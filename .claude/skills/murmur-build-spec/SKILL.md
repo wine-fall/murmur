@@ -1,0 +1,70 @@
+---
+name: murmur-build-spec
+description: "Use whenever the user asks to implement, build, work on, continue, or test any murmur spec — the request MUST name a target spec (e.g. `01`, `02`, `01-core-loop`, `L0`, `L1`). Also triggers on `/murmur-build-spec <id>`. This is the spec-driven build discipline for the murmur project: read the named spec first, build against it, and keep the spec and the code aligned (update the spec when a better direction emerges)."
+---
+
+# murmur-build-spec — spec-driven build for murmur
+
+The murmur project is built from specs. `DESIGN.md` is the **master spec** (vision, locked decisions, architecture); `specs/NN-*.md` are **sub-specs** (one per part). Code follows specs, and specs stay true to code. This skill is how every build task runs.
+
+Current focus: **L0 then L1** (specs `01-core-loop`, `02-voice-provider`, then `03-music-provider`). Later specs (03–09) may still change — don't treat them as frozen.
+
+## The rule
+
+**Every build task must name a target spec. No spec named → do not start. Ask which spec.**
+
+Accept any unambiguous reference: a sub-spec id (`01`, `01-core-loop`), a milestone (`L0` = specs 01+02; `L1` = adds 03), or `DESIGN.md` for a master-level change. If the user says "keep going" / "continue" right after working on a spec, the same spec is the target.
+
+## Workflow (do these in order)
+
+1. **Read the spec first — always.** Read the named `specs/NN-*.md` in full, plus the parts of `DESIGN.md` it references (at minimum §0 conventions, and the architecture/scope sections the spec points to). Never start editing from memory of the spec — re-read the current version.
+2. **Restate the contract.** Before code, state briefly: what this spec delivers, its contracts/seams, its acceptance criteria, and what's explicitly out of scope. This is the bar you build to.
+3. **Clarify gate — confirm the uncertain things BEFORE any code.** This skill is not head-down execution. Scan the part you're about to build for anything not nailed down:
+   - the spec's **Open questions** section,
+   - underspecified contracts or behaviors, or a choice the spec deliberately left open,
+   - ambiguity about scope or approach, or any decision that would be costly to reverse later.
+
+   If any of these apply, **ask the user first** — present each as a concrete choice with your recommendation — and wait for the answer. Do **not** guess and charge ahead on a material uncertainty. (The design itself was already brainstormed; this gate is a focused build-time confirmation, not a full re-brainstorm. A genuinely settled spec with no open questions needs no gate — proceed.) Record the resolved decisions back into the spec (per the alignment section) so the next build doesn't re-ask.
+4. **Build against the spec — test-first.** Tests are mandatory (see Testing below). Write logic **test-first**: failing unit test against the seams' fakes → implementation → green. Honor the seams the spec declares (don't bypass an interface another spec owns); ensure each seam has a **fake** for tests. Match the surrounding code's style.
+5. **Verify against the spec's acceptance criteria** before claiming done. Run the **unit suite** (must pass). For criteria covered by integration tests, run them **on demand**. For **sensory/human-acceptance** criteria (sounds human, feels like radio, type-and-reply flows), produce a **checklist and hand it to the user to run and confirm** — do not self-declare these met. Never claim a milestone (L0/L1) met on assertion alone. (`superpowers:verification-before-completion` applies.)
+6. **Keep spec and code aligned** (see next section).
+
+## Spec ↔ code alignment (the core discipline)
+
+The spec is a **living source of truth**, not a frozen contract. During a build you will sometimes discover the spec is wrong or that a better direction exists. When that happens:
+
+- **Stop before silently diverging.** If the implementation is about to differ from the spec in any way that matters (a changed contract, a different mechanism, a dropped/added behavior, a revised acceptance criterion), do not just code around it.
+- **Surface the divergence** to the user: what the spec says, what you found, why the new direction is better, and what it costs.
+- **On agreement, update the spec to match** — edit the `specs/NN-*.md` (and `DESIGN.md` if the change is architectural / cross-cutting) so the written spec and the code stay in lockstep. Keep the update English + AI-friendly + at the right altitude (master stays high-level; sub-specs stay design-level).
+- **Then continue the build** against the updated spec.
+
+Never leave the spec describing one thing while the code does another. Either the code matches the spec, or the spec has been updated to match the code. Small, obvious corrections (a typo, a renamed field for clarity) can be updated inline with a one-line note; anything that changes a contract, scope, or decision is surfaced first.
+
+When a sub-spec change contradicts or outgrows a master decision, update `DESIGN.md` too — and flag it, because master-level changes are bigger than they look.
+
+## Testing (mandatory — see DESIGN.md §11 for the full convention)
+
+- **Test-first for logic.** Failing unit test → implementation → green. Framework: `pytest`.
+- **Fakes for seams.** Every provider/seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a fake, so the core is always unit-testable without real audio/LLM/network.
+- **Three layers:** unit (fast, every change) · integration (tagged, **manual on-demand**, e.g. `pytest -m integration`) · human acceptance (sensory criteria → produce a **checklist for the user to run**).
+- **Don't run the heavy real models inside a build's tests.** Real model/voice *capability* eval (Qwen3-TTS, real LLMs — e.g. the voice blind A/B) is the dedicated **eval track** (DESIGN §10.3), not part of normal per-spec verification.
+- **Prefer Ollama** for any test/eval that needs an actual local LLM; reserve real Claude (`claude-agent-sdk`) for production + a gated, on-demand live smoke.
+
+## Conventions (from DESIGN.md §0)
+
+- **Specs are written for a coding agent, not humans** — explicit contracts, single source of truth, explicit non-goals, verifiable acceptance criteria.
+- **English** for all spec documents; **Chinese** for discussion with the user.
+- Master (`DESIGN.md`) stays high-altitude (what/why); sub-specs go to design level (mechanism/contracts), not into code-in-the-doc.
+- Sub-specs live under `specs/`, numbered by build order.
+
+(Cross-session project memory lives **outside the repo** at the Claude project memory dir, not under `murmur/` — don't look for it in the tree.)
+
+## Anti-patterns
+
+- Starting a build with no spec named, or from memory without re-reading the spec.
+- Charging ahead past a material uncertainty (an Open question, ambiguous scope, or a hard-to-reverse choice) instead of confirming with the user first.
+- Letting code drift from the spec without updating the spec — the cardinal sin of this skill.
+- Updating the spec to rationalize a shortcut rather than because the new direction is genuinely better — say so honestly and let the user decide.
+- Declaring a milestone (L0/L1) met without verifying its acceptance criteria against the running thing.
+- Treating later specs (03–09) as frozen — they're expected to change as L0/L1 teach us things.
+- Editing `DESIGN.md` for an architectural change without flagging that it's master-level.
