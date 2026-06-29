@@ -105,12 +105,22 @@ class ClaudeBrain:
             query,
         )
 
+        # Full isolation from the user's local Claude Code environment: the radio
+        # must not be influenced by their CLAUDE.md, plugins/skills, MCP servers,
+        # hooks, or subagents. The combination below was verified against the SDK
+        # init payload (no user config, no tools, no skills, no MCP; subscription
+        # OAuth preserved). Built-in agent *types* still appear in metadata but are
+        # inert -- with no tools there is no Task tool to launch them.
         options = ClaudeAgentOptions(
-            system_prompt=persona,
+            system_prompt=persona,   # custom prompt replaces the claude_code preset
             model=self._model,
-            allowed_tools=[],       # pure text generation; no agentic tools
-            setting_sources=[],     # do not inherit CLAUDE.md / project settings
-            max_turns=1,            # a single assistant turn, no tool loops
+            setting_sources=[],      # ignore user/project/local settings (CLAUDE.md, hooks, MCP, plugins)
+            allowed_tools=[],        # no tool may be invoked
+            tools=[],                # load zero tools (also trims context)
+            skills=[],               # no skills
+            mcp_servers={},          # no MCP servers
+            max_turns=1,             # a single assistant turn, no tool loops
+            extra_args={"disable-slash-commands": None},  # also disables built-in skills/commands
         )
 
         parts: list[str] = []
