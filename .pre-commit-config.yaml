@@ -1,0 +1,10 @@
+# Pre-commit hooks. Install once with:  pre-commit install
+# Run on all files:                      pre-commit run --all-files
+repos:
+  - repo: local
+    hooks:
+      - id: english-only-comments
+        name: English-only comments
+        entry: python scripts/check_comment_language.py
+        language: system
+        types: [python]
