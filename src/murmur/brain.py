@@ -41,14 +41,16 @@ class Brain(Protocol):
 # StubBrain — the fake (no SDK, no network)
 # --------------------------------------------------------------------------- #
 
-# Canned segments mimic the Chinese-speaking radio so the loop looks realistic.
-# This is fake Brain *output* (string literals), not prompt text.
+# Canned English fake output so the loop looks realistic with no network. The
+# stub's language is irrelevant to the product: the real radio speaks Chinese
+# only at runtime, produced by the model from the persona prompt — never from a
+# hardcoded string. v1 sources contain no Chinese (DESIGN §0).
 _STUB_SEGMENTS = (
-    "夜深了,空气里只剩我和你。今天就先随便聊聊吧。",
-    "刚才路过一个念头——人是不是越长大,越习惯把话咽回去。",
-    "放首歌的心情都有了,可惜音乐还得再等等。先用声音陪你。",
-    "窗外没什么动静,这种安静其实挺好的,像被世界轻轻放下。",
-    "我在想,所谓陪伴,大概就是有个声音一直在,不催你、不问你。",
+    "It's late, and it's just you and me on the air tonight. Let's talk about nothing in particular.",
+    "A thought drifted past just now -- the older we get, the more we swallow the things we meant to say.",
+    "I'm half in the mood to drop a song here, but music's still a little ways off. Voice will keep you company for now.",
+    "Nothing's stirring outside. This kind of quiet is actually nice -- like the world set you down gently.",
+    "I keep thinking company is really just this: a voice that stays, that doesn't rush you or ask anything of you.",
 )
 
 
@@ -66,7 +68,7 @@ class StubBrain:
         return next(self._segments)
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
-        return f"嗯,你说「{user_text}」——我听到了。我们顺着这个再聊聊。"
+        return f'Mm -- you said "{user_text}". I heard you. Let\'s follow that thread a little.'
 
 
 # --------------------------------------------------------------------------- #

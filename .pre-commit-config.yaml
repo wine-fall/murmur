@@ -3,8 +3,9 @@
 repos:
   - repo: local
     hooks:
-      - id: english-only-comments
-        name: English-only comments
-        entry: python scripts/check_comment_language.py
+      - id: source-language
+        name: Source language (no Chinese; English-only comments)
+        entry: python scripts/check_source_language.py
         language: system
-        types: [python]
+        # no-CJK applies to code and docs alike; comment check is Python-only.
+        types_or: [python, markdown, yaml, toml]

@@ -28,7 +28,7 @@ murmur's design is captured as **one master spec + several sub-specs**.
 - **AI-friendly first**: every spec's primary reader is a **coding agent, not a human**. Write for unambiguous machine consumption — explicit contracts (interfaces, I/O, types, paths, exact symbol/command names), a single canonical source of truth per fact, explicit scope **and non-goals**, and verifiable acceptance criteria. Keep rationale only where it constrains an implementation decision; drop motivational prose.
 - English for all spec documents; Chinese for live discussion.
 - **All prompt text is centralized** under `src/murmur/prompts/` and written in **English** (v1). The radio's *output* language is set inside the prompt — e.g. the persona seed instructs Chinese speech — so English prompt scaffolding still yields a Chinese-speaking radio. No prompt strings scattered through application modules.
-- **Code comments are English-only**, enforced by a lint check (`scripts/check_comment_language.py`, wired via pre-commit; stdlib-only). Only comments are constrained — string literals may hold non-English content (e.g. the radio's Chinese output).
+- **No Chinese (CJK) anywhere in source** — comments, string literals, and docstrings alike (v1). The radio speaks Chinese only at runtime, produced by the model from the persona prompt; it is never a hardcoded string. Additionally, **comments are English-only**. Enforced by `scripts/check_source_language.py` (wired via pre-commit; stdlib-only).
 - Master spec stays high-altitude; sub-specs may go deeper but remain design-level, not code.
 - Sub-specs live under `specs/` and are ordered by build sequence (e.g. `specs/01-…`, `specs/02-…`).
 - Cross-reference with relative links; mark status on every doc.
@@ -167,7 +167,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 - **v1 primary = yt-dlp**: covers **YouTube + Bilibili** (and 1000+ other sites), **no login, no account, no membership**. Claude can also search for a song by topic on the fly.
 - **Backlog adapters and their barriers** (all discussed; recorded so we don't revisit):
   - **Apple Music**: official, the Music app ships with macOS (controllable via AppleScript), most native; but on-demand full playback needs an Apple Music subscription.
-  - **NetEase Cloud Music (网易云)**: best Chinese catalog; but only unofficial APIs (pyncm, etc.), **requires login cookie**, VIP tracks need VIP.
+  - **NetEase Cloud Music (Wangyiyun)**: best Chinese catalog; but only unofficial APIs (pyncm, etc.), **requires login cookie**, VIP tracks need VIP.
   - **Spotify**: **no clean "no-app-and-no-membership" path** — either bind to the desktop app (AppleScript, with ads / on-demand limits) or run librespot headless (**needs Premium**). **User currently has no Premium** → not in v1.
 - *Why yt-dlp for v1*: across "official × free × on-demand full tracks," an "official + free + full track" option basically does not exist; yt-dlp is the **lowest-barrier, most self-contained** starting point, and Bilibili covers Chinese music. The cost is the ToS gray area — if it breaks, swap the adapter without touching the core.
 
