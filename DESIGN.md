@@ -110,7 +110,7 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.6 Interaction form: a single always-on Python async CLI process
 - One always-on process (e.g. `murmur`), launched in a terminal; one coroutine drives "speaking up," another reads keyboard input, both feed into the brain. **Proactive broadcasts and your typing share the same terminal** — no daemon/client split.
-- *Rationale*: for personal use, CLI is the lightest and fastest path to an MVP, with no GUI overhead. A menu-bar / web surface can later be decoupled out of this core.
+- *Rationale*: for personal use, CLI is the lightest and fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI), which upgrades the same in-terminal CLI Host surface in place — never a separate window/app/page. See the TUI sub-spec (§10, `specs/10-tui.md`).
 
 ---
 
@@ -216,7 +216,7 @@ Core: pillars 2 (batch) + 5 (activity-gating) + 4 (caching) turn "always on the 
 - Concrete activity-pacing mechanism · the "degree" of proactive/passive · blind A/B to pick the primary TTS (→ eval track, §10.3) · semantic memory recall
 
 ### Explicitly not in v1
-- ASR (keyboard instead) · GUI / menu bar · Spotify / Apple Music / NetEase · multi-channel / multi-mode switching
+- ASR (keyboard instead) · **GUI / menu-bar / web surface** (if any UI is ever added it is a **TUI** — §10, `specs/10-tui.md` — never a GUI/menu-bar/web) · Spotify / Apple Music / NetEase · multi-channel / multi-mode switching
 
 > **Delivery**: v1 is not one shot — it is **split into multiple sub-specs / steps**. This document is the umbrella for them.
 
@@ -269,11 +269,12 @@ v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and a
 | **07** | `proactive-and-pacing` | Model-C "turn to you / slide back" degree + time anchors (Scheduler) + activity-aware pacing (ActivitySensor). | companion character | 01,05 |
 | **08** | `token-economy` | Batch generation + prompt caching + tiered models + activity-gating + budget/graceful degradation. | don't burn the quota | 01,05,07 |
 | **09** | `claude-code-ingestion` | Permissioned ingestion of Claude Code data → bootstrap persona (feeds 06) + activity signals (feeds 07). | accelerator | 06,07 |
+| **10** | `tui` | Front-end refinement: replace the CLI Host's plain print/stdin with a real **TUI** (live now-playing/status region + scrolling program log + a stable input line). The **single richer front-end murmur ever gets** — there is no GUI/menu-bar/web. | front-end polish (off the L0→L1 critical path) | 01 |
 
 ### 10.1 Decomposition principles
 - **Interface-first (AI-friendly key)**: spec `01` declares the **VoiceProvider / MusicProvider / Memory contract seams** explicitly; their implementations land in 02 / 03 / 05 respectively. Parts stay decoupled and buildable in order, and a coding agent never has to guess an interface.
 - **Persistence**: local files (no DB in v1). **No front-end API server in v1** — single process, one consumer (your terminal).
-- **Detach/daemon is an optional side branch, NOT on the 01–09 main path.** The v1 core path is a foreground single process (terminal close = stop). Only if/when we want "the radio keeps playing after the terminal closes + a detachable/re-attachable TUI" do we add a separate daemon/client spec.
+- **Detach/daemon is an optional side branch, NOT on the main path.** The v1 core path is a foreground single process (terminal close = stop). Only if/when we want "the radio keeps playing after the terminal closes + a detachable/re-attachable session" do we add a separate daemon/client spec; its reattachable surface would build on the TUI (spec 10), not redefine it.
 
 ### 10.2 What sub-specs add over this master
 Each sub-spec goes one level deeper (contract, internal design, dependencies, acceptance criteria, open questions) per the template in §0. Implementation details live in the sub-specs (and their plans), never in this master.

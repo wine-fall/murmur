@@ -172,5 +172,5 @@ Two concurrent tasks over a shared state, single event loop:
 
 ## 6. Open questions
 - Persona seed file format & location (Markdown vs plain text; path under the project or a config dir). Default proposal: a single Markdown file path in config.
-- Terminal UX richness: plain `print`/stdin for L0, or a TUI (master mentions TUI as the front-end surface). Proposal: plain async stdin for L0; TUI is a later front-end refinement.
+- Terminal UX richness: plain `print`/stdin for L0, or a TUI (master mentions TUI as the front-end surface). Proposal: plain async stdin for L0; the TUI is a later front-end refinement, now its own sub-spec [`10-tui.md`](10-tui.md), which swaps in behind the same CLI Host seam.
 - Exact interjection mechanism (cancel-and-resume vs. queue-after-current). Proposal: cancel-and-resume (model C feel), but confirm during implementation.
