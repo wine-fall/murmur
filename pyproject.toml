@@ -1,0 +1,20 @@
+[project]
+name = "murmur"
+version = "0.0.1"
+description = "A fully-local, personal-use companion radio with Claude as its brain."
+requires-python = ">=3.10"
+# L0 / spec 01 step 1 has NO third-party dependencies: the loop runs end-to-end
+# against a stub VoiceProvider using only the standard library (asyncio, wave,
+# tempfile). claude-agent-sdk (Brain) lands in spec 01 step 2; a real TTS
+# adapter lands in spec 02.
+dependencies = []
+
+[project.scripts]
+murmur = "murmur.app:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/murmur"]
