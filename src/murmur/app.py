@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from .audio_player import AudioPlayer
-from .brain import StubBrain
+from .brain import build_brain
 from .cli_host import CliHost
 from .config import Config
 from .director import Director
@@ -34,7 +34,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     memory = InProcessMemoryStore()
     voice = build_voice(config.voice_provider)
     player = AudioPlayer()
-    brain = StubBrain()
+    brain = build_brain(config.brain_provider, model=config.model)
     director = Director(
         config=config,
         persona=persona,
@@ -46,7 +46,11 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     )
 
     await voice.start()
-    cli.banner(persona.splitlines()[0] if persona else "(empty)")
+    cli.banner(
+        persona.splitlines()[0] if persona else "(empty)",
+        brain=config.brain_provider,
+        voice=config.voice_provider,
+    )
     try:
         await director.run(max_segments=max_segments)
     finally:
@@ -82,6 +86,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         metavar="SECONDS",
         help="override the inter-segment gap",
     )
+    p.add_argument(
+        "--brain",
+        choices=["claude", "stub"],
+        default=None,
+        help="Brain to use: 'claude' (real, default) or 'stub' (canned, no network)",
+    )
     return p.parse_args(argv)
 
 
@@ -92,6 +102,8 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, persona_path=args.persona)
     if args.gap is not None:
         config = replace(config, inter_segment_gap=args.gap)
+    if args.brain is not None:
+        config = replace(config, brain_provider=args.brain)
 
     try:
         asyncio.run(_run(config, max_segments=args.max_segments))

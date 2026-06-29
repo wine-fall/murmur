@@ -1,13 +1,18 @@
-"""Brain contract + step-1 stub (spec 01 §3.2).
+"""Brain contract + implementations (spec 01 §3.2).
 
-The Brain wraps ``claude-agent-sdk`` (master §3.2: subscription-OAuth, no API
-key; model ``claude-opus-4-8``) and produces talk-segment text and user
-responses from a ``ContextPack``.
+The Brain produces talk-segment text and user responses from a ``ContextPack``.
+Two implementations live here behind one two-method ``Brain`` Protocol:
 
-Step 1 of spec 01 ships only ``StubBrain`` — canned, deterministic text with no
-SDK call — so the core loop can be exercised end-to-end before the real Brain
-lands in step 2. The two-method ``Brain`` Protocol is fixed here; the real
-adapter implements it without touching its consumers (the Director).
+- ``StubBrain``  — canned, dependency-free text. The fake for the fast test
+  layer (DESIGN §11.1) and the step-1 loop. No network.
+- ``ClaudeBrain`` — the real Brain on ``claude-agent-sdk`` (master §3.2):
+  subscription-OAuth inherited from the local Claude Code login (no API key),
+  model ``claude-opus-4-8``. Stateless — persona is the System Prompt and
+  ``ctx.recent`` is re-sent as context on every call (§3.2, master §6).
+
+All prompt text is centralized under ``murmur.prompts`` (DESIGN §0); this module
+holds only Brain mechanics. ``build_brain`` selects by ``Config.brain_provider``
+so the core never imports a concrete Brain directly.
 """
 
 from __future__ import annotations
@@ -16,6 +21,7 @@ from itertools import cycle
 from typing import Protocol, runtime_checkable
 
 from .contracts import ContextPack
+from .prompts import build_next_talk_prompt, build_respond_prompt
 
 
 @runtime_checkable
@@ -31,9 +37,12 @@ class Brain(Protocol):
         ...
 
 
-# Canned segments rotated by the stub. Content is placeholder only — the point
-# is to prove the loop, the seam, and that ContextPack flows through. The real
-# voice and the real (Claude) text both arrive in later steps.
+# --------------------------------------------------------------------------- #
+# StubBrain — the fake (no SDK, no network)
+# --------------------------------------------------------------------------- #
+
+# Canned segments mimic the Chinese-speaking radio so the loop looks realistic.
+# This is fake Brain *output* (string literals), not prompt text.
 _STUB_SEGMENTS = (
     "夜深了,空气里只剩我和你。今天就先随便聊聊吧。",
     "刚才路过一个念头——人是不是越长大,越习惯把话咽回去。",
@@ -46,8 +55,8 @@ _STUB_SEGMENTS = (
 class StubBrain:
     """Deterministic, dependency-free Brain. Satisfies the ``Brain`` Protocol.
 
-    Proves the seam (no ``claude-agent-sdk`` present) for spec 01 §5 criterion
-    5. Replaced by the real SDK-backed Brain in spec 01 step 2.
+    The fake for the fast test layer and the step-1 loop — proves the seam with
+    no ``claude-agent-sdk`` and no network.
     """
 
     def __init__(self) -> None:
@@ -58,3 +67,74 @@ class StubBrain:
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return f"嗯,你说「{user_text}」——我听到了。我们顺着这个再聊聊。"
+
+
+# --------------------------------------------------------------------------- #
+# ClaudeBrain — the real Brain on claude-agent-sdk
+# --------------------------------------------------------------------------- #
+
+
+class ClaudeBrain:
+    """Real Brain via ``claude-agent-sdk`` one-shot ``query`` (stateless).
+
+    Each call builds fresh ``ClaudeAgentOptions`` with the persona as the
+    System Prompt and re-sends the compact transcript (master §6). No tools
+    (``allowed_tools=[]``) and no filesystem settings (``setting_sources=[]``)
+    — this is pure persona-driven text generation, not a coding agent, so the
+    user's CLAUDE.md / project config never leaks into the radio's voice.
+    """
+
+    def __init__(self, model: str) -> None:
+        self._model = model
+
+    async def next_talk(self, ctx: ContextPack) -> str:
+        return await self._generate(ctx.persona, build_next_talk_prompt(ctx))
+
+    async def respond(self, user_text: str, ctx: ContextPack) -> str:
+        return await self._generate(ctx.persona, build_respond_prompt(user_text, ctx))
+
+    async def _generate(self, persona: str, prompt: str) -> str:
+        # Imported lazily so the stdlib-only stub path (tests) never imports the
+        # SDK, and an install issue surfaces only when the real Brain is used.
+        from claude_agent_sdk import (
+            AssistantMessage,
+            ClaudeAgentOptions,
+            TextBlock,
+            query,
+        )
+
+        options = ClaudeAgentOptions(
+            system_prompt=persona,
+            model=self._model,
+            allowed_tools=[],       # pure text generation; no agentic tools
+            setting_sources=[],     # do not inherit CLAUDE.md / project settings
+            max_turns=1,            # a single assistant turn, no tool loops
+        )
+
+        parts: list[str] = []
+        async for message in query(prompt=prompt, options=options):
+            if isinstance(message, AssistantMessage):
+                for block in message.content:
+                    if isinstance(block, TextBlock) and block.text:
+                        parts.append(block.text)
+
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError(
+                "ClaudeBrain produced no text (check Claude Code login / network)"
+            )
+        return text
+
+
+# --------------------------------------------------------------------------- #
+# Factory
+# --------------------------------------------------------------------------- #
+
+
+def build_brain(name: str, *, model: str) -> Brain:
+    """Construct the configured Brain. ``"stub"`` (fake) or ``"claude"`` (real)."""
+    if name == "stub":
+        return StubBrain()
+    if name == "claude":
+        return ClaudeBrain(model)
+    raise ValueError(f"unknown brain_provider {name!r}; expected 'stub' or 'claude'")

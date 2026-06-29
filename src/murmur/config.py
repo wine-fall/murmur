@@ -11,14 +11,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-# Repo root = three levels up from this file: src/murmur/config.py -> repo/.
-_REPO_ROOT = Path(__file__).resolve().parents[2]
+from .prompts import DEFAULT_PERSONA_PATH
 
 
 @dataclass(frozen=True)
 class Config:
     # --- persona -----------------------------------------------------------
-    persona_path: Path = _REPO_ROOT / "persona.md"
+    persona_path: Path = DEFAULT_PERSONA_PATH
 
     # --- pacing (spec 01 §3.4) --------------------------------------------
     # Natural pause between talk segments, in seconds. Bounds the talk rate so
@@ -35,6 +34,11 @@ class Config:
     recent_window: int = 12
 
     # --- provider selection (spec 01 §3.1) --------------------------------
+    # Which Brain to construct. "claude" = real claude-agent-sdk Brain (L0
+    # default, subscription OAuth); "stub" = canned text, no network (the fast
+    # test layer, DESIGN §11.1).
+    brain_provider: str = "claude"
+
     # Which VoiceProvider adapter to construct. "stub" exercises the loop with
     # no spec-02 code present (acceptance criterion §5). spec 02 adds e.g.
     # "qwen3".

@@ -13,8 +13,9 @@ import sys
 
 
 class CliHost:
-    def banner(self, persona_first_line: str) -> None:
-        print("┌─ murmur · L0 (spec 01, step 1: stub-voice loop) ─────────────")
+    def banner(self, persona_first_line: str, *, brain: str, voice: str) -> None:
+        print("┌─ murmur · L0 (spec 01) ──────────────────────────────────────")
+        print(f"│ brain: {brain}   voice: {voice}")
         print(f"│ persona: {persona_first_line}")
         print("│ the radio will start speaking on its own. Ctrl-C to stop.")
         print("└──────────────────────────────────────────────────────────────")

@@ -1,8 +1,8 @@
 # spec/01 · core-loop — the L0 single-process spine
 
-> **Status**: In progress. Built in 3 steps — **step 1 done**; steps 2–3 pending.
+> **Status**: In progress. Built in 3 steps — **steps 1–2 done**; step 3 pending.
 >   - **step 1 (done)**: scaffold + all contracts/data types (§2) + in-process `MemoryStore` + stub `VoiceProvider` + `StubBrain` + simulated `AudioPlayer` + autonomous talk loop. Runs end-to-end against the stub voice with no spec-02 code (criterion §5), paced, clean Ctrl-C shutdown. Package under `src/murmur/`, entry `murmur` / `python -m murmur`.
->   - **step 2 (pending)**: real Brain on `claude-agent-sdk` (subscription-OAuth, `claude-opus-4-8`) + static persona already loads; swap `StubBrain` for the SDK-backed one behind the same two-method contract.
+>   - **step 2 (done)**: real `ClaudeBrain` on `claude-agent-sdk` (subscription-OAuth, no API key, `claude-opus-4-8`), swapped in behind the same two-method contract via a `brain_provider` config knob (`"claude"` default / `"stub"` fake); `build_brain` factory; `--brain` flag. Verified by a live smoke test (real subscription call) + the stub loop regression (no network). First third-party dependency. Voice is still the stub — real TTS is spec 02.
 >   - **step 3 (pending)**: real `AudioPlayer` (external-player subprocess + `stop()` terminates it) + typed talk-back via `cli_host` stdin + cancel-and-resume interjection (§3.3 `input_task`) + `/quit`. Completes criteria §1–§4 audibly once spec 02's voice is wired.
 > **Part**: The orchestrator spine for milestone **L0** (talk-only radio). See master [`../DESIGN.md`](../DESIGN.md) §4 (architecture), §9 (L0 definition), §10 (build order).
 > **Milestone**: L0 (with [`02-voice-provider.md`](02-voice-provider.md), 01+02 = the first runnable, audible version).
@@ -120,7 +120,8 @@ class Brain:
 ```
 - Persona is injected as the **System Prompt**; `ctx.recent` is sent as prior turns. The API is stateless — the core resends the compact context each call (master §6).
 - Model `claude-opus-4-8` for L0. Tiered models (cheap filler on `claude-haiku-4-5`) are deferred to spec 08.
-- Exact `claude-agent-sdk` call surface (session object, message shape, how subscription-OAuth is inherited from the local Claude Code login) is resolved at implementation time against the SDK; this spec fixes only the two-method contract and the auth/model facts from master §3.2.
+- **Resolved (step 2)**: uses the SDK's one-shot `query(prompt=..., options=ClaudeAgentOptions(...))` — explicitly *stateless* per the SDK, so it matches "resend the compact context each call." Per call: `system_prompt = ctx.persona`; `model = claude-opus-4-8`; `allowed_tools=[]` (pure text, no agentic tools); `setting_sources=[]` (do not inherit the user's CLAUDE.md / project settings into the radio's voice); `max_turns=1`. Reply text is collected from `AssistantMessage` `TextBlock`s. Subscription-OAuth is inherited automatically from the local Claude Code login (no API key) by the SDK shelling out to the `claude` CLI. (The spec fixes only the two-method contract + the auth/model facts from master §3.2; the above is the resolved mechanism, kept here to keep spec and code aligned.)
+- **Prompt text is centralized** in `src/murmur/prompts/` (English; DESIGN §0): `persona_seed.md` (the static System Prompt) and `talk.py` (the `next_talk` / `respond` instruction templates + transcript rendering). `brain.py` holds only Brain mechanics and imports the builders. `Config.persona_path` defaults to the bundled seed.
 
 ### 3.3 Control flow (the loop + interruption)
 Two concurrent tasks over a shared state, single event loop:

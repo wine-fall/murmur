@@ -27,6 +27,8 @@ murmur's design is captured as **one master spec + several sub-specs**.
 **Conventions**
 - **AI-friendly first**: every spec's primary reader is a **coding agent, not a human**. Write for unambiguous machine consumption — explicit contracts (interfaces, I/O, types, paths, exact symbol/command names), a single canonical source of truth per fact, explicit scope **and non-goals**, and verifiable acceptance criteria. Keep rationale only where it constrains an implementation decision; drop motivational prose.
 - English for all spec documents; Chinese for live discussion.
+- **All prompt text is centralized** under `src/murmur/prompts/` and written in **English** (v1). The radio's *output* language is set inside the prompt — e.g. the persona seed instructs Chinese speech — so English prompt scaffolding still yields a Chinese-speaking radio. No prompt strings scattered through application modules.
+- **Code comments are English-only**, enforced by a lint check (`scripts/check_comment_language.py`, wired via pre-commit; stdlib-only). Only comments are constrained — string literals may hold non-English content (e.g. the radio's Chinese output).
 - Master spec stays high-altitude; sub-specs may go deeper but remain design-level, not code.
 - Sub-specs live under `specs/` and are ordered by build sequence (e.g. `specs/01-…`, `specs/02-…`).
 - Cross-reference with relative links; mark status on every doc.

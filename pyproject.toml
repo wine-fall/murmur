@@ -3,11 +3,21 @@ name = "murmur"
 version = "0.0.1"
 description = "A fully-local, personal-use companion radio with Claude as its brain."
 requires-python = ">=3.10"
-# L0 / spec 01 step 1 has NO third-party dependencies: the loop runs end-to-end
-# against a stub VoiceProvider using only the standard library (asyncio, wave,
-# tempfile). claude-agent-sdk (Brain) lands in spec 01 step 2; a real TTS
-# adapter lands in spec 02.
-dependencies = []
+# spec 01 step 2 introduces the first third-party dependency: claude-agent-sdk
+# (the real Brain, via the local Claude Code subscription OAuth — no API key).
+# The stub VoiceProvider + StubBrain still run on the stdlib alone, so the fast
+# test layer (DESIGN §11.1) needs no network. A real TTS adapter lands in spec 02.
+dependencies = [
+    "claude-agent-sdk>=0.2.110",
+]
+
+[project.optional-dependencies]
+# Dev tooling. Install with:  pip install -e ".[dev]"  then  pre-commit install
+# The English-only-comment hook itself is stdlib-only (no install needed); this
+# is just the automation harness around it.
+dev = [
+    "pre-commit>=3.5",
+]
 
 [project.scripts]
 murmur = "murmur.app:main"
