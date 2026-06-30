@@ -18,11 +18,18 @@ dependencies = [
 dev = [
     "pre-commit>=3.5",
     "pytest>=8",
+    "ruff>=0.15",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # Async tests wrap their coroutine in asyncio.run(), so no asyncio plugin is needed.
+
+[tool.ruff]
+# Project-owned formatting so it's deterministic across machines/editors instead
+# of relying on an editor's bundled default. Black-compatible defaults.
+line-length = 88
+target-version = "py310"
 
 [project.scripts]
 murmur = "murmur.app:main"

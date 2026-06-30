@@ -100,7 +100,9 @@ class Director:
         play_task = asyncio.ensure_future(self._player.play(clip))
         get_task = asyncio.ensure_future(self._cli.next_line())
         try:
-            await asyncio.wait({play_task, get_task}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(
+                {play_task, get_task}, return_when=asyncio.FIRST_COMPLETED
+            )
             if get_task.done() and not get_task.cancelled():
                 await self._player.stop()  # cancel current playback (interjection)
                 return get_task.result()
@@ -114,7 +116,9 @@ class Director:
         sleep_task: asyncio.Task[None] = asyncio.ensure_future(asyncio.sleep(seconds))
         get_task = asyncio.ensure_future(self._cli.next_line())
         try:
-            await asyncio.wait({sleep_task, get_task}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait(
+                {sleep_task, get_task}, return_when=asyncio.FIRST_COMPLETED
+            )
             if get_task.done() and not get_task.cancelled():
                 return get_task.result()
             return None

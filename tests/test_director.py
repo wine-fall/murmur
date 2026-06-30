@@ -56,7 +56,12 @@ def test_typed_line_interrupts_replies_and_resumes():
         assert cli.user == ["hello"]
         # talk-1 (interrupted) -> reply -> talk-2 (resumed)
         assert cli.radio == ["talk-1", "reply:hello", "talk-2"]
-        assert [t.role for t in memory.recent(10)] == ["radio", "user", "radio", "radio"]
+        assert [t.role for t in memory.recent(10)] == [
+            "radio",
+            "user",
+            "radio",
+            "radio",
+        ]
         assert [t.text for t in memory.recent(10)] == [
             "talk-1",
             "hello",

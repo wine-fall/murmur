@@ -18,7 +18,9 @@ _OUTPUT_RULES = (
 )
 
 
-def _render_transcript(ctx: ContextPack, *, drop_trailing_user: str | None = None) -> str:
+def _render_transcript(
+    ctx: ContextPack, *, drop_trailing_user: str | None = None
+) -> str:
     """Render recent turns as a transcript. The host's own prior lines are
     "You"; the listener's lines are "Listener"."""
     turns = list(ctx.recent)
@@ -39,7 +41,9 @@ def build_next_talk_prompt(ctx: ContextPack) -> str:
     """Prompt for a self-initiated next talk segment."""
     transcript = _render_transcript(ctx)
     if transcript:
-        head = f"(The program so far)\n{transcript}\n\nNow continue — say your next beat."
+        head = (
+            f"(The program so far)\n{transcript}\n\nNow continue — say your next beat."
+        )
     else:
         head = "The program is just starting. Open naturally with your first beat."
     return f"{head}\n{_OUTPUT_RULES}"

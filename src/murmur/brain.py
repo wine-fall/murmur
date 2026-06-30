@@ -112,15 +112,17 @@ class ClaudeBrain:
         # OAuth preserved). Built-in agent *types* still appear in metadata but are
         # inert -- with no tools there is no Task tool to launch them.
         options = ClaudeAgentOptions(
-            system_prompt=persona,   # custom prompt replaces the claude_code preset
+            system_prompt=persona,  # custom prompt replaces the claude_code preset
             model=self._model,
-            setting_sources=[],      # ignore user/project/local settings (CLAUDE.md, hooks, MCP, plugins)
-            allowed_tools=[],        # no tool may be invoked
-            tools=[],                # load zero tools (also trims context)
-            skills=[],               # no skills
-            mcp_servers={},          # no MCP servers
-            max_turns=1,             # a single assistant turn, no tool loops
-            extra_args={"disable-slash-commands": None},  # also disables built-in skills/commands
+            setting_sources=[],  # ignore user/project/local settings (CLAUDE.md, hooks, MCP, plugins)
+            allowed_tools=[],  # no tool may be invoked
+            tools=[],  # load zero tools (also trims context)
+            skills=[],  # no skills
+            mcp_servers={},  # no MCP servers
+            max_turns=1,  # a single assistant turn, no tool loops
+            extra_args={
+                "disable-slash-commands": None
+            },  # also disables built-in skills/commands
         )
 
         parts: list[str] = []

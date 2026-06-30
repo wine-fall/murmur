@@ -67,7 +67,9 @@ def _check_comments_english(path: Path) -> list[str]:
                     {
                         ch
                         for ch in tok.string
-                        if ord(ch) >= 128 and ch not in _ALLOWED_NON_ASCII and not _is_cjk(ch)
+                        if ord(ch) >= 128
+                        and ch not in _ALLOWED_NON_ASCII
+                        and not _is_cjk(ch)
                     }
                 )
                 if bad:

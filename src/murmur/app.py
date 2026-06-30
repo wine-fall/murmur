@@ -65,7 +65,9 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
-    p = argparse.ArgumentParser(prog="murmur", description="personal companion radio (L0)")
+    p = argparse.ArgumentParser(
+        prog="murmur", description="personal companion radio (L0)"
+    )
     p.add_argument(
         "--max-segments",
         type=int,
