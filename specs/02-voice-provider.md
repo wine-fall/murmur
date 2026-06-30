@@ -13,13 +13,13 @@
 1. A concrete implementation of the `VoiceProvider` Protocol declared in [`01-core-loop.md`](01-core-loop.md) §2.2.
 2. A **warm TTS sidecar process** that keeps the model loaded between utterances and is crash-isolated from the core (master §3.5 rationale).
 3. The **first adapter: Qwen3-TTS** (MLX on Apple Silicon) — chosen for L0 because it is the only candidate that runs **real-time on Mac** (master §3.5), so the loop feels live.
-4. A clean adapter boundary so the other candidates (CosyVoice2, Chatterbox, OpenAudio-S1) drop in by config without touching the core.
+4. A clean adapter boundary with **standardized I/O** (§3.5 `SynthesisRequest`) so the other candidates (CosyVoice2, Chatterbox, Fish-Audio/OpenAudio S1) drop in by writing one `TtsBackend` — no protocol or core change. The boundary is designed for the whole pool up front, not retrofitted per model.
 
 ### Out of scope
 - Choosing the *final* primary voice — that is a later blind A/B (master §8 "committed, deferred"). L0 ships Qwen3-TTS as the working default; this spec makes swapping trivial, it does not pick the winner.
 - Scenario split (fast vs. warm voice) beyond accepting the `scenario` arg — wiring different models per scenario is deferred (master §3.5); L0 honors one voice.
 - Streaming/partial TTS — L0 renders a complete clip per segment (see §3.4). Streaming is a later optimization, related to spec 04.
-- Voice cloning — a candidate capability (master §3.5), not required for L0.
+- Voice cloning — a candidate capability (master §3.5). The boundary **reserves the slot** (`reference_audio`/`reference_text`, §3.5) so a cloning backend drops in without a contract change, but L0 does **not** wire cloning — Qwen3-TTS speaks with preset voices.
 
 ---
 
@@ -43,10 +43,20 @@ async def aclose(self) -> None       # shut the sidecar down
 - The `VoiceProvider` client owns the sidecar's lifecycle: `start()` spawns it and blocks until it reports **ready** (model loaded + warmed with a throwaway synth); `aclose()` terminates it. The client **supervises** the sidecar: if it dies, restart on next `synthesize` (or eagerly) and surface a clear error rather than hanging the core.
 
 ### 3.2 Sidecar interface (local IPC)
-A minimal local request/response over a localhost transport. Recommended: a small **localhost HTTP** endpoint or a **JSON-lines-over-stdio** protocol — pick one in implementation; HTTP is easier to probe/health-check, stdio avoids a port. Logical contract, transport-agnostic:
-- `synthesize(text: str, scenario: str) -> { audio_path: str }` (sidecar writes the file, returns its path).
-- `health() -> { ready: bool }`.
-Keep the payload tiny (text in, file path out) — do not stream audio bytes over the IPC in L0.
+A minimal local request/response. **Resolved: JSON-lines over stdio** (one JSON
+object per line; core writes a request line to the sidecar's stdin, reads a
+response line from its stdout). Chosen over localhost HTTP because it needs no
+port and no extra dependency, is the fastest to stand up, and reuses the
+supervised-subprocess pattern the core already has for `AudioPlayer`. Logical
+contract:
+- request `{"op": "synthesize", "request": <SynthesisRequest>}` → response `{"audio_path": str}` (sidecar writes the file, returns its path). The `request` object is the standardized `SynthesisRequest` (§3.5) — `text` plus optional cross-model fields and a `params` escape hatch.
+- request `{"op": "health"}` → response `{"ready": bool}`.
+- on failure the sidecar returns `{"error": str}` on the same line (the client raises, never hangs).
+
+**stdout is the protocol channel and must stay clean**: the model/library
+(MLX, mlx-audio) and all sidecar logging go to **stderr**, never stdout. Keep
+the payload tiny (text in, file path out) — do not stream audio bytes over the
+IPC in L0.
 
 ### 3.3 First adapter — Qwen3-TTS (MLX)
 - Run Qwen3-TTS on Apple Silicon via the MLX path (the `mlx-audio` ecosystem is the Mac hub for these models, master §3.5 research). Apache-2.0; ~6 GB peak; sub-100ms-class streaming-capable, but L0 uses whole-clip render (§3.4).
@@ -56,10 +66,35 @@ Keep the payload tiny (text in, file path out) — do not stream audio bytes ove
 ### 3.4 Whole-clip render (L0)
 A talk segment is a few seconds of speech. L0 renders the **complete** clip, then the core plays it. No streaming TTS, no partial playback. (This is why small inter-segment gaps are acceptable in L0 — master §9.2; look-ahead pre-generation to hide synth latency is spec 04.)
 
-### 3.5 Adapter boundary (hot-swap)
-- Define an internal `TtsBackend` interface inside the sidecar: `load()`, `warm()`, `synthesize(text, scenario) -> audio_path`.
-- Each candidate (Qwen3-TTS now; CosyVoice2 / Chatterbox / OpenAudio-S1 later) is one `TtsBackend`.
-- `config` (01 §3.1) selects the backend by name; the core and the sidecar protocol are unchanged when swapping. Per master §8, personal use means non-commercial-licensed backends (CosyVoice2 etc.) are fine to add later.
+### 3.5 Adapter boundary (hot-swap) — standardized I/O so backends drop in without churn
+The boundary is designed **once** to fit the whole candidate pool, so wiring
+Qwen3-TTS now and adding CosyVoice2 / Chatterbox / Fish-Audio(OpenAudio S1)
+later is "write one `TtsBackend`," never a protocol/core change.
+
+**Standardized input — `SynthesisRequest`** (a frozen dataclass; the single
+input to both the IPC `synthesize` op and `TtsBackend.synthesize`). Cross-model
+common axes are first-class fields; model-idiosyncratic knobs go in `params`:
+```python
+@dataclass(frozen=True)
+class SynthesisRequest:
+    text: str                          # required — what to speak
+    voice: str | None = None           # preset timbre / speaker id (Qwen3 voices, CosyVoice SFT speakers)
+    language: str | None = None        # language tag (Chatterbox language_id, CosyVoice cross-lingual)
+    reference_audio: str | None = None # path to a reference clip for zero-shot voice cloning
+    reference_text: str | None = None  # transcript of the reference clip (CosyVoice2 / Fish need it)
+    style: str | None = None           # natural-language emotion/instruction (CosyVoice2 instruct, OpenAudio markers)
+    params: dict = field(default_factory=dict)  # model-specific escape hatch: speed, exaggeration, cfg_weight, temperature, top_p, repetition_penalty, ...
+```
+**Standardized output**: a path to a complete mono wav on local disk (→
+`AudioClip.source`). Uniform across all backends.
+
+**`TtsBackend` interface** (inside the sidecar): `load()`, `warm()`,
+`synthesize(req: SynthesisRequest) -> audio_path: str`. Each candidate is one
+`TtsBackend` that reads the fields it supports and ignores the rest.
+
+- The candidate pool (master §3.5): **Qwen3-TTS** (wired in L0); **CosyVoice2**, **Chatterbox Multilingual V3**, **Fish-Audio local = OpenAudio S1 / fish-speech** drop in later. Per master §8, personal use means non-commercial-licensed backends are fine.
+- **Zero-shot voice cloning** (CosyVoice2 / Chatterbox / Fish) is a *designed-for axis* of the boundary (`reference_audio` / `reference_text`), **not wired in L0** — Qwen3-TTS uses preset voices. The slot exists so adding a cloning backend needs no contract change.
+- `config` (01 §3.1) selects the backend by name and supplies the per-backend defaults (which `voice`, `language`, `reference_audio`, default `params`) used to build the `SynthesisRequest` from the core's `synthesize(text, scenario=...)` call. The core contract and the IPC protocol are unchanged when swapping backends.
 
 ---
 
@@ -78,6 +113,6 @@ A talk segment is a few seconds of speech. L0 renders the **complete** clip, the
 ---
 
 ## 6. Open questions
-- IPC transport: localhost HTTP vs JSON-lines-over-stdio (see §3.2). Proposal: start with whichever is faster to stand up; revisit if latency matters.
+- ~~IPC transport: localhost HTTP vs JSON-lines-over-stdio~~ **Resolved (§3.2): JSON-lines over stdio** — no port, no extra dependency, fastest to stand up, reuses the supervised-subprocess pattern. Revisit only if latency forces shared-memory/streamed PCM (tied to spec 04).
 - Audio handoff: file-path (chosen for L0) vs shared-memory/streamed PCM (lower latency, needed if/when streaming TTS lands in spec 04).
 - Exact Qwen3-TTS voice/preset selection and any Chinese/English voice mapping — deferred to first hands-on run.

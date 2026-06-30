@@ -96,6 +96,15 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="Brain to use: 'claude' (real, default) or 'stub' (canned, no network)",
     )
     p.add_argument(
+        "--voice",
+        choices=["stub", "qwen3", "sidecar-fake"],
+        default=None,
+        help=(
+            "VoiceProvider: 'stub' (silent wav, no sidecar), 'qwen3' (real TTS "
+            "via the warm sidecar), or 'sidecar-fake' (sidecar path, no model)"
+        ),
+    )
+    p.add_argument(
         "--player",
         default=None,
         metavar="CMD",
@@ -113,6 +122,8 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, inter_segment_gap=args.gap)
     if args.brain is not None:
         config = replace(config, brain_provider=args.brain)
+    if args.voice is not None:
+        config = replace(config, voice_provider=args.voice)
     if args.player is not None:
         config = replace(config, player_cmd=args.player)
 
