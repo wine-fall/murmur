@@ -93,7 +93,7 @@ def check_file(path: Path) -> list[str]:
 def _collect(argv: list[str]) -> list[Path]:
     if argv:
         return [Path(a) for a in argv]
-    roots = [Path("src"), Path("scripts")]
+    roots = [Path("src"), Path("scripts"), Path("tests")]
     return [p for root in roots if root.exists() for p in root.rglob("*.py")]
 
 

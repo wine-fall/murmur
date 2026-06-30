@@ -28,19 +28,15 @@ class AudioPlayer:
         self._current: asyncio.Task[None] | None = None
 
     async def play(self, clip: AudioClip) -> None:
+        # Cancellation propagates — whether from stop() (an interjection cancels
+        # the inner render task) or from this play() call being cancelled
+        # (shutdown). asyncio cancels the inner task in both cases, and _render
+        # terminates the subprocess on cancellation, so the speakers go quiet
+        # either way. play() always runs as its own task, so propagating is
+        # safe; the Director cleans the task up.
         self._current = asyncio.ensure_future(self._render(clip.source))
         try:
             await self._current
-        except asyncio.CancelledError:
-            if self._current is not None and self._current.cancelled():
-                return  # stopped via stop(): interjection, not an error
-            # This play() call is itself being cancelled (shutdown): tear down
-            # the subprocess, then propagate so the loop unwinds.
-            if self._current is not None:
-                self._current.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await self._current
-            raise
         finally:
             self._current = None
 

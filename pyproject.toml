@@ -17,7 +17,12 @@ dependencies = [
 # is just the automation harness around it.
 dev = [
     "pre-commit>=3.5",
+    "pytest>=8",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Async tests wrap their coroutine in asyncio.run(), so no asyncio plugin is needed.
 
 [project.scripts]
 murmur = "murmur.app:main"
