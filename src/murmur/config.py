@@ -24,6 +24,11 @@ class Config:
     # testing does not drain the subscription; full economy is spec 08.
     inter_segment_gap: float = 4.0
 
+    # --- audio playback (spec 01 §3.5) ------------------------------------
+    # External player binary the AudioPlayer hands each clip to. macOS-native
+    # "afplay" is fine for L0; swap for "ffplay"/"mpv" elsewhere.
+    player_cmd: str = "afplay"
+
     # --- brain (spec 01 §3.2) ---------------------------------------------
     # Model id for L0. Tiered models (cheap filler) are deferred to spec 08.
     # Used by the real Brain in spec 01 step 2; the step-1 stub ignores it.

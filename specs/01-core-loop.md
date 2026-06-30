@@ -1,9 +1,9 @@
 # spec/01 · core-loop — the L0 single-process spine
 
-> **Status**: In progress. Built in 3 steps — **steps 1–2 done**; step 3 pending.
+> **Status**: Implemented (steps 1–3 done). The L0 spine is complete and verified against the stub voice; it becomes *audible* once spec 02 wires a real `VoiceProvider`.
 >   - **step 1 (done)**: scaffold + all contracts/data types (§2) + in-process `MemoryStore` + stub `VoiceProvider` + `StubBrain` + simulated `AudioPlayer` + autonomous talk loop. Runs end-to-end against the stub voice with no spec-02 code (criterion §5), paced, clean Ctrl-C shutdown. Package under `src/murmur/`, entry `murmur` / `python -m murmur`.
->   - **step 2 (done)**: real `ClaudeBrain` on `claude-agent-sdk` (subscription-OAuth, no API key, `claude-opus-4-8`), swapped in behind the same two-method contract via a `brain_provider` config knob (`"claude"` default / `"stub"` fake); `build_brain` factory; `--brain` flag. Verified by a live smoke test (real subscription call) + the stub loop regression (no network). First third-party dependency. Voice is still the stub — real TTS is spec 02.
->   - **step 3 (pending)**: real `AudioPlayer` (external-player subprocess + `stop()` terminates it) + typed talk-back via `cli_host` stdin + cancel-and-resume interjection (§3.3 `input_task`) + `/quit`. Completes criteria §1–§4 audibly once spec 02's voice is wired.
+>   - **step 2 (done)**: real `ClaudeBrain` on `claude-agent-sdk` (subscription-OAuth, no API key, `claude-opus-4-8`), swapped in behind the same two-method contract via a `brain_provider` config knob (`"claude"` default / `"stub"` fake); `build_brain` factory; `--brain` flag; fully isolated from the local Claude env (§3.2). Verified by a live smoke test + the stub loop regression. First third-party dependency. Voice is still the stub — real TTS is spec 02.
+>   - **step 3 (done)**: real `AudioPlayer` (external-player subprocess — `afplay` default, configurable via `config.player_cmd` / `--player`; `stop()` terminates it) + typed talk-back via the `CliHost` stdin reader (a daemon thread feeding the loop) + cancel-and-resume interjection arbitrated by the `Director` (§3.3) + `/quit`. Criteria §1–§5 verified against the stub voice (interrupt → reply → resume; `/quit` + Ctrl-C clean; no orphaned player). Audible once spec 02 lands.
 > **Part**: The orchestrator spine for milestone **L0** (talk-only radio). See master [`../DESIGN.md`](../DESIGN.md) §4 (architecture), §9 (L0 definition), §10 (build order).
 > **Milestone**: L0 (with [`02-voice-provider.md`](02-voice-provider.md), 01+02 = the first runnable, audible version).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
@@ -148,11 +148,12 @@ Two concurrent tasks over a shared state, single event loop:
 - These two bound the talk rate so testing doesn't drain the subscription. Full economy (batch/cache/tier/gate) is spec 08.
 
 ### 3.5 Audio playback (L0)
-- `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.)
+- `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`.
 - No mixing/ducking in L0 (only one talk clip plays at a time). Ducking arrives with music (spec 03).
 
 ### 3.6 Stop
 - Ctrl-C and/or a typed `/quit` command performs an orderly shutdown: stop playback, `await voice.aclose()`, exit.
+- EOF on stdin (pipe closed / Ctrl-D) is **not** a stop — the radio keeps broadcasting whether or not anyone types (master §2.2); only Ctrl-C or `/quit` stops it.
 
 ---
 

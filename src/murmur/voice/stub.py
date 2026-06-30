@@ -32,7 +32,7 @@ class StubVoiceProvider:
 
     def __init__(self) -> None:
         self._dir: Path | None = None
-        self._counter = 0
+        self._counter: int = 0
 
     async def start(self) -> None:
         # Idempotent: a warm "backend" here is just a temp dir for clips.

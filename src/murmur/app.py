@@ -5,8 +5,9 @@ loop as a single foreground asyncio process (master §3.6). Closing the terminal
 or Ctrl-C stops it; cleanup shuts down the voice backend (§3.6).
 
 Spec 01 step 1: the loop runs against the stub VoiceProvider and StubBrain.
-Step 2 swaps in the real (claude-agent-sdk) Brain; step 3 adds typed talk-back,
-cancel-and-resume interjection, and ``/quit``.
+Step 2 swaps in the real (claude-agent-sdk) Brain. Step 3 adds the real
+AudioPlayer (external player subprocess), typed talk-back, cancel-and-resume
+interjection, and ``/quit`` (the Director arbitrates; see director.py).
 """
 
 from __future__ import annotations
@@ -33,7 +34,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     cli = CliHost()
     memory = InProcessMemoryStore()
     voice = build_voice(config.voice_provider)
-    player = AudioPlayer()
+    player = AudioPlayer(config.player_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
     director = Director(
         config=config,
@@ -92,6 +93,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         default=None,
         help="Brain to use: 'claude' (real, default) or 'stub' (canned, no network)",
     )
+    p.add_argument(
+        "--player",
+        default=None,
+        metavar="CMD",
+        help="external audio player binary (default: afplay)",
+    )
     return p.parse_args(argv)
 
 
@@ -104,6 +111,8 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, inter_segment_gap=args.gap)
     if args.brain is not None:
         config = replace(config, brain_provider=args.brain)
+    if args.player is not None:
+        config = replace(config, player_cmd=args.player)
 
     try:
         asyncio.run(_run(config, max_segments=args.max_segments))

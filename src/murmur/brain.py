@@ -62,7 +62,7 @@ class StubBrain:
     """
 
     def __init__(self) -> None:
-        self._segments = cycle(_STUB_SEGMENTS)
+        self._segments: "cycle[str]" = cycle(_STUB_SEGMENTS)
 
     async def next_talk(self, ctx: ContextPack) -> str:
         return next(self._segments)
@@ -87,7 +87,7 @@ class ClaudeBrain:
     """
 
     def __init__(self, model: str) -> None:
-        self._model = model
+        self._model: str = model
 
     async def next_talk(self, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_next_talk_prompt(ctx))
