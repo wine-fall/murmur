@@ -1,6 +1,8 @@
 # spec/02 · voice-provider — TTS as a warm, hot-swappable sidecar
 
-> **Status**: Design. Not yet implemented.
+> **Status**: Implemented (sidecar + client) — real voice pending hands-on acceptance.
+>   - **steps 1–2 (done)**: standardized adapter boundary (`SynthesisRequest` §3.5), JSON-lines-over-stdio sidecar (`python -m murmur.voice.sidecar`) with a `TtsBackend` interface + no-model `FakeBackend`, and the supervising `SidecarVoiceProvider` (spawn/wait-for-ready, restart-on-death + retry, synth-timeout kills the proc to avoid pipe desync). `build_voice`: `stub` / `qwen3` / `sidecar-fake`; `--voice` flag. Verified by 63 unit tests + a real two-process end-to-end run on `sidecar-fake`. Acceptance §3 (kill→recover) and §4 (hot-swap) are covered by the `sidecar-fake` path.
+>   - **step 3 (code in place, not yet verified)**: real `Qwen3Backend` via `mlx-audio` (optional `tts-qwen3` extra; lazy-imported). Tagged integration test (`pytest -m integration`) + a human-acceptance checklist gate §5.1 ("sounds clearly human") and §5.2 ("warm"). Needs a hands-on Mac run (install the extra, download the model, judge by ear) — the agent cannot self-verify a voice.
 > **Part**: The `VoiceProvider` implementation + the warm TTS sidecar + the first adapter. See master [`../DESIGN.md`](../DESIGN.md) §3.5 (TTS = soul, pluggable, warm sidecar), §4 (architecture).
 > **Milestone**: L0 (01+02 = the first audible version).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
