@@ -1,6 +1,6 @@
 # murmur · v1 Master Spec (living doc)
 
-> **Status**: Design phase. High-level architecture and feature set are aligned; implementation has not started.
+> **Status**: Building. Architecture/feature-set aligned; **spec 01 (`core-loop`, the L0 spine) is implemented & verified** (with a `pytest` layer). Next: spec 02 (`voice-provider`) to make L0 audible. See §10 for the build-order map.
 > **Role of this document**: This is the **master spec** — a living document that captures *what we are building* and *the rationale/trade-offs behind every decision*. It is the umbrella that sub-specs branch off from. It is **not** a directly-codeable implementation spec.
 > **Altitude rule**: This document stays at the architecture / layering / feature-set level. Concrete implementation (library usage, data structures, prompt copy, etc.) is deferred to the individual sub-specs.
 > **Conventions**: All specs are written in **English**; design conversations happen in Chinese. **Every spec's primary reader is a coding agent, not a human** — optimize for unambiguous machine consumption.
@@ -258,11 +258,11 @@ Music (→ L1 / spec 03), no-dead-air look-ahead (04), persistent memory (05), o
 
 ## 10. Decomposition, build order & sub-spec map
 
-v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and adds something audible**. L0 = specs 01+02; L1 (radio feel) = +03.
+v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and adds something audible**. L0 = specs 01+02; L1 (radio feel) = +03. (**✅** in the table = implemented & verified; see that sub-spec's own status block for detail.)
 
 | # | sub-spec (`specs/NN-…`) | Part it delivers | Milestone | Depends on |
 |---|---|---|---|---|
-| **01** | `core-loop` | Single-process spine: CLI Host + Program Director (talk-only policy) + Brain (Claude SDK, subscription auth) + static persona load + typed talk-back + session-only history + AudioPlayer (basic, sole audio authority, manual stop) + segment cadence. **Declares the outbound interface contracts** (VoiceProvider / MusicProvider / Memory seams). | **L0** | — |
+| **01 ✅** | `core-loop` | Single-process spine: CLI Host + Program Director (talk-only policy) + Brain (Claude SDK, subscription auth) + static persona load + typed talk-back + session-only history + AudioPlayer (basic, sole audio authority, manual stop) + segment cadence. **Declares the outbound interface contracts** (VoiceProvider / MusicProvider / Memory seams). | **L0** | — |
 | **02** | `voice-provider` | VoiceProvider interface impl + TTS sidecar process + first adapter (Qwen3-TTS). | **L0** (01+02 = audible) | 01 |
 | **03** | `music-provider` | MusicProvider interface + yt-dlp adapter (YouTube+Bilibili) + Director talk↔music scheduling + AudioPlayer music playback. | **L1** (radio feel) | 01 |
 | **04** | `no-dead-air` | 1-segment look-ahead / pre-generation buffer to remove inter-segment gaps. | polish | 01,02,03 |
