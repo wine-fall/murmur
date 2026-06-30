@@ -7,6 +7,8 @@ description: "Use whenever the user asks to implement, build, work on, continue,
 
 The murmur project is built from specs. `DESIGN.md` is the **master spec** (vision, locked decisions, architecture); `specs/NN-*.md` are **sub-specs** (one per part). Code follows specs, and specs stay true to code. This skill is how every build task runs.
 
+This is the **build discipline**. The end-to-end loop that wraps it — test gate → closing `code-review` → commit, with a clean exit contract — is `murmur-ship`; it calls this skill for the build itself.
+
 Current focus: **L0 then L1** (specs `01-core-loop`, `02-voice-provider`, then `03-music-provider`). Later specs (03–09) may still change — don't treat them as frozen.
 
 ## The rule
@@ -25,7 +27,7 @@ Accept any unambiguous reference: a sub-spec id (`01`, `01-core-loop`), a milest
    - ambiguity about scope or approach, or any decision that would be costly to reverse later.
 
    If any of these apply, **ask the user first** — present each as a concrete choice with your recommendation — and wait for the answer. Do **not** guess and charge ahead on a material uncertainty. (The design itself was already brainstormed; this gate is a focused build-time confirmation, not a full re-brainstorm. A genuinely settled spec with no open questions needs no gate — proceed.) Record the resolved decisions back into the spec (per the alignment section) so the next build doesn't re-ask.
-4. **Build against the spec — test-first.** Tests are mandatory (see Testing below). Write logic **test-first**: failing unit test against the seams' fakes → implementation → green. Honor the seams the spec declares (don't bypass an interface another spec owns); ensure each seam has a **fake** for tests. Match the surrounding code's style.
+4. **Build against the spec — test-first.** Tests are mandatory (see Testing below). Write logic **test-first**: failing unit test against the seams' fakes → implementation → green. Write the test as part of building each requirement, **in the same step** — never implement first and add tests afterward. Honor the seams the spec declares (don't bypass an interface another spec owns); ensure each seam has a **fake** for tests. Match the surrounding code's style. (See **Test-first is non-negotiable** below — this is the rule most easily rationalized away.)
 5. **Verify against the spec's acceptance criteria** before claiming done. Run the **unit suite** (must pass). For criteria covered by integration tests, run them **on demand**. For **sensory/human-acceptance** criteria (sounds human, feels like radio, type-and-reply flows), produce a **checklist and hand it to the user to run and confirm** — do not self-declare these met. Never claim a milestone (L0/L1) met on assertion alone. (`superpowers:verification-before-completion` applies.)
 6. **Keep spec and code aligned** (see next section).
 
@@ -50,6 +52,26 @@ When a sub-spec change contradicts or outgrows a master decision, update `DESIGN
 - **Don't run the heavy real models inside a build's tests.** Real model/voice *capability* eval (Qwen3-TTS, real LLMs — e.g. the voice blind A/B) is the dedicated **eval track** (DESIGN §10.3), not part of normal per-spec verification.
 - **Prefer Ollama** for any test/eval that needs an actual local LLM; reserve real Claude (`claude-agent-sdk`) for production + a gated, on-demand live smoke.
 
+## Test-first is non-negotiable
+
+**Violating the letter of test-first is violating the spirit of it.** "I ran it and it works, I'll add the test next" is not test-first — it is test-last, and it is forbidden. The test is written and run green *as part of the step that builds the thing*, before that step is called done or committed.
+
+This is the rule most easily rationalized away under build momentum. It already happened on this project: spec 01 was built and committed step by step with only manual runs, the `pytest` suite was backfilled at the very end, and that backfill let a real `AudioPlayer` cancellation bug ship — found only when the test was finally written. Test-per-step would have caught it.
+
+| Rationalization | Reality |
+|---|---|
+| "I'll verify by running the app and add `pytest` at the end." | A manual run is not a test. Backfilling already shipped a bug here. Write the test in the step. |
+| "Tests-after give the same coverage." | Tests-after ask *what does this do*; tests-first ask *what should this do* — and catch the bug before the commit, not after. |
+| "This step is exploratory / the shape will change." | Then test the **contract**, not the internals. A changing shape is the reason to pin behavior first. |
+| "Claude's / the voice's output is unpredictable — I can't test it." | Correct — so don't. Unit-test the **deterministic scaffolding** (prompt assembly, the loop on fakes); route model/voice quality to the **eval track** (DESIGN §10.3/§11.4). |
+| "It's a tiny change." | Tiny changes break too; the test is 30 seconds. |
+
+**Red flags — STOP and write the test first:**
+- Implementation written before its test exists.
+- "I'll add tests at the end / in a follow-up."
+- About to commit a step whose tests you have not run green.
+- Asserting on exact Claude / voice output in a unit test (that's the eval track).
+
 ## Conventions (from DESIGN.md §0)
 
 - **Specs are written for a coding agent, not humans** — explicit contracts, single source of truth, explicit non-goals, verifiable acceptance criteria.
@@ -61,6 +83,7 @@ When a sub-spec change contradicts or outgrows a master decision, update `DESIGN
 
 ## Anti-patterns
 
+- Backfilling tests at the end (test-last) instead of test-first per step — see **Test-first is non-negotiable**.
 - Starting a build with no spec named, or from memory without re-reading the spec.
 - Charging ahead past a material uncertainty (an Open question, ambiguous scope, or a hard-to-reverse choice) instead of confirming with the user first.
 - Letting code drift from the spec without updating the spec — the cardinal sin of this skill.
