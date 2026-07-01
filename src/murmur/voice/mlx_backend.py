@@ -18,24 +18,27 @@ import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from .backend import SynthesisRequest
 
-
-class _GenerationResult(Protocol):
-    audio: Any  # an mlx array; opaque here — we only hand it to audio_write
+if TYPE_CHECKING:
+    # Type-only import of mlx-audio's real result type. Guarded so importing this
+    # module never pulls in MLX at runtime (with `from __future__ import
+    # annotations` the reference below stays a lazy string).
+    from mlx_audio.tts.models.base import GenerationResult
 
 
 class TtsModel(Protocol):
-    """The slice of an mlx-audio model that this backend actually uses. The
-    concrete model class is third-party and differs per repo (Spark/Qwen/…), but
-    all we call is ``generate()`` + ``sample_rate`` — declaring that here gives
-    pyright teeth on our usage instead of a blanket ``Any``."""
+    """The slice of an mlx-audio model that this backend uses. mlx-audio has no
+    shared model base class — its ~40 model classes (Spark/Qwen/Kokoro/…) expose
+    ``generate()`` + ``sample_rate`` only by convention — so we declare that
+    convention as a Protocol (typed with mlx-audio's own ``GenerationResult``).
+    This gives pyright teeth on our usage instead of a blanket ``Any``."""
 
     sample_rate: int
 
-    def generate(self, text: str, **kwargs: Any) -> Iterable[_GenerationResult]: ...
+    def generate(self, text: str, **kwargs: Any) -> Iterable[GenerationResult]: ...
 
 
 @dataclass(frozen=True)
