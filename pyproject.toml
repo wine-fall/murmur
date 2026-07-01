@@ -28,6 +28,7 @@ dev = [
 # Install on a Mac:  pip install -e ".[tts-mlx]"   then:  murmur --voice spark
 tts-mlx = [
     "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all four L0 voices
+    "soxr",              # audio resampler the Spark backend (BiCodec) needs at load
 ]
 
 [tool.pytest.ini_options]

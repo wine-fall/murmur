@@ -75,7 +75,7 @@ collapse into a config profile + the `params` escape hatch (§3.5).
 | `chatterbox` | `chatterbox-fp16` | ~0.5B | multi (en-strong) | expressive, emotion-exaggeration control. |
 | `dia` | `Dia-1.6B-fp16` | 1.6B | en | ultra-real dialogue/emotion (English wildcard). |
 
-- Repo ids are the L0 defaults and **confirmed on first hands-on run** (they can shift; §6). All are open-weight, local, non-commercial-or-permissive — fine for personal use (master §8).
+- Repo ids are the L0 defaults and **confirmed on first hands-on run** (they can shift; §6). All are open-weight and local; licensing is per the **two-phase model strategy** (master §3.7) — any good open model is fair game during local experimentation, and the *distributable* voice is a paid/licensed choice made at distribution time (so e.g. Spark's CC-BY-NC is fine to experiment with now, not a commitment to ship).
 - The sidecar loads the selected model at `start()` and warms it with one throwaway synth so the first real `synthesize` is fast.
 - Output: a mono wav at the model's native sample rate, written to a temp path; that path becomes `AudioClip.source`.
 - The choice of primary voice is still a **blind A/B by ear** (master §8/§10.3), now over these four; Spark leads going in.

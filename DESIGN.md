@@ -39,7 +39,9 @@ murmur's design is captured as **one master spec + several sub-specs**.
 
 ## 1. What this is (Vision)
 
-A **fully-local, personal-use companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
+A **fully-local companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
+
+> **Product framing**: murmur is an **open-source, non-commercial product** distributed to users. "Audience of one" is the *experience* — each user runs their own private, fully-local radio — **not** a personal one-off; the earlier "personal use" framing is retired. Model choices follow a **two-phase strategy** (§3.7): experiment with good local/open models now, adopt paid/licensed models at distribution.
 
 It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **mostly broadcasting, but occasionally turns to me and asks something** (if I don't engage, it gracefully slides back into the program). It has a **persona that grows** — seeded by a few questions up front, then it learns me as it keeps me company and fits me better over time. I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
@@ -79,13 +81,14 @@ The persona is **not a hard-coded constant — it is an evolving, living asset**
 Each item records the **why**, to avoid re-litigating later.
 
 ### 3.1 Positioning & privacy boundary
-- **Fully local, personal use**, not distributed to others.
-- **The only two network hops**: ① Claude brain inference; ② the music stream. All other logic, I/O, and memory stay on-device.
-- *Rationale*: this is the project's founding constraint; it also directly unlocks the TTS licensing call below (see 3.5).
+- **Fully local, open-source, non-commercial** — distributed to users; every instance runs entirely on the user's own machine (not a hosted service, not a personal one-off).
+- **The only two network hops**: ① Claude brain inference; ② the music stream. All other logic, I/O, and memory stay on-device — a core product value, not merely a personal constraint.
+- *Rationale*: local-first + open-source is the product's identity. Model **licensing** is handled by the two-phase strategy (§3.7): during local experimentation any good open model is fair game; the distributable stack uses paid/properly-licensed models chosen at distribution time. (This retires the old "personal use unlocks non-commercial models" shortcut.)
 
 ### 3.2 Brain & authentication
 - Brain = **Claude Opus**, via `claude-agent-sdk`, **reusing the local Claude Code subscription OAuth credentials** — **no API key needed**.
 - *Rationale*: this auth chain is already verified in the `~/.personal/ai-investment` project — with no `ANTHROPIC_API_KEY` in the environment, the SDK falls back to the local `claude /login` subscription credentials and bills the subscription directly. For headless contexts, `claude setup-token` can mint a one-year token.
+- **Phase note (§3.7)**: subscription-OAuth is the **current local-experimentation** substitute. A distributed build swaps to a paid API / user-provided key (or another provider); the brain stays behind the same two-method `Brain` seam, so the swap is an adapter/config change, not a rewrite.
 
 ### 3.3 Language / runtime: all Python
 - Orchestrator + TTS sidecar are **both Python**.
@@ -101,10 +104,10 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.5 Output / TTS: hot-swappable, human-ness is the soul
 - **`VoiceProvider` abstraction**: TTS is a hot-swappable backend, not hard-coded. Each model is its own adapter, switchable by one config line; you can even **mount different models per scenario** (a fast one for live replies, a warm/rich one for proactive broadcasts).
-- **Candidate pool** (decide the primary after a blind A/B): Qwen3-TTS, CosyVoice2, Chatterbox Multilingual V3, OpenAudio S1-mini.
+- **Candidate pool** (decide the primary after a blind A/B): Qwen3-TTS, CosyVoice2, Chatterbox Multilingual V3, OpenAudio S1-mini. *(spec 02 wires the MLX-runnable experiment shortlist — **Spark** [primary], Qwen3-TTS, Chatterbox, Dia — as local experiment-phase voices per §3.7.)*
 - **TTS runs as an always-on warm sidecar process.** *Rationale*: models load slowly (seconds, several GB), so keep them warm rather than loading on every utterance; crash isolation — a TTS crash must not take down the radio brain; cross-process is also the cleanest seam for hot-swapping.
 - *Selection notes (from mid-2026 research)*:
-  - Because this is **personal use**, the "non-commercial license" landmines the research flagged (CosyVoice2/F5/Fish/IndexTTS2, etc.) **do not apply to us** → this unlocks the most emotionally expressive models.
+  - **Licensing is deferred to the two-phase strategy (§3.7)**: during local experimentation, non-commercially-licensed models (Spark/CosyVoice2/Fish/IndexTTS2, etc.) are fine to try; the *distributable* voice is a paid/licensed choice made at distribution time. So the experiment pool is unconstrained by license — an experiment pick is not a commitment to ship it.
   - On Mac the real trade-off is just "can it run in real time": MLX/Metal-accelerated models (e.g. Qwen3-TTS) can; CosyVoice2/GPT-SoVITS et al. are mostly CPU-bound and slow on Mac → better for **pre-generation** than millisecond-latency.
   - Since v1 input is keyboard and proactive broadcasts can be pre-generated in the background, "slow on Mac" matters little for broadcast → the most emotionally rich models remain usable.
   - **The human-ness / warmth of the voice is the soul of this product.** The primary model is ultimately decided by ear, via blind listening.
@@ -112,7 +115,12 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.6 Interaction form: a single always-on Python async CLI process
 - One always-on process (e.g. `murmur`), launched in a terminal; one coroutine drives "speaking up," another reads keyboard input, both feed into the brain. **Proactive broadcasts and your typing share the same terminal** — no daemon/client split.
-- *Rationale*: for personal use, CLI is the lightest and fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI), which upgrades the same in-terminal CLI Host surface in place — never a separate window/app/page. See the TUI sub-spec (§10, `specs/10-tui.md`).
+- *Rationale*: CLI is the lightest, fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI), which upgrades the same in-terminal CLI Host surface in place — never a separate window/app/page. See the TUI sub-spec (§10, `specs/10-tui.md`).
+
+### 3.7 Model strategy: local substitutes now, paid/licensed at distribution
+- **Two phases.** *Now (local experimentation)*: use the best **local, open** models available to prototype quality — the Claude Code subscription for the brain (§3.2), local open TTS (§3.5) — **regardless of their distribution license**. *At distribution*: re-evaluate and adopt **paid / properly-licensed** models (a paid brain API; a licensed or paid TTS) so the shipped open-source product is legally clean.
+- *Why*: it decouples "find what sounds/works good" (cheap, fast, local, license-agnostic for private experimentation) from "what we're allowed to ship" (resolved once, at distribution, by paying for or licensing the chosen models). An experiment-phase pick like a CC-BY-NC TTS (e.g. Spark) is fine to run locally and is **not** a commitment to ship it.
+- *Consequence*: model **licensing is not a selection filter during experimentation**; it becomes one only when choosing the distributable stack. Every model sits behind a seam (`Brain`, `VoiceProvider`) so each swap is an adapter/config change, not a rewrite.
 
 ---
 
@@ -276,6 +284,7 @@ v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and a
 ### 10.1 Decomposition principles
 - **Interface-first (AI-friendly key)**: spec `01` declares the **VoiceProvider / MusicProvider / Memory contract seams** explicitly; their implementations land in 02 / 03 / 05 respectively. Parts stay decoupled and buildable in order, and a coding agent never has to guess an interface.
 - **Persistence**: local files (no DB in v1). **No front-end API server in v1** — single process, one consumer (your terminal).
+- **One-click install; guided, atomic model provisioning.** As a distributed product, the base install is **one step** and runs **model-free** (stub / no voice). Enabling a real voice is a **single guided action** that installs that backend's **complete** dependency set *and* downloads its weights together — the user never hand-installs a missing dependency or hits a runtime import error. A backend is fully provisioned or not offered; **no half-installed state**. (Concretely: each backend declares its full dependency manifest; the guided setup installs it. The dev-facing `pip install -e ".[…]"` extras are the mechanism the product wraps.)
 - **Detach/daemon is an optional side branch, NOT on the main path.** The v1 core path is a foreground single process (terminal close = stop). Only if/when we want "the radio keeps playing after the terminal closes + a detachable/re-attachable session" do we add a separate daemon/client spec; its reattachable surface would build on the TUI (spec 10), not redefine it.
 
 ### 10.2 What sub-specs add over this master
