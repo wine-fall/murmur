@@ -14,6 +14,7 @@ everything else (model/library output, logging) must go to stderr.
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from typing import TextIO
 
@@ -78,11 +79,29 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
         stdout.flush()  # essential: unbuffer so the client's read returns
 
 
+def _serve_protected(backend: TtsBackend) -> None:
+    """Serve with the stdout protocol channel protected.
+
+    stdout carries only protocol JSON, but the model and its libraries (mlx-audio,
+    huggingface_hub/tqdm download progress, warnings) print to stdout during
+    ``load()`` — which would corrupt the channel and crash the client's JSON
+    decode. Preserve the real stdout for protocol writes, then point fd 1 *and*
+    ``sys.stdout`` at stderr so any such output (Python- or C-level) is visible on
+    stderr and can never reach the pipe the client reads (§3.2).
+    """
+    protocol_out = os.fdopen(
+        os.dup(sys.stdout.fileno()), "w", buffering=1, encoding="utf-8"
+    )
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = sys.stderr
+    serve(backend, stdin=sys.stdin, stdout=protocol_out)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(prog="murmur.voice.sidecar")
     parser.add_argument("--backend", default="fake", help="TTS backend name")
     args = parser.parse_args(argv)
-    serve(build_backend(args.backend), stdin=sys.stdin, stdout=sys.stdout)
+    _serve_protected(build_backend(args.backend))
 
 
 if __name__ == "__main__":

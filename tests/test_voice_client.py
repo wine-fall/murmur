@@ -25,6 +25,49 @@ def test_satisfies_voice_provider_protocol():
     assert isinstance(SidecarVoiceProvider("fake"), VoiceProvider)
 
 
+def test_sidecar_stdout_channel_survives_a_backend_printing_to_stdout():
+    # Regression: mlx/HF print download progress to stdout during load(), which
+    # corrupted the JSON protocol channel (JSONDecodeError on the health line).
+    # _serve_protected must redirect fd 1 to stderr so a noisy backend can't break
+    # the channel; the real fix is exercised via a backend that prints on load().
+    prog = (
+        "import sys\n"
+        "from murmur.voice.sidecar import _serve_protected\n"
+        "from murmur.voice.backend import FakeBackend\n"
+        "class Noisy(FakeBackend):\n"
+        "    def load(self):\n"
+        "        print('POLLUTION-print')\n"
+        "        sys.stdout.write('POLLUTION-write\\n'); sys.stdout.flush()\n"
+        "        super().load()\n"
+        "_serve_protected(Noisy())\n"
+    )
+
+    async def go():
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable,
+            "-c",
+            prog,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        assert proc.stdin is not None and proc.stdout is not None
+        proc.stdin.write(
+            encode({"op": "synthesize", "request": {"text": "hi"}}).encode()
+        )
+        await proc.stdin.drain()
+        line = await asyncio.wait_for(proc.stdout.readline(), timeout=20)
+        resp = decode(line.decode())  # must parse cleanly despite the pollution
+        assert Path(resp["audio_path"]).exists()
+        proc.terminate()
+        await asyncio.wait_for(proc.wait(), timeout=10)
+        assert proc.stderr is not None
+        stderr = await proc.stderr.read()
+        assert b"POLLUTION" in stderr  # the noise went to stderr, off the channel
+
+    asyncio.run(go())
+
+
 def test_sidecar_module_starts_without_runtime_warnings():
     # Regression: `python -m murmur.voice.sidecar` must not emit the double-import
     # RuntimeWarning — the package __init__ must not pull the server module into
