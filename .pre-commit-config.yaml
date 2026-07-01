@@ -9,3 +9,13 @@ repos:
         language: system
         # no-CJK applies to code and docs alike; comment check is Python-only.
         types_or: [python, markdown, yaml, toml]
+      - id: pyright
+        name: pyright (static type-check)
+        # Enforces the Protocol seams (contracts.py, Brain, TtsBackend, Player,
+        # Host): an impl whose signatures drift from a contract fails here.
+        # Uses the venv's pyright (run pre-commit inside the venv, like the hook
+        # above); pyproject's venvPath/.venv makes imports resolve.
+        entry: pyright
+        language: system
+        pass_filenames: false
+        types: [python]

@@ -16,6 +16,24 @@ from __future__ import annotations
 import asyncio
 import sys
 import threading
+from typing import Protocol, runtime_checkable
+
+
+@runtime_checkable
+class Host(Protocol):
+    """The CLI-host seam the Director consumes (spec 01 §3.3): start the input
+    reader, await the next typed line, and render program/user text. ``CliHost``
+    is the real impl (it also renders a banner / info lines, used by app.py);
+    tests inject a fake. Kept a Protocol so the Director depends on the
+    capability, not the concrete class (interface-first, DESIGN §11.1)."""
+
+    def start(self) -> None: ...
+
+    async def next_line(self) -> str: ...
+
+    def on_radio_segment(self, text: str) -> None: ...
+
+    def on_user_line(self, text: str) -> None: ...
 
 
 class CliHost:

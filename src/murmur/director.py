@@ -17,9 +17,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 
-from .audio_player import AudioPlayer
+from .audio_player import Player
 from .brain import Brain
-from .cli_host import CliHost
+from .cli_host import Host
 from .config import Config
 from .contracts import AudioClip, ContextPack, MemoryStore, Turn, VoiceProvider
 
@@ -34,17 +34,17 @@ class Director:
         persona: str,
         brain: Brain,
         voice: VoiceProvider,
-        player: AudioPlayer,
+        player: Player,
         memory: MemoryStore,
-        cli_host: CliHost,
+        cli_host: Host,
     ) -> None:
         self._config: Config = config
         self._persona: str = persona
         self._brain: Brain = brain
         self._voice: VoiceProvider = voice
-        self._player: AudioPlayer = player
+        self._player: Player = player
         self._memory: MemoryStore = memory
-        self._cli: CliHost = cli_host
+        self._cli: Host = cli_host
         self._quit: bool = False
 
     def _context(self) -> ContextPack:

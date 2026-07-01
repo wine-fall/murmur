@@ -16,8 +16,20 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import Protocol, runtime_checkable
 
 from .contracts import AudioClip
+
+
+@runtime_checkable
+class Player(Protocol):
+    """The audio-playback seam the Director consumes (spec 01 §3.3). ``AudioPlayer``
+    is the real impl; tests inject a fake. Kept a Protocol so the Director depends
+    on the capability, not the concrete class (interface-first, DESIGN §11.1)."""
+
+    async def play(self, clip: AudioClip) -> None: ...
+
+    async def stop(self) -> None: ...
 
 
 class AudioPlayer:
