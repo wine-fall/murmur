@@ -17,6 +17,7 @@ from __future__ import annotations
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .backend import SynthesisRequest
 
@@ -46,14 +47,17 @@ class MlxAudioBackend:
 
     def __init__(self, profile: MlxProfile) -> None:
         self._profile = profile
-        self._model = None
+        # mlx-audio's loaded model is untyped (optional heavy dep); Any keeps the
+        # type-checker honest about the rest without stubbing a third-party model.
+        self._model: Any = None
         self._dir: Path | None = None
         self._counter = 0
 
     def load(self) -> None:
         from mlx_audio.tts.utils import load_model
 
-        self._model = load_model(self._profile.repo)
+        # mlx-audio types model_path as Path, but it accepts a HF repo-id str.
+        self._model = load_model(self._profile.repo)  # type: ignore[arg-type]
         self._dir = Path(tempfile.mkdtemp(prefix="murmur-mlx-"))
 
     def warm(self) -> None:
@@ -97,4 +101,5 @@ class MlxAudioBackend:
             raise RuntimeError(f"{self._profile.repo} produced no audio")
         # L0 renders the whole clip (§3.4): join all segments into one wav.
         audio = chunks[0] if len(chunks) == 1 else mx.concatenate(chunks, axis=0)
-        audio_write(str(path), audio, self._model.sample_rate, format="wav")
+        # audio is an mlx array (not np.ndarray); audio_write handles it at runtime.
+        audio_write(str(path), audio, self._model.sample_rate, format="wav")  # type: ignore[arg-type]

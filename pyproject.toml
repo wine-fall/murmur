@@ -19,6 +19,7 @@ dev = [
     "pre-commit>=3.5",
     "pytest>=8",
     "ruff>=0.15",
+    "pyright>=1.1.390",  # static type-checking: gives the Protocol seams (contracts.py) teeth
 ]
 # Optional real TTS voices. All four L0 backends (spark/qwen3/chatterbox/dia,
 # spec 02 §3.3) run on ONE runtime — mlx-audio, Apple-Silicon-only — so a single
@@ -46,6 +47,16 @@ markers = [
 # of relying on an editor's bundled default. Black-compatible defaults.
 line-length = 88
 target-version = "py310"
+
+[tool.pyright]
+# Static type-checking so the Protocol seams (contracts.py VoiceProvider /
+# MusicProvider / MemoryStore, brain.Brain) are actually enforced: an impl whose
+# signatures drift from the contract fails here. Run:  pyright
+include = ["src", "tests"]
+pythonVersion = "3.10"
+typeCheckingMode = "basic"
+venvPath = "."
+venv = ".venv"
 
 [project.scripts]
 murmur = "murmur.app:main"

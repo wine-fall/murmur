@@ -105,6 +105,7 @@ def test_killing_sidecar_does_not_hang_core_and_recovers():
 
         # Hard-kill the underlying process.
         killed = provider._proc
+        assert killed is not None
         killed.kill()
         await killed.wait()
 
@@ -208,6 +209,7 @@ def test_aclose_terminates_the_process():
         provider = SidecarVoiceProvider("fake")
         await provider.start()
         proc = provider._proc
+        assert proc is not None
         await provider.aclose()
         assert proc.returncode is not None  # exited
         assert provider._proc is None

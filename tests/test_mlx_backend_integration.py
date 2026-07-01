@@ -41,9 +41,9 @@ def test_mlx_backend_renders_a_real_nonempty_wav(name):
 def test_mlx_backend_stays_warm_across_calls():
     # Acceptance §2: the model loads once; later calls do not reload it.
     from murmur.voice.backend import SynthesisRequest
-    from murmur.voice.sidecar import build_backend
+    from murmur.voice.mlx_backend import PROFILES, MlxAudioBackend
 
-    backend = build_backend("spark")
+    backend = MlxAudioBackend(PROFILES["spark"])
     backend.load()
     model_after_load = backend._model
     backend.warm()
