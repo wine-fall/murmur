@@ -20,19 +20,14 @@ dev = [
     "pytest>=8",
     "ruff>=0.15",
 ]
-# Optional TTS voice backends — ONE extra per backend, so a user installs only
-# the heavy deps for the voice(s) they actually use. The core, the unit suite,
-# and the stub/sidecar-fake voices need NONE of these (they run model-free).
-# L0 wires only Qwen3-TTS; the seam (SynthesisRequest / TtsBackend / sidecar) is
-# model-agnostic, so future backends each just add their own extra and a
-# build_backend name — e.g. tts-cosyvoice2 / tts-chatterbox / tts-fish — without
-# touching the core. Extras may share a runtime lib (several MLX models reuse
-# mlx-audio); they are named by backend because users pick a voice, not a runtime.
-#
-# Qwen3-TTS runs on the MLX runtime (Apple-Silicon-only). Install on a Mac:
-#   pip install -e ".[tts-qwen3]"   then run:  murmur --voice qwen3
-tts-qwen3 = [
-    "mlx-audio>=0.4.4",  # the MLX TTS runtime that hosts Qwen3-TTS
+# Optional real TTS voices. All four L0 backends (spark/qwen3/chatterbox/dia,
+# spec 02 §3.3) run on ONE runtime — mlx-audio, Apple-Silicon-only — so a single
+# extra covers them all. The core, the unit suite, and the stub/sidecar-fake
+# voices need none of it (they run model-free). A future non-MLX backend (e.g. a
+# PyTorch CosyVoice2/Fish) would add its own extra without touching the core.
+# Install on a Mac:  pip install -e ".[tts-mlx]"   then:  murmur --voice spark
+tts-mlx = [
+    "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all four L0 voices
 ]
 
 [tool.pytest.ini_options]

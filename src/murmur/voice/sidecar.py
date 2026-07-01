@@ -18,20 +18,21 @@ import sys
 from typing import TextIO
 
 from .backend import FakeBackend, SynthesisRequest, TtsBackend
+from .mlx_backend import PROFILES, MlxAudioBackend
 from .protocol import OP_HEALTH, OP_SYNTHESIZE, ProtocolError, decode, encode
 
 
 def build_backend(name: str) -> TtsBackend:
-    """Select a ``TtsBackend`` by name. ``"fake"`` (no model) ships now; the real
-    ``"qwen3"`` adapter lands in step 3 (lazy-imported there so this module never
-    pulls in MLX)."""
+    """Select a ``TtsBackend`` by name: ``"fake"`` (no model), or one of the MLX
+    backends in ``mlx_backend.PROFILES`` (``spark``/``qwen3``/``chatterbox``/``dia``).
+    Constructing an MLX backend imports no MLX — the model loads only in load()."""
     if name == "fake":
         return FakeBackend()
-    if name == "qwen3":
-        from .qwen3 import Qwen3Backend
-
-        return Qwen3Backend()
-    raise ValueError(f"unknown tts backend {name!r}; available: 'fake', 'qwen3'")
+    profile = PROFILES.get(name)
+    if profile is not None:
+        return MlxAudioBackend(profile)
+    available = ", ".join(["fake", *sorted(PROFILES)])
+    raise ValueError(f"unknown tts backend {name!r}; available: {available}")
 
 
 def _handle(backend: TtsBackend, req: dict) -> dict:

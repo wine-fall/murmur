@@ -2,7 +2,7 @@
 
 > **Status**: Implemented (sidecar + client) — real voice pending hands-on acceptance.
 >   - **steps 1–2 (done)**: standardized adapter boundary (`SynthesisRequest` §3.5), JSON-lines-over-stdio sidecar (`python -m murmur.voice.sidecar`) with a `TtsBackend` interface + no-model `FakeBackend`, and the supervising `SidecarVoiceProvider` (spawn/wait-for-ready, restart-on-death + retry, synth-timeout kills the proc to avoid pipe desync). `build_voice`: `stub` / `qwen3` / `sidecar-fake`; `--voice` flag. Verified by 63 unit tests + a real two-process end-to-end run on `sidecar-fake`. Acceptance §3 (kill→recover) and §4 (hot-swap) are covered by the `sidecar-fake` path.
->   - **step 3 (code in place, not yet verified)**: real `Qwen3Backend` via `mlx-audio` (optional `tts-qwen3` extra; lazy-imported). Tagged integration test (`pytest -m integration`) + a human-acceptance checklist gate §5.1 ("sounds clearly human") and §5.2 ("warm"). Needs a hands-on Mac run (install the extra, download the model, judge by ear) — the agent cannot self-verify a voice.
+>   - **step 3 (code in place, not yet verified)**: a **thin generic `MlxAudioBackend`** over `mlx-audio` (optional `tts-mlx` extra; lazy-imported) + a **profile registry** wiring four backends — `spark` (primary), `qwen3`, `chatterbox`, `dia` (§3.3). The deterministic layer (request→`generate` kwarg mapping, profile merge, backend selection) is unit-tested with a fake model; real model load/synth is a parametrized tagged integration test (`pytest -m integration`). Acceptance §5.1 ("sounds clearly human") / §5.2 ("warm") + the blind A/B among the four gate on a hands-on Mac run (install the extra, download models, judge by ear) — the agent cannot self-verify a voice.
 > **Part**: The `VoiceProvider` implementation + the warm TTS sidecar + the first adapter. See master [`../DESIGN.md`](../DESIGN.md) §3.5 (TTS = soul, pluggable, warm sidecar), §4 (architecture).
 > **Milestone**: L0 (01+02 = the first audible version).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
@@ -60,10 +60,25 @@ contract:
 the payload tiny (text in, file path out) — do not stream audio bytes over the
 IPC in L0.
 
-### 3.3 First adapter — Qwen3-TTS (MLX)
-- Run Qwen3-TTS on Apple Silicon via the MLX path (the `mlx-audio` ecosystem is the Mac hub for these models, master §3.5 research). Apache-2.0; ~6 GB peak; sub-100ms-class streaming-capable, but L0 uses whole-clip render (§3.4).
-- The sidecar loads this model at `start()` and warms it with one throwaway synthesis so the first real `synthesize` is fast.
+### 3.3 Backends — a thin MLX layer over four models (Spark primary)
+L0 wires **four** TTS backends, all on Apple Silicon via **`mlx-audio`** (the Mac
+hub for these models, master §3.5). Because all four share one runtime and one
+`load_model(repo) → model.generate(text, …)` API, they are served by a **single
+generic `MlxAudioBackend`** parameterized by a per-model **profile** — not one
+class per model. This is the "thin middle layer": the model-specific differences
+collapse into a config profile + the `params` escape hatch (§3.5).
+
+| backend name | HF repo (mlx-community) | size | lang | why |
+|---|---|---|---|---|
+| **`spark`** (primary) | `Spark-TTS-0.5B-bf16` | 0.5B | zh/en | best Chinese by ear so far; small → real-time. Note: 16 kHz output. |
+| `qwen3` | `Qwen3-TTS-12Hz-0.6B-Base-bf16` | 0.6B | multi (zh) | 24 kHz; voice presets / voice-design. |
+| `chatterbox` | `chatterbox-fp16` | ~0.5B | multi (en-strong) | expressive, emotion-exaggeration control. |
+| `dia` | `Dia-1.6B-fp16` | 1.6B | en | ultra-real dialogue/emotion (English wildcard). |
+
+- Repo ids are the L0 defaults and **confirmed on first hands-on run** (they can shift; §6). All are open-weight, local, non-commercial-or-permissive — fine for personal use (master §8).
+- The sidecar loads the selected model at `start()` and warms it with one throwaway synth so the first real `synthesize` is fast.
 - Output: a mono wav at the model's native sample rate, written to a temp path; that path becomes `AudioClip.source`.
+- The choice of primary voice is still a **blind A/B by ear** (master §8/§10.3), now over these four; Spark leads going in.
 
 ### 3.4 Whole-clip render (L0)
 A talk segment is a few seconds of speech. L0 renders the **complete** clip, then the core plays it. No streaming TTS, no partial playback. (This is why small inter-segment gaps are acceptable in L0 — master §9.2; look-ahead pre-generation to hide synth latency is spec 04.)
@@ -91,18 +106,37 @@ class SynthesisRequest:
 `AudioClip.source`). Uniform across all backends.
 
 **`TtsBackend` interface** (inside the sidecar): `load()`, `warm()`,
-`synthesize(req: SynthesisRequest) -> audio_path: str`. Each candidate is one
-`TtsBackend` that reads the fields it supports and ignores the rest.
+`synthesize(req: SynthesisRequest) -> audio_path: str`. A backend reads the
+fields it supports and ignores the rest.
 
-- The candidate pool (master §3.5): **Qwen3-TTS** (wired in L0); **CosyVoice2**, **Chatterbox Multilingual V3**, **Fish-Audio local = OpenAudio S1 / fish-speech** drop in later. Per master §8, personal use means non-commercial-licensed backends are fine.
-- **Zero-shot voice cloning** (CosyVoice2 / Chatterbox / Fish) is a *designed-for axis* of the boundary (`reference_audio` / `reference_text`), **not wired in L0** — Qwen3-TTS uses preset voices. The slot exists so adding a cloning backend needs no contract change.
-- `config` (01 §3.1) selects the backend by name and supplies the per-backend defaults (which `voice`, `language`, `reference_audio`, default `params`) used to build the `SynthesisRequest` from the core's `synthesize(text, scenario=...)` call. The core contract and the IPC protocol are unchanged when swapping backends.
+**The thin middle layer — one generic backend + a profile registry.** Because
+the four L0 models (§3.3) all run on `mlx-audio` through the same
+`load_model(repo) → model.generate(text, …)` API, they are **not** four classes
+— they are **one `MlxAudioBackend`** whose only per-model state is a **profile**:
+```python
+@dataclass(frozen=True)
+class MlxProfile:            # one row per model; adding a model = adding a row
+    repo: str                # HF repo id (mlx-community/…)
+    voice: str | None = None
+    language: str | None = None
+    default_params: dict = field(default_factory=dict)
+```
+`MlxAudioBackend.synthesize` merges the profile defaults with the incoming
+`SynthesisRequest` (request wins), maps them to `generate()` kwargs, renders the
+whole clip (§3.4), and writes the wav. The registry (`spark`/`qwen3`/`chatterbox`/`dia`)
+lives in one place; `build_backend(name)` looks up the profile and constructs the
+one backend. A future non-MLX model (e.g. a PyTorch CosyVoice2/Fish for
+pre-generation) would be a *separate* `TtsBackend` in its own process/env, but the
+core contract and IPC are still unchanged.
+
+- **Zero-shot voice cloning** (`reference_audio` / `reference_text`) stays a *designed-for axis*, **not wired in L0** — L0 uses preset voices. The slot exists so a cloning backend needs no contract change.
+- `config` (01 §3.1) selects the backend by name; the profile supplies the per-model defaults used (with the core's `synthesize(text, scenario=…)` call) to build the `SynthesisRequest`. The core contract and IPC are unchanged when swapping backends — proven by hot-swapping among the four.
 
 ---
 
 ## 4. Dependencies
 - [`01-core-loop.md`](01-core-loop.md) — owns the `VoiceProvider`/`AudioClip` contract this implements.
-- External (Mac): MLX + `mlx-audio` + the Qwen3-TTS weights. No network at inference time (local model) — consistent with master §3.1 ("only network hops: inference + music"; TTS is local).
+- External (Mac): MLX + `mlx-audio` (one optional extra `tts-mlx` covers all four backends) + each model's weights (downloaded once from HF/ModelScope). No network **at inference time** (local models) — consistent with master §3.1 ("only network hops: inference + music"; TTS is local). The weight download is one-time setup, not a runtime hop.
 
 ---
 
@@ -110,11 +144,13 @@ class SynthesisRequest:
 1. With the sidecar started, `synthesize("…")` returns an `AudioClip` the core can play, and the speech sounds **clearly human** (not robotic `say`-tier) — the L0 bar for "soul."
 2. The model is **warm**: the second and later `synthesize` calls do **not** reload the model; per-call latency is small enough that the talk loop feels live on the target Mac.
 3. Killing the sidecar process does **not** crash the core; the core reports the failure and recovers (restart) on the next call.
-4. Switching the configured backend name changes the voice **without any change to spec-01 code** (proves the hot-swap seam) — even if only one backend is fully wired in L0.
+4. Switching the configured backend name (`spark`/`qwen3`/`chatterbox`/`dia`) changes the voice **without any change to spec-01 code** (proves the hot-swap seam) — the thin `MlxAudioBackend` + profile registry serve all four.
+5. **Blind A/B among the four** (master §10.3 eval track): render the same Chinese line through each and pick the primary by ear. `spark` leads going in; watch its 16 kHz output against `qwen3`'s 24 kHz.
 
 ---
 
 ## 6. Open questions
 - ~~IPC transport: localhost HTTP vs JSON-lines-over-stdio~~ **Resolved (§3.2): JSON-lines over stdio** — no port, no extra dependency, fastest to stand up, reuses the supervised-subprocess pattern. Revisit only if latency forces shared-memory/streamed PCM (tied to spec 04).
 - Audio handoff: file-path (chosen for L0) vs shared-memory/streamed PCM (lower latency, needed if/when streaming TTS lands in spec 04).
+- Exact mlx-community repo ids + per-model `generate` kwargs (voice presets, Dia's `[S1]/[S2]` speaker tags, Chatterbox `exaggeration`/`cfg`, Spark gender/pitch): the §3.3 repos are best-effort defaults, confirmed/tuned on the first hands-on run. Each maps onto `SynthesisRequest` fields + `params`; the profile registry absorbs the per-model differences.
 - Exact Qwen3-TTS voice/preset selection and any Chinese/English voice mapping — deferred to first hands-on run.
