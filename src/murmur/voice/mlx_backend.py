@@ -15,11 +15,27 @@ never pulls in MLX.
 from __future__ import annotations
 
 import tempfile
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from .backend import SynthesisRequest
+
+
+class _GenerationResult(Protocol):
+    audio: Any  # an mlx array; opaque here — we only hand it to audio_write
+
+
+class TtsModel(Protocol):
+    """The slice of an mlx-audio model that this backend actually uses. The
+    concrete model class is third-party and differs per repo (Spark/Qwen/…), but
+    all we call is ``generate()`` + ``sample_rate`` — declaring that here gives
+    pyright teeth on our usage instead of a blanket ``Any``."""
+
+    sample_rate: int
+
+    def generate(self, text: str, **kwargs: Any) -> Iterable[_GenerationResult]: ...
 
 
 @dataclass(frozen=True)
@@ -47,17 +63,16 @@ class MlxAudioBackend:
 
     def __init__(self, profile: MlxProfile) -> None:
         self._profile = profile
-        # mlx-audio's loaded model is untyped (optional heavy dep); Any keeps the
-        # type-checker honest about the rest without stubbing a third-party model.
-        self._model: Any = None
+        self._model: TtsModel | None = None
         self._dir: Path | None = None
         self._counter = 0
 
     def load(self) -> None:
         from mlx_audio.tts.utils import load_model
 
-        # mlx-audio types model_path as Path, but it accepts a HF repo-id str.
-        self._model = load_model(self._profile.repo)  # type: ignore[arg-type]
+        # mlx-audio types model_path as Path but accepts a HF repo-id str, and its
+        # loaded model is untyped; we treat it as our TtsModel slice (§ above).
+        self._model = load_model(self._profile.repo)  # type: ignore[arg-type,assignment]
         self._dir = Path(tempfile.mkdtemp(prefix="murmur-mlx-"))
 
     def warm(self) -> None:
@@ -95,6 +110,7 @@ class MlxAudioBackend:
         import mlx.core as mx
         from mlx_audio.audio_io import write as audio_write
 
+        assert self._model is not None, "load() must run before _render()"
         kwargs = self._build_generate_kwargs(req)
         chunks = [result.audio for result in self._model.generate(req.text, **kwargs)]
         if not chunks:
