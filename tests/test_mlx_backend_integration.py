@@ -11,6 +11,7 @@ acceptance, not this test.
 
 from __future__ import annotations
 
+import asyncio
 import importlib.util
 import wave
 from pathlib import Path
@@ -35,6 +36,31 @@ def test_mlx_backend_renders_a_real_nonempty_wav(name):
     assert Path(path).exists()
     with wave.open(path, "rb") as w:
         assert w.getnframes() > 0
+
+
+@pytest.mark.skipif(not _MLX_AVAILABLE, reason="mlx-audio not installed ([tts-mlx])")
+def test_real_model_through_the_sidecar_returns_a_playable_clip():
+    # Closes the gap that let the stdout-pollution bug ship: exercise a REAL model
+    # THROUGH the supervising client (subprocess + JSON-lines IPC), not just
+    # in-process. This is the combination where model/library output on stdout
+    # (HF/tqdm progress) meets the protocol channel — the two other integration
+    # tests call the backend in-process and never spawn the sidecar.
+    from murmur.voice.client import SidecarVoiceProvider
+
+    async def go():
+        provider = SidecarVoiceProvider("spark")
+        try:
+            clip = await asyncio.wait_for(
+                provider.synthesize("Hello, this is a test."), timeout=300
+            )
+            assert clip.kind == "talk"
+            assert Path(clip.source).exists()
+            with wave.open(clip.source, "rb") as w:
+                assert w.getnframes() > 0
+        finally:
+            await provider.aclose()
+
+    asyncio.run(go())
 
 
 @pytest.mark.skipif(not _MLX_AVAILABLE, reason="mlx-audio not installed ([tts-mlx])")

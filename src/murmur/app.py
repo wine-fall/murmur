@@ -97,12 +97,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument(
         "--voice",
-        choices=["stub", "sidecar-fake", "spark", "qwen3", "chatterbox", "dia"],
+        choices=["stub", "spark", "qwen3", "chatterbox", "dia"],
         default=None,
         help=(
-            "VoiceProvider: 'stub' (silent wav, no sidecar), 'sidecar-fake' "
-            "(sidecar path, no model), or a real MLX voice via the warm sidecar "
-            "('spark' primary / 'qwen3' / 'chatterbox' / 'dia')"
+            "VoiceProvider: 'stub' (silent wav, no sidecar/model) or a real MLX "
+            "voice via the warm sidecar ('spark' primary / 'qwen3' / 'chatterbox' "
+            "/ 'dia'). ('sidecar-fake' exists for internal plumbing diagnostics.)"
         ),
     )
     p.add_argument(

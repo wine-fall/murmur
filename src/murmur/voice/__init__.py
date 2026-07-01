@@ -6,9 +6,10 @@ the core never imports a concrete adapter directly:
 - ``"stub"``        — spec-01 silent-wav provider (no sidecar, no model).
 - ``"spark"`` / ``"qwen3"`` / ``"chatterbox"`` / ``"dia"`` — the four real MLX
   voices via the supervised warm sidecar (spec 02 §3.3; ``spark`` is primary).
-- ``"sidecar-fake"``— the full two-process sidecar path running the no-model
-  ``FakeBackend``: exercises spawn/supervise/restart + hot-swap (acceptance
-  §3/§4) without the heavy model.
+- ``"sidecar-fake"``— **internal/diagnostic, not a user-facing voice** (kept off
+  the ``--voice`` menu): the full two-process sidecar path running the no-model
+  ``FakeBackend``, so tests (and a future ``doctor`` self-check) can exercise
+  spawn/supervise/restart + hot-swap on any machine without the heavy model.
 
 Constructing a sidecar provider imports no heavy dependency — the model loads
 only inside the subprocess that ``start()`` spawns.
