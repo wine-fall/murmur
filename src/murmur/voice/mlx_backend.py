@@ -48,7 +48,7 @@ class MlxProfile:
     repo: str
     voice: str | None = None
     language: str | None = None
-    default_params: dict = field(default_factory=dict)
+    default_params: dict[str, Any] = field(default_factory=dict)
 
 
 # The four L0 backends (spec 02 §3.3). Spark is primary (best Chinese by ear so
@@ -90,11 +90,11 @@ class MlxAudioBackend:
         self._render(req, path)
         return str(path)
 
-    def _build_generate_kwargs(self, req: SynthesisRequest) -> dict:
+    def _build_generate_kwargs(self, req: SynthesisRequest) -> dict[str, Any]:
         """Merge profile defaults with the request (request wins) and map to
         mlx-audio ``generate()`` kwargs. ``text`` is passed positionally, not here.
         """
-        kwargs: dict = {}
+        kwargs: dict[str, Any] = {}
         voice = req.voice or self._profile.voice
         if voice:
             kwargs["voice"] = voice

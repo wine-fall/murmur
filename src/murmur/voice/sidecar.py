@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import TextIO
+from typing import Any, TextIO
 
 from .backend import FakeBackend, SynthesisRequest, TtsBackend
 from .mlx_backend import PROFILES, MlxAudioBackend
@@ -36,7 +36,7 @@ def build_backend(name: str) -> TtsBackend:
     raise ValueError(f"unknown tts backend {name!r}; available: {available}")
 
 
-def _handle(backend: TtsBackend, req: dict) -> dict:
+def _handle(backend: TtsBackend, req: dict[str, Any]) -> dict[str, Any]:
     op = req.get("op")
     if op == OP_HEALTH:
         # Unconditionally ready by construction: serve() runs load()+warm() to

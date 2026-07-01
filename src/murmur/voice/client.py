@@ -44,7 +44,7 @@ class SidecarVoiceProvider:
         reference_audio: str | None = None,
         reference_text: str | None = None,
         style: str | None = None,
-        params: dict | None = None,
+        params: dict[str, Any] | None = None,
         ready_timeout: float = _READY_TIMEOUT,
         synth_timeout: float = _SYNTH_TIMEOUT,
     ) -> None:
@@ -136,7 +136,7 @@ class SidecarVoiceProvider:
                 f"sidecar {self._backend!r} did not report ready: {resp}"
             )
 
-    async def _do_synth(self, obj: dict) -> dict:
+    async def _do_synth(self, obj: dict[str, Any]) -> dict[str, Any]:
         try:
             return await asyncio.wait_for(
                 self._request(obj), timeout=self._synth_timeout

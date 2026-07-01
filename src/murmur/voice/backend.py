@@ -12,7 +12,7 @@ is a path to a complete mono wav on local disk.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field, fields
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ._wav import SilentClipWriter
 
@@ -32,13 +32,13 @@ class SynthesisRequest:
     reference_audio: str | None = None  # reference clip path for zero-shot cloning
     reference_text: str | None = None  # transcript of the reference clip
     style: str | None = None  # natural-language emotion / instruction
-    params: dict = field(default_factory=dict)  # model-specific knobs
+    params: dict[str, Any] = field(default_factory=dict)  # model-specific knobs
 
-    def to_dict(self) -> dict:
+    def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict) -> "SynthesisRequest":
+    def from_dict(cls, data: dict[str, Any]) -> "SynthesisRequest":
         if not isinstance(data, dict):
             raise ValueError("SynthesisRequest payload must be a JSON object")
         text = data.get("text")
