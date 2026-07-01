@@ -11,10 +11,20 @@ is a path to a complete mono wav on local disk.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field, fields
-from typing import Any, Protocol, runtime_checkable
+from dataclasses import asdict, dataclass, field
+from typing import Protocol, cast, runtime_checkable
 
 from ._wav import SilentClipWriter
+
+
+def _opt_str(value: object) -> str | None:
+    """Coerce an untrusted JSON value to ``str | None`` (non-strings → None)."""
+    return value if isinstance(value, str) else None
+
+
+def _str_dict(value: object) -> dict[str, object]:
+    """Coerce an untrusted JSON value to a ``dict`` (non-dicts → empty)."""
+    return cast("dict[str, object]", value) if isinstance(value, dict) else {}
 
 
 @dataclass(frozen=True)
@@ -32,22 +42,30 @@ class SynthesisRequest:
     reference_audio: str | None = None  # reference clip path for zero-shot cloning
     reference_text: str | None = None  # transcript of the reference clip
     style: str | None = None  # natural-language emotion / instruction
-    params: dict[str, Any] = field(default_factory=dict)  # model-specific knobs
+    params: dict[str, object] = field(default_factory=dict[str, object])  # knobs
 
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+    def to_dict(self) -> dict[str, object]:
+        return cast("dict[str, object]", asdict(self))
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "SynthesisRequest":
+    def from_dict(cls, data: object) -> "SynthesisRequest":
         if not isinstance(data, dict):
             raise ValueError("SynthesisRequest payload must be a JSON object")
-        text = data.get("text")
+        obj = cast("dict[str, object]", data)
+        text = obj.get("text")
         if not isinstance(text, str):
             raise ValueError("SynthesisRequest requires 'text' (str)")
-        # Ignore unknown keys so a newer client never breaks an older sidecar
-        # (forward-compat is the whole point of the standardized boundary).
-        known = {f.name for f in fields(cls)}
-        return cls(**{k: v for k, v in data.items() if k in known})
+        # Read only known fields (unknown keys ignored — forward-compat), coercing
+        # each to its declared type: this is untrusted JSON, so validate shapes.
+        return cls(
+            text=text,
+            voice=_opt_str(obj.get("voice")),
+            language=_opt_str(obj.get("language")),
+            reference_audio=_opt_str(obj.get("reference_audio")),
+            reference_text=_opt_str(obj.get("reference_text")),
+            style=_opt_str(obj.get("style")),
+            params=_str_dict(obj.get("params")),
+        )
 
 
 @runtime_checkable

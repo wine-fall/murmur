@@ -30,7 +30,7 @@ def _render_transcript(
             turns = turns[:-1]
     if not turns:
         return ""
-    lines = []
+    lines: list[str] = []
     for t in turns:
         speaker = "You" if t.role == "radio" else "Listener"
         lines.append(f"{speaker}: {t.text}")

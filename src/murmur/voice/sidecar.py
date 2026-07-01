@@ -16,7 +16,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from typing import Any, TextIO
+from typing import TextIO
 
 from .backend import FakeBackend, SynthesisRequest, TtsBackend
 from .mlx_backend import PROFILES, MlxAudioBackend
@@ -36,7 +36,7 @@ def build_backend(name: str) -> TtsBackend:
     raise ValueError(f"unknown tts backend {name!r}; available: {available}")
 
 
-def _handle(backend: TtsBackend, req: dict[str, Any]) -> dict[str, Any]:
+def _handle(backend: TtsBackend, req: dict[str, object]) -> dict[str, object]:
     op = req.get("op")
     if op == OP_HEALTH:
         # Unconditionally ready by construction: serve() runs load()+warm() to
@@ -45,10 +45,9 @@ def _handle(backend: TtsBackend, req: dict[str, Any]) -> dict[str, Any]:
         # this must instead query real backend readiness.
         return {"ready": True}
     if op == OP_SYNTHESIZE:
-        payload = req.get("request")
-        if not isinstance(payload, dict):
-            raise ProtocolError("synthesize requires a 'request' object")
-        sr = SynthesisRequest.from_dict(payload)
+        # from_dict takes untrusted input and validates (raises on a non-object
+        # payload or missing text), so pass it through without narrowing here.
+        sr = SynthesisRequest.from_dict(req.get("request"))
         return {"audio_path": backend.synthesize(sr)}
     raise ProtocolError(f"unknown op {op!r}")
 
@@ -69,6 +68,7 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
     for raw in iter(stdin.readline, ""):
         if not raw.strip():
             continue  # tolerate blank lines on the pipe
+        resp: dict[str, object]
         try:
             resp = _handle(backend, decode(raw))
         except ProtocolError as exc:

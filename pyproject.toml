@@ -54,9 +54,16 @@ target-version = "py310"
 # signatures drift from the contract fails here. Run:  pyright
 include = ["src", "tests"]
 pythonVersion = "3.10"
+# Shipped code is held to strict; tests stay at the base mode (they legitimately
+# reach into internals and use loosely-typed fakes/monkeypatch — strict there is
+# noise, not safety).
 typeCheckingMode = "basic"
+strict = ["src"]
 venvPath = "."
 venv = ".venv"
+# mlx-audio (optional, Apple-Silicon-only) ships no type stubs; its imports carry
+# per-line `# pyright: ignore[reportMissingTypeStubs]` in mlx_backend.py, and the
+# few untyped-model touch points are confined there.
 
 [project.scripts]
 murmur = "murmur.app:main"

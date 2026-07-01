@@ -16,7 +16,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
-from typing import Any
 
 from ..contracts import AudioClip
 from .backend import SynthesisRequest
@@ -44,7 +43,7 @@ class SidecarVoiceProvider:
         reference_audio: str | None = None,
         reference_text: str | None = None,
         style: str | None = None,
-        params: dict[str, Any] | None = None,
+        params: dict[str, object] | None = None,
         ready_timeout: float = _READY_TIMEOUT,
         synth_timeout: float = _SYNTH_TIMEOUT,
     ) -> None:
@@ -71,7 +70,10 @@ class SidecarVoiceProvider:
         # scenario is accepted but deliberately unused in L0 (spec 02 §1: per-
         # scenario voice wiring is deferred; L0 honors one voice). The seam stays
         # open — when it lands it maps to SynthesisRequest fields in _build_request.
-        obj = {"op": OP_SYNTHESIZE, "request": self._build_request(text).to_dict()}
+        obj: dict[str, object] = {
+            "op": OP_SYNTHESIZE,
+            "request": self._build_request(text).to_dict(),
+        }
         async with self._lock:
             await self._ensure_started()
             try:
@@ -136,7 +138,7 @@ class SidecarVoiceProvider:
                 f"sidecar {self._backend!r} did not report ready: {resp}"
             )
 
-    async def _do_synth(self, obj: dict[str, Any]) -> dict[str, Any]:
+    async def _do_synth(self, obj: dict[str, object]) -> dict[str, object]:
         try:
             return await asyncio.wait_for(
                 self._request(obj), timeout=self._synth_timeout
@@ -149,7 +151,7 @@ class SidecarVoiceProvider:
             await self._kill_proc()
             raise RuntimeError("sidecar synthesize timed out") from exc
 
-    async def _request(self, obj: dict[str, Any]) -> dict:
+    async def _request(self, obj: dict[str, object]) -> dict[str, object]:
         # Invariant: this has no internal deadline — every caller MUST wrap it in
         # asyncio.wait_for so a wedged-but-alive sidecar cannot hang the core.
         proc = self._proc

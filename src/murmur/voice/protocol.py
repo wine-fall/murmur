@@ -10,7 +10,7 @@ which avoids any pipe-encoding surprises while round-tripping losslessly.
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import cast
 
 # Wire-protocol op names (the "op" field of a request line).
 OP_HEALTH = "health"
@@ -21,12 +21,12 @@ class ProtocolError(Exception):
     """A line could not be parsed as a single JSON object."""
 
 
-def encode(obj: dict[str, Any]) -> str:
+def encode(obj: dict[str, object]) -> str:
     """Serialize one object to a single newline-terminated JSON line."""
     return json.dumps(obj, ensure_ascii=True) + "\n"
 
 
-def decode(line: str) -> dict[str, Any]:
+def decode(line: str) -> dict[str, object]:
     """Parse one line into a JSON object, or raise ``ProtocolError``."""
     line = line.strip()
     if not line:
@@ -37,4 +37,6 @@ def decode(line: str) -> dict[str, Any]:
         raise ProtocolError(f"invalid JSON: {exc}") from exc
     if not isinstance(obj, dict):
         raise ProtocolError(f"expected a JSON object, got {type(obj).__name__}")
-    return obj
+    # json.loads is the one unavoidable Any boundary; contain it in a cast so the
+    # whole rest of the wire is typed as dict[str, object] (keys are JSON strings).
+    return cast("dict[str, object]", obj)

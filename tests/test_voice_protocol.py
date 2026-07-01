@@ -42,7 +42,9 @@ def test_encode_keeps_non_ascii_text_on_one_ascii_line():
     text = "a" + chr(0x00E9) + chr(0x4E2D)  # an accented latin char + a CJK codepoint
     line = encode({"op": "synthesize", "request": {"text": text}})
     assert line.isascii()  # escaped -> the stdio channel stays pure ascii
-    assert decode(line)["request"]["text"] == text  # but round-trips losslessly
+    request = decode(line)["request"]  # but round-trips losslessly
+    assert isinstance(request, dict)
+    assert request["text"] == text
 
 
 def test_synthesis_request_round_trips_through_dict():

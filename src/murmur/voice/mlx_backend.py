@@ -26,7 +26,9 @@ if TYPE_CHECKING:
     # Type-only import of mlx-audio's real result type. Guarded so importing this
     # module never pulls in MLX at runtime (with `from __future__ import
     # annotations` the reference below stays a lazy string).
-    from mlx_audio.tts.models.base import GenerationResult
+    from mlx_audio.tts.models.base import (  # pyright: ignore[reportMissingTypeStubs]
+        GenerationResult,
+    )
 
 
 class TtsModel(Protocol):
@@ -48,7 +50,7 @@ class MlxProfile:
     repo: str
     voice: str | None = None
     language: str | None = None
-    default_params: dict[str, Any] = field(default_factory=dict)
+    default_params: dict[str, object] = field(default_factory=dict[str, object])
 
 
 # The four L0 backends (spec 02 §3.3). Spark is primary (best Chinese by ear so
@@ -71,7 +73,9 @@ class MlxAudioBackend:
         self._counter = 0
 
     def load(self) -> None:
-        from mlx_audio.tts.utils import load_model
+        from mlx_audio.tts.utils import (  # pyright: ignore[reportMissingTypeStubs]
+            load_model,
+        )
 
         # mlx-audio types model_path as Path but accepts a HF repo-id str, and its
         # loaded model is untyped; we treat it as our TtsModel slice (§ above).
@@ -90,11 +94,11 @@ class MlxAudioBackend:
         self._render(req, path)
         return str(path)
 
-    def _build_generate_kwargs(self, req: SynthesisRequest) -> dict[str, Any]:
+    def _build_generate_kwargs(self, req: SynthesisRequest) -> dict[str, object]:
         """Merge profile defaults with the request (request wins) and map to
         mlx-audio ``generate()`` kwargs. ``text`` is passed positionally, not here.
         """
-        kwargs: dict[str, Any] = {}
+        kwargs: dict[str, object] = {}
         voice = req.voice or self._profile.voice
         if voice:
             kwargs["voice"] = voice
@@ -111,7 +115,9 @@ class MlxAudioBackend:
 
     def _render(self, req: SynthesisRequest, path: Path) -> None:
         import mlx.core as mx
-        from mlx_audio.audio_io import write as audio_write
+        from mlx_audio.audio_io import (  # pyright: ignore[reportMissingTypeStubs]
+            write as audio_write,
+        )
 
         assert self._model is not None, "load() must run before _render()"
         kwargs = self._build_generate_kwargs(req)

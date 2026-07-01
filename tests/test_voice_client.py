@@ -58,7 +58,9 @@ def test_sidecar_stdout_channel_survives_a_backend_printing_to_stdout():
         await proc.stdin.drain()
         line = await asyncio.wait_for(proc.stdout.readline(), timeout=20)
         resp = decode(line.decode())  # must parse cleanly despite the pollution
-        assert Path(resp["audio_path"]).exists()
+        audio_path = resp["audio_path"]
+        assert isinstance(audio_path, str)
+        assert Path(audio_path).exists()
         proc.terminate()
         await asyncio.wait_for(proc.wait(), timeout=10)
         assert proc.stderr is not None
