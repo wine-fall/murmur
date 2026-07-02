@@ -1,0 +1,47 @@
+name: CI
+
+# Build the package and run the fast (model-free) test suite on every PR to
+# main. The suite runs against fakes/stubs — no real TTS model, LLM, or network
+# (DESIGN.md §11.1), so it runs on plain Linux runners. Integration tests
+# (pytest -m integration) are excluded by default (pyproject addopts).
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # Bound the supported range: floor (requires-python >=3.10) and current.
+        python-version: ["3.10", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install (dev deps + build frontend)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]" build
+
+      - name: Build package
+        run: python -m build
+
+      - name: Test
+        run: pytest
