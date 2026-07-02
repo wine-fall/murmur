@@ -7,8 +7,9 @@ tested with no real audio, LLM, or network.
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
-from murmur.contracts import AudioClip, ContextPack
+from murmur.contracts import AudioClip, ContextPack, TrackCandidate
 
 
 class FakeBrain:
@@ -87,3 +88,66 @@ class FakeCli:
 
     def info(self, message: str) -> None:
         pass
+
+
+class FakeMusicProvider:
+    """Canned MusicProvider (spec 03-01 §5): no network. ``resolvable`` is the
+    set of refs that resolve; any other ref raises so retry paths are testable."""
+
+    def __init__(
+        self,
+        candidates: list[TrackCandidate] | None = None,
+        resolvable: set[str] | None = None,
+    ) -> None:
+        self._candidates = list(candidates or [])
+        self._resolvable = set(resolvable or set())
+        self.searched: list[tuple[str, int]] = []
+        self.resolved: list[str] = []
+        self.started = False
+        self.closed = False
+
+    async def start(self) -> None:
+        self.started = True
+
+    async def search(self, query: str, *, limit: int = 5) -> list[TrackCandidate]:
+        self.searched.append((query, limit))
+        return self._candidates[:limit]
+
+    async def resolve(self, ref: str) -> AudioClip:
+        self.resolved.append(ref)
+        if ref in self._resolvable:
+            return AudioClip(source=f"stream:{ref}", kind="music")
+        raise RuntimeError(f"cannot resolve {ref!r}")
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+class FakeMusicBrain:
+    """Scripted Harness (spec 03-01 §2.1): search once, then submit_pick each
+    candidate until one resolves. A stand-in for the model's loop — plumbing
+    only, no selection intelligence (that is the Ollama/human layer)."""
+
+    def __init__(self) -> None:
+        self.tasks: list[dict[str, Any]] = []
+
+    async def run_task(
+        self,
+        system_prompt: str,
+        prompt: str,
+        *,
+        tools: list[Any],
+        model: str,
+        max_turns: int,
+    ) -> dict[str, Any] | None:
+        self.tasks.append(
+            {"system_prompt": system_prompt, "prompt": prompt, "model": model}
+        )
+        search = next(t for t in tools if not t.terminal)
+        submit = next(t for t in tools if t.terminal)
+        found = await search.run({"query": "test", "limit": 5})
+        for candidate in found["candidates"][:max_turns]:
+            out = await submit.run({"ref": candidate["ref"], "why": "fake pick"})
+            if out.get("ok"):
+                return out
+        return None

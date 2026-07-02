@@ -31,6 +31,12 @@ tts-mlx = [
     "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all four L0 voices
     "soxr",              # audio resampler the Spark backend (BiCodec) needs at load
 ]
+# Default music source (spec 03-01): yt-dlp covers YouTube + Bilibili with no
+# login/account. The core + unit suite run without it (fakes / no network);
+# enable real music discovery with:  pip install -e ".[music]"
+music = [
+    "yt-dlp>=2024.1",  # the `yt-dlp` binary the MusicProvider shells out to
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

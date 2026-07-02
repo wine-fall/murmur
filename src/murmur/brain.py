@@ -17,11 +17,18 @@ so the core never imports a concrete Brain directly.
 
 from __future__ import annotations
 
+import json
+import os
 from itertools import cycle
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from .contracts import ContextPack
 from .prompts import build_next_talk_prompt, build_respond_prompt
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import ClaudeAgentOptions, McpSdkServerConfig
+
+    from .harness import BrainTool
 
 
 @runtime_checkable
@@ -138,6 +145,105 @@ class ClaudeBrain:
                 "ClaudeBrain produced no text (check Claude Code login / network)"
             )
         return text
+
+    async def run_task(
+        self,
+        system_prompt: str,
+        prompt: str,
+        *,
+        tools: list[BrainTool],
+        model: str,
+        max_turns: int,
+    ) -> dict[str, Any] | None:
+        """Harness capability (spec 03-01 §2.1): run a bounded, isolated tool-use
+        loop over murmur's OWN in-process tools, returning the terminal tool's
+        successful result (or None if ``max_turns`` is hit with no success).
+
+        Isolation (spec 01 §3.2) holds — but tools are now *allowed*: the
+        allowlist is exactly murmur's own mcp tools, nothing else. No user
+        CLAUDE.md / settings / skills / commands leak in; subscription OAuth is
+        preserved. The loop stops as soon as the terminal tool succeeds.
+        """
+        from claude_agent_sdk import (  # lazy: keep the stub/test path SDK-free
+            create_sdk_mcp_server,
+            query,
+            tool,
+        )
+
+        captured: dict[str, Any] | None = None
+
+        def wrap(bt: BrainTool):
+            async def handler(args: dict[str, Any]) -> dict[str, Any]:
+                nonlocal captured
+                out = await bt.run(args)
+                if bt.terminal and out.get("ok"):
+                    captured = out
+                # The SDK requires the MCP tool-result shape; a bare dict would
+                # be fed to the model as an EMPTY result.
+                return _to_mcp_result(out)
+
+            return tool(bt.name, bt.description, bt.input_schema)(handler)
+
+        server = create_sdk_mcp_server(name="murmur", tools=[wrap(t) for t in tools])
+        tool_names = [f"mcp__murmur__{t.name}" for t in tools]
+        options = _build_agentic_options(
+            system_prompt, model, tool_names, server, max_turns
+        )
+
+        # Close the query generator on break so the CLI subprocess is torn down
+        # deterministically (not only at eventual GC / loop shutdown).
+        gen = query(prompt=prompt, options=options)
+        debug = os.environ.get("MURMUR_HARNESS_DEBUG")
+        try:
+            async for _message in gen:
+                if debug:
+                    print(f"[harness] {type(_message).__name__}: {_message!r}"[:800])
+                if captured is not None:
+                    break
+        finally:
+            aclose = getattr(gen, "aclose", None)
+            if aclose is not None:
+                await aclose()
+        return captured
+
+
+def _to_mcp_result(out: dict[str, Any]) -> dict[str, Any]:
+    """Wrap a ``BrainTool`` result in the MCP tool-result shape the SDK requires.
+
+    The SDK's in-process tool handler only forwards a result that carries a
+    ``content`` list; a bare dict is delivered to the model as an EMPTY result.
+    So every tool's JSON result is serialized into a single text content block
+    (spec 03-01 §2.3). The raw dict is captured separately for the terminal tool.
+    """
+    return {"content": [{"type": "text", "text": json.dumps(out)}]}
+
+
+def _build_agentic_options(
+    system_prompt: str,
+    model: str,
+    tool_names: list[str],
+    server: McpSdkServerConfig,
+    max_turns: int,
+) -> ClaudeAgentOptions:
+    """Build the isolated ``ClaudeAgentOptions`` for an agentic task (spec 03-01
+    §2.1). Factored out so the isolation invariant is unit-testable without any
+    network call. Isolation mirrors spec 01 §3.2 — except tools are ALLOWED, and
+    the allowlist is exactly ``tool_names`` (murmur's own mcp tools), nothing else.
+    """
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    return ClaudeAgentOptions(
+        system_prompt=system_prompt,
+        model=model,
+        setting_sources=[],  # ignore user CLAUDE.md / project / local settings
+        strict_mcp_config=True,  # ONLY murmur's server; ignore inherited/discovered MCP
+        tools=[],  # no built-in tools (Read/Write/Bash/...); only the mcp tools below
+        allowed_tools=tool_names,  # allowlist: ONLY murmur's own mcp tools
+        mcp_servers={"murmur": server},
+        skills=[],  # no skills
+        max_turns=max_turns,
+        extra_args={"disable-slash-commands": None},  # no built-in slash commands
+    )
 
 
 # --------------------------------------------------------------------------- #
