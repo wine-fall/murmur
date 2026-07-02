@@ -1,6 +1,6 @@
 # murmur · v1 Master Spec (living doc)
 
-> **Status**: Building. Architecture/feature-set aligned; **spec 01 (`core-loop`, the L0 spine) is implemented & verified** (with a `pytest` layer). Next: spec 02 (`voice-provider`) to make L0 audible. See §10 for the build-order map.
+> **Status**: Building. Architecture/feature-set aligned; **spec 01 (`core-loop`, the L0 spine) is implemented & verified** and **spec 02 (`voice-provider`) is code-implemented** (real-voice acceptance is a hands-on gate) — so L0 is audible. Next: **spec 03-01 (`brain-harness`)** then **spec 03-02 (`ducking`)** for the L1 radio feel. See §10 for the build-order map.
 > **Role of this document**: This is the **master spec** — a living document that captures *what we are building* and *the rationale/trade-offs behind every decision*. It is the umbrella that sub-specs branch off from. It is **not** a directly-codeable implementation spec.
 > **Altitude rule**: This document stays at the architecture / layering / feature-set level. Concrete implementation (library usage, data structures, prompt copy, etc.) is deferred to the individual sub-specs.
 > **Conventions**: All specs are written in **English**; design conversations happen in Chinese. **Every spec's primary reader is a coding agent, not a human** — optimize for unambiguous machine consumption.
@@ -88,7 +88,11 @@ Each item records the **why**, to avoid re-litigating later.
 ### 3.2 Brain & authentication
 - Brain = **Claude Opus**, via `claude-agent-sdk`, **reusing the local Claude Code subscription OAuth credentials** — **no API key needed**.
 - *Rationale*: this auth chain is already verified in the `~/.personal/ai-investment` project — with no `ANTHROPIC_API_KEY` in the environment, the SDK falls back to the local `claude /login` subscription credentials and bills the subscription directly. For headless contexts, `claude setup-token` can mint a one-year token.
-- **Phase note (§3.7)**: subscription-OAuth is the **current local-experimentation** substitute. A distributed build swaps to a paid API / user-provided key (or another provider); the brain stays behind the same two-method `Brain` seam, so the swap is an adapter/config change, not a rewrite.
+- **Phase note (§3.7)**: subscription-OAuth is the **current local-experimentation** substitute. A distributed build swaps to a paid API / user-provided key (or another provider); the brain stays behind the same `Brain` seam, so the swap is an adapter/config change, not a rewrite.
+- **The brain is a *harnessed agent*, not a one-shot LLM call.** murmur treats the brain as a complete, tool- and skill-using agent that murmur *shapes with its own harness* — it may call murmur-owned tools/skills and take real actions (search music, analyze a file the user hands it, update memory), and the user can steer its behavior by talking to it. Two invariants bound this:
+  - **Isolation ≠ crippling.** The brain is fully isolated from the *user's local Claude Code environment* (no inherited `CLAUDE.md`, skills, MCP servers, hooks — see spec 01 §3.2), but it is given **murmur's own** tools/skills. Isolation sandboxes the *environment*; it does not forbid tool use.
+  - **Bounded surface + off the live loop.** "Complete" means complete *within the tool/permission surface murmur's harness defines* — never an unrestricted shell on the user's machine. Any heavy, multi-step agentic task runs as a **background job off the live radio loop** (the stream never goes silent while the agent works); its results feed Memory/persona.
+  - The tool/skill **harness seam is introduced in spec 03-01** (music search & recommendation is its first capability); later specs (05/06/07) hang more capabilities on the same seam. Fast, latency-critical calls like `next_talk` stay tool-less **by choice** — a harness *configuration*, not a separate "crippled" brain.
 
 ### 3.3 Language / runtime: all Python
 - Orchestrator + TTS sidecar are **both Python**.
@@ -178,6 +182,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
   - **NetEase Cloud Music (Wangyiyun)**: best Chinese catalog; but only unofficial APIs (pyncm, etc.), **requires login cookie**, VIP tracks need VIP.
   - **Spotify**: **no clean "no-app-and-no-membership" path** — either bind to the desktop app (AppleScript, with ads / on-demand limits) or run librespot headless (**needs Premium**). **User currently has no Premium** → not in v1.
 - *Why yt-dlp for v1*: across "official × free × on-demand full tracks," an "official + free + full track" option basically does not exist; yt-dlp is the **lowest-barrier, most self-contained** starting point, and Bilibili covers Chinese music. The cost is the ToS gray area — if it breaks, swap the adapter without touching the core.
+- **Optional, user-installed gray providers (personal-experiment tier, §3.7 phase-1 — never a shipped default).** Behind the same `MusicProvider` seam a user may mount unofficial sources on their own machine, accepting the fragility/ToS risk: e.g. [`musicdl`](https://github.com/CharlesPikachu/musicdl) (a 50+-platform downloader — but it bundles a Node runtime and does **Widevine DRM circumvention**, a legal non-starter to *ship*), unofficial NetEase APIs (login-cookie + VIP), or Spotify via librespot (needs Premium). These are **not** in the shippable stack; they are opt-in providers a user installs and self-provisions. Because the ducking engine (spec 03-02) is **source-agnostic**, any of them works once it yields decodable audio.
 
 ---
 
@@ -260,20 +265,21 @@ The **minimal playable loop** is the smallest end-to-end slice that delivers the
 4. The user can **stop it cleanly**.
 
 ### 9.4 Explicitly deferred out of L0
-Music (→ L1 / spec 03), no-dead-air look-ahead (04), persistent memory (05), onboarding + persona evolution (06), proactive "turn to you" + time anchors + activity pacing (07), full token economy (08), Claude Code ingestion (09).
+Music (→ L1 / specs 03-01 & 03-02), no-dead-air look-ahead (04), persistent memory (05), onboarding + persona evolution (06), proactive "turn to you" + time anchors + activity pacing (07), full token economy (08), Claude Code ingestion (09).
 
 ---
 
 ## 10. Decomposition, build order & sub-spec map
 
-v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and adds something audible**. L0 = specs 01+02; L1 (radio feel) = +03. (**✅** in the table = implemented & verified; see that sub-spec's own status block for detail.)
+v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and adds something audible**. L0 = specs 01+02; L1 (radio feel) = +03-01+03-02. (**✅** in the table = implemented & verified; see that sub-spec's own status block for detail.)
 
 | # | sub-spec (`specs/NN-…`) | Part it delivers | Milestone | Depends on |
 |---|---|---|---|---|
 | **01 ✅** | `core-loop` | Single-process spine: CLI Host + Program Director (talk-only policy) + Brain (Claude SDK, subscription auth) + static persona load + typed talk-back + session-only history + AudioPlayer (basic, sole audio authority, manual stop) + segment cadence. **Declares the outbound interface contracts** (VoiceProvider / MusicProvider / Memory seams). | **L0** | — |
-| **02** | `voice-provider` | VoiceProvider interface impl + TTS sidecar process + first adapter (Qwen3-TTS). | **L0** (01+02 = audible) | 01 |
-| **03** | `music-provider` | MusicProvider interface + yt-dlp adapter (YouTube+Bilibili) + Director talk↔music scheduling + AudioPlayer music playback. | **L1** (radio feel) | 01 |
-| **04** | `no-dead-air` | 1-segment look-ahead / pre-generation buffer to remove inter-segment gaps. | polish | 01,02,03 |
+| **02 ✅** | `voice-provider` | VoiceProvider interface impl + warm TTS sidecar + adapters (Spark primary; Qwen3/Chatterbox/Dia). Code implemented; the real-voice "sounds human" / blind-A/B is a hands-on acceptance gate. | **L0** (01+02 = audible) | 01 |
+| **03-01** | `brain-harness` | The general **brain-harness** seam — turn the isolated brain into a tool/skill-using agent (§3.2), preserving local-env isolation. **First capability: habit-based music search & recommendation** — Claude analyzes the user's habits + program context, searches, recommends, and pulls a track (`MusicProvider` impl; yt-dlp default, musicdl optional) + Director talk↔music scheduling. Music plays **sequentially via the existing player** (ducking is 03-02). | **L1** (radio feel) | 01 |
+| **03-02** | `ducking` | Source-agnostic mixing audio **engine** (replaces the afplay `AudioPlayer`): ffmpeg→PCM + numpy mix + gain-envelope **ducking**; a typed interjection **ducks** music instead of hard-stopping it. Music pulled by 03-01 flows through this engine. | **L1** (radio feel) | 01, 03-01 |
+| **04** | `no-dead-air` | 1-segment look-ahead / pre-generation buffer to remove inter-segment gaps. | polish | 01,02,03-01,03-02 |
 | **05** | `memory` | Persistent three tiers (profile/history/ledger) + context-pack assembly + periodic compaction. | cross-session "gets me" | 01 |
 | **06** | `persona-lifecycle` | Onboarding seed Q&A + persona evolution loop (observe → rewrite). | living persona | 05 |
 | **07** | `proactive-and-pacing` | Model-C "turn to you / slide back" degree + time anchors (Scheduler) + activity-aware pacing (ActivitySensor). | companion character | 01,05 |
@@ -282,7 +288,7 @@ v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and a
 | **10** | `tui` | Front-end refinement: replace the CLI Host's plain print/stdin with a real **TUI** (live now-playing/status region + scrolling program log + a stable input line). The **single richer front-end murmur ever gets** — there is no GUI/menu-bar/web. | front-end polish (off the L0→L1 critical path) | 01 |
 
 ### 10.1 Decomposition principles
-- **Interface-first (AI-friendly key)**: spec `01` declares the **VoiceProvider / MusicProvider / Memory contract seams** explicitly; their implementations land in 02 / 03 / 05 respectively. Parts stay decoupled and buildable in order, and a coding agent never has to guess an interface.
+- **Interface-first (AI-friendly key)**: spec `01` declares the **VoiceProvider / MusicProvider / Memory contract seams** explicitly; their implementations land in 02 / 03-01 / 05 respectively. Parts stay decoupled and buildable in order, and a coding agent never has to guess an interface.
 - **Persistence**: local files (no DB in v1). **No front-end API server in v1** — single process, one consumer (your terminal).
 - **One-click install; guided, atomic model provisioning.** As a distributed product, the base install is **one step** and runs **model-free** (stub / no voice). Enabling a real voice is a **single guided action** that installs that backend's **complete** dependency set *and* downloads its weights together — the user never hand-installs a missing dependency or hits a runtime import error. A backend is fully provisioned or not offered; **no half-installed state**. (Concretely: each backend declares its full dependency manifest; the guided setup installs it. The dev-facing `pip install -e ".[…]"` extras are the mechanism the product wraps.)
 - **Detach/daemon is an optional side branch, NOT on the main path.** The v1 core path is a foreground single process (terminal close = stop). Only if/when we want "the radio keeps playing after the terminal closes + a detachable/re-attachable session" do we add a separate daemon/client spec; its reattachable surface would build on the TUI (spec 10), not redefine it.
