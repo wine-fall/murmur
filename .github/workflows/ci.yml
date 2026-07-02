@@ -2,7 +2,7 @@ name: CI
 
 # Build the package and run the fast (model-free) test suite on every PR to
 # main. The suite runs against fakes/stubs — no real TTS model, LLM, or network
-# (DESIGN.md §11.1), so it runs on plain Linux runners. Integration tests
+# (specs/DESIGN.md §11.1), so it runs on plain Linux runners. Integration tests
 # (pytest -m integration) are excluded by default (pyproject addopts).
 
 on:

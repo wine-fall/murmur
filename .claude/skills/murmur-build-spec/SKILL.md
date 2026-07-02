@@ -5,21 +5,21 @@ description: "Use whenever the user asks to implement, build, work on, continue,
 
 # murmur-build-spec — spec-driven build for murmur
 
-The murmur project is built from specs. `DESIGN.md` is the **master spec** (vision, locked decisions, architecture); `specs/NN-*.md` are **sub-specs** (one per part). Code follows specs, and specs stay true to code. This skill is how every build task runs.
+The murmur project is built from specs. `specs/DESIGN.md` is the **master spec** (vision, locked decisions, architecture); `specs/specNN/*.md` are **sub-specs** (one per part). Code follows specs, and specs stay true to code. This skill is how every build task runs.
 
 This is the **build discipline**. The end-to-end loop that wraps it — test gate → closing `code-review` → commit, with a clean exit contract — is `murmur-ship`; it calls this skill for the build itself.
 
-Current focus: **L0 then L1** (specs `01-core-loop`, `02-voice-provider`, then `03-music-provider`). Later specs (03–09) may still change — don't treat them as frozen.
+Current focus: **L0 then L1** (specs `01-core-loop` + `02-voice-provider` = L0; then `03-01-brain-harness` + `03-02-ducking` = L1). Later specs (03–09) may still change — don't treat them as frozen.
 
 ## The rule
 
 **Every build task must name a target spec. No spec named → do not start. Ask which spec.**
 
-Accept any unambiguous reference: a sub-spec id (`01`, `01-core-loop`), a milestone (`L0` = specs 01+02; `L1` = adds 03), or `DESIGN.md` for a master-level change. If the user says "keep going" / "continue" right after working on a spec, the same spec is the target.
+Accept any unambiguous reference: a sub-spec id (`01`, `01-core-loop`), a milestone (`L0` = specs 01+02; `L1` = adds 03), or `specs/DESIGN.md` for a master-level change. If the user says "keep going" / "continue" right after working on a spec, the same spec is the target.
 
 ## Workflow (do these in order)
 
-1. **Read the spec first — always.** Read the named `specs/NN-*.md` in full, plus the parts of `DESIGN.md` it references (at minimum §0 conventions, and the architecture/scope sections the spec points to). Never start editing from memory of the spec — re-read the current version.
+1. **Read the spec first — always.** Read the named `specs/specNN/*.md` in full, plus the parts of `specs/DESIGN.md` it references (at minimum §0 conventions, and the architecture/scope sections the spec points to). Never start editing from memory of the spec — re-read the current version.
 2. **Restate the contract.** Before code, state briefly: what this spec delivers, its contracts/seams, its acceptance criteria, and what's explicitly out of scope. This is the bar you build to.
 3. **Clarify gate — confirm the uncertain things BEFORE any code.** This skill is not head-down execution. Scan the part you're about to build for anything not nailed down:
    - the spec's **Open questions** section,
@@ -37,14 +37,14 @@ The spec is a **living source of truth**, not a frozen contract. During a build 
 
 - **Stop before silently diverging.** If the implementation is about to differ from the spec in any way that matters (a changed contract, a different mechanism, a dropped/added behavior, a revised acceptance criterion), do not just code around it.
 - **Surface the divergence** to the user: what the spec says, what you found, why the new direction is better, and what it costs.
-- **On agreement, update the spec to match** — edit the `specs/NN-*.md` (and `DESIGN.md` if the change is architectural / cross-cutting) so the written spec and the code stay in lockstep. Keep the update English + AI-friendly + at the right altitude (master stays high-level; sub-specs stay design-level).
+- **On agreement, update the spec to match** — edit the `specs/specNN/*.md` (and `specs/DESIGN.md` if the change is architectural / cross-cutting) so the written spec and the code stay in lockstep. Keep the update English + AI-friendly + at the right altitude (master stays high-level; sub-specs stay design-level).
 - **Then continue the build** against the updated spec.
 
 Never leave the spec describing one thing while the code does another. Either the code matches the spec, or the spec has been updated to match the code. Small, obvious corrections (a typo, a renamed field for clarity) can be updated inline with a one-line note; anything that changes a contract, scope, or decision is surfaced first.
 
-When a sub-spec change contradicts or outgrows a master decision, update `DESIGN.md` too — and flag it, because master-level changes are bigger than they look.
+When a sub-spec change contradicts or outgrows a master decision, update `specs/DESIGN.md` too — and flag it, because master-level changes are bigger than they look.
 
-## Testing (mandatory — see DESIGN.md §11 for the full convention)
+## Testing (mandatory — see specs/DESIGN.md §11 for the full convention)
 
 - **Test-first for logic.** Failing unit test → implementation → green. Framework: `pytest`.
 - **Fakes for seams.** Every provider/seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a fake, so the core is always unit-testable without real audio/LLM/network.
@@ -72,12 +72,12 @@ This is the rule most easily rationalized away under build momentum. It already 
 - About to commit a step whose tests you have not run green.
 - Asserting on exact Claude / voice output in a unit test (that's the eval track).
 
-## Conventions (from DESIGN.md §0)
+## Conventions (from specs/DESIGN.md §0)
 
 - **Specs are written for a coding agent, not humans** — explicit contracts, single source of truth, explicit non-goals, verifiable acceptance criteria.
 - **English** for all spec documents; **Chinese** for discussion with the user.
-- Master (`DESIGN.md`) stays high-altitude (what/why); sub-specs go to design level (mechanism/contracts), not into code-in-the-doc.
-- Sub-specs live under `specs/`, numbered by build order.
+- Master (`specs/DESIGN.md`) stays high-altitude (what/why); sub-specs go to design level (mechanism/contracts), not into code-in-the-doc.
+- Sub-specs live under `specs/specNN/` (one directory per top-level spec; a multi-part spec keeps its sub-parts together, e.g. `specs/spec03/03-01-*.md` + `specs/spec03/03-02-*.md`), numbered by build order.
 
 (Cross-session project memory lives **outside the repo** at the Claude project memory dir, not under `murmur/` — don't look for it in the tree.)
 
@@ -90,4 +90,4 @@ This is the rule most easily rationalized away under build momentum. It already 
 - Updating the spec to rationalize a shortcut rather than because the new direction is genuinely better — say so honestly and let the user decide.
 - Declaring a milestone (L0/L1) met without verifying its acceptance criteria against the running thing.
 - Treating later specs (03–09) as frozen — they're expected to change as L0/L1 teach us things.
-- Editing `DESIGN.md` for an architectural change without flagging that it's master-level.
+- Editing `specs/DESIGN.md` for an architectural change without flagging that it's master-level.

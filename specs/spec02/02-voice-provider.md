@@ -12,7 +12,7 @@
 ## 1. Goal & scope
 
 ### Delivers
-1. A concrete implementation of the `VoiceProvider` Protocol declared in [`01-core-loop.md`](01-core-loop.md) §2.2.
+1. A concrete implementation of the `VoiceProvider` Protocol declared in [`01-core-loop.md`](../spec01/01-core-loop.md) §2.2.
 2. A **warm TTS sidecar process** that keeps the model loaded between utterances and is crash-isolated from the core (master §3.5 rationale).
 3. The **first adapter: Qwen3-TTS** (MLX on Apple Silicon) — chosen for L0 because it is the only candidate that runs **real-time on Mac** (master §3.5), so the loop feels live.
 4. A clean adapter boundary with **standardized I/O** (§3.5 `SynthesisRequest`) so the other candidates (CosyVoice2, Chatterbox, Fish-Audio/OpenAudio S1) drop in by writing one `TtsBackend` — no protocol or core change. The boundary is designed for the whole pool up front, not retrofitted per model.
@@ -27,7 +27,7 @@
 
 ## 2. Contract / seam
 
-Implements [`01`](01-core-loop.md) §2.2 `VoiceProvider` exactly:
+Implements [`01`](../spec01/01-core-loop.md) §2.2 `VoiceProvider` exactly:
 ```python
 async def start(self) -> None        # launch + warm the sidecar; idempotent
 async def synthesize(self, text, *, scenario="broadcast") -> AudioClip   # kind="talk"
@@ -135,7 +135,7 @@ core contract and IPC are still unchanged.
 ---
 
 ## 4. Dependencies
-- [`01-core-loop.md`](01-core-loop.md) — owns the `VoiceProvider`/`AudioClip` contract this implements.
+- [`01-core-loop.md`](../spec01/01-core-loop.md) — owns the `VoiceProvider`/`AudioClip` contract this implements.
 - External (Mac): MLX + `mlx-audio` (one optional extra `tts-mlx` covers all four backends) + each model's weights (downloaded once from HF/ModelScope). No network **at inference time** (local models) — consistent with master §3.1 ("only network hops: inference + music"; TTS is local). The weight download is one-time setup, not a runtime hop.
 
 ---
