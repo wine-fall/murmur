@@ -5,7 +5,8 @@ buildable in order. The core loop (spec 01) only ever depends on what is
 declared here; implementations land in the specs noted below:
 
 - ``VoiceProvider``  -> implemented in spec 02 (TTS sidecar + adapters).
-- ``MusicProvider``  -> declared only here; implemented in spec 03.
+- ``MusicProvider``  -> declared only here; implemented in spec 03-01 (the
+                       brain-harness spec; Claude-driven, habit-based search).
 - ``MemoryStore``    -> in-process impl in spec 01 (``memory.py``); persistent
                         three-tier impl in spec 05.
 
@@ -33,7 +34,7 @@ class AudioClip:
     needs ``source`` and ``kind``.
     """
 
-    source: str  # local file path (L0); may be a stream URL once spec 03 lands
+    source: str  # local file path (L0); may be a stream URL once spec 03-01 lands
     kind: str  # "talk" | "music"
 
 
@@ -83,7 +84,7 @@ class VoiceProvider(Protocol):
 
 
 # --------------------------------------------------------------------------- #
-# 2.3 MusicProvider — declared only; implemented in spec 03
+# 2.3 MusicProvider — declared only; implemented in spec 03-01
 # --------------------------------------------------------------------------- #
 
 

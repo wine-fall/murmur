@@ -23,7 +23,7 @@ A single long-running Python `asyncio` process that:
 
 ### Out of scope (explicit non-goals for this spec)
 - TTS model integration — `VoiceProvider` is **declared here, implemented in [`02`](02-voice-provider.md)**. L0 imports the spec-02 adapter; this spec does not contain TTS code.
-- Music — `MusicProvider` is declared but **not instantiated or called** in L0 (spec 03).
+- Music — `MusicProvider` is declared but **not instantiated or called** in L0 (spec 03-01).
 - Persistent memory — L0 uses an **in-process** `MemoryStore`; persistence is spec 05.
 - No-dead-air look-ahead (spec 04), onboarding/persona evolution (06), proactive "turn to you" / time anchors / activity pacing (07), full token economy (08), ASR, GUI.
 - Daemon/detach (radio surviving terminal close) — explicitly a later optional side-spec, not here.
@@ -82,7 +82,7 @@ class MusicProvider(Protocol):
     async def resolve(self, query: str) -> AudioClip: ...   # AudioClip(kind="music")
     async def aclose(self) -> None: ...
 ```
-L0 ships **no implementation** and never constructs one. Declared so the Director's segment-selection has a typed extension point. Spec 03 owns the real contract detail (it may widen `resolve`).
+L0 ships **no implementation** and never constructs one. Declared so the Director's segment-selection has a typed extension point. Spec 03-01 owns the real contract detail (it widens `resolve` and adds `search`).
 
 ### 2.4 `MemoryStore` — implemented in-process here; persistent impl in spec 05
 ```python
@@ -150,7 +150,7 @@ Two concurrent tasks over a shared state, single event loop:
 
 ### 3.5 Audio playback (L0)
 - `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`.
-- No mixing/ducking in L0 (only one talk clip plays at a time). Ducking arrives with music (spec 03).
+- No mixing/ducking in L0 (only one talk clip plays at a time). Ducking arrives with music (spec 03-02).
 
 ### 3.6 Stop
 - Ctrl-C and/or a typed `/quit` command performs an orderly shutdown: stop playback, `await voice.aclose()`, exit.
