@@ -6,7 +6,7 @@
 >   - **step 3 (done)**: real `AudioPlayer` (external-player subprocess — `afplay` default, configurable via `config.player_cmd` / `--player`; `stop()` terminates it) + typed talk-back via the `CliHost` stdin reader (a daemon thread feeding the loop) + cancel-and-resume interjection arbitrated by the `Director` (§3.3) + `/quit`. Criteria §1–§5 verified against the stub voice (interrupt → reply → resume; `/quit` + Ctrl-C clean; no orphaned player). Audible once spec 02 lands.
 >   - **tests (DESIGN §11.1/§11.2)**: `pytest` unit layer under `tests/` — pure logic (memory, prompts, persona, config/factories, StubBrain) + the Director loop/interjection driven by fakes + `AudioPlayer` subprocess control (stand-in binaries). Fast, no network/LLM/audio. Run: `pytest`.
 > **Part**: The orchestrator spine for milestone **L0** (talk-only radio). See master [`../DESIGN.md`](../DESIGN.md) §4 (architecture), §9 (L0 definition), §10 (build order).
-> **Milestone**: L0 (with [`02-voice-provider.md`](02-voice-provider.md), 01+02 = the first runnable, audible version).
+> **Milestone**: L0 (with [`02-voice-provider.md`](../spec02/02-voice-provider.md), 01+02 = the first runnable, audible version).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
 
 ---
@@ -22,7 +22,7 @@ A single long-running Python `asyncio` process that:
 5. **Declares the outbound interface contracts** (`VoiceProvider`, `MusicProvider`, `MemoryStore`) that later specs implement — so parts stay decoupled and buildable in order.
 
 ### Out of scope (explicit non-goals for this spec)
-- TTS model integration — `VoiceProvider` is **declared here, implemented in [`02`](02-voice-provider.md)**. L0 imports the spec-02 adapter; this spec does not contain TTS code.
+- TTS model integration — `VoiceProvider` is **declared here, implemented in [`02`](../spec02/02-voice-provider.md)**. L0 imports the spec-02 adapter; this spec does not contain TTS code.
 - Music — `MusicProvider` is declared but **not instantiated or called** in L0 (spec 03-01).
 - Persistent memory — L0 uses an **in-process** `MemoryStore`; persistence is spec 05.
 - No-dead-air look-ahead (spec 04), onboarding/persona evolution (06), proactive "turn to you" / time anchors / activity pacing (07), full token economy (08), ASR, GUI.
@@ -159,7 +159,7 @@ Two concurrent tasks over a shared state, single event loop:
 ---
 
 ## 4. Dependencies
-- **None** among sub-specs for the orchestration skeleton — but L0 is only *audible* once [`02-voice-provider.md`](02-voice-provider.md) provides a real `VoiceProvider`. Build 01 against a trivial stub `VoiceProvider` (e.g. one that writes a silent/placeholder clip) to exercise the loop, then drop in spec 02.
+- **None** among sub-specs for the orchestration skeleton — but L0 is only *audible* once [`02-voice-provider.md`](../spec02/02-voice-provider.md) provides a real `VoiceProvider`. Build 01 against a trivial stub `VoiceProvider` (e.g. one that writes a silent/placeholder clip) to exercise the loop, then drop in spec 02.
 - External: `claude-agent-sdk`; the user has logged into Claude Code CLI (master §3.2).
 
 ---
@@ -175,5 +175,5 @@ Two concurrent tasks over a shared state, single event loop:
 
 ## 6. Open questions
 - Persona seed file format & location (Markdown vs plain text; path under the project or a config dir). Default proposal: a single Markdown file path in config.
-- Terminal UX richness: plain `print`/stdin for L0, or a TUI (master mentions TUI as the front-end surface). Proposal: plain async stdin for L0; the TUI is a later front-end refinement, now its own sub-spec [`10-tui.md`](10-tui.md), which swaps in behind the same CLI Host seam.
+- Terminal UX richness: plain `print`/stdin for L0, or a TUI (master mentions TUI as the front-end surface). Proposal: plain async stdin for L0; the TUI is a later front-end refinement, now its own sub-spec [`10-tui.md`](../spec10/10-tui.md), which swaps in behind the same CLI Host seam.
 - Exact interjection mechanism (cancel-and-resume vs. queue-after-current). Proposal: cancel-and-resume (model C feel), but confirm during implementation.

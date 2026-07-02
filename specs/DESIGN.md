@@ -30,7 +30,7 @@ murmur's design is captured as **one master spec + several sub-specs**.
 - **All prompt text is centralized** under `src/murmur/prompts/` and written in **English** (v1). The radio's *output* language is set inside the prompt — e.g. the persona seed instructs Chinese speech — so English prompt scaffolding still yields a Chinese-speaking radio. No prompt strings scattered through application modules.
 - **No Chinese (CJK) anywhere in source** — comments, string literals, and docstrings alike (v1). The radio speaks Chinese only at runtime, produced by the model from the persona prompt; it is never a hardcoded string. Additionally, **comments are English-only**. Enforced by `scripts/check_source_language.py` (wired via pre-commit; stdlib-only).
 - Master spec stays high-altitude; sub-specs may go deeper but remain design-level, not code.
-- Sub-specs live under `specs/` and are ordered by build sequence (e.g. `specs/01-…`, `specs/02-…`).
+- This master lives at `specs/DESIGN.md`. Each sub-spec gets its own directory `specs/specNN/` (ordered by build sequence), holding that part's doc(s) — e.g. `specs/spec01/01-core-loop.md`, `specs/spec02/02-voice-provider.md`. A multi-part spec keeps its sub-parts together in one directory (e.g. `specs/spec03/03-01-brain-harness.md` + `specs/spec03/03-02-ducking.md`).
 - Cross-reference with relative links; mark status on every doc.
 
 > **Master status**: the v1 **minimal playable loop** (§9) and the **decomposition + sub-spec map + build order** (§10) are now defined. This master is "complete enough" to spawn sub-specs under `specs/` per the build order.
@@ -119,7 +119,7 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.6 Interaction form: a single always-on Python async CLI process
 - One always-on process (e.g. `murmur`), launched in a terminal; one coroutine drives "speaking up," another reads keyboard input, both feed into the brain. **Proactive broadcasts and your typing share the same terminal** — no daemon/client split.
-- *Rationale*: CLI is the lightest, fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI), which upgrades the same in-terminal CLI Host surface in place — never a separate window/app/page. See the TUI sub-spec (§10, `specs/10-tui.md`).
+- *Rationale*: CLI is the lightest, fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI), which upgrades the same in-terminal CLI Host surface in place — never a separate window/app/page. See the TUI sub-spec (§10, `specs/spec10/10-tui.md`).
 
 ### 3.7 Model strategy: local substitutes now, paid/licensed at distribution
 - **Two phases.** *Now (local experimentation)*: use the best **local, open** models available to prototype quality — the Claude Code subscription for the brain (§3.2), local open TTS (§3.5) — **regardless of their distribution license**. *At distribution*: re-evaluate and adopt **paid / properly-licensed** models (a paid brain API; a licensed or paid TTS) so the shipped open-source product is legally clean.
@@ -231,7 +231,7 @@ Core: pillars 2 (batch) + 5 (activity-gating) + 4 (caching) turn "always on the 
 - Concrete activity-pacing mechanism · the "degree" of proactive/passive · blind A/B to pick the primary TTS (→ eval track, §10.3) · semantic memory recall
 
 ### Explicitly not in v1
-- ASR (keyboard instead) · **GUI / menu-bar / web surface** (if any UI is ever added it is a **TUI** — §10, `specs/10-tui.md` — never a GUI/menu-bar/web) · Spotify / Apple Music / NetEase · multi-channel / multi-mode switching
+- ASR (keyboard instead) · **GUI / menu-bar / web surface** (if any UI is ever added it is a **TUI** — §10, `specs/spec10/10-tui.md` — never a GUI/menu-bar/web) · Spotify / Apple Music / NetEase · multi-channel / multi-mode switching
 
 > **Delivery**: v1 is not one shot — it is **split into multiple sub-specs / steps**. This document is the umbrella for them.
 
@@ -273,7 +273,7 @@ Music (→ L1 / specs 03-01 & 03-02), no-dead-air look-ahead (04), persistent me
 
 v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and adds something audible**. L0 = specs 01+02; L1 (radio feel) = +03-01+03-02. (**✅** in the table = implemented & verified; see that sub-spec's own status block for detail.)
 
-| # | sub-spec (`specs/NN-…`) | Part it delivers | Milestone | Depends on |
+| # | sub-spec (`specs/specNN/…`) | Part it delivers | Milestone | Depends on |
 |---|---|---|---|---|
 | **01 ✅** | `core-loop` | Single-process spine: CLI Host + Program Director (talk-only policy) + Brain (Claude SDK, subscription auth) + static persona load + typed talk-back + session-only history + AudioPlayer (basic, sole audio authority, manual stop) + segment cadence. **Declares the outbound interface contracts** (VoiceProvider / MusicProvider / Memory seams). | **L0** | — |
 | **02 ✅** | `voice-provider` | VoiceProvider interface impl + warm TTS sidecar + adapters (Spark primary; Qwen3/Chatterbox/Dia). Code implemented; the real-voice "sounds human" / blind-A/B is a hands-on acceptance gate. | **L0** (01+02 = audible) | 01 |
@@ -297,7 +297,7 @@ v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and a
 Each sub-spec goes one level deeper (contract, internal design, dependencies, acceptance criteria, open questions) per the template in §0. Implementation details live in the sub-specs (and their plans), never in this master.
 
 ### 10.3 Eval track (parallel — not on the L0→L1 critical path)
-A dedicated `specs/NN-model-voice-eval.md` harness to evaluate **real model/voice capability**:
+A dedicated `specs/specNN/NN-model-voice-eval.md` harness to evaluate **real model/voice capability**:
 - TTS **voice-quality blind A/B** to pick the primary voice (the §8 deferred item).
 - Any LLM / prompt / persona capability eval (Ollama-preferred per §11.4).
 

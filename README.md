@@ -40,7 +40,7 @@ A single Python `asyncio` process. One coroutine drives "speaking up," another r
 - **Keyboard in, voice out** — no ASR this round; ASR is solved and not the value-add. The hard part is making the AI *sound human*, and that's the focus.
 - **Two-phase model strategy** — experiment now with the best local/open models (license-agnostic, private); adopt paid/properly-licensed models at distribution.
 
-See [`DESIGN.md`](DESIGN.md) for the full master spec and rationale.
+See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 
 ## Status
 
@@ -88,10 +88,10 @@ pytest                 # fast unit layer (fakes; no network/models)
 pytest -m integration  # heavy: real TTS sidecar synth, run deliberately
 ```
 
-Testing is layered (see [`DESIGN.md` §11](DESIGN.md)): unit tests are test-first against fakes; integration tests are tagged and run on demand; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
+Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; integration tests are tagged and run on demand; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
 
 Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check_source_language.py` via pre-commit.
 
 ## License
 
-Open-source, non-commercial. Distributed models are chosen/licensed at distribution time (see the two-phase strategy in `DESIGN.md` §3.7).
+Open-source, non-commercial. Distributed models are chosen/licensed at distribution time (see the two-phase strategy in `specs/DESIGN.md` §3.7).

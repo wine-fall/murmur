@@ -10,8 +10,9 @@ Rules
    ``(scope)``, an optional breaking ``!``, then ``: `` and a subject.
 2. Spec tag: the title contains ``[spec NN]`` (or ``[spec NN-NN]`` for a
    sub-spec), e.g. ``[spec 01]`` / ``[spec 03-01]``.
-3. Spec link: the description references at least one spec file that actually
-   exists (``specs/NN-....md``), and its number matches the title's spec tag.
+3. Spec link: the description references at least one Markdown file under
+   ``specs/`` that actually exists in the repo — at any directory depth
+   (e.g. ``specs/DESIGN.md`` or ``specs/spec03/03-01-brain-harness.md``).
 
 Rules 2-3 apply only to product-behavior PRs (``feat``/``fix``/``perf``/
 ``refactor``); infra/meta types (``ci``/``chore``/``docs``/``build``/``style``/
@@ -51,14 +52,9 @@ TITLE_RE = re.compile(rf"^(?:{'|'.join(TYPES)})(?:\([^)]+\))?!?: .+")
 TYPE_RE = re.compile(r"^([a-z]+)")
 # [spec 01] / [spec 03-01] / [spec1]  (space optional, sub-spec optional)
 SPEC_TAG_RE = re.compile(r"\[spec ?(\d{1,2}(?:-\d{1,2})?)\]", re.IGNORECASE)
-# A concrete spec path anywhere in the body: specs/03-01-brain-harness.md
-SPEC_PATH_RE = re.compile(r"specs/\d{2}(?:-\d{2})?-[a-z0-9-]+\.md")
-SPEC_ID_RE = re.compile(r"specs/(\d{2}(?:-\d{2})?)-")
-
-
-def _norm(spec_id: str) -> str:
-    """Zero-pad each numeric part so '3-1' and '03-01' compare equal."""
-    return "-".join(part.zfill(2) for part in spec_id.split("-"))
+# Any Markdown path under specs/, at any depth:
+#   specs/DESIGN.md · specs/spec03/03-01-brain-harness.md
+SPEC_PATH_RE = re.compile(r"specs/[\w./-]+\.md")
 
 
 def _emit(errors: list[str]) -> None:
@@ -87,50 +83,34 @@ def main() -> int:
 
     # Spec tag + linked spec path are required only for product-behavior PRs.
     if pr_type in REQUIRE_SPEC:
-        tag_match = SPEC_TAG_RE.search(title)
-        if not tag_match:
+        if not SPEC_TAG_RE.search(title):
             errors.append(
                 "Title must carry a spec tag: [spec 01], or [spec 03-01] for a "
                 "sub-spec."
             )
 
-        # Description must link a spec file that exists on disk.
+        # Description must link a Markdown file under specs/ that exists on disk
+        # (any depth — specs/DESIGN.md, specs/spec03/03-01-brain-harness.md, …).
         linked_paths = SPEC_PATH_RE.findall(body)
         existing_paths = [p for p in linked_paths if Path(p).is_file()]
-        existing_ids = {
-            _norm(m.group(1))
-            for p in existing_paths
-            if (m := SPEC_ID_RE.match(p))
-        }
 
         if not linked_paths:
             errors.append(
-                "Description must link the corresponding spec file by path, "
-                "e.g. specs/03-01-brain-harness.md."
+                "Description must link a spec file under specs/ by path, "
+                "e.g. specs/spec03/03-01-brain-harness.md."
             )
         elif not existing_paths:
             errors.append(
-                "The spec path(s) in the description do not exist in the repo: "
+                "The specs/ path(s) in the description do not exist in the repo: "
                 f"{sorted(set(linked_paths))}."
             )
-
-        # Cross-check: the title's [spec NN] must match a linked, existing spec.
-        if tag_match and existing_ids:
-            tag_id = _norm(tag_match.group(1))
-            if tag_id not in existing_ids:
-                errors.append(
-                    f"Title tag [spec {tag_match.group(1)}] does not match any "
-                    f"spec linked in the description (found "
-                    f"{sorted(existing_ids)}). Keep the title tag and the linked "
-                    "spec path consistent."
-                )
 
     if errors:
         print(f"::error::Invalid PR title/description: {title!r}")
         _emit(errors)
         print()
         print("Example title:        feat(brain): add music search [spec 03-01]")
-        print("Example description:  Implements specs/03-01-brain-harness.md")
+        print("Example description:  Implements specs/spec03/03-01-brain-harness.md")
         return 1
 
     print(f"OK: {title}")

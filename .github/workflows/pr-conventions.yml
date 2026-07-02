@@ -3,8 +3,8 @@ name: PR conventions
 # Validates PR metadata before merge:
 #   1. Title follows Conventional Commits (feat/fix/chore/...).  [all PRs]
 #   2. Title carries a murmur spec tag, e.g. [spec 01] / [spec 03-01].
-#   3. Description links a concrete, existing spec file (specs/NN-....md),
-#      whose number matches the [spec NN] tag in the title.
+#   3. Description links an existing Markdown file under specs/ (any depth,
+#      e.g. specs/DESIGN.md or specs/spec03/03-01-brain-harness.md).
 # Rules 2-3 apply only to product-behavior PRs (feat/fix/perf/refactor);
 # infra/meta types (ci/chore/docs/build/style/test/revert) are exempt.
 
