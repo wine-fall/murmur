@@ -4,7 +4,7 @@
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin with a real TUI. The **single richer front-end murmur ever gets**: there is no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md) §3.6, §8).
 > **Milestone**: Front-end polish — **off the L0→L1 critical path**. Buildable any time after spec 01; independent of voice (02) and music (03).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
-> **Amended (2026-07 — two-process direction)**: superseding the original in-process design, the TUI is now a **separate process** attached to a headless murmur engine over **language-neutral IPC** (master §3.6, amended). **Locked**: "two processes over IPC." **Still open (§6)**: the front-end **language/framework** (Go/Charm vs Rust/Ratatui), the **IPC protocol**, and the **`Host`-seam→IPC mapping**. Sections below that assumed same-process are superseded/annotated inline.
+> **Amended (2026-07 — two-process direction)**: superseding the original in-process design, the TUI is now a **separate process** attached to a headless murmur engine over **language-neutral IPC** (master §3.6, amended). **Locked**: "two processes over IPC"; front-end = **Go / Charm (Bubble Tea)** (§3.1). **Still open (§6)**: the **IPC protocol** and the **`Host`-seam→IPC mapping**. Sections below that assumed same-process are superseded/annotated inline.
 
 ---
 
@@ -57,10 +57,11 @@ The TUI is a **separate process** from the murmur engine. The engine runs headle
 
 ## 3. Design
 
-### 3.1 Framework (amended 2026-07)
-The TUI is a **separate-process** front-end, so the framework is **no longer a Python in-process library** and need not co-run in the Director's asyncio loop. **Language/framework is an open question (§6)**; the two live candidates are:
-- **Go / Charm (Bubble Tea)** — warmth-first ethos, `ntcharts` for ready-made audio visualization, MVU structure with high AI-friendliness.
-- **Rust / Ratatui** — `ratatui-image` for **true bitmap sprites** on Ghostty's Kitty graphics protocol, `tachyonfx` for shader-like effects (dissolve / glow / scanlines).
+### 3.1 Framework — Go / Charm (Bubble Tea) (decided 2026-07)
+The TUI is a **separate-process** front-end, so the framework is **no longer a Python in-process library** and need not co-run in the Director's asyncio loop. **Decision: Go / Charm (Bubble Tea)** — with Lip Gloss (styling/gradients), Harmonica (motion), and `ntcharts` (audio visualization: waveform / spectrum / sparkline).
+- *Why Go/Charm*: the Charm stack is built **warmth-first** (a companion feel, not a dev-tool dashboard); `ntcharts` gives **ready-made audio visualization**; the MVU structure is **highly AI-friendly / fast to build against** — the original top priority.
+- *Why not Rust/Ratatui (considered, rejected for v1)*: its edge was crisp **bitmap** pixel-pets via `ratatui-image` on Ghostty's Kitty protocol + `tachyonfx` effects. But **no ready-made pet exists in either ecosystem** — the pet is custom work regardless of language — so Rust's bitmap edge is not leveraged by anything off-the-shelf, while its immediate-mode + borrow-checker cost real build speed. The crisp-sprite ceiling did not justify the friction for v1.
+- *Consequence for the pet*: the pixel pet will be **block / half-block sprite art** (à la `krabby`'s unicode sprites), not true bitmaps. Accepted trade for v1.
 
 The original in-process `textual` / `prompt_toolkit`+`rich` candidates are **superseded** by the two-process direction. Motivating goals for the richer front-end: **live audio animation** and a **warm, playful, companion feel** (e.g. a pixel pet) — explicitly *not* a dev-tool dashboard.
 
@@ -80,7 +81,7 @@ Whether the TUI becomes the **default** front-end or stays opt-in (`front_end="t
 ## 4. Dependencies
 - **spec 01** (`core-loop`): the CLI Host seam + the Director events + the step-3 talk-back path. This spec extends the host seam (`on_state`) and adds `TuiHost`.
 - Independent of spec 02 (voice) and spec 03 (music): the TUI renders talk-only or talk+music identically.
-- External: the separate-process TUI's toolkit — **language/framework TBD** (Go/Charm or Rust/Ratatui, §3.1/§6), plus the engine↔TUI **IPC layer**. Both selected in this spec's plan.
+- External: the separate-process TUI is **Go / Charm (Bubble Tea)** (+ Lip Gloss, Harmonica, `ntcharts`; §3.1), plus the engine↔TUI **IPC layer** (selected in this spec's plan).
 
 ---
 
@@ -94,8 +95,8 @@ Whether the TUI becomes the **default** front-end or stays opt-in (`front_end="t
 ---
 
 ## 6. Open questions
-- **Language/framework** (locked: separate process; open: which language): **Go/Charm (Bubble Tea)** vs **Rust/Ratatui** — decide by prototype feel + effect ceiling (pixel pets, audio animation, fancy fx) weighed against AI-friendliness / build speed.
-- **IPC protocol + `Host`-seam mapping**: transport (unix socket / stdio JSON-lines, per the TTS-sidecar precedent §3.3) + message schema + how `Host` calls map to wire messages.
+- **Language/framework** — **resolved: Go / Charm (Bubble Tea)** (§3.1).
+- **IPC protocol + `Host`-seam mapping**: transport (unix socket / stdio JSON-lines, per the TTS-sidecar precedent §3.3) + message schema + how `Host` calls map to wire messages. Note the cross-language boundary is now real (Python engine ↔ Go TUI), so the protocol must be language-neutral.
 - **Daemon/detach reconciliation (master §10.1)**: the two-process split subsumes the daemon substrate — decide how much detach/reattach UX, if any, v1 exposes.
 - **Default**: does the TUI become the default front-end once stable, or stay opt-in with `plain` as default?
 - **Status detail**: how much to surface (just state, or also recent-topic / token-usage hints once spec 08 exists)?
