@@ -101,3 +101,10 @@ Whether the TUI becomes the **default** front-end or stays opt-in (`front_end="t
 - **Default**: does the TUI become the default front-end once stable, or stay opt-in with `plain` as default?
 - **Status detail**: how much to surface (just state, or also recent-topic / token-usage hints once spec 08 exists)?
 - **Persona/voice attribution in the log**: show a speaker label/color per segment, or keep it minimal?
+
+### 6.1 The design conversation still to have (deferred — brainstorm as its own session)
+Beyond the technical open questions above, the **creative** side of the TUI is intentionally not designed yet. To pick up next:
+- **Art direction**: overall look / warmth / palette — a **companion radio** feel, not a dev-tool dashboard.
+- **The pixel pet**: sprite art (block / half-block per §3.1), idle + reaction behaviors, how it responds to program state (talking / music / awaiting-reply), motion via Harmonica.
+- **Audio animation**: the visualizer style driven by the engine's audio — waveform / spectrum / VU — via `ntcharts`.
+- **Layout & personality**: how the status region + program log + input line + pet + visualizer compose into something that feels alive.
