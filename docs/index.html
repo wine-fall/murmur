@@ -1,0 +1,579 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>murmur — a radio for an audience of one</title>
+<meta name="description" content="A fully-local companion radio with Claude as its brain. It talks on its own, plays music, and keeps you company; type back and it answers in a voice that sounds human. Open-source, non-commercial.">
+<style>
+  /* ---- reset-ish ---- */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; }
+  a { color: inherit; }
+  canvas { display: block; }
+
+  /* ---- theme: a warm dark, an amber terminal at low light ---- */
+  :root {
+    --bg:        #17141f;
+    --bg-2:      #110e17;
+    --surface:   #1e1a28;
+    --surface-2: #241f30;
+    --line:        rgba(245,238,251,0.085);
+    --line-strong: rgba(245,238,251,0.15);
+
+    --ink:   #f5eefb;   /* primary ~14:1 on bg */
+    --ink-2: #cfc3dd;   /* prose ~9:1 */
+    --ink-3: #9a8fac;   /* labels ~5.9:1 */
+    --ink-4: #6b6280;   /* decorative only */
+
+    --amber:      #ff5faf;  /* accent, headings, links ~8:1 */
+    --amber-soft: #ff8ec7;
+    --coral:      #c77dff;  /* the on-air light */
+    --sky:        #43f6c7;  /* a cool counterweight */
+
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Monaco, "Cascadia Code", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+    --maxw: 70rem;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1); /* ease-out-quint */
+
+    --z-header: 100;
+    --z-skip: 200;
+  }
+
+  html { background: var(--bg); }
+  body {
+    background:
+      radial-gradient(120% 90% at 84% -8%, rgba(255,95,175,0.07), transparent 60%),
+      radial-gradient(120% 100% at -10% 110%, rgba(199,125,255,0.05), transparent 55%),
+      var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.6;
+    letter-spacing: 0.005em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow-x: hidden;
+  }
+
+  .wrap { width: 100%; max-width: var(--maxw); margin-inline: auto; padding-inline: clamp(1.15rem, 4vw, 2.75rem); }
+
+  /* ---- focus + skip ---- */
+  :focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 3px; }
+  .skip {
+    position: absolute; left: 0.75rem; top: -3.5rem; z-index: var(--z-skip);
+    background: var(--surface-2); color: var(--ink);
+    padding: 0.55rem 0.9rem; border-radius: 8px; font-family: var(--mono); font-size: 0.85rem;
+    border: 1px solid var(--line-strong); transition: top 0.2s var(--ease);
+  }
+  .skip:focus { top: 0.75rem; }
+
+  /* ---- header ---- */
+  header {
+    position: sticky; top: 0; z-index: var(--z-header);
+    background: color-mix(in oklab, var(--bg) 92%, transparent);
+    border-bottom: 1px solid var(--line);
+  }
+  .bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; height: 3.65rem; }
+  .brand { display: inline-flex; align-items: center; gap: 0.6rem; font-family: var(--mono); font-weight: 600; font-size: 1.02rem; letter-spacing: 0.01em; }
+  .brand .live-dot { width: 0.55rem; height: 0.55rem; border-radius: 50%; background: var(--coral); box-shadow: 0 0 0 0 rgba(199,125,255,0.55); animation: pulse 2.6s ease-in-out infinite; }
+  .brand small { color: var(--ink-3); font-weight: 400; font-size: 0.8rem; }
+
+  nav.top { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .lang {
+    display: inline-flex; align-items: center; gap: 0.15rem;
+    font-family: var(--mono); font-size: 0.82rem; color: var(--ink-3);
+    padding: 0.4rem 0.6rem; border-radius: 8px; border: 1px solid var(--line);
+    transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+  }
+  .lang:hover { border-color: var(--line-strong); color: var(--ink-2); }
+  .lang .seg { padding: 0 0.12rem; transition: color 0.2s var(--ease); }
+  .lang .sep { color: var(--ink-4); }
+  .lang[data-active="en"] .en { color: var(--ink); }
+  .lang[data-active="zh"] .zh { color: var(--ink); }
+  .gh {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    font-family: var(--mono); font-size: 0.82rem; color: var(--ink-2);
+    padding: 0.4rem 0.7rem; border-radius: 8px; text-decoration: none;
+    border: 1px solid var(--line); transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+  }
+  .gh:hover { border-color: var(--line-strong); color: var(--ink); }
+  .gh svg { width: 1rem; height: 1rem; fill: currentColor; opacity: 0.9; }
+  @media (max-width: 34rem) { .gh .txt { display: none; } }
+
+  /* ---- hero ---- */
+  .hero { padding-top: clamp(2.75rem, 7vw, 5rem); padding-bottom: clamp(2rem, 5vw, 3rem); }
+  .hero-copy { max-width: 46rem; }
+  h1 {
+    font-family: var(--mono);
+    font-weight: 600;
+    font-size: clamp(2rem, 1.1rem + 4.4vw, 3.5rem);
+    line-height: 1.08;
+    letter-spacing: -0.02em;
+    margin: 0 0 1.15rem;
+    text-wrap: balance;
+    color: var(--ink);
+  }
+  :root[lang="zh"] h1 { letter-spacing: 0.01em; line-height: 1.22; }
+  .lead {
+    font-family: var(--mono);
+    color: var(--ink-2);
+    font-size: clamp(0.98rem, 0.92rem + 0.4vw, 1.14rem);
+    line-height: 1.68;
+    max-width: 42rem;
+    margin: 0;
+    text-wrap: pretty;
+  }
+  :root[lang="zh"] .lead { line-height: 1.85; }
+
+  /* ---- the terminal, now playing ---- */
+  .term {
+    margin-top: clamp(2rem, 5vw, 3.25rem);
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 14px;
+    overflow: hidden;
+    box-shadow:
+      0 1px 0 rgba(255,255,255,0.03) inset,
+      0 30px 70px -30px rgba(0,0,0,0.75),
+      0 8px 22px -12px rgba(0,0,0,0.6);
+  }
+  .term-head {
+    display: flex; align-items: center; gap: 0.75rem;
+    padding: 0.7rem 0.95rem;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--line);
+  }
+  .lights { display: inline-flex; gap: 0.48rem; }
+  .lights i { width: 0.72rem; height: 0.72rem; border-radius: 50%; display: block; }
+  .lights i:nth-child(1) { background: #ff5f87; }
+  .lights i:nth-child(2) { background: #ffd76b; }
+  .lights i:nth-child(3) { background: #43f6c7; }
+  .term-title { font-family: var(--mono); font-size: 0.82rem; color: var(--ink-3); letter-spacing: 0.01em; }
+  .term-title b { color: var(--ink-2); font-weight: 600; }
+  .onair {
+    margin-left: auto; display: inline-flex; align-items: center; gap: 0.45rem;
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--coral);
+  }
+  .onair .live-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--coral); animation: pulse 2.6s ease-in-out infinite; }
+
+  .term-body {
+    padding: clamp(1.05rem, 2.4vw, 1.7rem) clamp(1.05rem, 2.4vw, 1.7rem) clamp(1.2rem, 2.4vw, 1.7rem);
+    font-family: var(--mono);
+    overflow-x: auto;
+  }
+
+  /* now-playing prompt line */
+  .np {
+    display: flex; align-items: baseline; flex-wrap: wrap; gap: 0.5rem 0.7rem;
+    font-family: var(--mono);
+    font-size: clamp(0.82rem, 0.78rem + 0.3vw, 0.94rem);
+    color: var(--ink-2);
+    padding-bottom: clamp(0.9rem, 2vw, 1.4rem);
+    border-bottom: 1px solid var(--line);
+  }
+  .np .who { color: var(--amber); font-weight: 600; }
+  .np .play { color: var(--coral); }
+  .np .lbl { color: var(--ink); }
+  .np .meta { margin-left: auto; color: var(--ink-3); letter-spacing: 0.04em; }
+  .np .meta .caret { color: var(--amber); animation: blink 1.05s steps(1) infinite; margin-left: 0.15em; }
+
+  /* the record stage */
+  .stage {
+    position: relative;
+    display: grid; place-items: center;
+    padding: clamp(1.6rem, 4.5vw, 3rem) 0 clamp(1rem, 2.5vw, 1.6rem);
+  }
+  .stage::before {
+    content: ""; position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background: radial-gradient(42% 42% at 50% 46%, rgba(255,95,175,0.10), transparent 70%);
+  }
+  .disc-svg {
+    position: relative; z-index: 1;
+    width: min(340px, 82%); height: auto; display: block;
+    filter: drop-shadow(0 20px 38px rgba(0,0,0,0.6));
+  }
+  .disc { transform-box: fill-box; transform-origin: 50% 50%; animation: spin 40s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .np-under {
+    text-align: center; font-family: var(--mono);
+    font-size: 0.74rem; letter-spacing: 0.1em; color: var(--ink-3);
+    padding-top: 0.2rem;
+  }
+  .np-under .sp { color: var(--ink-4); margin: 0 0.55em; }
+  .np-under b { color: var(--amber); font-weight: 600; }
+
+  .term-foot {
+    display: flex; align-items: center; gap: 0.9rem;
+    padding: 0.5rem 0.95rem;
+    background: var(--surface-2);
+    border-top: 1px solid var(--line);
+  }
+  .term-foot .vu { flex: 1 1 auto; min-width: 0; height: 1.6rem; }
+  .term-foot .status { flex: none; font-family: var(--mono); font-size: 0.72rem; color: var(--ink-3); letter-spacing: 0.04em; }
+  .term-foot .status b { color: var(--sky); font-weight: 600; }
+
+  /* ---- listen pill + caption ---- */
+  .demo { margin-top: clamp(1.4rem, 3vw, 2rem); display: flex; flex-wrap: wrap; align-items: center; gap: 0.85rem 1.1rem; }
+  .listen {
+    display: inline-flex; align-items: center; gap: 0.6rem;
+    font-family: var(--mono); font-size: 0.86rem; color: var(--ink-2);
+    padding: 0.6rem 1rem; border-radius: 999px;
+    border: 1px dashed var(--line-strong); background: rgba(245,238,251,0.02);
+    cursor: not-allowed;
+  }
+  .listen .tri { width: 0; height: 0; border-style: solid; border-width: 0.35rem 0 0.35rem 0.6rem; border-color: transparent transparent transparent var(--amber); }
+  .demo .cap { flex: 1 1 22rem; min-width: 0; color: var(--ink-3); font-size: 0.94rem; line-height: 1.6; max-width: 36rem; }
+
+  /* ---- traits: three unhurried blocks ---- */
+  .traits { padding: clamp(2.5rem, 6vw, 4rem) 0 clamp(1rem, 3vw, 2rem); }
+  .block { max-width: 44rem; padding: clamp(1.9rem, 4vw, 2.9rem) 0; border-top: 1px solid var(--line); }
+  .block:first-child { border-top: none; }
+  .block h2 {
+    font-family: var(--mono); font-weight: 600;
+    font-size: clamp(1.3rem, 1.05rem + 1.1vw, 1.85rem);
+    line-height: 1.25; letter-spacing: -0.01em; margin: 0 0 0.9rem;
+    color: var(--ink); text-wrap: balance;
+  }
+  :root[lang="zh"] .block h2 { letter-spacing: 0.01em; }
+  .block h2 .glyph { color: var(--amber); font-weight: 400; margin-right: 0.5ch; }
+  .block p { margin: 0; color: var(--ink-2); font-size: 1.02rem; line-height: 1.72; text-wrap: pretty; }
+  :root[lang="zh"] .block p { line-height: 1.9; }
+
+  /* ---- shape: the man-page panel (local / form / status) ---- */
+  .shape { padding: clamp(1rem, 3vw, 2rem) 0 clamp(3.5rem, 8vw, 5.5rem); }
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line-strong);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 0.7rem 1.15rem; background: var(--surface-2); border-bottom: 1px solid var(--line);
+    font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.06em; color: var(--ink-3);
+  }
+  .panel-head .glyph { color: var(--ink-4); margin-right: 0.5ch; }
+  dl.specs { margin: 0; }
+  dl.specs > div { display: grid; grid-template-columns: 8.5rem 1fr; gap: 0.4rem 1.6rem; padding: clamp(1.25rem, 2.6vw, 1.7rem) clamp(1.15rem, 2.6vw, 1.9rem); border-top: 1px solid var(--line); }
+  dl.specs > div:first-child { border-top: none; }
+  dl.specs dt {
+    font-family: var(--mono); font-weight: 600; color: var(--amber);
+    font-size: 1.02rem; line-height: 1.4; align-self: start;
+  }
+  dl.specs dd { margin: 0; color: var(--ink-2); font-size: 0.99rem; line-height: 1.7; text-wrap: pretty; }
+  :root[lang="zh"] dl.specs dd { line-height: 1.9; }
+  @media (max-width: 40rem) {
+    dl.specs > div { grid-template-columns: 1fr; gap: 0.55rem; }
+  }
+
+  /* ---- footer ---- */
+  footer { border-top: 1px solid var(--line); background: var(--bg-2); }
+  .foot { padding: clamp(2.5rem, 6vw, 3.75rem) 0; }
+  .foot p { margin: 0; }
+  .foot .fl { font-family: var(--mono); color: var(--ink-2); font-size: 0.98rem; line-height: 1.7; max-width: 44rem; }
+  :root[lang="zh"] .foot .fl { line-height: 1.9; }
+  .foot .cta { margin-top: 0.75rem; color: var(--ink-3); font-size: 0.98rem; line-height: 1.7; }
+  .foot .cta a {
+    color: var(--amber); text-decoration: none;
+    border-bottom: 1px solid color-mix(in oklab, var(--amber) 40%, transparent);
+    padding-bottom: 1px; transition: border-color 0.2s var(--ease), color 0.2s var(--ease);
+  }
+  .foot .cta a:hover { color: var(--amber-soft); border-bottom-color: var(--amber-soft); }
+  .foot .mark { margin-top: 2.25rem; font-family: var(--mono); font-size: 0.74rem; color: var(--ink-4); letter-spacing: 0.02em; }
+
+  /* ---- reduced motion: everything rests, fully legible ---- */
+  @media (prefers-reduced-motion: reduce) {
+    .brand .live-dot, .onair .live-dot { animation: none; }
+    .np .meta .caret { animation: none; }
+    .disc { animation: none; }
+    .skip { transition: none; }
+    * { scroll-behavior: auto; }
+  }
+
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  @keyframes blink { 0%, 49% { opacity: 1; } 50%, 100% { opacity: 0; } }
+</style>
+</head>
+<body>
+
+<a class="skip" href="#main">Skip to content</a>
+
+<header>
+  <div class="wrap bar">
+    <span class="brand">
+      <span class="live-dot" aria-hidden="true"></span>
+      murmur <small data-en="on air" data-zh="正在播出">on air</small>
+    </span>
+    <nav class="top" aria-label="Site">
+      <button class="lang" id="lang" data-active="en" aria-label="Switch language between Chinese and English">
+        <span class="seg zh">中</span><span class="sep">/</span><span class="seg en">EN</span>
+      </button>
+      <a class="gh" href="https://github.com/wine-fall/murmur" rel="noopener">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+        <span class="txt">GitHub</span>
+      </a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero">
+    <div class="wrap">
+      <div class="hero-copy">
+        <h1 data-en="A whole radio station, for an audience of one." data-zh="一整座电台，只播给你一个人。">A whole radio station, for an audience of one.</h1>
+        <p class="lead" data-en="Nobody presses play. It starts talking on its own, and a while in it puts on a song; when the song ends, it comes back and keeps going. It says good morning, and good night. Type a line whenever you want, and it answers you out loud. The moment its voice comes on, the room feels a little less empty." data-zh="没人点播，它自己就开口了。说着说着放一首歌，歌放完，回来接着讲。天亮说声早，夜里说声晚安。你想说话，打一行字就行，它就开口回你。声音一出来，屋子好像就没那么空了。">Nobody presses play. It starts talking on its own, and a while in it puts on a song; when the song ends, it comes back and keeps going. It says good morning, and good night. Type a line whenever you want, and it answers you out loud. The moment its voice comes on, the room feels a little less empty.</p>
+      </div>
+
+      <!-- the centerpiece: a terminal, showing the record turning -->
+      <div class="term" role="figure" aria-label="A terminal window showing murmur's now-playing view: a record turning on the air.">
+        <div class="term-head">
+          <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="term-title"><b>murmur</b> · session · <span data-en="tonight" data-zh="今夜">tonight</span></span>
+          <span class="onair"><span class="live-dot" aria-hidden="true"></span><span data-en="on air" data-zh="播出中">on air</span></span>
+        </div>
+
+        <div class="term-body">
+          <div class="np">
+            <span class="who" aria-hidden="true">murmur</span>
+            <span class="play" aria-hidden="true">&#9205;</span>
+            <span class="lbl" data-en="now playing" data-zh="正在播放">now playing</span>
+            <span class="meta" aria-hidden="true">&#8734; rpm &middot; mono&nbsp;<span class="caret">&#9611;</span></span>
+          </div>
+
+          <div class="stage">
+            <svg class="disc-svg" viewBox="0 0 420 420" role="img" aria-label="A record turning: the murmur label at its centre, a tonearm resting in the groove.">
+              <defs>
+                <radialGradient id="vinyl" cx="42%" cy="38%" r="74%">
+                  <stop offset="0%" stop-color="#241f30"/>
+                  <stop offset="52%" stop-color="#17131f"/>
+                  <stop offset="100%" stop-color="#0d0b12"/>
+                </radialGradient>
+                <path id="arcTop" d="M132,210 A78,78 0 0 0 288,210" fill="none"/>
+              </defs>
+
+              <!-- turning record: vinyl + grooves + label -->
+              <g class="disc">
+                <circle cx="210" cy="210" r="200" fill="url(#vinyl)"/>
+                <circle cx="210" cy="210" r="200" fill="none" stroke="#000" stroke-opacity="0.5"/>
+                <!-- grooves -->
+                <g fill="none" stroke="#f5eefb">
+                  <circle cx="210" cy="210" r="196" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="189" stroke-opacity=".08"/>
+                  <circle cx="210" cy="210" r="182" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="176" stroke-opacity=".10"/>
+                  <circle cx="210" cy="210" r="169" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="162" stroke-opacity=".07"/>
+                  <circle cx="210" cy="210" r="155" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="148" stroke-opacity=".09"/>
+                  <circle cx="210" cy="210" r="141" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="134" stroke-opacity=".07"/>
+                  <circle cx="210" cy="210" r="127" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="120" stroke-opacity=".09"/>
+                  <circle cx="210" cy="210" r="113" stroke-opacity=".05"/>
+                  <circle cx="210" cy="210" r="106" stroke-opacity=".07"/>
+                </g>
+                <!-- a single amber cue groove: the track it's on -->
+                <circle cx="210" cy="210" r="158" fill="none" stroke="#ff5faf" stroke-opacity=".28" stroke-width="1.2"/>
+
+                <!-- label: warm disk, two-tone amber + coral ink -->
+                <circle cx="210" cy="210" r="100" fill="#241f30"/>
+                <circle cx="210" cy="210" r="100" fill="none" stroke="#ff5faf" stroke-width="2"/>
+                <circle cx="210" cy="210" r="92" fill="none" stroke="#c77dff" stroke-opacity=".38" stroke-width="1"/>
+
+                <text font-family="ui-monospace, Menlo, monospace" font-size="10" letter-spacing="1.5" text-anchor="middle" fill="#ff5faf">
+                  <textPath href="#arcTop" startOffset="50%">&#183; MURMUR &#183; AN AUDIENCE OF ONE &#183;</textPath>
+                </text>
+                <text x="210" y="190" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="9.5" letter-spacing="3" fill="#9a8fac">SIDE &#8734;</text>
+                <text x="210" y="238" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="10.5" letter-spacing="1.5" fill="#ff8ec7">&#8734; RPM &#183; MONO</text>
+                <text x="210" y="260" text-anchor="middle" font-family="ui-monospace, Menlo, monospace" font-size="8" letter-spacing="2.5" fill="#c77dff" fill-opacity=".92">FULLY LOCAL</text>
+
+                <!-- spindle -->
+                <circle cx="210" cy="210" r="6.5" fill="#0d0b12"/>
+                <circle cx="210" cy="210" r="6.5" fill="none" stroke="#000" stroke-opacity=".5"/>
+              </g>
+
+              <!-- tonearm (resting on the track — static) -->
+              <g stroke-linecap="round">
+                <line x1="352" y1="82" x2="262" y2="158" stroke="#6b6280" stroke-width="5"/>
+                <rect x="253" y="150" width="19" height="12" rx="2" fill="#9a8fac" transform="rotate(40 262 156)"/>
+                <circle cx="262" cy="164" r="2.6" fill="#c77dff"/>
+                <line x1="352" y1="82" x2="372" y2="66" stroke="#9a8fac" stroke-width="9"/>
+                <circle cx="360" cy="74" r="16" fill="#6b6280" stroke="#0d0b12" stroke-opacity=".4"/>
+                <circle cx="360" cy="74" r="5.5" fill="#0d0b12" fill-opacity=".6"/>
+              </g>
+            </svg>
+          </div>
+
+          <p class="np-under" aria-hidden="true">
+            <b data-en="always on the air" data-zh="始终在播">always on the air</b>
+            <span class="sp">&#183;</span>
+            <span data-en="for an audience of one" data-zh="只为一个人">for an audience of one</span>
+          </p>
+        </div>
+
+        <div class="term-foot">
+          <canvas class="vu" id="vu" aria-hidden="true"></canvas>
+          <span class="status"><b>&#9834;</b>&nbsp; <span data-en="local only" data-zh="仅在本地">local only</span></span>
+        </div>
+      </div>
+
+      <div class="demo">
+        <button class="listen" type="button" disabled aria-disabled="true">
+          <span class="tri" aria-hidden="true"></span>
+          <span data-en="Listen · coming soon" data-zh="试听 · 即将到来">Listen · coming soon</span>
+        </button>
+        <p class="cap" data-en="The voice is the whole point. You've read all of this, and it still hasn't made a sound. You won't really know it until you hear it." data-zh="声音才是它的全部。这些字你都读完了，它还没出过声。真正的它，得等你亲耳听见。">The voice is the whole point. You've read all of this, and it still hasn't made a sound. You won't really know it until you hear it.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="traits" aria-label="What makes it different">
+    <div class="wrap">
+      <div class="block">
+        <h2><span class="glyph" aria-hidden="true">#</span><span data-en="It speaks first." data-zh="它先开口。">It speaks first.</span></h2>
+        <p data-en="Other radio waits for you to press play. This one doesn't. It picks a topic and just starts talking. No set time, nobody flipping a switch. It just felt like talking to you right then. Not many things speak first." data-zh="别的电台都等你按下播放。它不。它自己挑个话题就讲起来，不是定好的点，也没人按开关，就是那会儿想找你说说话了。会自己先开口的，不多。">Other radio waits for you to press play. This one doesn't. It picks a topic and just starts talking. No set time, nobody flipping a switch. It just felt like talking to you right then. Not many things speak first.</p>
+      </div>
+
+      <div class="block">
+        <h2><span class="glyph" aria-hidden="true">#</span><span data-en="Most of the time, it's just talking away on its own." data-zh="大多数时候，它只是自己在讲。">Most of the time, it's just talking away on its own.</span></h2>
+        <p data-en="Say nothing and it keeps right on going, carrying the show by itself, like a radio left on late at night that no one thought to switch off. Every so often it stops and turns to ask you something. Answer, and you talk for a bit; stay quiet, and it doesn't press, and before long it drifts back into the program. It keeps you company, and never asks for yours." data-zh="你不接话，它也照样往下说，一个人把节目撑着，像深夜里没人去关的那台收音机。偶尔它停下来，转过头问你一句。你答，就多聊几句；你不出声，它也不追问，过会儿自己就绕回节目里去了。它陪着你，却不用你陪。">Say nothing and it keeps right on going, carrying the show by itself, like a radio left on late at night that no one thought to switch off. Every so often it stops and turns to ask you something. Answer, and you talk for a bit; stay quiet, and it doesn't press, and before long it drifts back into the program. It keeps you company, and never asks for yours.</p>
+      </div>
+
+      <div class="block">
+        <h2><span class="glyph" aria-hidden="true">#</span><span data-en="Little by little, it learns who you are." data-zh="它会一点点把你认出来。">Little by little, it learns who you are.</span></h2>
+        <p data-en="The first time, it asks you a few questions and roughs out a sketch of you. After that, while it keeps you company, it's quietly keeping track: what made you laugh, whether you stay up late or turn in early, the topics you keep circling back to. Then it adjusts itself, a little closer to you, then closer still. Give it enough time and it becomes something no one else could copy, one that understands you and only you." data-zh="头一回，它问你几个问题，先大概摸出你的样子。往后一边陪你，一边把你记下来：哪句话把你逗笑了，你熬夜还是早睡，聊天总往哪儿绕。然后它悄悄改自己，改得离你近一点，再近一点。时间一长，它就长成别人复制不走的样子，只懂你一个人。">The first time, it asks you a few questions and roughs out a sketch of you. After that, while it keeps you company, it's quietly keeping track: what made you laugh, whether you stay up late or turn in early, the topics you keep circling back to. Then it adjusts itself, a little closer to you, then closer still. Give it enough time and it becomes something no one else could copy, one that understands you and only you.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="shape" aria-label="What it is, plainly">
+    <div class="wrap">
+      <div class="panel">
+        <div class="panel-head"><span class="glyph" aria-hidden="true">$</span>man murmur <span data-en="· the plain facts" data-zh="· 老实交代" style="color:var(--ink-4)">· the plain facts</span></div>
+        <dl class="specs">
+          <div>
+            <dt data-en="Fully local." data-zh="完全本地。">Fully local.</dt>
+            <dd>
+              <span data-en="It stays put on your own computer and goes nowhere. The whole station runs on this one machine of yours. From end to end, only two things ever leave the house: letting Claude think something over, and fetching a song to play for you. Everything else stays where it is: the things it remembers about you, what you've said, the songs it's played. None of it gets off this computer. It just never gave itself a way to send anything out." data-zh="它哪儿也不去，就待在你的电脑里。整座电台，就架在你自己这台机器上。从头到尾，只有两件事会出门：让 Claude 替它想一想，把一首歌取回来放给你。剩下的都留在原地，它记着你的那些事，你们说过的话，放过的歌，都出不了这台电脑。它没给自己留一条往外送的路。">It stays put on your own computer and goes nowhere. The whole station runs on this one machine of yours. From end to end, only two things ever leave the house: letting Claude think something over, and fetching a song to play for you. Everything else stays where it is: the things it remembers about you, what you've said, the songs it's played. None of it gets off this computer. It just never gave itself a way to send anything out.</span>
+            </dd>
+          </div>
+          <div>
+            <dt data-en="What it looks like." data-zh="它长什么样。">What it looks like.</dt>
+            <dd>
+              <span data-en="It has no interface. No window, no menu bar, no web page. It's just lines of text coming up in a terminal, and a voice. At most it will grow into a nicer terminal someday, never an app. It stays light, and that's on purpose." data-zh="它没有界面。没有窗口，没有菜单栏，也没有网页。它就是终端里一行行冒出来的字，和一个声音。往后它顶多变成一个好看点的终端，不会做成一个 App。它轻，是它自己要的。">It has no interface. No window, no menu bar, no web page. It's just lines of text coming up in a terminal, and a voice. At most it will grow into a nicer terminal someday, never an app. It stays light, and that's on purpose.</span>
+            </dd>
+          </div>
+          <div>
+            <dt data-en="Still being built." data-zh="还在打造。">Still being built.</dt>
+            <dd>
+              <span data-en="It isn't finished yet. But the hard part is done: it can speak on its own, and it can answer you when you type. Once that worked, the rest is just time. Next comes music: a song between stretches of talk, back and forth, until it really feels like a radio. What's here is still simple, but it can already sit with you a while." data-zh="它还没做完。但最难的地方已经成了：它能自己开口，也能在你打字的时候回你。这一步走通了，剩下的都是时间。接下来是音乐，让它在说话中间放歌，一段话、一首歌地来回着，才真有个电台的样子。现在的它还简单，可已经能陪你坐一会儿了。">It isn't finished yet. But the hard part is done: it can speak on its own, and it can answer you when you type. Once that worked, the rest is just time. Next comes music: a song between stretches of talk, back and forth, until it really feels like a radio. What's here is still simple, but it can already sit with you a while.</span>
+            </dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <p class="fl" data-en="Open-source, not a business. It belongs to you, and to this computer of yours." data-zh="开源，不做生意。它只属于你，和你这台电脑。">Open-source, not a business. It belongs to you, and to this computer of yours.</p>
+    <p class="cta">
+      <span data-en="If you'd like a voice like this to keep you company, it's on " data-zh="你要是也想有这么一个声音陪着，它就在 ">If you'd like a voice like this to keep you company, it's on </span><a href="https://github.com/wine-fall/murmur" rel="noopener">GitHub</a><span data-en=", waiting for you." data-zh=" 上，等你。">, waiting for you.</span>
+    </p>
+    <p class="mark" aria-hidden="true">broadcasting to an audience of one · <span data-en="local only" data-zh="仅在本地">local only</span></p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+  var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var lang = "en";
+  var i18n = document.querySelectorAll("[data-en]");
+
+  // --- language toggle ---------------------------------------------------
+  function applyLang(l) {
+    lang = l;
+    document.documentElement.lang = (l === "zh") ? "zh" : "en";
+    document.getElementById("lang").setAttribute("data-active", l);
+    i18n.forEach(function (el) {
+      var v = el.getAttribute("data-" + l);
+      if (v !== null) el.textContent = v;
+    });
+  }
+  document.getElementById("lang").addEventListener("click", function () {
+    applyLang(lang === "en" ? "zh" : "en");
+  });
+
+  // --- the audio VU (a warm, breathing waveform) ------------------------
+  var cv = document.getElementById("vu");
+  var ctx = cv.getContext("2d");
+  var W = 0, H = 0, dpr = 1, raf = 0;
+
+  function sizeVU() {
+    var r = cv.getBoundingClientRect();
+    dpr = Math.min(2, window.devicePixelRatio || 1);
+    W = Math.max(1, Math.floor(r.width));
+    H = Math.max(1, Math.floor(r.height));
+    cv.width = Math.floor(W * dpr);
+    cv.height = Math.floor(H * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function bar(x, y, w, h, r) {
+    r = Math.min(r, w / 2, h / 2);
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function drawVU(time) {
+    if (!W || !H) return;
+    ctx.clearRect(0, 0, W, H);
+    var n = Math.max(20, Math.floor(W / 7));
+    var gap = 2;
+    var bw = (W - (n - 1) * gap) / n;
+    var mid = H / 2;
+    var tt = (time || 0) / 1000;
+    for (var i = 0; i < n; i++) {
+      var a = Math.sin(tt * 2.1 + i * 0.5) * 0.5 + 0.5;
+      var b = Math.sin(tt * 1.27 + i * 0.9 + 1.7) * 0.5 + 0.5;
+      var amp = a * 0.6 + b * 0.4;
+      var env = Math.sin((i / (n - 1)) * Math.PI);         // taper the ends
+      amp = 0.14 + amp * (0.35 + env * 0.65) * 0.86;
+      var bh = Math.max(2, amp * (H - 3));
+      var x = i * (bw + gap);
+      ctx.fillStyle = "rgba(255,95,175," + (0.32 + amp * 0.5).toFixed(3) + ")";
+      bar(x, mid - bh / 2, bw, bh, 1.4);
+    }
+    if (!reduce) raf = requestAnimationFrame(drawVU);
+  }
+
+  function startVU() {
+    sizeVU();
+    if (raf) cancelAnimationFrame(raf);
+    if (reduce) drawVU(1837);       // one pleasing frozen frame
+    else raf = requestAnimationFrame(drawVU);
+  }
+
+  var rz;
+  window.addEventListener("resize", function () {
+    clearTimeout(rz);
+    rz = setTimeout(function () { sizeVU(); if (reduce) drawVU(1837); }, 150);
+  });
+
+  startVU();
+})();
+</script>
+</body>
+</html>
