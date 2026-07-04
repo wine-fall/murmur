@@ -126,10 +126,12 @@ class FakeMusicProvider:
 class FakeMusicBrain:
     """Scripted Harness (spec 03-01 §2.1): search once, then submit_pick each
     candidate until one resolves. A stand-in for the model's loop — plumbing
-    only, no selection intelligence (that is the Ollama/human layer)."""
+    only, no selection intelligence (that is the Ollama/human layer).
+    ``with_announce=False`` scripts a model that omits the optional metadata."""
 
-    def __init__(self) -> None:
+    def __init__(self, with_announce: bool = True) -> None:
         self.tasks: list[dict[str, Any]] = []
+        self._with_announce = with_announce
 
     async def run_task(
         self,
@@ -147,7 +149,14 @@ class FakeMusicBrain:
         submit = next(t for t in tools if t.terminal)
         found = await search.run({"query": "test", "limit": 5})
         for candidate in found["candidates"][:max_turns]:
-            out = await submit.run({"ref": candidate["ref"], "why": "fake pick"})
+            args = {"ref": candidate["ref"], "why": "fake pick"}
+            if self._with_announce:
+                args |= {
+                    "title": candidate["title"],
+                    "artist": candidate["uploader"],
+                    "announce": f"up next: {candidate['title']}",
+                }
+            out = await submit.run(args)
             if out.get("ok"):
                 return out
         return None

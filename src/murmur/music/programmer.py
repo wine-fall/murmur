@@ -7,6 +7,8 @@ pulls a track — it does not play, schedule, or announce it (that is spec 03-02
 
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ..contracts import AudioClip, MusicProvider
 from ..harness import BrainTool, Harness
 from ..prompts import build_find_music_instruction
@@ -14,6 +16,17 @@ from .context import MusicContext, render_context
 from .tools import SearchMusicTool, SubmitPickTool
 
 _DEFAULT_MAX_TURNS = 6
+
+
+@dataclass(frozen=True)
+class TrackPick:
+    """One found-and-pulled track (spec 03-01 §2.4, widened by 03-02): the
+    playable clip (with title/artist display metadata when the task supplied
+    them) plus the one-line in-persona DJ intro to speak over its ducked head
+    (None -> no intro)."""
+
+    clip: AudioClip
+    announce: str | None = None
 
 
 class MusicProgrammer:
@@ -39,7 +52,7 @@ class MusicProgrammer:
             SubmitPickTool(provider),
         ]
 
-    async def next_track(self, ctx: MusicContext) -> AudioClip | None:
+    async def next_track(self, ctx: MusicContext) -> TrackPick | None:
         """Find and pull one track for ``ctx``; None if nothing suitable resolves."""
         system_prompt, situation_block = render_context(ctx)
         prompt = f"{self._instruction}\n\n{situation_block}"
@@ -55,4 +68,15 @@ class MusicProgrammer:
         source = result.get("source")
         if not source:
             return None
-        return AudioClip(source=str(source), kind=str(result.get("kind", "music")))
+
+        def _opt(key: str) -> str | None:
+            value = result.get(key)
+            return str(value) if value else None
+
+        clip = AudioClip(
+            source=str(source),
+            kind=str(result.get("kind", "music")),
+            title=_opt("title"),
+            artist=_opt("artist"),
+        )
+        return TrackPick(clip=clip, announce=_opt("announce"))

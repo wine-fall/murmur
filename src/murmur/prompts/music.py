@@ -25,6 +25,10 @@ Guidance:
 - Match the listener's taste and language as expressed by the persona.
 - Do not repeat something already noted as recently played.
 - If your pick fails to resolve, pick another candidate and submit again.
+- In submit_pick, also pass the track's title and artist (from the candidate),
+  and write `announce`: ONE short spoken line introducing the track, in the
+  persona's voice and language — like a radio DJ's "up next". No quotes around
+  it, no markdown; it will be read aloud over the song's opening.
 """
 
 
