@@ -46,7 +46,10 @@ class CliHost:
 
     # --- keyboard input (stdin) -------------------------------------------
     def start(self) -> None:
-        """Spawn the stdin reader. Call once, from inside the running loop."""
+        """Spawn the stdin reader, from inside the running loop. Idempotent —
+        the startup checks and the Director both call it (spec 03-02 §2.4)."""
+        if self._reader is not None:
+            return
         self._loop = asyncio.get_running_loop()
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()

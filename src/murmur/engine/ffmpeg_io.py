@@ -109,9 +109,7 @@ class SounddeviceSink:
     ) -> None:
         import sounddevice  # lazy: unit tests never import the audio stack
 
-        def _callback(
-            outdata: Any, frames: int, _time: Any, _status: Any
-        ) -> None:
+        def _callback(outdata: Any, frames: int, _time: Any, _status: Any) -> None:
             try:
                 outdata[:] = render(frames)
             except Exception:

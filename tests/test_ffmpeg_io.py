@@ -18,9 +18,7 @@ _ENGINE_SR = 8_000
 _CH = 2
 
 
-def _write_wav(
-    path: Path, values: np.ndarray, *, rate: int, channels: int
-) -> None:
+def _write_wav(path: Path, values: np.ndarray, *, rate: int, channels: int) -> None:
     pcm = (values * 32767).astype(np.int16)
     with wave.open(str(path), "wb") as wav:
         wav.setnchannels(channels)
@@ -46,9 +44,7 @@ def test_load_voice_wav_upmixes_mono_and_resamples(tmp_path: Path):
 
 def test_load_voice_wav_same_format_roundtrips(tmp_path: Path):
     frames = 64
-    values = np.linspace(-0.5, 0.5, frames * _CH, dtype=np.float32).reshape(
-        frames, _CH
-    )
+    values = np.linspace(-0.5, 0.5, frames * _CH, dtype=np.float32).reshape(frames, _CH)
     path = tmp_path / "talk.wav"
     _write_wav(path, values, rate=_ENGINE_SR, channels=_CH)
 
