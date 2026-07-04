@@ -21,14 +21,14 @@ dev = [
     "ruff>=0.15",
     "pyright>=1.1.390",  # static type-checking: gives the Protocol seams (contracts.py) teeth
 ]
-# Optional real TTS voices. All four L0 backends (spark/qwen3/chatterbox/dia,
-# spec 02 §3.3) run on ONE runtime — mlx-audio, Apple-Silicon-only — so a single
-# extra covers them all. The core, the unit suite, and the stub/sidecar-fake
+# Optional real TTS voices. All MLX backends (spark/qwen3/chatterbox/dia + the
+# post-L0 voxcpm2 candidate, spec 02 §3.3) run on ONE runtime — mlx-audio,
+# Apple-Silicon-only — so a single extra covers them all. The core, the unit suite, and the stub/sidecar-fake
 # voices need none of it (they run model-free). A future non-MLX backend (e.g. a
 # PyTorch CosyVoice2/Fish) would add its own extra without touching the core.
 # Install on a Mac:  pip install -e ".[tts-mlx]"   then:  murmur --voice spark
 tts-mlx = [
-    "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all four L0 voices
+    "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all the MLX voices
     "soxr",              # audio resampler the Spark backend (BiCodec) needs at load
 ]
 # Default music source (spec 03-01): yt-dlp covers YouTube + Bilibili with no

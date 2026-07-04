@@ -4,8 +4,9 @@ The ``build_voice`` factory selects an adapter by ``Config.voice_provider`` so
 the core never imports a concrete adapter directly:
 
 - ``"stub"``        — spec-01 silent-wav provider (no sidecar, no model).
-- ``"spark"`` / ``"qwen3"`` / ``"chatterbox"`` / ``"dia"`` — the four real MLX
-  voices via the supervised warm sidecar (spec 02 §3.3; ``spark`` is primary).
+- ``"spark"`` / ``"qwen3"`` / ``"chatterbox"`` / ``"dia"`` / ``"voxcpm2"`` — the real
+  MLX voices via the supervised warm sidecar (spec 02 §3.3; ``spark`` is primary,
+  ``voxcpm2`` is the post-L0 quality-reference candidate).
 - ``"sidecar-fake"``— **internal/diagnostic, not a user-facing voice** (kept off
   the ``--voice`` menu): the full two-process sidecar path running the no-model
   ``FakeBackend``, so tests (and a future ``doctor`` self-check) can exercise
@@ -29,7 +30,7 @@ def build_voice(name: str) -> VoiceProvider:
         return StubVoiceProvider()
     if name == "sidecar-fake":
         return SidecarVoiceProvider("fake")
-    if name in PROFILES:  # spark / qwen3 / chatterbox / dia
+    if name in PROFILES:  # spark / qwen3 / chatterbox / dia / voxcpm2
         return SidecarVoiceProvider(name)
     available = ", ".join(["stub", "sidecar-fake", *sorted(PROFILES)])
     raise ValueError(f"unknown voice_provider {name!r}; expected one of: {available}")

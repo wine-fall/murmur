@@ -25,7 +25,7 @@ from .protocol import OP_HEALTH, OP_SYNTHESIZE, ProtocolError, decode, encode
 
 def build_backend(name: str) -> TtsBackend:
     """Select a ``TtsBackend`` by name: ``"fake"`` (no model), or one of the MLX
-    backends in ``mlx_backend.PROFILES`` (``spark``/``qwen3``/``chatterbox``/``dia``).
+    backends in ``mlx_backend.PROFILES`` (``spark``/``qwen3``/``chatterbox``/``dia``/``voxcpm2``).
     Constructing an MLX backend imports no MLX — the model loads only in load()."""
     if name == "fake":
         return FakeBackend()

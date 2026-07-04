@@ -1,4 +1,4 @@
-"""Real MLX TTS synthesis across the four L0 backends — integration, on demand
+"""Real MLX TTS synthesis across the MLX backends — integration, on demand
 only (DESIGN §11.2/§11.3).
 
 Excluded from the fast suite (marked ``integration``); run deliberately with the
@@ -24,7 +24,7 @@ _MLX_AVAILABLE = importlib.util.find_spec("mlx_audio") is not None
 
 
 @pytest.mark.skipif(not _MLX_AVAILABLE, reason="mlx-audio not installed ([tts-mlx])")
-@pytest.mark.parametrize("name", ["spark", "qwen3", "chatterbox", "dia"])
+@pytest.mark.parametrize("name", ["spark", "qwen3", "chatterbox", "dia", "voxcpm2"])
 def test_mlx_backend_renders_a_real_nonempty_wav(name):
     from murmur.voice.backend import SynthesisRequest
     from murmur.voice.sidecar import build_backend

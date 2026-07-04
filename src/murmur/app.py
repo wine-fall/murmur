@@ -25,7 +25,7 @@ from .config import Config
 from .director import Director
 from .memory import InProcessMemoryStore
 from .persona import load_persona
-from .voice import build_voice
+from .voice import PROFILES, build_voice
 
 
 async def _run(config: Config, *, max_segments: int | None) -> None:
@@ -109,12 +109,14 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     )
     p.add_argument(
         "--voice",
-        choices=["stub", "spark", "qwen3", "chatterbox", "dia"],
+        # Derived from the backend registry so a new PROFILES row is CLI-selectable
+        # without editing this list. 'spark' is primary; 'sidecar-fake' exists for
+        # internal plumbing diagnostics (intentionally not offered here).
+        choices=["stub", *sorted(PROFILES)],
         default=None,
         help=(
             "VoiceProvider: 'stub' (silent wav, no sidecar/model) or a real MLX "
-            "voice via the warm sidecar ('spark' primary / 'qwen3' / 'chatterbox' "
-            "/ 'dia'). ('sidecar-fake' exists for internal plumbing diagnostics.)"
+            "voice via the warm sidecar (choices above; 'spark' is primary)."
         ),
     )
     p.add_argument(
