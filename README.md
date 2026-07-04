@@ -47,7 +47,7 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 Building, in ordered sub-specs under [`specs/`](specs/). Each step runs and adds something audible.
 
 - **✅ Spec 01 — `core-loop`** (implemented & verified): the L0 spine — CLI Host + Director + Brain + static persona + typed talk-back + session history + AudioPlayer.
-- **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): warm TTS sidecar + MLX adapters (Spark primary / Qwen3 / Chatterbox / Dia). **L0 is now audible.**
+- **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): warm TTS sidecar + MLX adapters (Spark primary / Qwen3 / Chatterbox / Dia, plus the post-L0 VoxCPM2 candidate). **L0 is now audible.**
 - **Next → Spec 03-01 `brain-harness`**, then **03-02 `ducking`** for the L1 radio feel.
 
 Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecycle (06), proactive + pacing (07), token economy (08), Claude Code ingestion (09), TUI (10).
@@ -77,7 +77,7 @@ pip install -e ".[tts-mlx]"
 murmur --voice spark
 ```
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,spark,qwen3,chatterbox,dia}`. Stop cleanly with `Ctrl-C`.
+Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,spark,qwen3,chatterbox,dia,voxcpm2}`. Stop cleanly with `Ctrl-C`.
 
 ## Development
 

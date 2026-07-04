@@ -72,8 +72,9 @@ def test_text_is_not_a_kwarg():
 # --- profile registry + selection ----------------------------------------- #
 
 
-def test_registry_wires_exactly_the_four_backends():
-    assert set(PROFILES) == {"spark", "qwen3", "chatterbox", "dia"}
+def test_registry_wires_the_backend_candidates():
+    # L0 shipped four; VoxCPM2 (OpenBMB) was added as a fifth blind-A/B candidate.
+    assert set(PROFILES) == {"spark", "qwen3", "chatterbox", "dia", "voxcpm2"}
 
 
 def test_spark_is_the_primary():
@@ -81,7 +82,7 @@ def test_spark_is_the_primary():
 
 
 def test_build_backend_constructs_mlx_without_loading_a_model():
-    for name in ("spark", "qwen3", "chatterbox", "dia"):
+    for name in ("spark", "qwen3", "chatterbox", "dia", "voxcpm2"):
         backend = build_backend(name)
         assert isinstance(backend, MlxAudioBackend)
         assert backend._profile is PROFILES[name]
@@ -95,8 +96,8 @@ def test_build_backend_unknown_raises():
 # --- core-side factory (hot-swap by name) ---------------------------------- #
 
 
-def test_build_voice_wires_the_four_mlx_names():
-    for name in ("spark", "qwen3", "chatterbox", "dia"):
+def test_build_voice_wires_the_mlx_names():
+    for name in ("spark", "qwen3", "chatterbox", "dia", "voxcpm2"):
         provider = build_voice(name)
         assert isinstance(provider, SidecarVoiceProvider)
         assert provider._backend == name

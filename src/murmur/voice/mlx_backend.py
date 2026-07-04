@@ -1,8 +1,9 @@
 """The thin generic MLX TTS backend + the profile registry (spec 02 §3.3/§3.5).
 
-All four L0 voices (Spark, Qwen3-TTS, Chatterbox, Dia) run on Apple Silicon via
-``mlx-audio`` through the same ``load_model(repo) -> model.generate(text, ...)``
-API, so they are ONE backend, not four classes: ``MlxAudioBackend`` + a per-model
+The L0 voices (Spark, Qwen3-TTS, Chatterbox, Dia) plus the added VoxCPM2 candidate
+all run on Apple Silicon via ``mlx-audio`` through the same
+``load_model(repo) -> model.generate(text, ...)`` API, so they are ONE backend,
+not a class per model: ``MlxAudioBackend`` + a per-model
 ``MlxProfile`` (repo + defaults). Adding a model = adding a row to ``PROFILES``.
 
 This is the heavy real-model path (DESIGN §11.3): the deterministic middle-layer
@@ -53,13 +54,16 @@ class MlxProfile:
     default_params: dict[str, object] = field(default_factory=dict[str, object])
 
 
-# The four L0 backends (spec 02 §3.3). Spark is primary (best Chinese by ear so
-# far). Repo ids are L0 defaults, confirmed/tuned on the first hands-on run (§6).
+# The L0 backends (spec 02 §3.3). Spark is primary (best Chinese by ear so far).
+# VoxCPM2 (OpenBMB) was added post-L0 as a fifth blind-A/B candidate — 8bit is the
+# quality reference for the A/B (swap to VoxCPM2-4bit if real-time RTF forces it).
+# Repo ids are defaults, confirmed/tuned on the first hands-on run (§6).
 PROFILES: dict[str, MlxProfile] = {
     "spark": MlxProfile("mlx-community/Spark-TTS-0.5B-bf16"),
     "qwen3": MlxProfile("mlx-community/Qwen3-TTS-12Hz-0.6B-Base-bf16", voice="Chelsie"),
     "chatterbox": MlxProfile("mlx-community/chatterbox-fp16"),
     "dia": MlxProfile("mlx-community/Dia-1.6B-fp16"),
+    "voxcpm2": MlxProfile("mlx-community/VoxCPM2-8bit"),
 }
 
 

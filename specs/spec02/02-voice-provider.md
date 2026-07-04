@@ -2,7 +2,7 @@
 
 > **Status**: Implemented (sidecar + client) — real voice pending hands-on acceptance.
 >   - **steps 1–2 (done)**: standardized adapter boundary (`SynthesisRequest` §3.5), JSON-lines-over-stdio sidecar (`python -m murmur.voice.sidecar`) with a `TtsBackend` interface + no-model `FakeBackend`, and the supervising `SidecarVoiceProvider` (spawn/wait-for-ready, restart-on-death + retry, synth-timeout kills the proc to avoid pipe desync). `build_voice`: `stub` / `qwen3` / `sidecar-fake`; `--voice` flag. Verified by 63 unit tests + a real two-process end-to-end run on `sidecar-fake`. Acceptance §3 (kill→recover) and §4 (hot-swap) are covered by the `sidecar-fake` path.
->   - **step 3 (code in place, not yet verified)**: a **thin generic `MlxAudioBackend`** over `mlx-audio` (optional `tts-mlx` extra; lazy-imported) + a **profile registry** wiring four backends — `spark` (primary), `qwen3`, `chatterbox`, `dia` (§3.3). The deterministic layer (request→`generate` kwarg mapping, profile merge, backend selection) is unit-tested with a fake model; real model load/synth is a parametrized tagged integration test (`pytest -m integration`). Acceptance §5.1 ("sounds clearly human") / §5.2 ("warm") + the blind A/B among the four gate on a hands-on Mac run (install the extra, download models, judge by ear) — the agent cannot self-verify a voice.
+>   - **step 3 (code in place, not yet verified)**: a **thin generic `MlxAudioBackend`** over `mlx-audio` (optional `tts-mlx` extra; lazy-imported) + a **profile registry** wiring the backends — `spark` (primary), `qwen3`, `chatterbox`, `dia`, plus the post-L0 `voxcpm2` candidate (§3.3). The deterministic layer (request→`generate` kwarg mapping, profile merge, backend selection) is unit-tested with a fake model; real model load/synth is a parametrized tagged integration test (`pytest -m integration`). Acceptance §5.1 ("sounds clearly human") / §5.2 ("warm") + the blind A/B among the candidates gate on a hands-on Mac run (install the extra, download models, judge by ear) — the agent cannot self-verify a voice.
 > **Part**: The `VoiceProvider` implementation + the warm TTS sidecar + the first adapter. See master [`../DESIGN.md`](../DESIGN.md) §3.5 (TTS = soul, pluggable, warm sidecar), §4 (architecture).
 > **Milestone**: L0 (01+02 = the first audible version).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism and contracts, not final code.
@@ -60,9 +60,10 @@ contract:
 the payload tiny (text in, file path out) — do not stream audio bytes over the
 IPC in L0.
 
-### 3.3 Backends — a thin MLX layer over four models (Spark primary)
+### 3.3 Backends — a thin MLX layer over the candidate models (Spark primary)
 L0 wires **four** TTS backends, all on Apple Silicon via **`mlx-audio`** (the Mac
-hub for these models, master §3.5). Because all four share one runtime and one
+hub for these models, master §3.5); **VoxCPM2** (OpenBMB) was added post-L0 as a
+fifth blind-A/B candidate (§5). Because all of them share one runtime and one
 `load_model(repo) → model.generate(text, …)` API, they are served by a **single
 generic `MlxAudioBackend`** parameterized by a per-model **profile** — not one
 class per model. This is the "thin middle layer": the model-specific differences
@@ -74,6 +75,7 @@ collapse into a config profile + the `params` escape hatch (§3.5).
 | `qwen3` | `Qwen3-TTS-12Hz-0.6B-Base-bf16` | 0.6B | multi (zh) | 24 kHz; voice presets / voice-design. |
 | `chatterbox` | `chatterbox-fp16` | ~0.5B | multi (en-strong) | expressive, emotion-exaggeration control. |
 | `dia` | `Dia-1.6B-fp16` | 1.6B | en | ultra-real dialogue/emotion (English wildcard). |
+| `voxcpm2` | `VoxCPM2-8bit` | 2B | multi (zh) | tokenizer-free, 48 kHz native (confirmed); strong naturalness + long-form continuation + native streaming (`generate_streaming`). Heaviest — **measured RTF ≈ 1.6 on M3 Pro / 8bit** (whole-clip, warm), i.e. slower than real-time → a **quality-reference / pre-generated** candidate, **not** the real-time default. 8bit for the A/B; drop to `VoxCPM2-4bit` if RTF must improve. |
 
 - Repo ids are the L0 defaults and **confirmed on first hands-on run** (they can shift; §6). All are open-weight and local; licensing is per the **two-phase model strategy** (master §3.7) — any good open model is fair game during local experimentation, and the *distributable* voice is a paid/licensed choice made at distribution time (so e.g. Spark's CC-BY-NC is fine to experiment with now, not a commitment to ship).
 - The sidecar loads the selected model at `start()` and warms it with one throwaway synth so the first real `synthesize` is fast.
@@ -110,7 +112,7 @@ class SynthesisRequest:
 fields it supports and ignores the rest.
 
 **The thin middle layer — one generic backend + a profile registry.** Because
-the four L0 models (§3.3) all run on `mlx-audio` through the same
+the L0 models plus the VoxCPM2 candidate (§3.3) all run on `mlx-audio` through the same
 `load_model(repo) → model.generate(text, …)` API, they are **not** four classes
 — they are **one `MlxAudioBackend`** whose only per-model state is a **profile**:
 ```python
@@ -123,20 +125,20 @@ class MlxProfile:            # one row per model; adding a model = adding a row
 ```
 `MlxAudioBackend.synthesize` merges the profile defaults with the incoming
 `SynthesisRequest` (request wins), maps them to `generate()` kwargs, renders the
-whole clip (§3.4), and writes the wav. The registry (`spark`/`qwen3`/`chatterbox`/`dia`)
+whole clip (§3.4), and writes the wav. The registry (`spark`/`qwen3`/`chatterbox`/`dia`/`voxcpm2`)
 lives in one place; `build_backend(name)` looks up the profile and constructs the
 one backend. A future non-MLX model (e.g. a PyTorch CosyVoice2/Fish for
 pre-generation) would be a *separate* `TtsBackend` in its own process/env, but the
 core contract and IPC are still unchanged.
 
 - **Zero-shot voice cloning** (`reference_audio` / `reference_text`) stays a *designed-for axis*, **not wired in L0** — L0 uses preset voices. The slot exists so a cloning backend needs no contract change.
-- `config` (01 §3.1) selects the backend by name; the profile supplies the per-model defaults used (with the core's `synthesize(text, scenario=…)` call) to build the `SynthesisRequest`. The core contract and IPC are unchanged when swapping backends — proven by hot-swapping among the four.
+- `config` (01 §3.1) selects the backend by name; the profile supplies the per-model defaults used (with the core's `synthesize(text, scenario=…)` call) to build the `SynthesisRequest`. The core contract and IPC are unchanged when swapping backends — proven by hot-swapping among the candidates.
 
 ---
 
 ## 4. Dependencies
 - [`01-core-loop.md`](../spec01/01-core-loop.md) — owns the `VoiceProvider`/`AudioClip` contract this implements.
-- External (Mac): MLX + `mlx-audio` (one optional extra `tts-mlx` covers all four backends) + each model's weights (downloaded once from HF/ModelScope). No network **at inference time** (local models) — consistent with master §3.1 ("only network hops: inference + music"; TTS is local). The weight download is one-time setup, not a runtime hop.
+- External (Mac): MLX + `mlx-audio` (one optional extra `tts-mlx` covers all the MLX backends) + each model's weights (downloaded once from HF/ModelScope). No network **at inference time** (local models) — consistent with master §3.1 ("only network hops: inference + music"; TTS is local). The weight download is one-time setup, not a runtime hop.
 
 ---
 
@@ -144,8 +146,8 @@ core contract and IPC are still unchanged.
 1. With the sidecar started, `synthesize("…")` returns an `AudioClip` the core can play, and the speech sounds **clearly human** (not robotic `say`-tier) — the L0 bar for "soul."
 2. The model is **warm**: the second and later `synthesize` calls do **not** reload the model; per-call latency is small enough that the talk loop feels live on the target Mac.
 3. Killing the sidecar process does **not** crash the core; the core reports the failure and recovers (restart) on the next call.
-4. Switching the configured backend name (`spark`/`qwen3`/`chatterbox`/`dia`) changes the voice **without any change to spec-01 code** (proves the hot-swap seam) — the thin `MlxAudioBackend` + profile registry serve all four.
-5. **Blind A/B among the four** (master §10.3 eval track): render the same Chinese line through each and pick the primary by ear. `spark` leads going in; watch its 16 kHz output against `qwen3`'s 24 kHz.
+4. Switching the configured backend name (`spark`/`qwen3`/`chatterbox`/`dia`/`voxcpm2`) changes the voice **without any change to spec-01 code** (proves the hot-swap seam) — the thin `MlxAudioBackend` + profile registry serve them all.
+5. **Blind A/B among the candidates** (master §10.3 eval track): render the same Chinese line through each and pick the primary by ear. `spark` leads going in; watch its 16 kHz output against `qwen3`'s 24 kHz and `voxcpm2`'s 48 kHz (VoxCPM2 is the quality contender but ~3× slower — judge whether its naturalness earns the latency, or only for pre-generated segments).
 
 ---
 
@@ -154,3 +156,5 @@ core contract and IPC are still unchanged.
 - Audio handoff: file-path (chosen for L0) vs shared-memory/streamed PCM (lower latency, needed if/when streaming TTS lands in spec 04).
 - Exact mlx-community repo ids + per-model `generate` kwargs (voice presets, Dia's `[S1]/[S2]` speaker tags, Chatterbox `exaggeration`/`cfg`, Spark gender/pitch): the §3.3 repos are best-effort defaults, confirmed/tuned on the first hands-on run. Each maps onto `SynthesisRequest` fields + `params`; the profile registry absorbs the per-model differences.
 - Exact Qwen3-TTS voice/preset selection and any Chinese/English voice mapping — deferred to first hands-on run.
+- **VoxCPM2 quant**: candidate wired at `mlx-community/VoxCPM2-8bit` (~3.2 GB disk, ~4–5 GB resident on the target 18 GB Mac). 8bit is deliberate — the blind A/B should hear the model near full quality; `VoxCPM2-4bit` (~2.3 GB) is the fallback only if real-time RTF on M3 Pro forces it. Resolved for now; revisit after the hands-on RTF check.
+- ~~**VoxCPM2 mlx-audio load risk** ([Blaizzy/mlx-audio#649](https://github.com/Blaizzy/mlx-audio/issues/649))~~ **Resolved by smoke**: the installed `mlx-audio` loads `voxcpm2` fine (only a benign `transformers` model_type warning) and synthesizes a real 48 kHz wav through the standard seam — verified via a throwaway `scratch/` smoke, and covered on-demand by `test_mlx_backend_renders_a_real_nonempty_wav[voxcpm2]` (`pytest -m integration`). Re-check only if the pinned `mlx-audio` version changes.

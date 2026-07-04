@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import pytest
 
+from murmur.app import _parse_args
 from murmur.brain import ClaudeBrain, StubBrain, build_brain
 from murmur.config import Config
 from murmur.voice import build_voice
+from murmur.voice.mlx_backend import PROFILES
 from murmur.voice.stub import StubVoiceProvider
 
 
@@ -38,3 +40,11 @@ def test_build_brain_selects_impl():
 def test_build_brain_unknown_raises():
     with pytest.raises(ValueError):
         build_brain("nope", model="m")
+
+
+def test_cli_voice_flag_accepts_every_registered_voice():
+    # The --voice choices must stay derived from the PROFILES registry: adding a
+    # backend row (regression: voxcpm2) must not leave the CLI rejecting it while
+    # build_voice() accepts it. Every registry name + "stub" must parse.
+    for name in ("stub", *PROFILES):
+        assert _parse_args(["--voice", name]).voice == name
