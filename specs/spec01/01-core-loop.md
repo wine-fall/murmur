@@ -149,7 +149,7 @@ Two concurrent tasks over a shared state, single event loop:
 - These two bound the talk rate so testing doesn't drain the subscription. Full economy (batch/cache/tier/gate) is spec 08.
 
 ### 3.5 Audio playback (L0)
-- `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`.
+- `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`. **Superseded (spec 03-02)**: the mixing `AudioEngine` replaced this player in the app; `player_cmd`/`--player` were retired (`ffmpeg_cmd` is the engine's only external binary). `AudioPlayer` remains in-tree as the `Player` seam's reference impl.
 - No mixing/ducking in L0 (only one talk clip plays at a time). Ducking arrives with music (spec 03-02).
 
 ### 3.6 Stop

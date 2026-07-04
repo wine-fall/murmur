@@ -77,15 +77,12 @@ class MusicProgrammer:
         source = result.get("source")
         if not source:
             return None
-
-        def _opt(key: str) -> str | None:
-            value = result.get(key)
-            return str(value) if value else None
-
+        # title/artist/announce were already normalized to str-or-None by the
+        # terminal tool (SubmitPickTool) — trust its result shape.
         clip = AudioClip(
             source=str(source),
             kind=str(result.get("kind", "music")),
-            title=_opt("title"),
-            artist=_opt("artist"),
+            title=result.get("title"),
+            artist=result.get("artist"),
         )
-        return TrackPick(clip=clip, announce=_opt("announce"))
+        return TrackPick(clip=clip, announce=result.get("announce"))

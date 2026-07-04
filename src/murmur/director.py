@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+from typing import Any, Coroutine
 
 from .audio_player import Player
 from .brain import Brain
@@ -130,35 +131,48 @@ class Director:
 
     async def _play_music_segment(self) -> bool:
         """Find, announce, and play one track (spec 03-02 §3.5 music branch).
-        Returns False when nothing resolves (the caller falls back to talk)."""
+        Returns False when nothing resolves or the machinery fails (the caller
+        falls back to talk — a music error must never crash the radio)."""
         music, mixing = self._music, self._mixing
         assert music is not None and mixing is not None
         ctx = MusicContext(
             persona=self._persona,
             situation=build_music_situation(self._recent_lines()),
         )
-        pick = await music.next_track(ctx)
-        if pick is None:
+        try:
+            pick = await music.next_track(ctx)
+            if pick is None:
+                return False
+
+            announce_clip: AudioClip | None = None
+            if pick.announce:
+                # Synthesized before the song starts so the intro is ready to
+                # ride the ducked head with no gap.
+                announce_clip = await self._voice.synthesize(pick.announce)
+
+            handle = await mixing.play_music(pick.clip)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._cli.info(f"music segment failed ({exc}); back to talk.")
             return False
-
-        announce_clip: AudioClip | None = None
-        if pick.announce:
-            # Synthesized before the song starts so the intro is ready to ride
-            # the ducked head with no gap.
-            announce_clip = await self._voice.synthesize(pick.announce)
-
-        handle = await mixing.play_music(pick.clip)
         title = pick.clip.title or "music"
         artist = f" — {pick.clip.artist}" if pick.clip.artist else ""
         self._cli.info(f"now playing: {title}{artist}")
+
+        # The announce is an on-air spoken segment like any other: it races
+        # the next typed line (user turns take priority, spec 01) — cancelling
+        # it only cuts the intro, the song underneath keeps playing.
+        line: str | None = None
         if pick.announce and announce_clip is not None:
             self._cli.on_radio_segment(pick.announce)
-            await mixing.play(announce_clip)  # auto-ducks the song head
+            line = await self._play_interruptible(announce_clip)
             self._memory.record(Turn("radio", pick.announce))
 
         # Duck, not stop: lines during the song get replies OVER it; the song
         # is stopped only by /quit (or shutdown cancellation).
-        line = await self._race_song(handle)
+        if line is None:
+            line = await self._race_song(handle)
         while line is not None and not self._quit:
             line = await self._handle_user(line)
             if line is None and not self._quit:
@@ -185,53 +199,40 @@ class Director:
         self._memory.record(Turn("radio", reply))
         return interrupting
 
-    async def _play_interruptible(self, clip: AudioClip) -> str | None:
-        """Play ``clip``, racing it against the next typed line. Returns the
-        interrupting line (playback stopped), or None if playback finished.
-        ``stop()`` targets the voice channel only, so over a music segment
-        this cancels the reply, never the song (spec 03-02 §3.5)."""
-        play_task = asyncio.ensure_future(self._player.play(clip))
+    async def _race_line(
+        self, primary: Coroutine[Any, Any, object], *, stop_player: bool = False
+    ) -> str | None:
+        """The one race protocol: run ``primary`` against the next typed line.
+        Returns the line if it arrived first (with ``stop_player`` cancelling
+        the voice channel — the interjection), or None when ``primary`` ends."""
+        primary_task = asyncio.ensure_future(primary)
         get_task = asyncio.ensure_future(self._cli.next_line())
         try:
             await asyncio.wait(
-                {play_task, get_task}, return_when=asyncio.FIRST_COMPLETED
+                {primary_task, get_task}, return_when=asyncio.FIRST_COMPLETED
             )
             if get_task.done() and not get_task.cancelled():
-                await self._player.stop()  # cancel current playback (interjection)
+                if stop_player:
+                    await self._player.stop()
                 return get_task.result()
             return None
         finally:
-            await _settle(play_task, get_task)
+            await _settle(primary_task, get_task)
+
+    async def _play_interruptible(self, clip: AudioClip) -> str | None:
+        """Play ``clip``, racing it against the next typed line. ``stop()``
+        targets the voice channel only, so over a music segment this cancels
+        the reply/announce, never the song (spec 03-02 §3.5)."""
+        return await self._race_line(self._player.play(clip), stop_player=True)
 
     async def _race_song(self, handle: MusicHandle) -> str | None:
-        """Await the song's natural end, racing it against the next typed
-        line. Returns the line (song keeps playing), or None when it ended."""
-        wait_task = asyncio.ensure_future(handle.wait())
-        get_task = asyncio.ensure_future(self._cli.next_line())
-        try:
-            await asyncio.wait(
-                {wait_task, get_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if get_task.done() and not get_task.cancelled():
-                return get_task.result()
-            return None
-        finally:
-            await _settle(wait_task, get_task)
+        """Await the song's natural end vs the next typed line. Returns the
+        line (song keeps playing), or None when it ended."""
+        return await self._race_line(handle.wait())
 
     async def _sleep_interruptible(self, seconds: float) -> str | None:
-        """Wait the inter-segment gap, racing it against the next typed line.
-        Returns the interrupting line, or None if the gap elapsed."""
-        sleep_task: asyncio.Task[None] = asyncio.ensure_future(asyncio.sleep(seconds))
-        get_task = asyncio.ensure_future(self._cli.next_line())
-        try:
-            await asyncio.wait(
-                {sleep_task, get_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if get_task.done() and not get_task.cancelled():
-                return get_task.result()
-            return None
-        finally:
-            await _settle(sleep_task, get_task)
+        """Wait the inter-segment gap vs the next typed line."""
+        return await self._race_line(asyncio.sleep(seconds))
 
 
 async def _settle(*tasks: asyncio.Task[object]) -> None:

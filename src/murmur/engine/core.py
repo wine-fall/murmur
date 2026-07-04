@@ -229,6 +229,7 @@ class AudioEngine:
         duck_target: float = DUCK_TARGET,
         ramp_s: float = RAMP_S,
         music_buffer_s: float = 4.0,
+        voice_timeout_margin_s: float = 5.0,
     ) -> None:
         self._decoder_factory = decoder_factory
         self._voice_loader = voice_loader
@@ -238,7 +239,12 @@ class AudioEngine:
         self._blocksize = blocksize
         self._duck_target = duck_target
         self._ramp_s = ramp_s
+        self._voice_timeout_margin_s = voice_timeout_margin_s
         self._sink: Sink | None = None
+        # Scratch buffers reused by render() — the audio callback must not
+        # allocate per block (an allocator stall there is an audible dropout).
+        self._music_buf: Any = np.zeros((blocksize, channels), dtype=np.float32)
+        self._voice_buf: Any = np.zeros((blocksize, channels), dtype=np.float32)
 
         self._env_lock = threading.Lock()
         self._envelope = GainEnvelope(samplerate=samplerate, ramp_s=ramp_s)
@@ -272,10 +278,14 @@ class AudioEngine:
             self._voice_notify = _notify
         # Mirror spec-01 AudioPlayer: the wait runs as an inner task so stop()
         # (the interjection) can cancel it without cancelling play()'s caller.
+        # The timeout is a dead-sink guard: if the output stream stops pulling
+        # blocks mid-clip (device gone), the radio must not freeze forever.
+        timeout = 2.0 * len(pcm) / self._samplerate + self._voice_timeout_margin_s
         waiter: asyncio.Task[bool] = asyncio.ensure_future(done.wait())
         self._voice_task = waiter
         try:
-            await waiter
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(waiter, timeout)
         finally:
             self._voice_task = None
             with self._voice_lock:
@@ -297,12 +307,17 @@ class AudioEngine:
     async def play_music(self, clip: AudioClip) -> MusicHandle:
         """Start a music source; non-blocking. Returns its handle."""
         self._ensure_sink()
-        if self._mixed is not None:
-            await self._mixed.stop()
+        # One music source at a time (sole audio authority) — stop whatever is
+        # live, our own MixedHandle or an adopted external one.
+        previous = self._mixed if self._mixed is not None else self._music
+        if previous is not None:
+            await previous.stop()
+            self._music = None
         decoder = await asyncio.to_thread(self._decoder_factory, clip.source)
+        with self._voice_lock:
+            voice_live = self._voice_pcm is not None
         with self._env_lock:
             # Fresh track, fresh envelope; born ducked if a voice is on air.
-            voice_live = self._voice_pcm is not None
             initial = self._duck_target if voice_live else FULL_GAIN
             self._envelope = GainEnvelope(
                 samplerate=self._samplerate, ramp_s=self._ramp_s, initial=initial
@@ -358,7 +373,11 @@ class AudioEngine:
     # -- the mixing callback (audio thread; tests call it directly) -----------
     def render(self, frames: int) -> Any:
         """Produce the next mixed block. Starved buffers pad with silence."""
-        music = np.zeros((frames, self._channels), dtype=np.float32)
+        if len(self._music_buf) != frames:  # sink blocksize changed — rare
+            self._music_buf = np.zeros((frames, self._channels), dtype=np.float32)
+            self._voice_buf = np.zeros((frames, self._channels), dtype=np.float32)
+        music = self._music_buf
+        music.fill(0.0)
         self._music_ring.read_into(music, frames)
         mixed = self._mixed
         if mixed is not None and mixed.drained():
@@ -367,7 +386,8 @@ class AudioEngine:
         with self._env_lock:
             gains = self._envelope.next_block(frames)
 
-        voice = np.zeros((frames, self._channels), dtype=np.float32)
+        voice = self._voice_buf
+        voice.fill(0.0)
         with self._voice_lock:
             pcm = self._voice_pcm
             if pcm is not None:

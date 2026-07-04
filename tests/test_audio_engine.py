@@ -171,6 +171,47 @@ def test_auto_duck_dispatches_through_the_music_handle_protocol():
     asyncio.run(go())
 
 
+def test_play_music_stops_an_adopted_external_handle_first():
+    """Sole audio authority: starting our own track silences whatever external
+    source was adopted for duck dispatch (review fix)."""
+
+    class FakeControlledHandle:
+        def __init__(self) -> None:
+            self.stops = 0
+
+        async def duck(self) -> None: ...
+
+        async def unduck(self) -> None: ...
+
+        async def stop(self) -> None:
+            self.stops += 1
+
+        async def wait(self) -> None: ...
+
+    async def go():
+        eng, _ = _engine(FakeDecoder(0.5, 400))
+        external = FakeControlledHandle()
+        eng.adopt_handle(external)
+        await eng.play_music(_music_clip())
+        assert external.stops == 1
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
+def test_voice_play_does_not_hang_when_the_sink_dies():
+    """Dead-sink guard (review fix): if nothing pumps render(), play()
+    returns after its timeout instead of freezing the radio forever."""
+
+    async def go():
+        eng, _ = _engine(voice_frames=160)  # 0.02 s of voice at 8 kHz
+        eng._voice_timeout_margin_s = 0.05  # tight margin for the test
+        await asyncio.wait_for(eng.play(_talk_clip()), 1.0)  # no pumping at all
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
 def test_stop_cancels_the_voice_channel_only():
     async def go():
         eng, _ = _engine(FakeDecoder(0.5, 100_000), voice_frames=100_000)

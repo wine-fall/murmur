@@ -115,7 +115,7 @@ async def _run_setup(config: Config) -> None:
 
     cli = CliHost()
     cli.start()  # spawn the stdin reader so the guide's confirms can be answered
-    await run_music_setup(cli, ClaudeBrain(config.model))
+    await run_music_setup(cli, ClaudeBrain(config.model), ytdlp=config.ytdlp_cmd)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
