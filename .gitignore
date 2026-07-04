@@ -13,3 +13,6 @@ venv/
 .mypy_cache/
 .ruff_cache/
 .pytest_cache/
+
+# Throwaway smoke/probe scripts (murmur-smoke skill) — never committed
+scratch/
