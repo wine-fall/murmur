@@ -151,3 +151,29 @@ class FakeMusicBrain:
             if out.get("ok"):
                 return out
         return None
+
+
+class FakeGuideBrain:
+    """Scripted GuideCapable (spec 03-03): records run_guide calls, streams a
+    canned reply. Stand-in for the real repair loop — no SDK, no shell."""
+
+    def __init__(self, reply: str = "done") -> None:
+        self._reply = reply
+        self.calls = 0
+
+    async def run_guide(
+        self,
+        system_prompt: str,
+        prompt: str,
+        *,
+        model: str,
+        max_turns: int,
+        permission_mode: str = "default",
+        can_use_tool: Any = None,
+        on_text: Any = None,
+        next_user_input: Any = None,
+    ) -> str:
+        self.calls += 1
+        if on_text is not None:
+            on_text(self._reply)
+        return self._reply

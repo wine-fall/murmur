@@ -10,6 +10,7 @@ and music is only the first capability to ride the seam (spec 03-01).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from typing import Any, Protocol, runtime_checkable
 
 
@@ -56,4 +57,33 @@ class Harness(Protocol):
         result is returned), or ``max_turns`` is hit (returns None). ``tools`` is
         the only tool surface exposed. Content-agnostic: prompt text is already
         rendered (spec 03-01 §2.1/§2.5 termination rule)."""
+        ...
+
+
+@runtime_checkable
+class GuideCapable(Protocol):
+    """The setup/repair capability: harness the native Claude Code agent with
+    its built-in tools (Bash/Read/Write/…) to diagnose and fix the user's
+    environment. Distinct from ``Harness`` (find-music has no built-in tools) —
+    the real ``ClaudeBrain`` implements both; each consumer depends on the one
+    it needs (interface segregation)."""
+
+    async def run_guide(
+        self,
+        system_prompt: str,
+        prompt: str,
+        *,
+        model: str,
+        max_turns: int,
+        permission_mode: str = "default",
+        can_use_tool: Any = None,
+        on_text: Callable[[str], None] | None = None,
+        next_user_input: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> str:
+        """Run a multi-turn diagnose-and-fix conversation and return the final
+        plain-language explanation. Built-in system tools are enabled (the
+        bounded surface a repair task needs); ``permission_mode="default"`` keeps
+        the SDK's step-by-step confirmation on. ``can_use_tool`` gates each
+        action; ``on_text`` streams the agent's text; ``next_user_input`` supplies
+        the user's natural-language reply after each agent turn (None ends it)."""
         ...

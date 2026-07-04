@@ -19,14 +19,20 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Awaitable, Callable
 from itertools import cycle
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from .contracts import ContextPack
 from .prompts import build_next_talk_prompt, build_respond_prompt
 
 if TYPE_CHECKING:
-    from claude_agent_sdk import ClaudeAgentOptions, McpSdkServerConfig
+    from claude_agent_sdk import (
+        CanUseTool,
+        ClaudeAgentOptions,
+        McpSdkServerConfig,
+        PermissionMode,
+    )
 
     from .harness import BrainTool
 
@@ -206,6 +212,65 @@ class ClaudeBrain:
                 await aclose()
         return captured
 
+    async def run_guide(
+        self,
+        system_prompt: str,
+        prompt: str,
+        *,
+        model: str,
+        max_turns: int,
+        permission_mode: str = "default",
+        can_use_tool: CanUseTool | None = None,
+        on_text: Callable[[str], None] | None = None,
+        next_user_input: Callable[[], Awaitable[str | None]] | None = None,
+    ) -> str:
+        """Harness the native Claude Code agent for an interactive setup/repair
+        task: diagnose why something in the user's environment is broken and,
+        with the user's consent, fix it — using Claude Code's **built-in** tools
+        (Bash/Read/Write/…). Same isolation as run_task (no user CLAUDE.md /
+        MCP), but real system tools are ENABLED — the bounded surface a repair
+        task needs. Returns the final assistant text (plain-language explanation).
+
+        Multi-turn: uses ``ClaudeSDKClient`` so the conversation stays open — the
+        agent's text streams via ``on_text``; after each of its turns we pull the
+        user's next natural-language reply via ``next_user_input`` and send it,
+        until the user ends it (reply is None). ``can_use_tool`` still gates each
+        concrete action (``permission_mode="default"``); we never
+        ``bypassPermissions`` in a shipped build.
+        """
+        from claude_agent_sdk import (  # lazy: keep the stub/test path SDK-free
+            AssistantMessage,
+            ClaudeSDKClient,
+            TextBlock,
+        )
+
+        options = _build_guide_options(
+            system_prompt, model, max_turns, permission_mode, can_use_tool
+        )
+        debug = os.environ.get("MURMUR_HARNESS_DEBUG")
+        parts: list[str] = []
+        async with ClaudeSDKClient(options=options) as client:
+            await client.query(prompt)
+            while True:
+                async for message in client.receive_response():
+                    if debug:
+                        print(f"[guide] {type(message).__name__}: {message!r}"[:800])
+                    if isinstance(message, AssistantMessage):
+                        for block in message.content:
+                            if isinstance(block, TextBlock) and block.text:
+                                parts.append(block.text)
+                                if on_text is not None:
+                                    on_text(block.text)  # stream out as it arrives
+                # The agent's turn ended. Pull the user's next reply (natural
+                # language) and continue, or stop if there is no more input.
+                if next_user_input is None:
+                    break
+                reply = await next_user_input()
+                if reply is None:
+                    break
+                await client.query(reply)
+        return "\n".join(parts).strip()
+
 
 def _to_mcp_result(out: dict[str, Any]) -> dict[str, Any]:
     """Wrap a ``BrainTool`` result in the MCP tool-result shape the SDK requires.
@@ -243,6 +308,39 @@ def _build_agentic_options(
         skills=[],  # no skills
         max_turns=max_turns,
         extra_args={"disable-slash-commands": None},  # no built-in slash commands
+    )
+
+
+# Built-in Claude Code tools the guide harness may use to diagnose + repair the
+# environment. A curated set (no network fetch tools) — the bounded surface a
+# setup/repair task needs, in contrast to the tool-less find-music task.
+_GUIDE_BUILTINS = ["Bash", "Read", "Write", "Edit", "Glob", "Grep"]
+
+
+def _build_guide_options(
+    system_prompt: str,
+    model: str,
+    max_turns: int,
+    permission_mode: str,
+    can_use_tool: CanUseTool | None = None,
+) -> ClaudeAgentOptions:
+    """Options for the guide harness (spec 03-03). Same isolation as
+    the find-music task (setting_sources=[], strict_mcp_config=True, no user
+    skills/MCP), but built-in system tools are ENABLED and allowlisted — the
+    bounded surface a repair task legitimately needs. ``can_use_tool`` is the
+    permission callback that routes each pre-action ask to the user."""
+    from claude_agent_sdk import ClaudeAgentOptions
+
+    return ClaudeAgentOptions(
+        system_prompt=system_prompt,
+        model=model,
+        setting_sources=[],  # ignore user CLAUDE.md / project / local settings
+        strict_mcp_config=True,  # ignore inherited/discovered MCP
+        allowed_tools=list(_GUIDE_BUILTINS),  # curated built-ins; nothing else
+        permission_mode=cast("PermissionMode", permission_mode),
+        can_use_tool=can_use_tool,
+        max_turns=max_turns,
+        extra_args={"disable-slash-commands": None},
     )
 
 

@@ -59,6 +59,22 @@ def test_agentic_options_are_isolated_with_a_tool_allowlist():
     assert opts.system_prompt == "PERSONA"
 
 
+def test_guide_options_enable_curated_builtins_and_stay_isolated():
+    from murmur.brain import _GUIDE_BUILTINS, _build_guide_options
+
+    opts = _build_guide_options("P", "claude-opus-4-8", 30, "default")
+    # Same isolation as the find-music task...
+    assert opts.setting_sources == []
+    assert opts.strict_mcp_config is True
+    # ...but built-in system tools are ENABLED and allowlisted (the repair
+    # task's bounded surface), unlike find-music's tools=[].
+    assert opts.allowed_tools == _GUIDE_BUILTINS
+    assert "Bash" in opts.allowed_tools
+    # "default" is the SDK's step-by-step-confirmation mode (never bypassed).
+    assert opts.permission_mode == "default"
+    assert opts.model == "claude-opus-4-8"
+
+
 @pytest.mark.integration
 def test_claude_run_task_finds_a_track_end_to_end():
     """Live smoke (needs a Claude login): the harnessed model calls search_music

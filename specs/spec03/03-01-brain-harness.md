@@ -168,7 +168,7 @@ This mechanism is what 03-01 builds and tests; *which* fields ride in `situation
 ---
 
 ## 6. Open questions
-- **Context *content* (deferred, a later discussion):** which fields ride in `MusicContext.situation` (recent turns? time-of-day? anti-repeat set? explicit intent?). 03-01 builds only the insertion *mechanism* (§2.5); the content plugs into `render_context` later.
+- **Context *content* — owned by [`03-02`](03-02-ducking.md).** 03-01 builds only the insertion *mechanism* (§2.5). *What* rides in `MusicContext.situation`, and the logic that assembles it, is decided and first populated in 03-02 (where the Director builds the context and calls `next_track`); richer fields arrive as their sources land (recent-window / anti-repeat ledger from spec 05, time-of-day / pacing from spec 07).
 - **`max_turns` / model:** the bound on the search loop, and confirming the exact Haiku id, when wiring the real brain.
 - **Resolve-failure fallback:** how many `submit_pick` retries before `next_track` gives up and returns None. Proposal: bounded by `max_turns`.
 - **Settled (recorded so they are not re-asked):** selection heuristics live in the task-instruction prompt, not a formal skill; a separate `MusicContext` (not an extension of the tool-less `ContextPack`); resolve latency is accepted as a small gap (real look-ahead is spec 04).
