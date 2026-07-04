@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .music import MUSIC_CONTEXT_HEADER, build_find_music_instruction
 from .talk import build_next_talk_prompt, build_respond_prompt
 
 # The static persona System Prompt seed (L0). spec 06 will generate/evolve
@@ -23,5 +24,7 @@ DEFAULT_PERSONA_PATH = Path(__file__).resolve().parent / "persona_seed.md"
 __all__ = [
     "build_next_talk_prompt",
     "build_respond_prompt",
+    "build_find_music_instruction",
+    "MUSIC_CONTEXT_HEADER",
     "DEFAULT_PERSONA_PATH",
 ]

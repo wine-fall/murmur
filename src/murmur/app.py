@@ -64,6 +64,18 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         cli.info("stopped cleanly.")
 
 
+async def _run_setup(config: Config) -> None:
+    """Run the music (yt-dlp) preflight + guide harness, routed through the CLI
+    Host (spec 03-03). Explicit entry for now (``--setup-music``); the auto
+    startup-preflight + in-conversation trigger is a later UX refinement."""
+    from .brain import ClaudeBrain
+    from .setup import run_music_setup
+
+    cli = CliHost()
+    cli.start()  # spawn the stdin reader so the guide's confirms can be answered
+    await run_music_setup(cli, ClaudeBrain(config.model))
+
+
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="murmur", description="personal companion radio (L0)"
@@ -111,6 +123,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         metavar="CMD",
         help="external audio player binary (default: afplay)",
     )
+    p.add_argument(
+        "--setup-music",
+        action="store_true",
+        help="run the yt-dlp music preflight + setup/repair guide, then exit (spec 03-03)",
+    )
     return p.parse_args(argv)
 
 
@@ -127,6 +144,13 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, voice_provider=args.voice)
     if args.player is not None:
         config = replace(config, player_cmd=args.player)
+
+    if args.setup_music:
+        try:
+            asyncio.run(_run_setup(config))
+        except KeyboardInterrupt:
+            pass
+        return
 
     try:
         asyncio.run(_run(config, max_segments=args.max_segments))

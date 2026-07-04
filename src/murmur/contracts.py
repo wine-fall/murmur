@@ -16,8 +16,8 @@ params / new methods) but must not break them.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from dataclasses import dataclass, field
+from typing import Any, Protocol, runtime_checkable
 
 # --------------------------------------------------------------------------- #
 # 2.1 Data types
@@ -84,15 +84,46 @@ class VoiceProvider(Protocol):
 
 
 # --------------------------------------------------------------------------- #
-# 2.3 MusicProvider — declared only; implemented in spec 03-01
+# 2.3 MusicProvider — declared here; implemented in spec 03-01, widened to
+#     search + resolve (selection is Claude-driven). yt-dlp is the default
+#     adapter; musicdl is an optional user-installed one behind the same seam.
 # --------------------------------------------------------------------------- #
+
+
+def _empty_extra() -> dict[str, Any]:
+    """Typed default factory for ``TrackCandidate.extra`` (keeps pyright strict
+    happy — a bare ``dict`` factory infers ``dict[Unknown, Unknown]``)."""
+    return {}
+
+
+@dataclass(frozen=True)
+class TrackCandidate:
+    """A search hit the brain judges (spec 03-01 §2.2).
+
+    Carries enough signal to reject junk (hour-long loops, low-quality
+    re-uploads) and prefer official audio. ``ref`` is the opaque provider handle
+    (URL / id) passed back to ``MusicProvider.resolve``.
+    """
+
+    ref: str
+    title: str
+    uploader: str
+    duration_s: int
+    extra: dict[str, Any] = field(
+        default_factory=_empty_extra
+    )  # e.g. {"view_count": ...}
 
 
 @runtime_checkable
 class MusicProvider(Protocol):
     async def start(self) -> None: ...
 
-    async def resolve(self, query: str) -> AudioClip:  # AudioClip(kind="music")
+    async def search(self, query: str, *, limit: int = 5) -> list[TrackCandidate]:
+        """Search the source for candidate tracks (metadata only, no download)."""
+        ...
+
+    async def resolve(self, ref: str) -> AudioClip:  # AudioClip(kind="music")
+        """Resolve a candidate's ``ref`` to a playable clip (stream URL or file)."""
         ...
 
     async def aclose(self) -> None: ...

@@ -14,14 +14,16 @@
 2. **Ducking (MVP = gain envelope).** When a voice clip plays over music, the music channel's gain ramps down (≈1.0 → ≈0.3 over ~300 ms), holds, and ramps back when the voice ends. This is the DJ-over-music radio feel.
 3. **Interjection = duck, not stop.** A typed interjection during a song **ducks** the music and plays the reply **over** it (replaces the spec-01 hard-stop for music segments); the song resumes at full gain afterward.
 4. **A source-agnostic seam** — ducking is a property of an abstract **music-playback handle**, with two prospective mechanisms behind one `duck()` interface (master "raw-audio vs black-box player" analysis): the **PCM/own-mixer** path (this MVP) and a future **external-player volume-control** path (seam only). So "ducking applies regardless of source" holds at the architecture level.
-5. **Integration:** music pulled by [`03-01`](03-01-brain-harness.md) now flows through this engine.
+5. **Music playback + Director talk↔music scheduling + optional DJ "up next" announce** (moved here from 03-01): the local-policy cadence that decides when a music segment plays, the wiring that plays the tracks 03-01 pulls, and an optional short spoken intro over the track's start. Music actually reaching the speakers begins here.
+6. **Integration:** the `AudioClip`s pulled by [`03-01`](03-01-brain-harness.md)'s `MusicProgrammer.next_track` flow through this engine.
+7. **Assemble the music context (first real `situation`).** When the Director schedules a music segment it builds the `MusicContext` (spec 03-01 §2.4) — persona + a `situation` string — and calls `next_track`. This is the first place `situation` is populated with real content (03-01 declared the field + insertion mechanism but wrote nothing to it). MVP fills it with the **L1-available** signals (session `recent` turns + the Director's intent); richer content (recent-window / anti-repeat ledger from spec 05, time-of-day / pacing from spec 07) enriches it as those land. What makes a *good* context is an open question (§6).
 
 ### Out of scope (explicit non-goals)
 - **Crossfade** and **true sidechain-compression** ducking — MVP is a fixed gain envelope. Because we own the sample-level mixer, both are later **free upgrades** (the voice is already a PCM buffer we hold); not built here.
 - **The external-player (black-box) duck mechanism** (Spotify app / Apple Music via AppleScript volume) — the **seam** is defined so it can slot in, but **no implementation** here. MVP implements only the PCM/own-mixer path.
 - **No-dead-air look-ahead / pre-generation buffer** → spec 04. This engine plays what it is handed; it does not pre-resolve the next segment.
 - **skip command** — deferred (not in L1).
-- **Music search / acquisition / scheduling** → [`03-01`](03-01-brain-harness.md).
+- **Music search / acquisition (find + pull)** → [`03-01`](03-01-brain-harness.md). (Scheduling + playback + announce are now owned *here* — see Delivers #5.)
 
 ---
 
@@ -133,3 +135,4 @@ So `_play_interruptible`/`_handle_user` grow a **music branch** ("await song-don
 - **Underrun policy:** output silence vs hold-last-block on a network stall.
 - **Inter-segment gap ownership:** does the engine own the paced gap or does the Director keep it (spec 01)? Proposal: Director keeps it; the engine only mixes/plays.
 - **Player binary for 03-01 interim:** 03-01 plays stream URLs via `ffplay`/`mpv` before this engine exists; confirm the handoff so config stays coherent when this engine takes over music playback.
+- **What makes a *reasonable* music context** (the content of `MusicContext.situation`, inherited from 03-01 §6): which signals actually improve picks, how to phrase them, and how much to include (token cost). MVP: session `recent` turns + the Director's intent; revisit as spec 05 (ledger/recent-window) and spec 07 (time-of-day/pacing) add sources.

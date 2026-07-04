@@ -35,6 +35,8 @@ class Host(Protocol):
 
     def on_user_line(self, text: str) -> None: ...
 
+    def info(self, message: str) -> None: ...
+
 
 class CliHost:
     def __init__(self) -> None:
