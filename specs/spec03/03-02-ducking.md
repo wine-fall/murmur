@@ -1,6 +1,6 @@
 # spec/03-02 · ducking — a source-agnostic mixing audio engine
 
-> **Status**: In build. Build-time decisions settled and recorded (cadence seam with switchable modes, in-scope announce via the pick task, extensible startup checks, default-on music — see §6 *Settled*).
+> **Status**: **Code-implemented; human (sensory) acceptance pending.** Unit suite green (mixer math, engine behavior on fakes, cadence modes, Director music branch, startup checks); integration tests (real ffmpeg decode, real sounddevice) pass locally; real-seam smoke verified (real yt-dlp stream through the engine with an audible duck + clean teardown; real Haiku pick task returns title/artist/announce). Remaining: the by-ear checklist (§5.1/§5.3 sensory half — smoothness/"sounds like radio") and envelope tuning if the ear disagrees with the defaults.
 > **Part**: Replace the spec-01 afplay-based `AudioPlayer` with a **mixing audio engine** that plays music and voice **simultaneously** and **ducks** the music under the voice. See master [`../DESIGN.md`](../DESIGN.md) §4 (AudioPlayer = sole audio authority, duck/stop), §3.5 (voice is the soul), §10 (build order).
 > **Milestone**: L1 (radio feel) — the second half, after [`03-01-brain-harness.md`](03-01-brain-harness.md). 03-01 makes the radio **find and play real songs** (sequentially); this spec makes talk play **over ducked music** and makes a typed interjection **duck** the song instead of hard-stopping it — the last piece of the radio feel.
 > **Conventions**: English; written for a coding agent. Design-level. No CJK in source (master §0).
@@ -52,9 +52,15 @@ class AudioEngine(Player):
     (spec 01 semantics)."""
 
     async def stop(self) -> None: ...
-    """Stop whatever the Director's cancel path targets (spec 01 interjection /
-    shutdown). For music: stopping the current music handle. Cancellation
-    paths (stop() vs cancelling play()) mirror spec 01's AudioPlayer."""
+    """Cancel current VOICE playback only (the spec-01 interjection signal) —
+    a reply-over-music interrupted by the next typed line must never kill the
+    song. Music stops via its handle (`MusicHandle.stop()`; the Director does
+    this on /quit) or `aclose()`. Cancellation paths (stop() vs cancelling
+    play()) mirror spec 01's AudioPlayer."""
+
+    async def aclose(self) -> None: ...
+    """Shutdown: stop voice + music (no orphaned decoder) and release the
+    output stream. The app's finally path."""
 ```
 `play(voice)` auto-ducking any active music is what makes "talk over music" and "interjection ducks the song" fall out of one rule — the Director does not orchestrate gain by hand.
 
@@ -64,6 +70,7 @@ class MusicHandle(Protocol):
     async def duck(self) -> None: ...     # ramp music DOWN to the duck target
     async def unduck(self) -> None: ...   # ramp music back UP to full
     async def stop(self) -> None: ...
+    async def wait(self) -> None: ...     # awaitable completion (natural end or stop)
 
 # MVP implementation — sample-level mixing (raw-audio / "A-class" sources)
 class MixedHandle(MusicHandle): ...       # duck() ramps a gain we apply in the mixer
@@ -135,7 +142,7 @@ So `_play_interruptible`/`_handle_user` grow a **music branch** ("await song-don
 - **spec 01**: the `Player` seam, `AudioClip`, and the sole-audio-authority invariant this engine preserves. **Modifies** the `Director`'s interjection/cancel arbitration to fork music (duck-over) from talk (cancel-and-resume) — see §3.5.
 - **spec 03-01**: produces the music `AudioClip`s that flow through this engine (integration). The **engine core is testable independently** with local fixtures.
 - **spec 02**: supplies the voice clips mixed on top.
-- **External**: `sounddevice` (PortAudio), `numpy`, and **ffmpeg** (system binary) for decode. Per master §10.1, this backend declares its full dependency manifest so provisioning is atomic (no half-installed state).
+- **External**: `sounddevice` (PortAudio), `numpy`, and **ffmpeg** (system binary) for decode. Per master §10.1, this backend declares its full dependency manifest so provisioning is atomic (no half-installed state). Config: `ffmpeg_cmd` replaces the retired spec-01 `player_cmd`/`--player` (the engine has no external player binary); new knobs `music_enabled`/`ytdlp_cmd`/`music_model`/`cadence_mode`/`music_every_n`, flags `--no-music`/`--cadence`.
 
 ---
 
