@@ -1,6 +1,6 @@
 # spec/03-02 · ducking — a source-agnostic mixing audio engine
 
-> **Status**: Not started. Design-level (mechanism + contracts, not final code).
+> **Status**: In build. Build-time decisions settled and recorded (cadence seam with switchable modes, in-scope announce via the pick task, extensible startup checks, default-on music — see §6 *Settled*).
 > **Part**: Replace the spec-01 afplay-based `AudioPlayer` with a **mixing audio engine** that plays music and voice **simultaneously** and **ducks** the music under the voice. See master [`../DESIGN.md`](../DESIGN.md) §4 (AudioPlayer = sole audio authority, duck/stop), §3.5 (voice is the soul), §10 (build order).
 > **Milestone**: L1 (radio feel) — the second half, after [`03-01-brain-harness.md`](03-01-brain-harness.md). 03-01 makes the radio **find and play real songs** (sequentially); this spec makes talk play **over ducked music** and makes a typed interjection **duck** the song instead of hard-stopping it — the last piece of the radio feel.
 > **Conventions**: English; written for a coding agent. Design-level. No CJK in source (master §0).
@@ -14,9 +14,11 @@
 2. **Ducking (MVP = gain envelope).** When a voice clip plays over music, the music channel's gain ramps down (≈1.0 → ≈0.3 over ~300 ms), holds, and ramps back when the voice ends. This is the DJ-over-music radio feel.
 3. **Interjection = duck, not stop.** A typed interjection during a song **ducks** the music and plays the reply **over** it (replaces the spec-01 hard-stop for music segments); the song resumes at full gain afterward.
 4. **A source-agnostic seam** — ducking is a property of an abstract **music-playback handle**, with two prospective mechanisms behind one `duck()` interface (master "raw-audio vs black-box player" analysis): the **PCM/own-mixer** path (this MVP) and a future **external-player volume-control** path (seam only). So "ducking applies regardless of source" holds at the architecture level.
-5. **Music playback + Director talk↔music scheduling + optional DJ "up next" announce** (moved here from 03-01): the local-policy cadence that decides when a music segment plays, the wiring that plays the tracks 03-01 pulls, and an optional short spoken intro over the track's start. Music actually reaching the speakers begins here.
-6. **Integration:** the `AudioClip`s pulled by [`03-01`](03-01-brain-harness.md)'s `MusicProgrammer.next_track` flow through this engine.
-7. **Assemble the music context (first real `situation`).** When the Director schedules a music segment it builds the `MusicContext` (spec 03-01 §2.4) — persona + a `situation` string — and calls `next_track`. This is the first place `situation` is populated with real content (03-01 declared the field + insertion mechanism but wrote nothing to it). MVP fills it with the **L1-available** signals (session `recent` turns + the Director's intent); richer content (recent-window / anti-repeat ledger from spec 05, time-of-day / pacing from spec 07) enriches it as those land. What makes a *good* context is an open question (§6).
+5. **Music playback + Director talk↔music scheduling behind a switchable `CadencePolicy` seam** (moved here from 03-01): the Director consults a `CadencePolicy` at each segment boundary to decide talk vs music. Three modes, switchable by config/CLI flag: **`every_n`** (default — a song after every N talk segments, deterministic, 0 tokens), **`random`** (probability p with min/max-interval guardrails; seeded RNG injectable for tests), **`brain`** (opt-in — a one-shot cheap-model call decides by feel; any failure/timeout hard-falls-back to the local policy; this mode is the explicit, user-chosen exception to master §7 pillar 1). Music actually reaching the speakers begins here.
+6. **DJ "up next" announce (in scope, decided).** A one-line spoken intro over the ducked head of each track. The announce copy is written by the **same pick task** that chose the track (the 03-01 `submit_pick` terminal tool gains `title`/`artist`/`announce` fields — no extra LLM call, in-persona at runtime, no hardcoded copy in source per master §0). Flow: synthesize announce → start music → `play(announce)` auto-ducks the song head → unduck. A missing announce simply skips the intro.
+7. **Startup checks phase (extensible seam).** At app start, run registered environment checks through a decoupled `StartupCheck`-style seam — built for onboarding to hang future checks on. First (and only, here) check: the yt-dlp preflight + guide offer, reusing 03-03's `run_music_setup` verbatim (broken → tell the user plainly, offer the guide, y/N). A failed/declined music check degrades the session to talk-only (the radio still starts); `--no-music` skips the check and music scheduling entirely. This is where 03-03's "automatic trigger" lands.
+8. **Integration:** the `AudioClip`s pulled by [`03-01`](03-01-brain-harness.md)'s `MusicProgrammer.next_track` flow through this engine (widened to `TrackPick(clip, announce)` — see 03-01 §2.4).
+9. **Assemble the music context (first real `situation`).** When the Director schedules a music segment it builds the `MusicContext` (spec 03-01 §2.4) — persona + a `situation` string — and calls `next_track`. This is the first place `situation` is populated with real content (03-01 declared the field + insertion mechanism but wrote nothing to it). MVP fills it with the **L1-available** signals (session `recent` turns + the Director's intent); richer content (recent-window / anti-repeat ledger from spec 05, time-of-day / pacing from spec 07) enriches it as those land. What makes a *good* context is an open question (§6).
 
 ### Out of scope (explicit non-goals)
 - **Crossfade** and **true sidechain-compression** ducking — MVP is a fixed gain envelope. Because we own the sample-level mixer, both are later **free upgrades** (the voice is already a PCM buffer we hold); not built here.
@@ -72,6 +74,29 @@ class ControlledHandle(MusicHandle): ...  # duck() issues a volume command to an
 ```
 The engine dispatches a universal duck intent to whichever handle backs the current music. MVP constructs only `MixedHandle`; the `ControlledHandle` seam documents how a non-mixable source (master §5 optional providers) would duck later.
 
+### 2.3 `CadencePolicy` — the talk↔music scheduling seam (switchable modes)
+```python
+@dataclass(frozen=True)
+class CadenceState:
+    talks_since_music: int     # local signals only; extend as later specs add sources
+
+class CadencePolicy(Protocol):
+    async def next_kind(self, state: CadenceState) -> str: ...   # "talk" | "music"
+
+class EveryNCadence(CadencePolicy): ...    # default: music after every N talks (0 tokens)
+class RandomCadence(CadencePolicy): ...    # p per boundary + min/max-interval guardrails; injectable RNG
+class BrainCadence(CadencePolicy): ...     # opt-in: one-shot cheap-model judgment; hard fallback to local on any failure
+```
+The Director consults the seam at each segment boundary and never knows which mode is behind it. Mode + knobs (N, p, bounds) are config; a CLI flag selects the mode.
+
+### 2.4 Startup checks — the extensible preflight seam
+```python
+class StartupCheck(Protocol):
+    name: str                                   # e.g. "music"
+    async def run(self, host: Host) -> bool: ...  # interactive allowed; False = feature unavailable
+```
+App start runs the registered checks in order before broadcasting. The only check shipped here wraps 03-03's `run_music_setup` (deterministic preflight → offer the guide → recheck); its result gates music scheduling for the session (False → talk-only). The seam exists so future onboarding checks (other providers, models, credentials) slot in without touching the app loop; `--no-music` skips the music check entirely.
+
 ---
 
 ## 3. Design
@@ -121,6 +146,9 @@ So `_play_interruptible`/`_handle_user` grow a **music branch** ("await song-don
 4. **Sole authority preserved.** On `stop()`/shutdown/Ctrl-C, no orphaned ffmpeg process or open stream remains; only the engine ever emits sound.
 5. **Source-agnostic.** The same engine plays a **local file** (unit/fixture) and a **yt-dlp stream URL** (integration, tagged).
 6. **Duck seam is real.** It is verifiable that `duck()` dispatches over an abstract `MusicHandle` such that a second mechanism (`ControlledHandle`) could slot in without touching the mixer.
+7. **Cadence is switchable (unit).** The Director schedules music through the `CadencePolicy` seam; each mode is unit-tested in isolation (`every_n` deterministic sequence; `random` respects guardrails under a seeded RNG; `brain` returns the model's choice and hard-falls-back to local policy on failure/timeout), and switching modes touches only config.
+8. **Announce rides the duck (unit + sensory).** When a pick carries an announce line, it is synthesized and played over the ducked head of the track via the same auto-duck path as any voice clip; a pick without an announce plays the track directly.
+9. **Startup checks gate music (unit).** The app runs the registered startup checks before broadcasting; a failing/declined music check yields a talk-only session (radio still starts); `--no-music` skips the check; a second registered fake check runs without any app-loop change (the seam is real).
 
 ### Testing (master §11)
 - **Unit (fast):** mixing math + gain-envelope ramp on synthetic PCM; handle dispatch (`MixedHandle` vs a fake `ControlledHandle`); cancellation/teardown with a stand-in decoder (no real ffmpeg/audio).
@@ -130,9 +158,7 @@ So `_play_interruptible`/`_handle_user` grow a **music branch** ("await song-don
 ---
 
 ## 6. Open questions
-- **Format/buffers:** samplerate (48 kHz?), block size, and ring-buffer depth — latency vs underrun resilience. Tune during implementation.
-- **Envelope shape/timing:** ~300 ms, linear vs exponential ramp, and the exact duck target (0.3?) — tuned by ear.
-- **Underrun policy:** output silence vs hold-last-block on a network stall.
-- **Inter-segment gap ownership:** does the engine own the paced gap or does the Director keep it (spec 01)? Proposal: Director keeps it; the engine only mixes/plays.
-- **Player binary for 03-01 interim:** 03-01 plays stream URLs via `ffplay`/`mpv` before this engine exists; confirm the handoff so config stays coherent when this engine takes over music playback.
+- **Format/buffers:** starting values 48 kHz / stereo / float32, block + ring depth tuned during implementation (latency vs underrun resilience).
+- **Envelope shape/timing:** starting values ~300 ms linear ramp, duck target 0.3 — final numbers tuned by ear at human acceptance.
 - **What makes a *reasonable* music context** (the content of `MusicContext.situation`, inherited from 03-01 §6): which signals actually improve picks, how to phrase them, and how much to include (token cost). MVP: session `recent` turns + the Director's intent; revisit as spec 05 (ledger/recent-window) and spec 07 (time-of-day/pacing) add sources.
+- **Settled (recorded so they are not re-asked):** cadence is a switchable `CadencePolicy` seam — `every_n` default / `random` / `brain` opt-in (§2.3); the "up next" announce is in scope, written by the pick task itself (no extra LLM call, no hardcoded copy — §1 #6); music is **on by default**, gated by the extensible startup-checks phase, `--no-music` to skip (§2.4); underrun outputs silence for the starved block; the inter-segment gap stays with the **Director** (the engine only mixes/plays); the "03-01 interim `ffplay` player" question is **moot** — 03-01 shipped find+pull with no playback at all.

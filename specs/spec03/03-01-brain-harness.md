@@ -88,18 +88,23 @@ class MusicProvider(Protocol):
 ### 2.3 Music tools (the harness's first tools, wrapping `MusicProvider`)
 Two `BrainTool`s handed to `run_task` for the music task:
 - `search_music(query: str, limit: int) -> {candidates: [TrackCandidate...]}` — wraps `MusicProvider.search`.
-- `submit_pick(ref: str, why: str) -> {ok, source?, kind?, error?}` — the **terminal tool** (`terminal=True`). It calls `MusicProvider.resolve(ref)`: on success it returns `{ok: true, source: <url/path>, kind: "music"}` — enough for `next_track` to rebuild the `AudioClip` directly (no side-channel, no re-resolve) and end the loop; on failure it returns `{ok: false, error}`, a non-terminating result that lets the brain pick another candidate and call `submit_pick` again. Unifies "confirm the pick is *actually playable*" + "structured termination" + "hand the clip back".
+- `submit_pick(ref: str, why: str, title: str, artist: str, announce: str) -> {ok, source?, kind?, title?, artist?, announce?, error?}` — the **terminal tool** (`terminal=True`). It calls `MusicProvider.resolve(ref)`: on success it returns `{ok: true, source: <url/path>, kind: "music", title, artist, announce}` — enough for `next_track` to rebuild the `AudioClip` directly (no side-channel, no re-resolve) and end the loop; on failure it returns `{ok: false, error}`, a non-terminating result that lets the brain pick another candidate and call `submit_pick` again. Unifies "confirm the pick is *actually playable*" + "structured termination" + "hand the clip back". *(Extension owned by [`03-02`](03-02-ducking.md): `title`/`artist` thread the display metadata through, and `announce` is a one-line in-persona DJ intro the same task writes — zero extra LLM calls, no hardcoded copy in source.)*
 
 Selection heuristics (avoid loops/covers/live unless apt, prefer official audio, match language/taste) live in the **task instruction prompt** for the MVP (a formal SDK *skill* is a later option — see Open Questions), centralized under `src/murmur/prompts/`.
 
 ### 2.4 The Director-facing entry — habit-based pick-and-pull
 ```python
+@dataclass(frozen=True)
+class TrackPick:            # widened return, owned by 03-02 (no consumer existed before)
+    clip: AudioClip         # carries optional title/artist display metadata
+    announce: str | None    # one-line in-persona DJ intro, spoken over the ducked head
+
 class MusicProgrammer:
-    async def next_track(self, ctx: MusicContext) -> AudioClip | None: ...
+    async def next_track(self, ctx: MusicContext) -> TrackPick | None: ...
     """Run the harnessed brain (Haiku, bounded turns) with the music tools
     over `ctx`; the brain searches, judges candidates against habits+context,
     and finalizes with `submit_pick`, which resolves the chosen ref. Returns
-    the `AudioClip` captured by that terminal call, or None if nothing suitable
+    the pick captured by that terminal call, or None if nothing suitable
     resolves within `max_turns` (Director falls back to more talk)."""
 ```
 

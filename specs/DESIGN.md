@@ -210,7 +210,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 Three pillars + helpers:
 | # | Strategy | Saves where | v1? |
 |---|---|---|---|
-| 1 | **Don't call Claude for everything** | "talk vs music," "which anchor" are the Director's local policy, 0 tokens | ✅ |
+| 1 | **Don't call Claude for everything** | "talk vs music," "which anchor" are the Director's local policy, 0 tokens *(default; spec 03-02's opt-in `brain` cadence mode is the one sanctioned exception — the user explicitly trades a cheap one-shot call per segment boundary for feel)* | ✅ |
 | 2 | **Batch generation (most important)** | one call generates the next N segments' scripts (a monologue split into beats), doled out between songs → one call covers minutes of radio | ✅ |
 | 3 | **Tiered models** | Haiku for idle filler, Opus only when you genuinely engage | ✅ |
 | 4 | **Cache the stable prefix** | `persona + profile` goes through prompt caching → near-free on repeated calls; send only history deltas | ✅ |
