@@ -162,6 +162,77 @@ class FakeMusicBrain:
         return None
 
 
+class FakeMusicHandle:
+    """Scripted MusicHandle (spec 03-02 §2.2): finishes when told (or at once
+    with ``auto_finish``), records duck/unduck/stop calls."""
+
+    def __init__(self, auto_finish: bool = False) -> None:
+        self._done = asyncio.Event()
+        if auto_finish:
+            self._done.set()
+        self.ducks = 0
+        self.unducks = 0
+        self.stops = 0
+
+    def finish(self) -> None:
+        self._done.set()
+
+    async def duck(self) -> None:
+        self.ducks += 1
+
+    async def unduck(self) -> None:
+        self.unducks += 1
+
+    async def stop(self) -> None:
+        self.stops += 1
+        self._done.set()
+
+    async def wait(self) -> None:
+        await self._done.wait()
+
+
+class FakeEngine(FakePlayer):
+    """FakePlayer + play_music (the spec 03-02 mixing-player capability):
+    records music clips, hands out FakeMusicHandles."""
+
+    def __init__(self, play_delay: float = 0.0, auto_finish: bool = True) -> None:
+        super().__init__(play_delay=play_delay)
+        self._auto_finish = auto_finish
+        self.music_played: list[AudioClip] = []
+        self.handles: list[FakeMusicHandle] = []
+
+    async def play_music(self, clip: AudioClip) -> FakeMusicHandle:
+        self.music_played.append(clip)
+        handle = FakeMusicHandle(auto_finish=self._auto_finish)
+        self.handles.append(handle)
+        return handle
+
+
+class FakeMusicProgrammer:
+    """Scripted next_track: pops picks (None = nothing found); records the
+    contexts it was asked for."""
+
+    def __init__(self, picks: list[Any] | None = None) -> None:
+        self._picks = list(picks or [])
+        self.contexts: list[Any] = []
+
+    async def next_track(self, ctx: Any) -> Any:
+        self.contexts.append(ctx)
+        return self._picks.pop(0) if self._picks else None
+
+
+class ScriptedCadence:
+    """Pops scripted kinds; defaults to talk when the script runs out."""
+
+    def __init__(self, kinds: list[str] | None = None) -> None:
+        self._kinds = list(kinds or [])
+        self.states: list[Any] = []
+
+    async def next_kind(self, state: Any) -> str:
+        self.states.append(state)
+        return self._kinds.pop(0) if self._kinds else "talk"
+
+
 class FakeGuideBrain:
     """Scripted GuideCapable (spec 03-03): records run_guide calls, streams a
     canned reply. Stand-in for the real repair loop — no SDK, no shell."""

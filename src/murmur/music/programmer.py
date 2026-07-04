@@ -8,6 +8,7 @@ pulls a track — it does not play, schedule, or announce it (that is spec 03-02
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from ..contracts import AudioClip, MusicProvider
 from ..harness import BrainTool, Harness
@@ -27,6 +28,14 @@ class TrackPick:
 
     clip: AudioClip
     announce: str | None = None
+
+
+@runtime_checkable
+class TrackSource(Protocol):
+    """What the Director consumes (spec 03-01 §2.4 seam): find + pull one
+    track. ``MusicProgrammer`` is the real impl; tests inject a fake."""
+
+    async def next_track(self, ctx: MusicContext) -> "TrackPick | None": ...
 
 
 class MusicProgrammer:

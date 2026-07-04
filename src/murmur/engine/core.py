@@ -63,6 +63,19 @@ class MusicHandle(Protocol):
     async def wait(self) -> None: ...
 
 
+@runtime_checkable
+class MixingPlayer(Protocol):
+    """The player capability the Director's music branch needs (spec §2.1):
+    the spec-01 ``Player`` surface plus ``play_music``. ``AudioEngine`` is the
+    real impl; tests inject a fake."""
+
+    async def play(self, clip: AudioClip) -> None: ...
+
+    async def stop(self) -> None: ...
+
+    async def play_music(self, clip: AudioClip) -> MusicHandle: ...
+
+
 class _Ring:
     """Thread-safe float32 frame ring: feeder thread writes, audio thread reads."""
 

@@ -35,3 +35,22 @@ Guidance:
 def build_find_music_instruction() -> str:
     """The static instruction for the music-discovery task (spec 03-01 §2.3)."""
     return _FIND_MUSIC_INSTRUCTION
+
+
+_MUSIC_SITUATION_TEMPLATE = """\
+Recent on-air turns:
+{recent}
+
+Intent: a music break in the program. Pick something that fits the mood and
+subjects of the conversation above (or the persona's taste if it is quiet).
+"""
+
+
+def build_music_situation(recent: list[str]) -> str:
+    """Render the first real ``MusicContext.situation`` (spec 03-02 §1 #9):
+    the session's recent turns (as ``role: text`` lines) + the Director's
+    intent. Richer signals (ledger, time-of-day) join as later specs land."""
+    lines = "\n".join(f"- {line}" for line in recent)
+    return _MUSIC_SITUATION_TEMPLATE.format(
+        recent=lines or "- (the program just started)"
+    )
