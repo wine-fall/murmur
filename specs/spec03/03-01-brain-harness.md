@@ -152,7 +152,7 @@ This mechanism is what 03-01 builds and tests; *which* fields ride in `situation
 ## 4. Dependencies
 - **spec 01**: `Brain` (extended here with `run_task`), `AudioClip`, `Turn`, and the declared `MusicProvider` seam. **No `Director`/`Player` changes here** — playback and scheduling are 03-02.
 - **spec 02**: not required (music is independent of voice), but both feed the same Director/loop.
-- **External**: `claude-agent-sdk` (in-process tool / MCP + agentic loop), `yt-dlp` (default source). **Optional**: `musicdl` (user-installed provider).
+- **External**: `claude-agent-sdk` (in-process tool / MCP + agentic loop); `yt-dlp` (default source) — an **unbound external binary** per master §10.1's binary/library split (no pip extra; provisioned by the startup checks + setup guide, versioned independently of murmur). **Optional**: `musicdl` (user-installed provider).
 - **Model**: `claude-haiku-4-5-20251001` for the search loop (config knob, alongside the spec-01 `claude-opus-4-8`).
 
 ---
