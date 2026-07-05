@@ -62,30 +62,35 @@ Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecy
 
 ## Install & run
 
+Managed with [uv](https://docs.astral.sh/uv/) (`pip install -e .` still works if you prefer pip).
+
 ```bash
 # core (runs model-free: stub voice, stub or real brain)
-pip install -e .
+uv sync
 
 # run the loop
-murmur
+uv run murmur
 
 # fully offline / no network (canned brain + silent stub voice)
-murmur --brain stub --voice stub
+uv run murmur --brain stub --voice stub
 
 # a real voice (Apple Silicon only)
-pip install -e ".[tts-mlx]"
-murmur --voice spark
+uv sync --extra tts-mlx
+uv run murmur --voice spark
 ```
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,spark,qwen3,chatterbox,dia,voxcpm2}`. Stop cleanly with `Ctrl-C`.
+**Music** needs two external binaries — `ffmpeg` (decode) and `yt-dlp` (source) — which are deliberately *not* Python dependencies: the startup check detects a missing/broken one and the setup assistant offers to fix it (`murmur --setup-music` runs the same repair on demand). To provision by hand: `brew install ffmpeg yt-dlp`. Without them the radio runs talk-only; `--no-music` skips music entirely.
+
+Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,spark,qwen3,chatterbox,dia,voxcpm2}`, `--no-music`, `--cadence {every_n,random,brain}`. Stop cleanly with `Ctrl-C`.
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pre-commit install
-pytest                 # fast unit layer (fakes; no network/models)
-pytest -m integration  # heavy: real TTS sidecar synth, run deliberately
+uv sync --all-extras
+uv run pre-commit install
+uv run pytest                 # fast unit layer (fakes; no network/models)
+uv run pytest -m integration  # heavy: real TTS/ffmpeg/audio, run deliberately
+brew install ffmpeg yt-dlp    # binaries the integration layer + real runs need
 ```
 
 Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; integration tests are tagged and run on demand; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
