@@ -16,3 +16,4 @@ venv/
 
 # Throwaway smoke/probe scripts (murmur-smoke skill) — never committed
 scratch/
+.github/hooks/
