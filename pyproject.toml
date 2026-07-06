@@ -18,7 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Dev tooling. Install with:  pip install -e ".[dev]"  then  pre-commit install
+# Dev tooling. Install with:  uv sync --all-extras  then  pre-commit install
 # The English-only-comment hook itself is stdlib-only (no install needed); this
 # is just the automation harness around it.
 dev = [
@@ -32,17 +32,24 @@ dev = [
 # Apple-Silicon-only — so a single extra covers them all. The core, the unit suite, and the stub/sidecar-fake
 # voices need none of it (they run model-free). A future non-MLX backend (e.g. a
 # PyTorch CosyVoice2/Fish) would add its own extra without touching the core.
-# Install on a Mac:  pip install -e ".[tts-mlx]"   then:  murmur --voice spark
+# These are imported in-process (libraries), so they stay declared here; the
+# product wraps this extra in a guided install (DESIGN §10.1).
+# Install on a Mac:  uv sync --extra tts-mlx   then:  murmur --voice spark
 tts-mlx = [
     "mlx-audio>=0.4.4",  # the MLX TTS runtime hosting all the MLX voices
+    # transformers 5.13 breaks mlx-audio 0.4.4's model-class resolution
+    # ("'str' object has no attribute '__module__'" loading Spark — found
+    # live 2026-07). Lift the cap when mlx-audio releases a compatible version.
+    "transformers<5.13",
     "soxr",              # audio resampler the Spark backend (BiCodec) needs at load
+    "hf_transfer",       # accelerates the (multi-GB) model weight downloads
 ]
-# Default music source (spec 03-01): yt-dlp covers YouTube + Bilibili with no
-# login/account. The core + unit suite run without it (fakes / no network);
-# enable real music discovery with:  pip install -e ".[music]"
-music = [
-    "yt-dlp>=2024.1",  # the `yt-dlp` binary the MusicProvider shells out to
-]
+# NOTE — no `music` extra, deliberately (DESIGN §10.1): murmur invokes yt-dlp
+# and ffmpeg as external BINARIES (subprocesses), never imports them. Binary
+# dependencies are unbound from the package: the startup preflight detects a
+# missing/broken one and the setup guide (spec 03-03) installs/repairs it with
+# the user's consent. Devs: `brew install ffmpeg yt-dlp` (needed for
+# `pytest -m integration` and real runs).
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -52,6 +59,12 @@ testpaths = ["tests"]
 addopts = "-m 'not integration'"
 markers = [
     "integration: heavy/real-model tests, run on demand (not in the fast loop)",
+]
+filterwarnings = [
+    # sounddevice 0.5.x assigns .shape in its output callback, deprecated by
+    # NumPy 2.5; upstream noise (one warning per audio block in integration
+    # runs), not ours. Drop when sounddevice ships a fix.
+    "ignore:Setting the shape on a NumPy array has been deprecated:DeprecationWarning:sounddevice",
 ]
 
 [tool.ruff]

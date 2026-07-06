@@ -35,7 +35,7 @@ This does **not** replace unit tests. It is the companion for the real / integra
 
 - **venv**: `.venv/bin/python scratch/x.py` (or `source .venv/bin/activate`, then `python …`).
 - **Real Claude**: needs `claude` logged in (subscription OAuth, no API key). Harness runs Haiku (find-music) / Opus (guide).
-- **Real yt-dlp**: `pip install -e ".[music]"`; the `yt-dlp` binary must be on PATH; needs network.
+- **Real yt-dlp / ffmpeg**: unbound external binaries (master §10.1) — `brew install ffmpeg yt-dlp`; both must be on PATH; needs network.
 - **Corporate MITM proxy** (e.g. Cloudflare Gateway): yt-dlp fails TLS verify (`CERTIFICATE_VERIFY_FAILED`) because it uses `certifi`, not the system CA bundle — **not a murmur bug** (it's what the guide harness fixes). For a smoke, run off that network or point `certifi` at the corp CA.
 - **Sandboxed Bash**: network may be TLS-intercepted; run the script unsandboxed (with the user's OK) or have the user run it in their terminal.
 - **Interactive flows** (the guide): need a real stdin to answer prompts — cannot be fully smoked headless; run in a real terminal.
