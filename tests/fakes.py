@@ -29,16 +29,20 @@ class FakeBrain:
 
 
 class FakeVoice:
-    """Returns an AudioClip without touching disk."""
+    """Returns an AudioClip without touching disk. ``fail_on`` lists texts
+    whose synthesis raises (the real sidecar can fail per-utterance)."""
 
-    def __init__(self) -> None:
+    def __init__(self, fail_on: list[str] | None = None) -> None:
         self.started = False
         self.closed = False
+        self._fail_on = set(fail_on or [])
 
     async def start(self) -> None:
         self.started = True
 
     async def synthesize(self, text: str, *, scenario: str = "broadcast") -> AudioClip:
+        if text in self._fail_on:
+            raise RuntimeError(f"sidecar synthesize failed: {text!r}")
         return AudioClip(source=f"fake:{text}", kind="talk")
 
     async def aclose(self) -> None:
@@ -73,6 +77,7 @@ class FakeCli:
         self.started = False
         self.radio: list[str] = []
         self.user: list[str] = []
+        self.infos: list[str] = []
 
     def start(self) -> None:
         self.started = True
@@ -87,7 +92,7 @@ class FakeCli:
         self.user.append(text)
 
     def info(self, message: str) -> None:
-        pass
+        self.infos.append(message)
 
 
 class FakeMusicProvider:

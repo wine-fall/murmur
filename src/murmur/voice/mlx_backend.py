@@ -67,6 +67,21 @@ PROFILES: dict[str, MlxProfile] = {
 }
 
 
+def normalize_tts_text(text: str) -> str:
+    """Make ``text`` safe for the model's internal sentence splitter.
+
+    mlx-audio models (Spark at least) split the input into segments and stack
+    the per-segment audio; a fragment with nothing speakable in it (a blank
+    paragraph line, an ellipsis-only line) yields an empty batch and crashes
+    generate() with ``[stack] No arrays provided for stacking`` (found live).
+    Collapse whitespace runs and drop lines with no word character, so every
+    segment the splitter can produce has something to say.
+    """
+    lines = (" ".join(line.split()) for line in text.splitlines())
+    speakable = [ln for ln in lines if any(ch.isalnum() for ch in ln)]
+    return " ".join(speakable)
+
+
 class MlxAudioBackend:
     """A generic ``TtsBackend`` over mlx-audio; a profile selects the model."""
 
@@ -124,8 +139,11 @@ class MlxAudioBackend:
         )
 
         assert self._model is not None, "load() must run before _render()"
+        text = normalize_tts_text(req.text)
+        if not text:
+            raise RuntimeError("no speakable text after normalization")
         kwargs = self._build_generate_kwargs(req)
-        chunks = [result.audio for result in self._model.generate(req.text, **kwargs)]
+        chunks = [result.audio for result in self._model.generate(text, **kwargs)]
         if not chunks:
             raise RuntimeError(f"{self._profile.repo} produced no audio")
         # L0 renders the whole clip (§3.4): join all segments into one wav.

@@ -114,11 +114,28 @@ class Director:
         """One autonomous talk segment (spec 01). Returns an interrupting line."""
         ctx = self._context()
         text = await self._brain.next_talk(ctx)
+        clip = await self._synthesize_or_skip(text)
+        if clip is None:
+            return None  # segment skipped; the loop keeps broadcasting
+        # Printed at air time (when playback starts), not at generation time —
+        # synthesis takes seconds and the text/audio gap read as a glitch.
         self._cli.on_radio_segment(text)
-        clip = await self._voice.synthesize(text)
         line = await self._play_interruptible(clip)
         self._memory.record(Turn("radio", text))
         return line
+
+    async def _synthesize_or_skip(self, text: str) -> AudioClip | None:
+        """Synthesize with degradation: a TTS failure skips this one spoken
+        segment (info line; nothing aired or recorded) instead of crashing the
+        radio — same principle as the music branch's fallback. Found live: a
+        single bad utterance used to unwind the whole loop."""
+        try:
+            return await self._voice.synthesize(text)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._cli.info(f"voice synthesis failed ({exc}); skipping this segment.")
+            return None
 
     async def _wants_music(self) -> bool:
         if self._music is None or self._cadence is None:
@@ -142,13 +159,15 @@ class Director:
         try:
             pick = await music.next_track(ctx)
             if pick is None:
+                self._cli.info("music: nothing suitable found; back to talk.")
                 return False
 
             announce_clip: AudioClip | None = None
             if pick.announce:
                 # Synthesized before the song starts so the intro is ready to
-                # ride the ducked head with no gap.
-                announce_clip = await self._voice.synthesize(pick.announce)
+                # ride the ducked head with no gap. A synthesis failure only
+                # costs the intro, never the song.
+                announce_clip = await self._synthesize_or_skip(pick.announce)
 
             handle = await mixing.play_music(pick.clip)
         except asyncio.CancelledError:
@@ -193,8 +212,10 @@ class Director:
         self._memory.record(Turn("user", line))
         ctx = self._context()
         reply = await self._brain.respond(line, ctx)
+        clip = await self._synthesize_or_skip(reply)
+        if clip is None:
+            return None  # reply skipped; the user turn stays recorded
         self._cli.on_radio_segment(reply)
-        clip = await self._voice.synthesize(reply)
         interrupting = await self._play_interruptible(clip)
         self._memory.record(Turn("radio", reply))
         return interrupting

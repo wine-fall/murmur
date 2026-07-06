@@ -103,6 +103,23 @@ def test_next_track_none_falls_back_to_talk():
         assert engine.music_played == []
         assert cli.radio == ["talk-1", "talk-2"]  # the music slot became talk
         assert len(programmer.contexts) == 1  # it did try after the first talk
+        # The silent fallback is observable (found live: invisible otherwise).
+        assert any("back to talk" in m for m in cli.infos)
+
+    asyncio.run(go())
+
+
+def test_announce_synthesis_failure_skips_the_intro_not_the_song():
+    async def go():
+        director, cli, brain, engine, programmer, memory = _make(
+            picks=[_pick(announce="up next: T1")]
+        )
+        director._voice = FakeVoice(fail_on=["up next: T1"])  # type: ignore[attr-defined]
+        await director.run(max_segments=2)
+        # The song still played; only the intro was skipped.
+        assert [c.source for c in engine.music_played] == ["stream:r1"]
+        assert "up next: T1" not in cli.radio
+        assert any("synthesis failed" in m for m in cli.infos)
 
     asyncio.run(go())
 
