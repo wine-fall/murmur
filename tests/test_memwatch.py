@@ -21,7 +21,8 @@ _SPEC.loader.exec_module(memwatch)
 
 _PS = """\
     1     0   1200 /sbin/launchd
-  100     1  52000 /repo/.venv/bin/python /repo/.venv/bin/murmur --voice spark
+   99     1  20000 /opt/homebrew/bin/uv run murmur --voice spark
+  100    99  52000 /repo/.venv/bin/python /repo/.venv/bin/murmur --voice spark
   101   100 3200000 /repo/.venv/bin/python -m murmur.voice.sidecar --backend spark
   102   100  48000 ffmpeg -nostdin -loglevel error -i http://x -f f32le pipe:1
   103   101   9000 some-helper-of-the-sidecar
@@ -42,20 +43,22 @@ def test_parse_ps_extracts_pid_ppid_rss_command():
 def test_find_roots_picks_the_top_of_the_murmur_tree_only():
     procs = memwatch.parse_ps(_PS)
     roots = memwatch.find_roots(procs, needle="murmur")
-    # The sidecar also matches "murmur" but is a child of 100; the vim session
-    # and memwatch itself are not murmur processes.
-    assert [r.pid for r in roots] == [100]
+    # The `uv run murmur` wrapper is the top of the tree; the sidecar and the
+    # real murmur process match too but ride under it; the vim session and
+    # memwatch itself are not murmur processes.
+    assert [r.pid for r in roots] == [99]
 
 
 def test_subtree_collects_all_descendants():
     procs = memwatch.parse_ps(_PS)
-    members = memwatch.subtree(procs, root_pid=100)
-    assert sorted(p.pid for p in members) == [100, 101, 102, 103]
+    members = memwatch.subtree(procs, root_pid=99)
+    assert sorted(p.pid for p in members) == [99, 100, 101, 102, 103]
 
 
 def test_labels_name_the_interesting_processes():
     procs = memwatch.parse_ps(_PS)
     by_pid = {p.pid: p for p in procs}
+    assert memwatch.label(by_pid[99]) == "launcher"  # the uv shell, not murmur
     assert memwatch.label(by_pid[100]) == "main"
     assert memwatch.label(by_pid[101]) == "sidecar"
     assert memwatch.label(by_pid[102]) == "ffmpeg"

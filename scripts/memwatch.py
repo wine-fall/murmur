@@ -101,9 +101,12 @@ def subtree(procs: list[Proc], *, root_pid: int) -> list[Proc]:
 
 
 def label(proc: Proc) -> str:
+    executable = os.path.basename(proc.command.split(None, 1)[0])
+    if executable in ("uv", "uvx"):
+        return "launcher"  # the `uv run murmur` shell, not murmur itself
     if "voice.sidecar" in proc.command:
         return "sidecar"
-    if proc.command.split(None, 1)[0].endswith("ffmpeg"):
+    if executable.endswith("ffmpeg"):
         return "ffmpeg"
     if "murmur" in proc.command:
         return "main"
