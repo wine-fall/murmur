@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from .cli_host import Host
 from .guide import SetupGuide
 from .harness import GuideCapable
-from .music.preflight import PreflightResult, preflight_ytdlp
+from .music.preflight import PreflightResult, preflight_music
 
 if TYPE_CHECKING:
     from claude_agent_sdk import (
@@ -66,17 +66,18 @@ async def run_music_setup(
     brain: GuideCapable,
     *,
     ytdlp: str = "yt-dlp",
+    ffmpeg: str = "ffmpeg",
     venv_python: str | None = None,
-    check: Callable[[str], Awaitable[PreflightResult]] = preflight_ytdlp,
+    check: Callable[..., Awaitable[PreflightResult]] = preflight_music,
 ) -> bool:
     """Preflight yt-dlp; if broken, offer the guide (routed through the CLI
     Host). Returns whether music is usable afterward. ``check`` is injectable
     for tests."""
-    result = await check(ytdlp)
+    result = await check(ytdlp=ytdlp, ffmpeg=ffmpeg)
     if result.ok:
         return True
 
-    host.info(f"music (yt-dlp) isn't working here: {result.reason}")
+    host.info(f"music dependencies aren't working here: {result.reason}")
     host.info("type 'y' to let the setup assistant look into it (anything else skips):")
     if (await host.next_line()).strip().lower() not in _YES:
         host.info("skipped music setup.")
@@ -84,12 +85,14 @@ async def run_music_setup(
 
     await SetupGuide(brain).fix_music(
         ytdlp=ytdlp,
+        ffmpeg=ffmpeg,
+        reason=result.reason,
         venv_python=venv_python,
         can_use_tool=_cli_permission(host),
         on_text=host.info,
         next_user_input=_cli_conversation(host),
     )
 
-    recheck = await check(ytdlp)
+    recheck = await check(ytdlp=ytdlp, ffmpeg=ffmpeg)
     host.info("music is working now." if recheck.ok else "music still isn't working.")
     return recheck.ok

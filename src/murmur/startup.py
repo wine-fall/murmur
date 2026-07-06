@@ -14,7 +14,7 @@ from typing import Protocol, runtime_checkable
 
 from .cli_host import Host
 from .harness import GuideCapable
-from .music.preflight import PreflightResult, preflight_ytdlp
+from .music.preflight import PreflightResult, preflight_music
 from .setup import run_music_setup
 
 
@@ -51,13 +51,19 @@ class MusicStartupCheck:
         brain: GuideCapable,
         *,
         ytdlp: str = "yt-dlp",
-        check: Callable[[str], Awaitable[PreflightResult]] = preflight_ytdlp,
+        ffmpeg: str = "ffmpeg",
+        check: Callable[..., Awaitable[PreflightResult]] = preflight_music,
     ) -> None:
         self._brain = brain
         self._ytdlp = ytdlp
+        self._ffmpeg = ffmpeg
         self._check = check
 
     async def run(self, host: Host) -> bool:
         return await run_music_setup(
-            host, self._brain, ytdlp=self._ytdlp, check=self._check
+            host,
+            self._brain,
+            ytdlp=self._ytdlp,
+            ffmpeg=self._ffmpeg,
+            check=self._check,
         )

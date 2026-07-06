@@ -15,11 +15,11 @@ from murmur.music.preflight import PreflightResult
 from murmur.setup import _cli_permission, run_music_setup
 
 
-async def _ok(_binary: str) -> PreflightResult:
+async def _ok(**_kw: str) -> PreflightResult:
     return PreflightResult(ok=True, reason="")
 
 
-async def _broken(_binary: str) -> PreflightResult:
+async def _broken(**_kw: str) -> PreflightResult:
     return PreflightResult(ok=False, reason="CERTIFICATE_VERIFY_FAILED")
 
 
@@ -47,7 +47,7 @@ def test_runs_guide_on_confirm_then_rechecks():
         def __init__(self) -> None:
             self.n = 0
 
-        async def __call__(self, _binary: str) -> PreflightResult:
+        async def __call__(self, **_kw: str) -> PreflightResult:
             self.n += 1  # broken first, ok on the recheck (fix "worked")
             return PreflightResult(ok=self.n >= 2, reason="" if self.n >= 2 else "cert")
 
@@ -57,6 +57,24 @@ def test_runs_guide_on_confirm_then_rechecks():
         assert await run_music_setup(FakeCli(lines=["y"]), brain, check=check) is True
         assert brain.calls == 1  # guide engaged once
         assert check.n == 2  # initial preflight + recheck
+
+    asyncio.run(go())
+
+
+def test_guide_task_names_both_binaries_and_carries_the_finding():
+    """The preflight's evidence seeds the agent's diagnosis (spec 03-03 §2):
+    the task prompt names both configured binaries and the failure reason."""
+
+    async def go():
+        brain = FakeGuideBrain()
+        cli = FakeCli(lines=["y"])
+        await run_music_setup(
+            cli, brain, ytdlp="/opt/yt-dlp", ffmpeg="/opt/ffmpeg", check=_broken
+        )
+        prompt = brain.prompts[-1]
+        assert "/opt/yt-dlp" in prompt
+        assert "/opt/ffmpeg" in prompt
+        assert "CERTIFICATE_VERIFY_FAILED" in prompt
 
     asyncio.run(go())
 

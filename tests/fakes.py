@@ -245,6 +245,7 @@ class FakeGuideBrain:
     def __init__(self, reply: str = "done") -> None:
         self._reply = reply
         self.calls = 0
+        self.prompts: list[str] = []
 
     async def run_guide(
         self,
@@ -259,6 +260,7 @@ class FakeGuideBrain:
         next_user_input: Any = None,
     ) -> str:
         self.calls += 1
+        self.prompts.append(prompt)
         if on_text is not None:
             on_text(self._reply)
         return self._reply
