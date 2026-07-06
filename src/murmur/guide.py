@@ -36,18 +36,24 @@ class SetupGuide:
         self,
         *,
         ytdlp: str = "yt-dlp",
+        ffmpeg: str = "ffmpeg",
+        reason: str = "",
         venv_python: str | None = None,
         permission_mode: str = "default",
         can_use_tool: Any = None,
         on_text: Callable[[str], None] | None = None,
         next_user_input: Callable[[], Awaitable[str | None]] | None = None,
     ) -> str:
-        """Diagnose + repair the yt-dlp music dependency; returns the plain-
+        """Diagnose + repair the music dependencies (yt-dlp + ffmpeg) in one
+        session; returns the plain-
         language explanation of what was wrong and what changed. ``can_use_tool``
         gates actions, ``on_text`` streams text, and ``next_user_input`` supplies
         the user's natural-language replies (a real conversation via the CLI Host)."""
         prompt = build_fix_music_prompt(
-            ytdlp=ytdlp, venv_python=venv_python or sys.executable
+            ytdlp=ytdlp,
+            ffmpeg=ffmpeg,
+            reason=reason,
+            venv_python=venv_python or sys.executable,
         )
         return await self._brain.run_guide(
             GUIDE_PERSONA,

@@ -58,7 +58,12 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     cadence: CadencePolicy | None = None
     if config.music_enabled and isinstance(brain, ClaudeBrain):
         results = await run_startup_checks(
-            cli, [MusicStartupCheck(brain, ytdlp=config.ytdlp_cmd)]
+            cli,
+            [
+                MusicStartupCheck(
+                    brain, ytdlp=config.ytdlp_cmd, ffmpeg=config.ffmpeg_cmd
+                )
+            ],
         )
         if results.get("music"):
             provider = YtDlpMusicProvider(config.ytdlp_cmd)
@@ -115,7 +120,9 @@ async def _run_setup(config: Config) -> None:
 
     cli = CliHost()
     cli.start()  # spawn the stdin reader so the guide's confirms can be answered
-    await run_music_setup(cli, ClaudeBrain(config.model), ytdlp=config.ytdlp_cmd)
+    await run_music_setup(
+        cli, ClaudeBrain(config.model), ytdlp=config.ytdlp_cmd, ffmpeg=config.ffmpeg_cmd
+    )
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:

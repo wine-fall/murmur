@@ -44,7 +44,7 @@ def test_checks_run_in_order_and_results_are_collected():
 def test_music_check_passes_without_touching_the_brain_when_healthy():
     brain = FakeGuideBrain()
 
-    async def healthy(binary: str) -> PreflightResult:
+    async def healthy(**_kw: str) -> PreflightResult:
         return PreflightResult(ok=True, reason="")
 
     async def go():
@@ -58,7 +58,7 @@ def test_music_check_passes_without_touching_the_brain_when_healthy():
 def test_music_check_returns_false_when_broken_and_user_declines():
     brain = FakeGuideBrain()
 
-    async def broken(binary: str) -> PreflightResult:
+    async def broken(**_kw: str) -> PreflightResult:
         return PreflightResult(ok=False, reason="no such binary")
 
     async def go():

@@ -29,20 +29,31 @@ and stop.
 """
 
 
-def build_fix_music_prompt(*, ytdlp: str, venv_python: str) -> str:
-    """High-level task: diagnose (cause unknown) and repair the yt-dlp music
-    dependency. Deliberately does NOT prescribe the fix. Consent is per-action
-    (via the permission gate), so the agent proceeds rather than asking in prose."""
+def build_fix_music_prompt(
+    *, ytdlp: str, ffmpeg: str, venv_python: str, reason: str = ""
+) -> str:
+    """High-level task: diagnose (cause unknown) and repair the music
+    dependencies. Deliberately does NOT prescribe the fix. Consent is per-action
+    (via the permission gate), so the agent proceeds rather than asking in prose.
+    ``reason`` is the preflight's finding, handed over as evidence."""
+    finding = (
+        f"\nA quick automated check just reported:\n  {reason}\n" if reason else ""
+    )
     return f"""\
-murmur's music depends on the `{ytdlp}` binary to fetch tracks, but it may not be
-working in this environment. Please:
+murmur's music depends on TWO external binaries: `{ytdlp}` (fetches tracks) and
+`{ffmpeg}` (decodes audio). One or both may be missing or broken in this
+environment.
+{finding}
+Please:
 
-1. Check whether it works (e.g. try a trivial search).
-2. If it does not, figure out WHY.
+1. Check each of them (e.g. a trivial `{ytdlp}` search; `{ffmpeg} -version`).
+2. For whichever is not working, figure out WHY — "not installed at all" is a
+   perfectly common cause.
 3. Explain in plain language what is wrong and the fix you propose, then ASK me
    to confirm before changing anything and WAIT for my go-ahead. Once I agree,
-   apply the smallest safe fix.
-4. Verify it now works.
+   apply the smallest safe fix (installing via the user's own package manager,
+   e.g. Homebrew on macOS, is a fine fix for a missing binary).
+4. Verify BOTH now work.
 
 (For reference, the venv's Python is `{venv_python}`.)
 """
