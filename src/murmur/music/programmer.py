@@ -14,7 +14,7 @@ from ..contracts import AudioClip, MusicProvider
 from ..harness import BrainTool, Harness
 from ..prompts import build_find_music_instruction
 from .context import MusicContext, render_context
-from .tools import SearchMusicTool, SubmitPickTool
+from .tools import SearchMusicTool, SubmitPickTool, parse_submit_success
 
 _DEFAULT_MAX_TURNS = 6
 
@@ -72,17 +72,16 @@ class MusicProgrammer:
             model=self._model,
             max_turns=self._max_turns,
         )
-        if not result or not result.get("ok"):
+        # Validate the opaque terminal result into a typed pick (or None). The
+        # shape is defined and checked in one place (music.tools), so field
+        # access below is type-safe rather than a trusted string-key guess.
+        pick = parse_submit_success(result)
+        if pick is None:
             return None
-        source = result.get("source")
-        if not source:
-            return None
-        # title/artist/announce were already normalized to str-or-None by the
-        # terminal tool (SubmitPickTool) — trust its result shape.
         clip = AudioClip(
-            source=str(source),
-            kind=str(result.get("kind", "music")),
-            title=result.get("title"),
-            artist=result.get("artist"),
+            source=pick["source"],
+            kind=pick["kind"],
+            title=pick["title"],
+            artist=pick["artist"],
         )
-        return TrackPick(clip=clip, announce=result.get("announce"))
+        return TrackPick(clip=clip, announce=pick["announce"])

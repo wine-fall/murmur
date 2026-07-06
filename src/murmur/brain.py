@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from itertools import cycle
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
@@ -160,7 +160,7 @@ class ClaudeBrain:
         tools: list[BrainTool],
         model: str,
         max_turns: int,
-    ) -> dict[str, Any] | None:
+    ) -> Mapping[str, object] | None:
         """Harness capability (spec 03-01 §2.1): run a bounded, isolated tool-use
         loop over murmur's OWN in-process tools, returning the terminal tool's
         successful result (or None if ``max_turns`` is hit with no success).
@@ -176,7 +176,7 @@ class ClaudeBrain:
             tool,
         )
 
-        captured: dict[str, Any] | None = None
+        captured: Mapping[str, object] | None = None
 
         def wrap(bt: BrainTool):
             async def handler(args: dict[str, Any]) -> dict[str, Any]:
@@ -272,7 +272,7 @@ class ClaudeBrain:
         return "\n".join(parts).strip()
 
 
-def _to_mcp_result(out: dict[str, Any]) -> dict[str, Any]:
+def _to_mcp_result(out: Mapping[str, object]) -> dict[str, Any]:
     """Wrap a ``BrainTool`` result in the MCP tool-result shape the SDK requires.
 
     The SDK's in-process tool handler only forwards a result that carries a

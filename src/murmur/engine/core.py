@@ -19,14 +19,17 @@ import asyncio
 import contextlib
 import threading
 import time
-from typing import Any, Callable, Protocol, runtime_checkable
+from typing import Any, Callable, Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 
 from ..contracts import AudioClip
 from .mixer import DUCK_TARGET, FULL_GAIN, RAMP_S, GainEnvelope, mix
 
-_Block = "np.ndarray[Any, np.dtype[np.float32]]"
+# One float32 PCM block. numpy cannot express a fixed shape, so the shape
+# parameter stays ``Any`` — but the dtype is pinned and the alias names the
+# contract, so nothing in the engine falls back to a bare ``Any``.
+_Block: TypeAlias = "np.ndarray[Any, np.dtype[np.float32]]"
 
 
 @runtime_checkable
@@ -36,7 +39,7 @@ class Decoder(Protocol):
     rate, and returns None at end-of-stream. ``close`` must unblock a pending
     read and be idempotent (it is the teardown path)."""
 
-    def read(self) -> "np.ndarray[Any, np.dtype[np.float32]] | None": ...
+    def read(self) -> _Block | None: ...
 
     def close(self) -> None: ...
 
@@ -80,7 +83,7 @@ class _Ring:
     """Thread-safe float32 frame ring: feeder thread writes, audio thread reads."""
 
     def __init__(self, capacity: int, channels: int) -> None:
-        self._buf: Any = np.zeros((capacity, channels), dtype=np.float32)
+        self._buf: _Block = np.zeros((capacity, channels), dtype=np.float32)
         self._capacity = capacity
         self._lock = threading.Lock()
         self._read = 0
@@ -91,7 +94,7 @@ class _Ring:
         with self._lock:
             return self._count
 
-    def write(self, block: Any) -> int:
+    def write(self, block: _Block) -> int:
         """Copy in up to ``len(block)`` frames; returns how many fit."""
         with self._lock:
             n = min(len(block), self._capacity - self._count)
@@ -105,7 +108,7 @@ class _Ring:
             self._count += n
             return n
 
-    def read_into(self, out: Any, frames: int) -> int:
+    def read_into(self, out: _Block, frames: int) -> int:
         """Copy out up to ``frames`` frames; returns how many were available."""
         with self._lock:
             n = min(frames, self._count)
@@ -219,13 +222,9 @@ class AudioEngine:
         self,
         *,
         decoder_factory: Callable[[str], Decoder],
-        voice_loader: Callable[[str], np.ndarray[Any, np.dtype[np.float32]]],
+        voice_loader: Callable[[str], _Block],
         sink_factory: (
-            Callable[
-                [Callable[[int], np.ndarray[Any, np.dtype[np.float32]]], int, int, int],
-                Sink,
-            ]
-            | None
+            Callable[[Callable[[int], _Block], int, int, int], Sink] | None
         ) = None,
         samplerate: int = 48_000,
         channels: int = 2,
@@ -247,8 +246,8 @@ class AudioEngine:
         self._sink: Sink | None = None
         # Scratch buffers reused by render() — the audio callback must not
         # allocate per block (an allocator stall there is an audible dropout).
-        self._music_buf: Any = np.zeros((blocksize, channels), dtype=np.float32)
-        self._voice_buf: Any = np.zeros((blocksize, channels), dtype=np.float32)
+        self._music_buf: _Block = np.zeros((blocksize, channels), dtype=np.float32)
+        self._voice_buf: _Block = np.zeros((blocksize, channels), dtype=np.float32)
 
         self._env_lock = threading.Lock()
         self._envelope = GainEnvelope(samplerate=samplerate, ramp_s=ramp_s)
@@ -257,7 +256,7 @@ class AudioEngine:
         self._mixed: MixedHandle | None = None  # our own PCM-backed handle
 
         self._voice_lock = threading.Lock()
-        self._voice_pcm: Any = None
+        self._voice_pcm: _Block | None = None
         self._voice_pos = 0
         self._voice_notify: Callable[[], None] | None = None
         self._voice_task: asyncio.Task[bool] | None = None
@@ -375,7 +374,7 @@ class AudioEngine:
             )
 
     # -- the mixing callback (audio thread; tests call it directly) -----------
-    def render(self, frames: int) -> np.ndarray[Any, np.dtype[np.float32]]:
+    def render(self, frames: int) -> _Block:
         """Produce the next mixed block. Starved buffers pad with silence."""
         if len(self._music_buf) != frames:  # sink blocksize changed — rare
             self._music_buf = np.zeros((frames, self._channels), dtype=np.float32)
