@@ -78,6 +78,9 @@ target-version = "py310"
 # MusicProvider / MemoryStore, brain.Brain) are actually enforced: an impl whose
 # signatures drift from the contract fails here. Run:  pyright
 include = ["src", "tests"]
+# scripts/ is not a package; tests load its modules (devwatch, dev_preflight)
+# by putting scripts/ on sys.path. Mirror that here so pyright resolves them.
+extraPaths = ["scripts"]
 pythonVersion = "3.10"
 # Shipped code is held to strict; tests stay at the base mode (they legitimately
 # reach into internals and use loosely-typed fakes/monkeypatch — strict there is

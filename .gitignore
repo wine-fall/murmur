@@ -20,3 +20,6 @@ scratch/
 
 # graphify knowledge-graph artifacts — rebuilt locally by the post-commit hook
 graphify-out/
+
+# Local dev session artifacts (make dev): the tailed diagnostics log
+.dev/
