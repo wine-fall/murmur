@@ -102,7 +102,7 @@ class SounddeviceSink:
 
     def __init__(
         self,
-        render: Callable[[int], Any],
+        render: Callable[[int], np.ndarray[Any, np.dtype[np.float32]]],
         samplerate: int,
         channels: int,
         blocksize: int,

@@ -17,3 +17,6 @@ venv/
 # Throwaway smoke/probe scripts (murmur-smoke skill) — never committed
 scratch/
 .github/hooks/
+
+# graphify knowledge-graph artifacts — rebuilt locally by the post-commit hook
+graphify-out/

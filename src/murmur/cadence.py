@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import random
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, Literal, Protocol, TypedDict, runtime_checkable
 
 from .harness import BrainTool, Harness
 from .prompts import CADENCE_INSTRUCTION, CADENCE_STATE_HEADER
@@ -80,6 +81,11 @@ class RandomCadence:
         return MUSIC if self._rng.random() < self._p else TALK
 
 
+class _ChooseResult(TypedDict):
+    ok: Literal[True]
+    kind: str
+
+
 class _ChooseSegmentTool:
     """Terminal tool: the model commits to talk or music (spec 03-01 §2.1
     termination rule — structured output via the terminal tool's schema)."""
@@ -99,8 +105,9 @@ class _ChooseSegmentTool:
     }
     terminal = True
 
-    async def run(self, args: dict[str, Any]) -> dict[str, Any]:
-        return {"ok": True, "kind": str(args.get("kind", ""))}
+    async def run(self, args: Mapping[str, object]) -> _ChooseResult:
+        raw = args.get("kind")
+        return _ChooseResult(ok=True, kind=raw if isinstance(raw, str) else "")
 
 
 class BrainCadence:
@@ -142,7 +149,7 @@ class BrainCadence:
             )
         except Exception:
             return await self._fallback.next_kind(state)
-        kind = (result or {}).get("kind")
+        kind = result.get("kind") if result else None
         if kind in (TALK, MUSIC):
             return str(kind)
         return await self._fallback.next_kind(state)

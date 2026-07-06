@@ -10,8 +10,11 @@ and music is only the first capability to ride the seam (spec 03-01).
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, runtime_checkable
+from collections.abc import Awaitable, Callable, Mapping
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import CanUseTool
 
 
 @runtime_checkable
@@ -25,13 +28,14 @@ class BrainTool(Protocol):
 
     name: str
     description: str
-    input_schema: dict[str, Any]
+    input_schema: dict[str, Any]  # a JSON Schema document — genuinely open JSON
     terminal: bool
 
-    async def run(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Execute the tool. ``args`` are validated against ``input_schema`` by
-        the harness before this is called. Returns a JSON-serializable dict
-        handed back to the model as the tool result."""
+    async def run(self, args: Mapping[str, object]) -> Mapping[str, object]:
+        """Execute the tool. ``args`` is the model's tool call — untrusted JSON;
+        a tool narrows/validates it rather than assuming a shape. Returns a
+        JSON-serializable mapping handed back to the model as the tool result
+        (concrete tools return a ``TypedDict``; the seam stays shape-agnostic)."""
         ...
 
 
@@ -52,7 +56,7 @@ class Harness(Protocol):
         tools: list[BrainTool],
         model: str,
         max_turns: int,
-    ) -> dict[str, Any] | None:
+    ) -> Mapping[str, object] | None:
         """Run the loop until the terminal tool returns ``ok == True`` (that
         result is returned), or ``max_turns`` is hit (returns None). ``tools`` is
         the only tool surface exposed. Content-agnostic: prompt text is already
@@ -76,7 +80,7 @@ class GuideCapable(Protocol):
         model: str,
         max_turns: int,
         permission_mode: str = "default",
-        can_use_tool: Any = None,
+        can_use_tool: CanUseTool | None = None,
         on_text: Callable[[str], None] | None = None,
         next_user_input: Callable[[], Awaitable[str | None]] | None = None,
     ) -> str:

@@ -7,7 +7,11 @@ import asyncio
 from fakes import FakeMusicProvider
 
 from murmur.contracts import TrackCandidate
-from murmur.music.tools import SearchMusicTool, SubmitPickTool
+from murmur.music.tools import (
+    SearchMusicTool,
+    SubmitPickTool,
+    parse_submit_success,
+)
 
 
 def test_search_music_returns_candidates_and_is_not_terminal():
@@ -82,3 +86,52 @@ def test_submit_pick_resolve_failure_is_a_nonterminating_result():
         assert "error" in out
 
     asyncio.run(go())
+
+
+def test_submit_pick_missing_ref_is_a_clean_error_not_a_crash():
+    # The model controls args; an omitted 'ref' must degrade to a retryable
+    # error result, never raise (it used to KeyError on args["ref"]).
+    provider = FakeMusicProvider(candidates=[], resolvable=set())
+    tool = SubmitPickTool(provider)
+
+    async def go():
+        out = await tool.run({"why": "no ref supplied"})
+        assert out["ok"] is False
+        assert "ref" in out["error"]
+        assert provider.resolved == []  # never even tried to resolve
+
+    asyncio.run(go())
+
+
+def test_parse_submit_success_validates_the_opaque_result():
+    good = {
+        "ok": True,
+        "source": "stream:r1",
+        "kind": "music",
+        "title": "T1",
+        "artist": "U",
+        "announce": "up next",
+    }
+    pick = parse_submit_success(good)
+    assert pick is not None
+    assert pick["source"] == "stream:r1"
+    assert pick["announce"] == "up next"
+
+    # Not a usable success -> None, so next_track falls back to talk.
+    assert parse_submit_success(None) is None
+    assert parse_submit_success({}) is None
+    assert parse_submit_success({"ok": False, "error": "boom"}) is None
+    assert parse_submit_success({"ok": True}) is None  # missing source
+    assert parse_submit_success({"ok": True, "source": ""}) is None  # empty source
+
+
+def test_parse_submit_success_defaults_and_scrubs_drifted_fields():
+    # A drifted shape (non-str kind, numeric title) must not produce a bad clip:
+    # kind defaults to "music" and non-string metadata is dropped to None.
+    pick = parse_submit_success(
+        {"ok": True, "source": "s", "kind": 7, "title": 123, "artist": None}
+    )
+    assert pick is not None
+    assert pick["kind"] == "music"
+    assert pick["title"] is None
+    assert pick["artist"] is None
