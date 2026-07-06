@@ -11,7 +11,10 @@ and music is only the first capability to ride the seam (spec 03-01).
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import CanUseTool
 
 
 @runtime_checkable
@@ -76,7 +79,7 @@ class GuideCapable(Protocol):
         model: str,
         max_turns: int,
         permission_mode: str = "default",
-        can_use_tool: Any = None,
+        can_use_tool: CanUseTool | None = None,
         on_text: Callable[[str], None] | None = None,
         next_user_input: Callable[[], Awaitable[str | None]] | None = None,
     ) -> str:

@@ -219,9 +219,13 @@ class AudioEngine:
         self,
         *,
         decoder_factory: Callable[[str], Decoder],
-        voice_loader: Callable[[str], Any],
+        voice_loader: Callable[[str], np.ndarray[Any, np.dtype[np.float32]]],
         sink_factory: (
-            Callable[[Callable[[int], Any], int, int, int], Sink] | None
+            Callable[
+                [Callable[[int], np.ndarray[Any, np.dtype[np.float32]]], int, int, int],
+                Sink,
+            ]
+            | None
         ) = None,
         samplerate: int = 48_000,
         channels: int = 2,
@@ -371,7 +375,7 @@ class AudioEngine:
             )
 
     # -- the mixing callback (audio thread; tests call it directly) -----------
-    def render(self, frames: int) -> Any:
+    def render(self, frames: int) -> np.ndarray[Any, np.dtype[np.float32]]:
         """Produce the next mixed block. Starved buffers pad with silence."""
         if len(self._music_buf) != frames:  # sink blocksize changed — rare
             self._music_buf = np.zeros((frames, self._channels), dtype=np.float32)

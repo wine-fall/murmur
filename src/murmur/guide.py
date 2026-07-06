@@ -11,10 +11,13 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import TYPE_CHECKING
 
 from .harness import GuideCapable
 from .prompts.guide import GUIDE_PERSONA, build_fix_music_prompt
+
+if TYPE_CHECKING:
+    from claude_agent_sdk import CanUseTool
 
 _DEFAULT_MODEL = "claude-opus-4-8"  # repair is judgment-heavy + occasional
 _DEFAULT_MAX_TURNS = 30
@@ -40,7 +43,7 @@ class SetupGuide:
         reason: str = "",
         venv_python: str | None = None,
         permission_mode: str = "default",
-        can_use_tool: Any = None,
+        can_use_tool: CanUseTool | None = None,
         on_text: Callable[[str], None] | None = None,
         next_user_input: Callable[[], Awaitable[str | None]] | None = None,
     ) -> str:
