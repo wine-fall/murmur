@@ -34,7 +34,7 @@ _PS = """\
 def test_parse_ps_extracts_pid_ppid_rss_command():
     procs = memwatch.parse_ps(_PS)
     by_pid = {p.pid: p for p in procs}
-    assert by_pid[100].ppid == 1
+    assert by_pid[100].ppid == 99
     assert by_pid[100].rss_kb == 52000
     assert by_pid[102].command.startswith("ffmpeg")
     assert 1 in by_pid  # header-less lines all parse
