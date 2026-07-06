@@ -27,7 +27,7 @@ A single Python `asyncio` process. One coroutine drives "speaking up," another r
 | **Brain** | Claude session (via `claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
 | **VoiceProvider** | text → speech; hot-swappable TTS running as a warm sidecar process |
 | **MusicProvider** | topic/query → audio stream; hot-swappable (v1 = yt-dlp, covering YouTube + Bilibili) |
-| **AudioPlayer** | sole audio authority: sequence TTS + music, duck/stop on interrupt |
+| **AudioEngine** | sole audio authority: one output stream mixing music + voice, gain-envelope **ducking** (talk rides over the song; an interjection ducks it, never stops it) |
 | **Memory** | who you are, topics discussed, songs played (anti-repeat), conversation log — the persona living asset lives here too |
 
 **No dead air**: while the current segment plays, the Director prepares the next one's audio ahead of time so it joins seamlessly.
@@ -46,9 +46,9 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 
 Building, in ordered sub-specs under [`specs/`](specs/). Each step runs and adds something audible.
 
-- **✅ Spec 01 — `core-loop`** (implemented & verified): the L0 spine — CLI Host + Director + Brain + static persona + typed talk-back + session history + AudioPlayer.
+- **✅ Spec 01 — `core-loop`** (implemented & verified): the L0 spine — CLI Host + Director + Brain + static persona + typed talk-back + session history + the basic player (superseded by 03-02's engine).
 - **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): warm TTS sidecar + MLX adapters (Spark primary / Qwen3 / Chatterbox / Dia, plus the post-L0 VoxCPM2 candidate). **L0 is now audible.**
-- **Next → Spec 03-01 `brain-harness`**, then **03-02 `ducking`** for the L1 radio feel.
+- **✅ Spec 03 — `brain-harness` + `ducking` + `guide-harness`** (code-implemented; by-ear acceptance is the open gate): Claude-driven music discovery, the mixing AudioEngine with ducking, cadence scheduling, startup checks + the yt-dlp repair guide. **L1 is code-complete.**
 
 Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecycle (06), proactive + pacing (07), token economy (08), Claude Code ingestion (09), TUI (10).
 

@@ -101,3 +101,33 @@ def test_build_voice_wires_the_mlx_names():
         provider = build_voice(name)
         assert isinstance(provider, SidecarVoiceProvider)
         assert provider._backend == name
+
+
+# --- normalize_tts_text (spec 02 §3.4 hygiene; found live with Spark) --------
+
+
+def test_normalize_collapses_paragraph_breaks_and_runs_of_whitespace():
+    from murmur.voice.mlx_backend import normalize_tts_text
+
+    assert normalize_tts_text("hello\n\nworld") == "hello world"
+    assert normalize_tts_text("a  b\t c") == "a b c"
+
+
+def test_normalize_drops_unspeakable_lines():
+    """Punctuation/whitespace-only fragments made mlx-audio's Spark splitter
+    produce an empty segment -> 'No arrays provided for stacking'."""
+    from murmur.voice.mlx_backend import normalize_tts_text
+
+    assert normalize_tts_text("hello\n...\nworld") == "hello world"
+    assert normalize_tts_text("...\n\n---") == ""
+
+
+def test_normalize_keeps_cjk_speakable_text():
+    # CJK via escapes (no literal CJK in source, master S0): runtime values
+    # are real Chinese lines with an ellipsis-only line between them.
+    from murmur.voice.mlx_backend import normalize_tts_text
+
+    hello = "\u4f60\u597d"
+    ellipsis_line = "\u2026\u2026"
+    bye = "\u518d\u89c1\u3002"
+    assert normalize_tts_text(f"{hello}\n\n{ellipsis_line}\n{bye}") == f"{hello} {bye}"

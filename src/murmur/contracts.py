@@ -36,6 +36,10 @@ class AudioClip:
 
     source: str  # local file path (L0); may be a stream URL once spec 03-01 lands
     kind: str  # "talk" | "music"
+    # Optional display metadata (spec 03-02 extension): who/what is playing.
+    # Producers that know it set it (music picks); talk clips leave it None.
+    title: str | None = None
+    artist: str | None = None
 
 
 @dataclass(frozen=True)

@@ -1,8 +1,13 @@
-"""AudioPlayer — the sole audio authority (spec 01 §3.5).
+"""The ``Player`` seam + the spec-01 reference ``AudioPlayer``.
+
+Since spec 03-02 the app's sole audio authority is the mixing ``AudioEngine``
+(``murmur.engine``); the afplay-subprocess ``AudioPlayer`` below is no longer
+wired into the app and is kept as the seam's minimal reference implementation
+(spec 01 §3.5). The ``Player`` Protocol here is still the contract the
+Director consumes.
 
 Plays one ``AudioClip`` at a time by handing its file to an external player
 subprocess (e.g. ``afplay`` on macOS); ``stop()`` terminates that subprocess.
-Only this component emits sound; nothing else in the core touches the speakers.
 
 Two cancellation paths are deliberately distinguished:
 - ``stop()`` cancels the inner playback task, so ``play()`` returns normally —

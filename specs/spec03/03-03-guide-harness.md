@@ -1,6 +1,6 @@
 # spec/03-03 · guide-harness — harness the native agent to set up / repair the music dependency
 
-> **Status**: Scaffolded, integration pending — **part of spec 03, built within spec 03**. The harness config is written and unit-green: `GuideCapable.run_guide` + `_build_guide_options` (isolated, built-ins enabled, `permission_mode="default"`), `SetupGuide.fix_music`, and centralized prompts (`GUIDE_PERSONA` + `build_fix_music_prompt`). **Not yet wired into the run loop**, so the interactive ask→confirm→act flow is not yet runnable (needs the preflight trigger + routing the SDK's permission prompts through the CLI Host).
+> **Status**: **Implemented behind an explicit entry; auto-trigger pending** — **part of spec 03, built within spec 03**. Unit-green and merged: `GuideCapable.run_guide` + `_build_guide_options` (isolated, built-ins enabled, `permission_mode="default"`), `SetupGuide.fix_music`, centralized prompts (`GUIDE_PERSONA` + `build_fix_music_prompt`), the deterministic preflight (`music/preflight.py`), and the CLI-Host wiring (`setup.py::run_music_setup`) — the SDK's permission asks are routed via `can_use_tool` (printed, answered y/N on the same stdin the Director uses) and its streamed text via `on_text`. Runnable via `murmur --setup-music`, and **auto-triggered at startup** by 03-02's startup-checks phase (`startup.py::MusicStartupCheck` — a failed/declined check degrades the session to talk-only). **Remaining**: human acceptance on a real broken environment (§5.3).
 > **Part**: The third part of spec 03 (the music family), riding the brain-harness from [`03-01-brain-harness.md`](03-01-brain-harness.md): shape the **native Claude Code agent** to diagnose and — with the user's consent — fix why the music dependency (yt-dlp) isn't working in *their* environment (e.g. a corporate proxy whose CA yt-dlp doesn't trust). This is what makes 03's music **actually usable** on constrained machines. See master [`../DESIGN.md`](../DESIGN.md) §3.2 (the brain is a harnessed agent), §10.1 (guided provisioning), §7 pillar 1 (deterministic checks are local, 0 tokens).
 > **Milestone**: L1 — part of delivering working music (03). Depends on 03-01 (the harness) + 01 (CLI Host); independent of 03-02 (ducking).
 > **Conventions**: English; written for a coding agent. We do **not** build an agent — Claude Code is the agent; we shape it. Prompts centralized under `src/murmur/prompts/`; no CJK in source (master §0).
@@ -31,8 +31,8 @@
 - **`GuideCapable`** (harness.py, done): `run_guide(...) -> str` returns the final plain-language explanation. `ClaudeBrain` implements it; distinct from `Harness` (find-music has no built-in tools) — interface segregation.
 - **`SetupGuide`** (guide.py, done): `fix_music(*, ytdlp="yt-dlp", venv_python=None, permission_mode="default") -> str`.
 - **Prompts** (prompts/guide.py, done): `GUIDE_PERSONA` (behavior) + `build_fix_music_prompt` (high-level task, no prescribed remedy).
-- **Preflight** (to build): a deterministic check, e.g. `music_preflight(binary) -> PreflightResult(ok: bool, reason: str)` — runs a trivial `yt-dlp` query, inspects exit code / stderr. No LLM.
-- **Permission routing** (to build, integration): connect the SDK's permission interaction to the CLI Host (print the ask, read the y/n). Mechanism (e.g. the SDK's `can_use_tool` callback backed by CLI Host I/O) is decided at integration — kept minimal: we *route* the SDK's prompt, we do not design consent semantics.
+- **Preflight** (music/preflight.py, done): a deterministic check — `preflight_ytdlp(binary) -> PreflightResult(ok: bool, reason: str)` runs a trivial `yt-dlp` query, inspects exit code / stderr. No LLM.
+- **Permission routing** (setup.py, done): the SDK's `can_use_tool` callback backed by CLI Host I/O — the ask is printed, the y/N read from the same stdin. Kept minimal: we *route* the SDK's prompt, we do not design consent semantics.
 
 ---
 
@@ -64,8 +64,8 @@
 ---
 
 ## 6. Open questions
-- **Permission routing mechanism**: how the SDK's ask reaches the CLI Host and the answer returns (likely a `can_use_tool` callback over print/stdin) — decide at integration; keep minimal, do not build a bespoke consent protocol.
+- **Settled — permission routing mechanism**: the SDK's `can_use_tool` callback backed by CLI Host print/stdin (`setup.py::_cli_permission`); no bespoke consent protocol.
 - **Preflight scope**: only yt-dlp, or a general "dependency doctor" covering future backends? Start with yt-dlp.
-- **Relationship to the broadcast loop**: does setup block startup, or run as a background job while the radio idles/talks? (Master §3.2 boundary ②.)
+- **Relationship to the broadcast loop**: does setup block startup, or run as a background job while the radio idles/talks? (Master §3.2 boundary ②.) The auto-trigger lands with 03-02's music wiring — decide there.
 - **Persistence/safety of fixes**: e.g. appending a CA to certifi is semi-global — confirm each fix is the smallest safe change and reversible/explained.
 - **Trigger surface**: this spec triggers via normal interaction; whether to also offer an explicit `murmur doctor`-style entry is deferred.

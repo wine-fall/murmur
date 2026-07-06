@@ -1,8 +1,9 @@
 """MusicProgrammer.next_track find-and-pull flow (spec 03-01 §3.2), fakes only.
 
-These pin the plumbing — search -> submit_pick -> resolved clip, retry on a
+These pin the plumbing — search -> submit_pick -> resolved pick, retry on a
 resolve failure, None when nothing resolves, and the §2.5 context split — not
-selection quality (that is the Ollama/human layer).
+selection quality (that is the Ollama/human layer). Per the 03-02 extension,
+next_track returns a TrackPick (clip with title/artist + the announce line).
 """
 
 from __future__ import annotations
@@ -11,9 +12,9 @@ import asyncio
 
 from fakes import FakeMusicBrain, FakeMusicProvider
 
-from murmur.contracts import AudioClip, TrackCandidate
+from murmur.contracts import TrackCandidate
 from murmur.music.context import MusicContext
-from murmur.music.programmer import MusicProgrammer
+from murmur.music.programmer import MusicProgrammer, TrackPick
 
 
 def _cands(*refs: str) -> list[TrackCandidate]:
@@ -23,13 +24,32 @@ def _cands(*refs: str) -> list[TrackCandidate]:
     ]
 
 
-def test_next_track_returns_the_resolved_clip():
+def test_next_track_returns_a_pick_with_clip_metadata_and_announce():
     provider = FakeMusicProvider(candidates=_cands("r1", "r2"), resolvable={"r1", "r2"})
     prog = MusicProgrammer(brain=FakeMusicBrain(), provider=provider, model="haiku")
 
     async def go():
-        clip = await prog.next_track(MusicContext(persona="P", situation="S"))
-        assert clip == AudioClip(source="stream:r1", kind="music")
+        pick = await prog.next_track(MusicContext(persona="P", situation="S"))
+        assert isinstance(pick, TrackPick)
+        assert pick.clip.source == "stream:r1"
+        assert pick.clip.kind == "music"
+        assert pick.clip.title == "T-r1"
+        assert pick.clip.artist == "U"
+        assert pick.announce == "up next: T-r1"
+
+    asyncio.run(go())
+
+
+def test_next_track_announce_is_none_when_the_task_omits_it():
+    provider = FakeMusicProvider(candidates=_cands("r1"), resolvable={"r1"})
+    prog = MusicProgrammer(
+        brain=FakeMusicBrain(with_announce=False), provider=provider, model="haiku"
+    )
+
+    async def go():
+        pick = await prog.next_track(MusicContext(persona="P", situation="S"))
+        assert pick is not None
+        assert pick.announce is None
 
     asyncio.run(go())
 
@@ -39,8 +59,9 @@ def test_next_track_retries_when_a_pick_fails_to_resolve():
     prog = MusicProgrammer(brain=FakeMusicBrain(), provider=provider, model="haiku")
 
     async def go():
-        clip = await prog.next_track(MusicContext(persona="P", situation="S"))
-        assert clip == AudioClip(source="stream:good", kind="music")
+        pick = await prog.next_track(MusicContext(persona="P", situation="S"))
+        assert pick is not None
+        assert pick.clip.source == "stream:good"
         assert provider.resolved == ["bad", "good"]  # tried the first, then the next
 
     asyncio.run(go())

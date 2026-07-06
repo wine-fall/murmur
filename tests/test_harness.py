@@ -100,14 +100,14 @@ def test_claude_run_task_finds_a_track_end_to_end():
     prog = MusicProgrammer(brain=ClaudeBrain(model), provider=provider, model=model)
 
     async def go():
-        clip = await prog.next_track(
+        pick = await prog.next_track(
             MusicContext(
                 persona="You are a calm classical-music radio host.",
                 situation="A quiet evening; the listener likes solo piano.",
             )
         )
-        assert clip is not None and clip.kind == "music"
-        assert clip.source == "stream:r1"
+        assert pick is not None and pick.clip.kind == "music"
+        assert pick.clip.source == "stream:r1"
         assert provider.searched  # the model actually searched
         assert "r1" in provider.resolved  # and submitted a pick that resolved
 

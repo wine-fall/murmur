@@ -26,6 +26,15 @@ _SUBMIT_SCHEMA: dict[str, Any] = {
     "properties": {
         "ref": {"type": "string", "description": "the chosen candidate's ref"},
         "why": {"type": "string", "description": "one line: why this track"},
+        "title": {"type": "string", "description": "the track's title"},
+        "artist": {"type": "string", "description": "the track's artist/uploader"},
+        "announce": {
+            "type": "string",
+            "description": (
+                "one short in-persona spoken line introducing the track "
+                "(the DJ's 'up next'), in the persona's language"
+            ),
+        },
     },
     "required": ["ref", "why"],
 }
@@ -86,4 +95,19 @@ class SubmitPickTool:
             clip = await self._provider.resolve(ref)
         except Exception as exc:  # any resolve failure -> let the model retry
             return {"ok": False, "error": str(exc)}
-        return {"ok": True, "source": clip.source, "kind": clip.kind}
+
+        def _opt(key: str) -> str | None:
+            value = args.get(key)
+            return str(value) if value else None
+
+        # Metadata rides the terminal result (spec 03-02): the model supplies
+        # title/artist from the candidate it judged and writes the announce
+        # line itself; all optional — a missing announce just skips the intro.
+        return {
+            "ok": True,
+            "source": clip.source,
+            "kind": clip.kind,
+            "title": _opt("title"),
+            "artist": _opt("artist"),
+            "announce": _opt("announce"),
+        }

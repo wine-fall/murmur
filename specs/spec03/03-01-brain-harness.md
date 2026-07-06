@@ -1,6 +1,6 @@
 # spec/03-01 · brain-harness — the isolated brain becomes a tool-using agent
 
-> **Status**: Not started. Design-level (mechanism + contracts, not final code).
+> **Status**: **Implemented** (merged to main; unit suite green — integration tests are tagged, run on demand). Built and tested: the harness (`Harness.run_task` + `BrainTool`, isolation invariants asserted), the yt-dlp `MusicProvider` (search/resolve), the music tools (`search_music`/`submit_pick`), the context-insertion mechanism (`MusicContext` + `render_context`), and `MusicProgrammer.next_track`. **Not yet consumed by the Director** — scheduling/playback wiring (incl. the music-model config knob) lands in [`03-02`](03-02-ducking.md) by design, so no track is audible yet. The optional `musicdl` adapter is **not implemented** (the seam supports it; user-installed, never required — master §5). Human acceptance ("tracks feel well-chosen") is pending 03-02 playback.
 > **Part**: The general **brain-harness** seam (master [`../DESIGN.md`](../DESIGN.md) §3.2 — "the brain is a *harnessed agent*, not a one-shot LLM call") + its **first capability**: habit-based music search & recommendation (the `MusicProvider` implementation) + the Director's talk↔music scheduling. See master §4 (architecture), §5 (music sources), §7 (token economy), §10 (build order).
 > **Milestone**: L1 (radio feel) — with [`03-02-ducking.md`](03-02-ducking.md). This spec alone makes the radio **find and play real songs** between talk segments (sequentially, via the existing player). 03-02 then makes talk-over-music and interjection **duck** instead of hard-stop.
 > **Conventions**: English; written for a coding agent. Prompt text centralized under `src/murmur/prompts/`; no CJK in source (master §0).
@@ -82,24 +82,29 @@ class MusicProvider(Protocol):
     async def resolve(self, ref: str) -> AudioClip: ...   # AudioClip(kind="music")
     async def aclose(self) -> None: ...
 ```
-- **yt-dlp adapter (default):** `search` via `ytsearch{limit}:<query>` (metadata only, no download); `resolve` via `-f bestaudio -g` → a **stream URL** (`AudioClip.source` = URL, no disk download — master decision A). Covers YouTube + Bilibili.
+- **yt-dlp adapter (default):** `search` via `ytsearch{limit}:<query>` (metadata only, no download); `resolve` via `-f bestaudio/best -g` (audio-only preferred; falls back to a combined format where yt-dlp cannot offer bestaudio, e.g. JS-runtime-gated YouTube formats — ffmpeg decodes either) → a **stream URL** (`AudioClip.source` = URL, no disk download — master decision A). Covers YouTube + Bilibili.
 - **musicdl adapter (optional, user-installed):** same seam; a downloader → `AudioClip.source` = a local file. Not required for core tests; not in the shipped default (master §5).
 
 ### 2.3 Music tools (the harness's first tools, wrapping `MusicProvider`)
 Two `BrainTool`s handed to `run_task` for the music task:
 - `search_music(query: str, limit: int) -> {candidates: [TrackCandidate...]}` — wraps `MusicProvider.search`.
-- `submit_pick(ref: str, why: str) -> {ok, source?, kind?, error?}` — the **terminal tool** (`terminal=True`). It calls `MusicProvider.resolve(ref)`: on success it returns `{ok: true, source: <url/path>, kind: "music"}` — enough for `next_track` to rebuild the `AudioClip` directly (no side-channel, no re-resolve) and end the loop; on failure it returns `{ok: false, error}`, a non-terminating result that lets the brain pick another candidate and call `submit_pick` again. Unifies "confirm the pick is *actually playable*" + "structured termination" + "hand the clip back".
+- `submit_pick(ref: str, why: str, title: str, artist: str, announce: str) -> {ok, source?, kind?, title?, artist?, announce?, error?}` — the **terminal tool** (`terminal=True`). It calls `MusicProvider.resolve(ref)`: on success it returns `{ok: true, source: <url/path>, kind: "music", title, artist, announce}` — enough for `next_track` to rebuild the `AudioClip` directly (no side-channel, no re-resolve) and end the loop; on failure it returns `{ok: false, error}`, a non-terminating result that lets the brain pick another candidate and call `submit_pick` again. Unifies "confirm the pick is *actually playable*" + "structured termination" + "hand the clip back". *(Extension owned by [`03-02`](03-02-ducking.md): `title`/`artist` thread the display metadata through, and `announce` is a one-line in-persona DJ intro the same task writes — zero extra LLM calls, no hardcoded copy in source.)*
 
 Selection heuristics (avoid loops/covers/live unless apt, prefer official audio, match language/taste) live in the **task instruction prompt** for the MVP (a formal SDK *skill* is a later option — see Open Questions), centralized under `src/murmur/prompts/`.
 
 ### 2.4 The Director-facing entry — habit-based pick-and-pull
 ```python
+@dataclass(frozen=True)
+class TrackPick:            # widened return, owned by 03-02 (no consumer existed before)
+    clip: AudioClip         # carries optional title/artist display metadata
+    announce: str | None    # one-line in-persona DJ intro, spoken over the ducked head
+
 class MusicProgrammer:
-    async def next_track(self, ctx: MusicContext) -> AudioClip | None: ...
+    async def next_track(self, ctx: MusicContext) -> TrackPick | None: ...
     """Run the harnessed brain (Haiku, bounded turns) with the music tools
     over `ctx`; the brain searches, judges candidates against habits+context,
     and finalizes with `submit_pick`, which resolves the chosen ref. Returns
-    the `AudioClip` captured by that terminal call, or None if nothing suitable
+    the pick captured by that terminal call, or None if nothing suitable
     resolves within `max_turns` (Director falls back to more talk)."""
 ```
 
@@ -171,4 +176,5 @@ This mechanism is what 03-01 builds and tests; *which* fields ride in `situation
 - **Context *content* — owned by [`03-02`](03-02-ducking.md).** 03-01 builds only the insertion *mechanism* (§2.5). *What* rides in `MusicContext.situation`, and the logic that assembles it, is decided and first populated in 03-02 (where the Director builds the context and calls `next_track`); richer fields arrive as their sources land (recent-window / anti-repeat ledger from spec 05, time-of-day / pacing from spec 07).
 - **`max_turns` / model:** the bound on the search loop, and confirming the exact Haiku id, when wiring the real brain.
 - **Resolve-failure fallback:** how many `submit_pick` retries before `next_track` gives up and returns None. Proposal: bounded by `max_turns`.
+- **Deferred together — optional/gray providers (`musicdl` + cliamp auth):** the optional user-installed `musicdl` adapter (downloader → local file, same `MusicProvider` seam) is not built. When it — or any auth-gated source (NetEase, Spotify, …) — is attempted, borrow [`cliamp`](https://github.com/bjarneo/cliamp)'s credential/cookie auth mechanics (auth flow only, not its user-picks interaction model) — see master §5 for the full analysis. Kept as one work item so neither reference is lost.
 - **Settled (recorded so they are not re-asked):** selection heuristics live in the task-instruction prompt, not a formal skill; a separate `MusicContext` (not an extension of the tool-less `ContextPack`); resolve latency is accepted as a small gap (real look-ahead is spec 04).

@@ -9,6 +9,12 @@ requires-python = ">=3.10"
 # test layer (DESIGN §11.1) needs no network. A real TTS adapter lands in spec 02.
 dependencies = [
     "claude-agent-sdk>=0.2.110",
+    # spec 03-02 (the mixing AudioEngine, now the default player): numpy does the
+    # sample math; sounddevice (bundled PortAudio) is the one output stream. The
+    # unit suite still opens no stream and spawns no ffmpeg (fakes at the decoder/
+    # sink seams); ffmpeg itself stays a system binary, checked at startup.
+    "numpy>=1.26",
+    "sounddevice>=0.4.6",
 ]
 
 [project.optional-dependencies]

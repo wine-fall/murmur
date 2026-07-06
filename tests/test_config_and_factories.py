@@ -16,10 +16,15 @@ def test_config_defaults():
     c = Config.default()
     assert c.brain_provider == "claude"
     assert c.voice_provider == "stub"
-    assert c.player_cmd == "afplay"
+    assert c.ffmpeg_cmd == "ffmpeg"
     assert c.model == "claude-opus-4-8"
     assert c.recent_window > 0
     assert c.inter_segment_gap >= 0
+    # spec 03-02: music on by default, local cadence, cheap music model.
+    assert c.music_enabled is True
+    assert c.cadence_mode == "every_n"
+    assert c.music_every_n >= 1
+    assert "haiku" in c.music_model
 
 
 def test_build_voice_selects_stub():

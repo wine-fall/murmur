@@ -18,13 +18,18 @@ import contextlib
 from dataclasses import replace
 from pathlib import Path
 
-from .audio_player import AudioPlayer
-from .brain import build_brain
+from .brain import ClaudeBrain, build_brain
+from .cadence import CadencePolicy, build_cadence
 from .cli_host import CliHost
 from .config import Config
+from .contracts import MusicProvider
 from .director import Director
+from .engine import build_engine
 from .memory import InProcessMemoryStore
+from .music.programmer import MusicProgrammer, TrackSource
+from .music.provider import YtDlpMusicProvider
 from .persona import load_persona
+from .startup import MusicStartupCheck, run_startup_checks
 from .voice import PROFILES, build_voice
 
 
@@ -34,8 +39,47 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     cli = CliHost()
     memory = InProcessMemoryStore()
     voice = build_voice(config.voice_provider)
-    player = AudioPlayer(config.player_cmd)
+    player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
+
+    await voice.start()
+    cli.banner(
+        persona.splitlines()[0] if persona else "(empty)",
+        brain=config.brain_provider,
+        voice=config.voice_provider,
+    )
+    cli.start()
+
+    # Startup checks (spec 03-02 §2.4): music is on by default and needs the
+    # real brain (the stub has no harness); a failed/declined check degrades
+    # the session to talk-only — the radio still starts.
+    provider: MusicProvider | None = None
+    music: TrackSource | None = None
+    cadence: CadencePolicy | None = None
+    if config.music_enabled and isinstance(brain, ClaudeBrain):
+        results = await run_startup_checks(
+            cli, [MusicStartupCheck(brain, ytdlp=config.ytdlp_cmd)]
+        )
+        if results.get("music"):
+            provider = YtDlpMusicProvider(config.ytdlp_cmd)
+            await provider.start()
+            music = MusicProgrammer(
+                brain=brain, provider=provider, model=config.music_model
+            )
+            cadence = build_cadence(
+                config.cadence_mode,
+                every_n=config.music_every_n,
+                brain=brain,
+                model=config.music_model,
+            )
+        else:
+            cli.info(
+                "music is off this session (talk-only). Fix later with: "
+                "murmur --setup-music"
+            )
+    elif config.music_enabled:
+        cli.info("music needs the claude brain; running talk-only.")
+
     director = Director(
         config=config,
         persona=persona,
@@ -44,21 +88,19 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         player=player,
         memory=memory,
         cli_host=cli,
-    )
-
-    await voice.start()
-    cli.banner(
-        persona.splitlines()[0] if persona else "(empty)",
-        brain=config.brain_provider,
-        voice=config.voice_provider,
+        music=music,
+        cadence=cadence,
     )
     try:
         await director.run(max_segments=max_segments)
     finally:
-        # Orderly shutdown (§3.6): stop playback, close the voice backend.
-        # Best-effort even if we got here via cancellation (Ctrl-C).
+        # Orderly shutdown (§3.6): stop all audio (voice + music, no orphaned
+        # ffmpeg), close the providers. Best-effort even via Ctrl-C.
         with contextlib.suppress(asyncio.CancelledError):
-            await player.stop()
+            await player.aclose()
+        if provider is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await provider.aclose()
         with contextlib.suppress(asyncio.CancelledError):
             await voice.aclose()
         cli.info("stopped cleanly.")
@@ -73,7 +115,7 @@ async def _run_setup(config: Config) -> None:
 
     cli = CliHost()
     cli.start()  # spawn the stdin reader so the guide's confirms can be answered
-    await run_music_setup(cli, ClaudeBrain(config.model))
+    await run_music_setup(cli, ClaudeBrain(config.model), ytdlp=config.ytdlp_cmd)
 
 
 def _parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -120,10 +162,18 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     p.add_argument(
-        "--player",
+        "--no-music",
+        action="store_true",
+        help="skip the music startup check and scheduling (talk-only session)",
+    )
+    p.add_argument(
+        "--cadence",
+        choices=["every_n", "random", "brain"],
         default=None,
-        metavar="CMD",
-        help="external audio player binary (default: afplay)",
+        help=(
+            "talk<->music scheduling mode (default: every_n; 'brain' spends a "
+            "cheap model call per segment boundary)"
+        ),
     )
     p.add_argument(
         "--setup-music",
@@ -144,8 +194,10 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, brain_provider=args.brain)
     if args.voice is not None:
         config = replace(config, voice_provider=args.voice)
-    if args.player is not None:
-        config = replace(config, player_cmd=args.player)
+    if args.no_music:
+        config = replace(config, music_enabled=False)
+    if args.cadence is not None:
+        config = replace(config, cadence_mode=args.cadence)
 
     if args.setup_music:
         try:

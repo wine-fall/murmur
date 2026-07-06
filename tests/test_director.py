@@ -87,6 +87,61 @@ def test_quit_command_stops_cleanly():
     asyncio.run(go())
 
 
+def test_talk_synthesis_failure_skips_the_segment_not_the_radio():
+    """A TTS failure degrades to a skipped segment (info line, nothing aired
+    or recorded); the loop keeps broadcasting. Found live: one bad utterance
+    killed the whole radio."""
+
+    async def go():
+        cli = FakeCli()
+        brain = FakeBrain()
+        voice = FakeVoice(fail_on=["talk-2"])  # the second segment's text
+        player = FakePlayer()
+        memory = InProcessMemoryStore()
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=brain,
+            voice=voice,
+            player=player,
+            memory=memory,
+            cli_host=cli,
+        )
+        await director.run(max_segments=3)
+        # talk-2 was never aired: not printed, not played, not recorded.
+        assert cli.radio == ["talk-1", "talk-3"]
+        assert player.played == ["fake:talk-1", "fake:talk-3"]
+        assert [t.text for t in memory.recent(10)] == ["talk-1", "talk-3"]
+        assert any("synthesis failed" in m for m in cli.infos)
+
+    asyncio.run(go())
+
+
+def test_reply_synthesis_failure_degrades_and_resumes():
+    """A failed reply synthesis is skipped (the user turn is still recorded);
+    the program resumes instead of crashing."""
+
+    async def go():
+        cli = FakeCli(["hello"])
+        brain = FakeBrain()
+        voice = FakeVoice(fail_on=["reply:hello"])
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=brain,
+            voice=voice,
+            player=FakePlayer(play_delay=0.05),
+            memory=InProcessMemoryStore(),
+            cli_host=cli,
+        )
+        await director.run(max_segments=2)
+        assert brain.responded_to == ["hello"]
+        assert cli.radio == ["talk-1", "talk-2"]  # the reply never aired
+        assert any("synthesis failed" in m for m in cli.infos)
+
+    asyncio.run(go())
+
+
 def test_chained_interjections():
     """A line arriving during a reply is handled before the program resumes."""
 

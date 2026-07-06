@@ -24,15 +24,28 @@ class Config:
     # testing does not drain the subscription; full economy is spec 08.
     inter_segment_gap: float = 4.0
 
-    # --- audio playback (spec 01 §3.5) ------------------------------------
-    # External player binary the AudioPlayer hands each clip to. macOS-native
-    # "afplay" is fine for L0; swap for "ffplay"/"mpv" elsewhere.
-    player_cmd: str = "afplay"
+    # --- audio engine (spec 03-02) -----------------------------------------
+    # The mixing AudioEngine replaced the spec-01 afplay player; its only
+    # external binary is ffmpeg (per-track decode).
+    ffmpeg_cmd: str = "ffmpeg"
 
     # --- brain (spec 01 §3.2) ---------------------------------------------
     # Model id for L0. Tiered models (cheap filler) are deferred to spec 08.
     # Used by the real Brain in spec 01 step 2; the step-1 stub ignores it.
     model: str = "claude-opus-4-8"
+
+    # --- music (specs 03-01/03-02) ------------------------------------------
+    # Music is on by default, gated by the startup checks (spec 03-02 §2.4);
+    # it needs the real (claude) brain — the stub runs talk-only.
+    music_enabled: bool = True
+    ytdlp_cmd: str = "yt-dlp"
+    # Cheap tier for the music-discovery task and the opt-in brain cadence
+    # (master §7 pillar 3).
+    music_model: str = "claude-haiku-4-5-20251001"
+    # Talk<->music scheduling mode (spec 03-02 §2.3): "every_n" (default) |
+    # "random" | "brain" (the opt-in master §7 pillar-1 exception).
+    cadence_mode: str = "every_n"
+    music_every_n: int = 2
 
     # --- memory (master §6) -----------------------------------------------
     # Size of the recent-turns window handed to the Brain per call.

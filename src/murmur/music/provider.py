@@ -5,7 +5,7 @@ Shells out to ``yt-dlp`` (covers YouTube + Bilibili, no login/account):
   (duration, uploader, view_count) so the brain can reject junk (hour-long
   loops, wrong version) and prefer official audio. Richer than ``--flat-playlist``
   at the cost of extracting each hit; a handful of results is acceptable latency.
-- ``resolve`` runs ``yt-dlp -f bestaudio -g <ref>`` → a **stream URL** (no disk
+- ``resolve`` runs ``yt-dlp -f bestaudio/best -g <ref>`` → a **stream URL** (no disk
   download — master decision A); the ducking engine (spec 03-02) decodes it.
 
 The subprocess call is thin; the real logic is the two pure parse helpers, which
@@ -90,7 +90,7 @@ class YtDlpMusicProvider:
         return _parse_search_output(stdout, limit)
 
     async def resolve(self, ref: str) -> AudioClip:
-        stdout = await self._run(["-f", "bestaudio", "-g", ref])
+        stdout = await self._run(["-f", "bestaudio/best", "-g", ref])
         return AudioClip(source=_parse_resolve_output(stdout), kind="music")
 
     async def aclose(self) -> None:
