@@ -85,6 +85,22 @@ Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH
 
 ## Development
 
+One command sets up and runs the app; a second terminal tails a live debug log:
+
+```bash
+make dev      # sync deps, preflight (prompts to fix any blocker), launch the app
+make logs     # in another terminal: tail diagnostics + memory while it runs
+```
+
+`make dev` runs the real brain + music with a real voice (`VOICE=spark`); pass
+`VOICE=stub` for a silent voice, or `STUB=1 make dev` for a fully offline session
+(canned brain, no music — needs no network/model/binaries). It streams
+diagnostics — harness steps and the failures the UI keeps terse, with full
+tracebacks — to `.dev/dev.log`; `make logs` (`scripts/devwatch.py`) tails that and
+folds in a periodic memory-tree line. `make help` lists every target.
+
+Under the hood:
+
 ```bash
 uv sync --all-extras
 uv run pre-commit install

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 from typing import Any, Coroutine
 
 from .audio_player import Player
@@ -36,6 +37,10 @@ from .engine.core import MixingPlayer, MusicHandle
 from .music.context import MusicContext
 from .music.programmer import TrackSource
 from .prompts import build_music_situation
+
+# The UI keeps failures terse (one info line); the dev logfile (make dev /
+# MURMUR_DEV_LOG) gets the full exception + traceback. No-op when unconfigured.
+_log = logging.getLogger("murmur.director")
 
 _QUIT_COMMAND = "/quit"
 
@@ -135,6 +140,7 @@ class Director:
             raise
         except Exception as exc:
             self._cli.info(f"voice synthesis failed ({exc}); skipping this segment.")
+            _log.warning("voice synthesis failed; segment skipped", exc_info=exc)
             return None
 
     async def _wants_music(self) -> bool:
@@ -174,6 +180,7 @@ class Director:
             raise
         except Exception as exc:
             self._cli.info(f"music segment failed ({exc}); back to talk.")
+            _log.warning("music segment failed; fell back to talk", exc_info=exc)
             return False
         title = pick.clip.title or "music"
         artist = f" — {pick.clip.artist}" if pick.clip.artist else ""

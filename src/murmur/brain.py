@@ -18,7 +18,7 @@ so the core never imports a concrete Brain directly.
 from __future__ import annotations
 
 import json
-import os
+import logging
 from collections.abc import Awaitable, Callable, Mapping
 from itertools import cycle
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
@@ -35,6 +35,11 @@ if TYPE_CHECKING:
     )
 
     from .harness import BrainTool
+
+# Diagnostics stream to the dev logfile only when MURMUR_DEV_LOG is set (make
+# dev / logging_setup). No handler otherwise, so these calls are ~free and the
+# interactive UI is never touched.
+_log = logging.getLogger("murmur.harness")
 
 
 @runtime_checkable
@@ -199,11 +204,12 @@ class ClaudeBrain:
         # Close the query generator on break so the CLI subprocess is torn down
         # deterministically (not only at eventual GC / loop shutdown).
         gen = query(prompt=prompt, options=options)
-        debug = os.environ.get("MURMUR_HARNESS_DEBUG")
         try:
             async for _message in gen:
-                if debug:
-                    print(f"[harness] {type(_message).__name__}: {_message!r}"[:800])
+                if _log.isEnabledFor(logging.DEBUG):
+                    _log.debug(
+                        "task %s: %s", type(_message).__name__, repr(_message)[:800]
+                    )
                 if captured is not None:
                     break
         finally:
@@ -247,14 +253,15 @@ class ClaudeBrain:
         options = _build_guide_options(
             system_prompt, model, max_turns, permission_mode, can_use_tool
         )
-        debug = os.environ.get("MURMUR_HARNESS_DEBUG")
         parts: list[str] = []
         async with ClaudeSDKClient(options=options) as client:
             await client.query(prompt)
             while True:
                 async for message in client.receive_response():
-                    if debug:
-                        print(f"[guide] {type(message).__name__}: {message!r}"[:800])
+                    if _log.isEnabledFor(logging.DEBUG):
+                        _log.debug(
+                            "guide %s: %s", type(message).__name__, repr(message)[:800]
+                        )
                     if isinstance(message, AssistantMessage):
                         for block in message.content:
                             if isinstance(block, TextBlock) and block.text:

@@ -25,6 +25,7 @@ from .config import Config
 from .contracts import MusicProvider
 from .director import Director
 from .engine import build_engine
+from .logging_setup import configure_dev_logging
 from .memory import InProcessMemoryStore
 from .music.programmer import MusicProgrammer, TrackSource
 from .music.provider import YtDlpMusicProvider
@@ -191,6 +192,9 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> None:
+    # Dev-only: if $MURMUR_DEV_LOG is set (make dev sets it), stream diagnostics
+    # to that file for `make logs` to tail. A no-op otherwise (shipping default).
+    configure_dev_logging()
     args = _parse_args(argv)
     config = Config.default()
     if args.persona is not None:
