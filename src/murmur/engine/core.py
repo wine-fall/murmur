@@ -24,7 +24,10 @@ from typing import Any, Callable, Protocol, TypeAlias, runtime_checkable
 import numpy as np
 
 from ..contracts import AudioClip, Player
+from ..logging_setup import get_log
 from .mixer import DUCK_TARGET, FULL_GAIN, RAMP_S, GainEnvelope, mix
+
+_log = get_log("engine")
 
 # One float32 PCM block. numpy cannot express a fixed shape, so the shape
 # parameter stays ``Any`` — but the dtype is pinned and the alias names the
@@ -260,8 +263,15 @@ class AudioEngine:
     # -- Player seam (spec 01): voice channel --------------------------------
     async def play(self, clip: AudioClip) -> None:
         """Play a voice clip; auto-duck any live music for its duration."""
-        self._ensure_sink()
-        pcm = await asyncio.to_thread(self._voice_loader, clip.source)
+        # Time the pre-playback path (device open on first use + decoding the
+        # whole clip into memory): the suspected source of the "stutter at
+        # playback start" — correlate its elapsed_s against mem.log RSS ticks.
+        with _log.timed("play") as t:
+            first = self._sink is None  # first play opens the audio device
+            self._ensure_sink()
+            pcm = await asyncio.to_thread(self._voice_loader, clip.source)
+            t["first"] = first
+            t["frames"] = len(pcm)
         handle = self._music
         if handle is not None:
             await handle.duck()
