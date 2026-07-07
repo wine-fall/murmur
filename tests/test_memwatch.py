@@ -115,3 +115,12 @@ def test_format_tick_omits_system_memory_when_none():
     procs = memwatch.parse_ps(_PS)
     line = memwatch.format_tick(memwatch.subtree(procs, root_pid=100), peak_kb=0)
     assert "sys used" not in line  # back-compatible with the live-view caller
+
+
+def test_sys_suffix_shared_by_the_no_murmur_line():
+    # The no-murmur line reuses this suffix, so machine memory is reported even
+    # when no murmur process is up.
+    assert memwatch._sys_suffix(None) == ""
+    assert "sys used 17324 / 19792 MB (avail 2468)" in memwatch._sys_suffix(
+        (19792.0, 2468.0)
+    )

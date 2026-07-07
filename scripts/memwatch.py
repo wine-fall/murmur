@@ -182,6 +182,18 @@ def system_memory() -> tuple[float, float] | None:
     return (total, avail) if avail is not None else (total, total)
 
 
+def _sys_suffix(sys_mem: tuple[float, float] | None) -> str:
+    """The `  |  sys used U / total T MB (avail A)` tail — the whole-machine
+    memory, shared by the tick line and the no-murmur line so both carry it."""
+    if sys_mem is None:
+        return ""
+    sys_total, sys_avail = sys_mem
+    return (
+        f"  |  sys used {sys_total - sys_avail:.0f} / {sys_total:.0f} MB"
+        f" (avail {sys_avail:.0f})"
+    )
+
+
 def format_tick(
     members: list[Proc],
     *,
@@ -193,17 +205,10 @@ def format_tick(
         f"{label(p)} {_mb(p.rss_kb)}" for p in sorted(members, key=lambda p: -p.rss_kb)
     )
     stamp = time.strftime("%H:%M:%S")
-    line = (
+    return (
         f"{stamp}  total {_mb(total)} MB  (peak {_mb(max(peak_kb, total))} MB)"
-        f"  [{parts}]"
+        f"  [{parts}]{_sys_suffix(sys_mem)}"
     )
-    if sys_mem is not None:
-        sys_total, sys_avail = sys_mem
-        line += (
-            f"  |  sys used {sys_total - sys_avail:.0f} / {sys_total:.0f} MB"
-            f" (avail {sys_avail:.0f})"
-        )
-    return line
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -236,7 +241,10 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 roots = find_roots(procs)
             if not roots:
-                emit("(no murmur process found)")
+                # Still report the machine's memory — just flag that murmur
+                # isn't up yet (e.g. the recorder started before the app).
+                stamp = time.strftime("%H:%M:%S")
+                emit(f"{stamp}  (no murmur running){_sys_suffix(system_memory())}")
             for root in roots:
                 members = subtree(procs, root_pid=root.pid)
                 total = sum(p.rss_kb for p in members)
