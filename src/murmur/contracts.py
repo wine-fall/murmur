@@ -5,6 +5,10 @@ buildable in order. The core loop (spec 01) only ever depends on what is
 declared here; implementations land in the specs noted below:
 
 - ``VoiceProvider``  -> implemented in spec 02 (TTS sidecar + adapters).
+- ``Player``         -> implemented by the mixing ``AudioEngine`` (spec 03-02),
+                        the sole audio authority. (The spec-01 afplay
+                        ``AudioPlayer`` reference impl was retired; git history
+                        keeps it.)
 - ``MusicProvider``  -> declared only here; implemented in spec 03-01 (the
                        brain-harness spec; Claude-driven, habit-based search).
 - ``MemoryStore``    -> in-process impl in spec 01 (``memory.py``); persistent
@@ -30,7 +34,7 @@ class AudioClip:
 
     L0 representation: a path to a complete audio file on local disk (e.g. a
     wav under a temp dir). Producers (VoiceProvider, later MusicProvider) write
-    the file and return this. The AudioPlayer consumes it opaquely — it only
+    the file and return this. The Player consumes it opaquely — it only
     needs ``source`` and ``kind``.
     """
 
@@ -88,16 +92,27 @@ class VoiceProvider(Protocol):
 
 
 # --------------------------------------------------------------------------- #
+# Player — the audio-playback seam the Director consumes (spec 01 §3.3)
+# --------------------------------------------------------------------------- #
+
+
+@runtime_checkable
+class Player(Protocol):
+    """One clip on air at a time; ``stop()`` cancels it (the cancel-and-resume
+    interjection, spec 01 §3.3). The mixing ``AudioEngine`` is the real impl;
+    tests inject a fake. Kept a Protocol so the Director depends on the
+    capability, not the concrete class (interface-first, DESIGN §11.1)."""
+
+    async def play(self, clip: AudioClip) -> None: ...
+
+    async def stop(self) -> None: ...
+
+
+# --------------------------------------------------------------------------- #
 # 2.3 MusicProvider — declared here; implemented in spec 03-01, widened to
 #     search + resolve (selection is Claude-driven). yt-dlp is the default
 #     adapter; musicdl is an optional user-installed one behind the same seam.
 # --------------------------------------------------------------------------- #
-
-
-def _empty_extra() -> dict[str, Any]:
-    """Typed default factory for ``TrackCandidate.extra`` (keeps pyright strict
-    happy — a bare ``dict`` factory infers ``dict[Unknown, Unknown]``)."""
-    return {}
 
 
 @dataclass(frozen=True)
@@ -113,9 +128,9 @@ class TrackCandidate:
     title: str
     uploader: str
     duration_s: int
-    extra: dict[str, Any] = field(
-        default_factory=_empty_extra
-    )  # e.g. {"view_count": ...}
+    # Typed factory (a bare ``dict`` infers dict[Unknown, Unknown] under pyright
+    # strict). e.g. {"view_count": ...}
+    extra: dict[str, Any] = field(default_factory=dict[str, Any])
 
 
 @runtime_checkable

@@ -230,6 +230,31 @@ def test_stop_cancels_the_voice_channel_only():
     asyncio.run(go())
 
 
+def test_cancelling_play_directly_propagates_and_unducks():
+    """Shutdown path (carried over from the retired AudioPlayer's test):
+    cancelling the play() TASK itself (not stop()) must propagate
+    CancelledError to the caller, and play()'s cleanup must still unduck."""
+
+    async def go():
+        eng, _ = _engine(FakeDecoder(0.5, 100_000), voice_frames=100_000)
+        await eng.play_music(_music_clip())
+        await _pump_until(eng, lambda b: np.allclose(b, 0.5))
+
+        voice_task = asyncio.ensure_future(eng.play(_talk_clip()))
+        await _pump_until(eng, lambda b: np.allclose(b, 0.4))
+        voice_task.cancel()
+        try:
+            await voice_task
+            raise AssertionError("play() swallowed CancelledError")
+        except asyncio.CancelledError:
+            pass
+        # play()'s finally still ran: music unducks back to full gain.
+        await _pump_until(eng, lambda b: np.allclose(b, 0.5))
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
 def test_handle_stop_tears_down_decoder_and_silences():
     async def go():
         decoder = FakeDecoder(0.5, 100_000)

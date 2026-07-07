@@ -27,12 +27,18 @@ import contextlib
 import logging
 from typing import Any, Coroutine
 
-from .audio_player import Player
 from .brain import Brain
 from .cadence import MUSIC, CadencePolicy, CadenceState
 from .cli_host import Host
 from .config import Config
-from .contracts import AudioClip, ContextPack, MemoryStore, Turn, VoiceProvider
+from .contracts import (
+    AudioClip,
+    ContextPack,
+    MemoryStore,
+    Player,
+    Turn,
+    VoiceProvider,
+)
 from .engine.core import MixingPlayer, MusicHandle
 from .music.context import MusicContext
 from .music.programmer import TrackSource
