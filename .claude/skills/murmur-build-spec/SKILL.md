@@ -44,6 +44,8 @@ Never leave the spec describing one thing while the code does another. Either th
 
 When a sub-spec change contradicts or outgrows a master decision, update `specs/DESIGN.md` too — and flag it, because master-level changes are bigger than they look.
 
+`specs/STATUS.md` is project-state truth (current milestone, what's next), not a spec contract — but the same living-truth rule applies. You **read it at the start of every build**, so if it's stale when you read it, or this build advances the milestone / changes the next target / closes an open acceptance bar, **update it and re-date-stamp in the same change**. A stale STATUS misdirects the next session.
+
 ## Testing (mandatory — see specs/DESIGN.md §11 for the full convention)
 
 - **Test-first for logic.** Failing unit test → implementation → green. Framework: `pytest`.

@@ -32,7 +32,7 @@ Drive one murmur task from intent to a **delivered PR** through fixed gates, **i
 
 ## Exit in exactly one of
 
-- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob).
+- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`).
 - **Paused — needs human input** — a gate failed past budget, a sensory checklist is owed, CI won't pick up, or a decision is needed (spec divergence, an open question, a multi-source conflict). State exactly what's needed.
 - **Won't-do** — decided against the change: close the PR, delete the branch, revert the working changes, and say why.
 
