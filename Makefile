@@ -11,6 +11,7 @@
 
 VOICE  ?= spark
 DEV_LOG := .dev/dev.log
+MEM_LOG := .dev/mem.log
 
 ifdef STUB
   SYNC_ARGS      := --extra dev
@@ -30,6 +31,7 @@ help:
 	@echo "                    (diagnostics -> $(DEV_LOG))"
 	@echo "  make logs         tail the dev log + memory (run in a 2nd terminal)"
 	@echo "                    INFO timeline by default; DEBUG=1 unmutes the firehose"
+	@echo "                    (memory is also recorded to $(MEM_LOG) while dev runs)"
 	@echo "  make preflight    check music/voice deps without launching"
 	@echo "  make setup-music  run the guided binary (yt-dlp/ffmpeg) repair"
 	@echo ""
@@ -48,12 +50,17 @@ dev: install
 	  echo "make dev stopped — fix the blockers above (or: STUB=1 make dev)."; \
 	  exit 1; \
 	}
-	@mkdir -p .dev && : > $(DEV_LOG)
+	@mkdir -p .dev && : > $(DEV_LOG) && : > $(MEM_LOG)
 	@echo ""
 	@echo "▶ logs: open another terminal in this repo and run:  make logs"
-	@echo "  (diagnostics stream to $(DEV_LOG))"
+	@echo "  (diagnostics -> $(DEV_LOG); memory -> $(MEM_LOG))"
 	@echo ""
-	@MURMUR_DEV_LOG=$(DEV_LOG) uv run murmur $(RUN_ARGS)
+	@# Side-car memory recorder (external, app-agnostic): sample the process
+	@# tree into mem.log for the whole run, torn down when the app exits.
+	@.venv/bin/python scripts/memwatch.py --out $(MEM_LOG) >/dev/null 2>&1 & \
+	  MEMPID=$$!; \
+	  trap 'kill $$MEMPID 2>/dev/null || true' EXIT INT TERM; \
+	  MURMUR_DEV_LOG=$(DEV_LOG) uv run murmur $(RUN_ARGS)
 
 LOG_LEVEL ?= INFO
 ifdef DEBUG
