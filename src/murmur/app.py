@@ -116,7 +116,6 @@ async def _run_setup(config: Config) -> None:
     """Run the music (yt-dlp) preflight + guide harness, routed through the CLI
     Host (spec 03-03). Explicit entry for now (``--setup-music``); the auto
     startup-preflight + in-conversation trigger is a later UX refinement."""
-    from .brain import ClaudeBrain
     from .setup import run_music_setup
 
     cli = CliHost()

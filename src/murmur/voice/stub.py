@@ -1,8 +1,8 @@
 """Stub VoiceProvider (spec 01 §4 — exercises the loop with no spec-02 code).
 
 Writes a complete, real (silent) WAV file to a temp dir and returns it as an
-``AudioClip(kind="talk")``. The clip's duration scales with text length so the
-AudioPlayer's pacing feels like a real spoken segment. This proves the
+``AudioClip(kind="talk")``. The clip's duration scales with text length so
+playback pacing feels like a real spoken segment. This proves the
 ``VoiceProvider`` seam: the core synthesizes and plays without any TTS model
 present. Spec 02 drops in a real adapter behind the same Protocol.
 """

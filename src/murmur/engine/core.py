@@ -23,7 +23,7 @@ from typing import Any, Callable, Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 
-from ..contracts import AudioClip
+from ..contracts import AudioClip, Player
 from .mixer import DUCK_TARGET, FULL_GAIN, RAMP_S, GainEnvelope, mix
 
 # One float32 PCM block. numpy cannot express a fixed shape, so the shape
@@ -67,14 +67,10 @@ class MusicHandle(Protocol):
 
 
 @runtime_checkable
-class MixingPlayer(Protocol):
+class MixingPlayer(Player, Protocol):
     """The player capability the Director's music branch needs (spec §2.1):
     the spec-01 ``Player`` surface plus ``play_music``. ``AudioEngine`` is the
     real impl; tests inject a fake."""
-
-    async def play(self, clip: AudioClip) -> None: ...
-
-    async def stop(self) -> None: ...
 
     async def play_music(self, clip: AudioClip) -> MusicHandle: ...
 

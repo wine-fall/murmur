@@ -23,12 +23,12 @@ class PreflightResult:
     reason: str  # "" when ok; else a short human-readable reason
 
 
-async def preflight_ytdlp(
-    binary: str = "yt-dlp", *, probe_query: str = "test"
+async def _probe(
+    name: str, binary: str, args: list[str], *, require_stdout: bool
 ) -> PreflightResult:
-    """Probe whether ``binary`` can fetch. ok = exit 0 with non-empty output;
-    otherwise broken, with ``reason`` (stderr snippet, or "binary not found")."""
-    args = ["--dump-json", "--flat-playlist", f"ytsearch1:{probe_query}"]
+    """Run one binary probe and classify it. ok = exit 0 (plus non-empty stdout
+    when ``require_stdout``); otherwise broken, with ``reason`` (stderr snippet,
+    or "binary not found")."""
     try:
         proc = await asyncio.create_subprocess_exec(
             binary,
@@ -37,41 +37,31 @@ async def preflight_ytdlp(
             stderr=asyncio.subprocess.PIPE,
         )
     except (FileNotFoundError, NotADirectoryError):
-        return PreflightResult(ok=False, reason=f"yt-dlp binary not found: {binary!r}")
+        return PreflightResult(ok=False, reason=f"{name} binary not found: {binary!r}")
     except PermissionError:
-        return PreflightResult(ok=False, reason=f"yt-dlp not executable: {binary!r}")
+        return PreflightResult(ok=False, reason=f"{name} not executable: {binary!r}")
 
     stdout_b, stderr_b = await proc.communicate()
-    if proc.returncode == 0 and stdout_b.strip():
+    if proc.returncode == 0 and (not require_stdout or stdout_b.strip()):
         return PreflightResult(ok=True, reason="")
 
     stderr = stderr_b.decode(errors="replace").strip()
-    reason = stderr or f"yt-dlp exited {proc.returncode} with no output"
+    suffix = " with no output" if require_stdout else ""
+    reason = stderr or f"{name} exited {proc.returncode}{suffix}"
     return PreflightResult(ok=False, reason=reason[:_REASON_MAX])
+
+
+async def preflight_ytdlp(
+    binary: str = "yt-dlp", *, probe_query: str = "test"
+) -> PreflightResult:
+    """Probe whether ``binary`` can fetch (a trivial flat search — network)."""
+    args = ["--dump-json", "--flat-playlist", f"ytsearch1:{probe_query}"]
+    return await _probe("yt-dlp", binary, args, require_stdout=True)
 
 
 async def preflight_ffmpeg(binary: str = "ffmpeg") -> PreflightResult:
-    """Probe whether ``binary`` is a working ffmpeg (``-version``; no network).
-    ok = exit 0; otherwise broken, with a short reason."""
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            binary,
-            "-version",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except (FileNotFoundError, NotADirectoryError):
-        return PreflightResult(ok=False, reason=f"ffmpeg binary not found: {binary!r}")
-    except PermissionError:
-        return PreflightResult(ok=False, reason=f"ffmpeg not executable: {binary!r}")
-
-    _stdout_b, stderr_b = await proc.communicate()
-    if proc.returncode == 0:
-        return PreflightResult(ok=True, reason="")
-
-    stderr = stderr_b.decode(errors="replace").strip()
-    reason = stderr or f"ffmpeg exited {proc.returncode}"
-    return PreflightResult(ok=False, reason=reason[:_REASON_MAX])
+    """Probe whether ``binary`` is a working ffmpeg (``-version``; no network)."""
+    return await _probe("ffmpeg", binary, ["-version"], require_stdout=False)
 
 
 async def preflight_music(
