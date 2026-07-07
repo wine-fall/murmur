@@ -127,6 +127,37 @@ def test_synthesize_lazy_starts_without_explicit_start():
     asyncio.run(go())
 
 
+def test_synthesize_logs_a_timing_event(tmp_path):
+    # The parent is the single log writer: it turns the sidecar's returned
+    # timings into one 'synth' event (with rtf) in the dev log.
+    from murmur.logging_setup import configure_dev_logging
+
+    logpath = tmp_path / "dev.log"
+    configure_dev_logging(str(logpath))
+
+    async def go():
+        provider = SidecarVoiceProvider("fake")
+        try:
+            await asyncio.wait_for(provider.synthesize("hello there"), timeout=20)
+        finally:
+            await provider.aclose()
+
+    try:
+        asyncio.run(go())
+        for h in __import__("logging").getLogger("murmur").handlers:
+            h.flush()
+        text = logpath.read_text(encoding="utf-8")
+        assert "murmur.voice: synth" in text
+        assert "chars=11" in text and "rtf=" in text and "audio_s=" in text
+    finally:
+        for h in list(__import__("logging").getLogger("murmur").handlers):
+            h.close()
+        __import__("logging").getLogger("murmur").handlers.clear()
+        import murmur.logging_setup as ls
+
+        ls._configured.clear()
+
+
 def test_start_is_idempotent_one_process():
     async def go():
         provider = SidecarVoiceProvider("fake")

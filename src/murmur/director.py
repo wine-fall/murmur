@@ -24,13 +24,13 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-import logging
 from typing import Any, Coroutine
 
 from .brain import Brain
 from .cadence import MUSIC, CadencePolicy, CadenceState
 from .cli_host import Host
 from .config import Config
+from .logging_setup import get_log
 from .contracts import (
     AudioClip,
     ContextPack,
@@ -46,7 +46,7 @@ from .prompts import build_music_situation
 
 # The UI keeps failures terse (one info line); the dev logfile (make dev /
 # MURMUR_DEV_LOG) gets the full exception + traceback. No-op when unconfigured.
-_log = logging.getLogger("murmur.director")
+_log = get_log("director")
 
 _QUIT_COMMAND = "/quit"
 
@@ -124,7 +124,9 @@ class Director:
     async def _talk_segment(self) -> str | None:
         """One autonomous talk segment (spec 01). Returns an interrupting line."""
         ctx = self._context()
-        text = await self._brain.next_talk(ctx)
+        with _log.timed("talk") as t:
+            text = await self._brain.next_talk(ctx)
+            t["chars"] = len(text)
         clip = await self._synthesize_or_skip(text)
         if clip is None:
             return None  # segment skipped; the loop keeps broadcasting
@@ -146,7 +148,7 @@ class Director:
             raise
         except Exception as exc:
             self._cli.info(f"voice synthesis failed ({exc}); skipping this segment.")
-            _log.warning("voice synthesis failed; segment skipped", exc_info=exc)
+            _log.warn("voice synthesis failed; segment skipped", exc=exc)
             return None
 
     async def _wants_music(self) -> bool:
@@ -169,7 +171,9 @@ class Director:
             situation=build_music_situation(self._recent_lines()),
         )
         try:
-            pick = await music.next_track(ctx)
+            with _log.timed("music.pick") as t:
+                pick = await music.next_track(ctx)
+                t["found"] = pick is not None
             if pick is None:
                 self._cli.info("music: nothing suitable found; back to talk.")
                 return False
@@ -186,7 +190,7 @@ class Director:
             raise
         except Exception as exc:
             self._cli.info(f"music segment failed ({exc}); back to talk.")
-            _log.warning("music segment failed; fell back to talk", exc_info=exc)
+            _log.warn("music segment failed; fell back to talk", exc=exc)
             return False
         title = pick.clip.title or "music"
         artist = f" — {pick.clip.artist}" if pick.clip.artist else ""

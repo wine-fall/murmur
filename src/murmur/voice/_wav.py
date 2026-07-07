@@ -25,6 +25,15 @@ def estimate_seconds(text: str) -> float:
     return max(_MIN_SECONDS, min(_MAX_SECONDS, len(text) * _SECONDS_PER_CHAR))
 
 
+def wav_seconds(path: Path | str) -> float:
+    """Duration of a wav in seconds (frames / framerate). Used to report the
+    spoken length of a synthesized clip so callers can compute a real-time
+    factor (generation time / audio duration)."""
+    with wave.open(str(path), "rb") as wav:
+        rate = wav.getframerate()
+        return wav.getnframes() / rate if rate else 0.0
+
+
 def write_silent_wav(
     path: Path, seconds: float, sample_rate: int = SAMPLE_RATE
 ) -> None:

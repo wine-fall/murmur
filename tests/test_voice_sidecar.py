@@ -93,6 +93,30 @@ def test_serve_synthesize_returns_an_existing_wav_path():
     assert Path(resps[0]["audio_path"]).exists()
 
 
+def test_serve_synthesize_reports_timings():
+    # gen_s (model time) + audio_s (clip duration) so the parent can log rtf.
+    resps = _run_serve(
+        FakeBackend(), [{"op": "synthesize", "request": {"text": "hello there"}}]
+    )
+    timings = resps[0]["timings"]
+    assert timings["gen_s"] >= 0.0
+    assert timings["audio_s"] > 0.0  # the silent clip has a real duration
+
+
+def test_first_synthesize_carries_load_and_warm_timings_then_not():
+    # load/warm happen once at startup (before any request) — ride the first
+    # synth response, and never repeat on later ones.
+    resps = _run_serve(
+        FakeBackend(),
+        [
+            {"op": "synthesize", "request": {"text": "one"}},
+            {"op": "synthesize", "request": {"text": "two"}},
+        ],
+    )
+    assert "load_s" in resps[0]["timings"] and "warm_s" in resps[0]["timings"]
+    assert "load_s" not in resps[1]["timings"]
+
+
 def test_serve_unknown_op_returns_error_and_keeps_serving():
     resps = _run_serve(FakeBackend(), [{"op": "bogus"}, {"op": "health"}])
     assert "error" in resps[0]

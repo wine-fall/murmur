@@ -10,7 +10,9 @@ from __future__ import annotations
 import wave
 from pathlib import Path
 
-from murmur.voice._wav import SilentClipWriter
+import pytest
+
+from murmur.voice._wav import SilentClipWriter, wav_seconds, write_silent_wav
 
 
 def test_writes_distinct_numbered_mono_clips():
@@ -33,6 +35,12 @@ def test_close_removes_the_dir_and_resets():
     writer.close()
     assert not clip_dir.exists()
     assert not writer.started
+
+
+def test_wav_seconds_reads_the_clip_duration(tmp_path):
+    path = tmp_path / "clip.wav"
+    write_silent_wav(path, seconds=2.0)
+    assert wav_seconds(path) == pytest.approx(2.0, abs=0.01)
 
 
 def test_start_is_idempotent():

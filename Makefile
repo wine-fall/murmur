@@ -29,6 +29,7 @@ help:
 	@echo "  make dev          install deps, preflight, then launch the app"
 	@echo "                    (diagnostics -> $(DEV_LOG))"
 	@echo "  make logs         tail the dev log + memory (run in a 2nd terminal)"
+	@echo "                    INFO timeline by default; DEBUG=1 unmutes the firehose"
 	@echo "  make preflight    check music/voice deps without launching"
 	@echo "  make setup-music  run the guided binary (yt-dlp/ffmpeg) repair"
 	@echo ""
@@ -54,8 +55,13 @@ dev: install
 	@echo ""
 	@MURMUR_DEV_LOG=$(DEV_LOG) uv run murmur $(RUN_ARGS)
 
+LOG_LEVEL ?= INFO
+ifdef DEBUG
+  LOG_LEVEL := DEBUG
+endif
+
 logs:
-	@uv run python scripts/devwatch.py --log $(DEV_LOG)
+	@uv run python scripts/devwatch.py --log $(DEV_LOG) --level $(LOG_LEVEL)
 
 setup-music:
 	uv run murmur --setup-music

@@ -12,6 +12,10 @@ Usage:
     python scripts/devwatch.py --log path/to.log
     python scripts/devwatch.py --interval 5          # memory line cadence
     python scripts/devwatch.py --no-mem              # log tail only
+    python scripts/devwatch.py --level DEBUG         # unmute the harness firehose
+
+By default only INFO+ shows: the readable talk/synth/music timeline + warnings.
+The DEBUG harness dump is still written to the file — `--level DEBUG` reveals it.
 
 Run it in a second terminal after `make dev`. It tolerates the logfile not
 existing yet (waits for it) and being truncated at the next `make dev` start.
@@ -28,6 +32,29 @@ import memwatch  # same scripts/ dir — stdlib-only, reused for the memory line
 
 _DEFAULT_LOG = ".dev/dev.log"
 _POLL_S = 0.5  # how often we check the file for new lines (log responsiveness)
+
+# Log-line levels, matching logging_setup's format: "HH:MM:SS LEVEL name: msg".
+_LEVELS = {"DEBUG": 10, "INFO": 20, "WARNING": 30, "ERROR": 40, "CRITICAL": 50}
+
+
+class LevelFilter:
+    """Show only log lines at or above a minimum level. The default INFO view is
+    the readable "what happened" timeline (talk/synth/music events + warnings);
+    the harness DEBUG firehose is written to the file but hidden here unless
+    --level DEBUG. A continuation line (a traceback under a WARNING, a wrapped
+    dump) carries no level token, so it inherits the previous line's decision —
+    a shown warning keeps its whole traceback, a hidden dump stays fully hidden.
+    """
+
+    def __init__(self, min_level: str = "INFO") -> None:
+        self._min = _LEVELS.get(min_level.upper(), _LEVELS["INFO"])
+        self._show = True  # decision carried onto continuation lines
+
+    def show(self, line: str) -> bool:
+        parts = line.split(None, 2)  # ["HH:MM:SS", "LEVEL", "name: msg"]
+        if len(parts) >= 2 and parts[1] in _LEVELS:
+            self._show = _LEVELS[parts[1]] >= self._min
+        return self._show
 
 
 class LogFollower:
@@ -82,8 +109,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--log", default=_DEFAULT_LOG, metavar="PATH")
     ap.add_argument("--interval", type=float, default=2.0, metavar="SECONDS")
     ap.add_argument("--no-mem", action="store_true", help="log tail only")
+    ap.add_argument(
+        "--level",
+        default="INFO",
+        choices=list(_LEVELS),
+        help="min level to show (default INFO; DEBUG unmutes the harness firehose)",
+    )
     args = ap.parse_args(argv)
 
+    level_filter = LevelFilter(args.level)
     follower = LogFollower(args.log)
     print(f"watching {args.log}  (Ctrl-C to stop)", flush=True)
     if not Path(args.log).exists():
@@ -94,7 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         while True:
             for line in follower.read_new():
-                print(line, flush=True)
+                if level_filter.show(line):
+                    print(line, flush=True)
             now = time.monotonic()
             if not args.no_mem and now - last_mem >= args.interval:
                 line, peak_kb = memory_line(peak_kb=peak_kb)
