@@ -53,7 +53,7 @@ TYPE_RE = re.compile(r"^([a-z]+)")
 # [spec 01] / [spec 03-01] / [spec1]  (space optional, sub-spec optional)
 SPEC_TAG_RE = re.compile(r"\[spec ?(\d{1,2}(?:-\d{1,2})?)\]", re.IGNORECASE)
 # Any Markdown path under specs/, at any depth:
-#   specs/DESIGN.md · specs/spec03/03-01-brain-harness.md
+#   specs/DESIGN.md , specs/spec03/03-01-brain-harness.md
 SPEC_PATH_RE = re.compile(r"specs/[\w./-]+\.md")
 
 

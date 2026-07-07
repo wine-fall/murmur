@@ -9,7 +9,7 @@ The murmur project is built from specs. `specs/DESIGN.md` is the **master spec**
 
 This is the **build discipline**. The end-to-end loop that wraps it — test gate → closing `code-review` → commit, with a clean exit contract — is `murmur-ship`; it calls this skill for the build itself.
 
-Current focus: **L0 then L1** (specs `01-core-loop` + `02-voice-provider` = L0; then `03-01-brain-harness` + `03-02-ducking` = L1). Later specs (03–09) may still change — don't treat them as frozen.
+Current focus lives in `specs/STATUS.md` — read it at the start of any build task. Later specs (03–09) may still change; don't treat not-yet-built specs as frozen.
 
 ## The rule
 
