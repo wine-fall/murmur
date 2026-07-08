@@ -3,9 +3,9 @@
 
 murmur's memory lives in THREE processes — the main asyncio loop, the warm TTS
 sidecar (the multi-GB model), and the per-track ffmpeg decoder — so watching
-one pid tells you little. This samples `ps`, finds the murmur tree (or the
-tree under --pid), and prints one line per tick: total RSS, session peak, and
-a per-process breakdown.
+one pid tells you little. This samples `ps` for the tree structure, `top` for
+each process's real size, finds the murmur tree (or the tree under --pid), and
+prints one line per tick: total size, session peak, and a per-process breakdown.
 
 Usage:
     python scripts/memwatch.py                # auto-find the murmur tree
@@ -13,8 +13,13 @@ Usage:
     python scripts/memwatch.py --interval 5   # sample every 5 s (default 2)
     python scripts/memwatch.py --once         # one snapshot, then exit
 
-Note: summing RSS over-counts memory shared between the processes (framework
-pages, forked pages) — read totals as an upper bound and watch the TREND.
+Each process's size is its phys_footprint (macOS `top`'s MEM column — the same
+number Activity Monitor shows), which counts the Metal/GPU/compressed pages
+that `ps` RSS silently misses (an MLX model resident-reads far larger than its
+RSS). Off macOS, or if `top` is unavailable, it falls back to `ps` RSS.
+
+Note: summing across processes still over-counts pages shared between them
+(framework, forked) — read totals as an upper bound and watch the TREND.
 """
 
 from __future__ import annotations
@@ -24,7 +29,7 @@ import os
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass(frozen=True)
@@ -60,11 +65,97 @@ def snapshot() -> list[Proc]:
     return parse_ps(out.stdout)
 
 
+# -- real per-process size: phys_footprint via `top` ----------------------- #
+#
+# `ps` RSS reports resident_size, which excludes the Metal/GPU-mapped and
+# compressed pages an MLX model actually holds — the sidecar reads ~40 MB by RSS
+# while truly costing ~1 GB. `top`'s MEM column is phys_footprint (Activity
+# Monitor's "Memory"), which counts them. One `top -l1` sample gives it for every
+# pid at once, so it is cheaper than per-pid `footprint`.
+
+_MEM_UNITS = {"B": 1 / 1024, "K": 1.0, "M": 1024.0, "G": 1024.0 * 1024, "T": 1024.0**3}
+
+
+def _mem_token_kb(token: str) -> int | None:
+    """Parse one `top` MEM token to KB: ``227M`` ``8722K`` ``1G`` ``5M+`` (top
+    marks a grown value with a trailing ``+``). None if it isn't a size."""
+    token = token.strip().rstrip("+*-")
+    if not token:
+        return None
+    if token[-1] in _MEM_UNITS:
+        try:
+            return round(float(token[:-1]) * _MEM_UNITS[token[-1]])
+        except ValueError:
+            return None
+    try:  # a bare number is bytes
+        return round(int(token) / 1024)
+    except ValueError:
+        return None
+
+
+def parse_top_mem(text: str) -> dict[int, int]:
+    """Map pid -> phys_footprint (KB) from `top -l1 -stats pid,mem` output.
+    Skips the preamble/header; keeps only ``<int-pid> <mem-token>`` rows."""
+    sizes: dict[int, int] = {}
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) < 2:
+            continue
+        try:
+            pid = int(parts[0])
+        except ValueError:
+            continue
+        kb = _mem_token_kb(parts[1])
+        if kb is not None:
+            sizes[pid] = kb
+    return sizes
+
+
+def top_footprints() -> dict[int, int]:
+    """pid -> phys_footprint (KB) for every process from one `top` sample.
+    macOS only; empty dict off-darwin or if `top` fails — callers fall back to
+    `ps` RSS (accurate enough on Linux, which has no unified-memory blind spot)."""
+    if sys.platform != "darwin":
+        return {}
+    try:
+        out = subprocess.run(
+            ["top", "-l", "1", "-stats", "pid,mem"],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return {}
+    return parse_top_mem(out)
+
+
+def apply_footprints(procs: list[Proc], footprints_kb: dict[int, int]) -> list[Proc]:
+    """Replace each proc's `ps` RSS with its `top` phys_footprint where known.
+    RSS is a floor (misses Metal/GPU/compressed); phys_footprint is honest. A pid
+    absent from the `top` sample (a race) keeps its RSS."""
+    if not footprints_kb:
+        return procs
+    return [replace(p, rss_kb=footprints_kb.get(p.pid, p.rss_kb)) for p in procs]
+
+
+_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "fish", "ksh"})
+
+
 def _runs_program(command: str, needle: str) -> bool:
     """True when the process IS the program (its executable is ``needle`` or
     it runs ``python -m needle[.sub]``) — not merely mentions it in an
     argument (an editor open on murmur-notes.txt is not murmur)."""
     tokens = command.split()
+    if not tokens:
+        return False
+    # A shell running `-c <script>` is not the program even when the script
+    # names it: e.g. `make dev`'s `/bin/sh -c '... memwatch & uv run murmur'`
+    # backgrounds the recorder AND launches murmur from one shell, so its
+    # command line carries a bare `murmur` token. Matching it would root the
+    # tree at the wrapper and pull the recorder itself into the measured tree.
+    # Skip it; the real murmur procs it spawns (uv/python) match on their own.
+    if os.path.basename(tokens[0]) in _SHELLS and "-c" in tokens:
+        return False
     for i, token in enumerate(tokens):
         if os.path.basename(token) == needle:
             return True
@@ -235,21 +326,27 @@ def main(argv: list[str] | None = None) -> int:
     peak_kb = 0
     try:
         while True:
-            procs = snapshot()
-            if args.pid is not None:
-                roots = [p for p in procs if p.pid == args.pid]
-            else:
-                roots = find_roots(procs)
-            if not roots:
-                # Still report the machine's memory — just flag that murmur
-                # isn't up yet (e.g. the recorder started before the app).
-                stamp = time.strftime("%H:%M:%S")
-                emit(f"{stamp}  (no murmur running){_sys_suffix(system_memory())}")
-            for root in roots:
-                members = subtree(procs, root_pid=root.pid)
-                total = sum(p.rss_kb for p in members)
-                emit(format_tick(members, peak_kb=peak_kb, sys_mem=system_memory()))
-                peak_kb = max(peak_kb, total)
+            # A recorder must survive its own errors: a bad `ps`/`top` sample or
+            # a parse bug logs one line and the loop goes on, never dying silently
+            # mid-run (and never — it is a separate process — touching murmur).
+            try:
+                procs = apply_footprints(snapshot(), top_footprints())
+                if args.pid is not None:
+                    roots = [p for p in procs if p.pid == args.pid]
+                else:
+                    roots = find_roots(procs)
+                if not roots:
+                    # Still report the machine's memory — just flag that murmur
+                    # isn't up yet (e.g. the recorder started before the app).
+                    stamp = time.strftime("%H:%M:%S")
+                    emit(f"{stamp}  (no murmur running){_sys_suffix(system_memory())}")
+                for root in roots:
+                    members = subtree(procs, root_pid=root.pid)
+                    total = sum(p.rss_kb for p in members)
+                    emit(format_tick(members, peak_kb=peak_kb, sys_mem=system_memory()))
+                    peak_kb = max(peak_kb, total)
+            except Exception as exc:
+                emit(f"{time.strftime('%H:%M:%S')}  ERROR sampling: {type(exc).__name__}: {exc}")
             if args.once:
                 return 0
             try:
