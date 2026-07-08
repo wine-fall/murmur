@@ -18,12 +18,12 @@ so the core never imports a concrete Brain directly.
 from __future__ import annotations
 
 import json
-import logging
 from collections.abc import Awaitable, Callable, Mapping
 from itertools import cycle
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from .contracts import ContextPack
+from .logging_setup import get_log
 from .prompts import build_next_talk_prompt, build_respond_prompt
 
 if TYPE_CHECKING:
@@ -38,8 +38,9 @@ if TYPE_CHECKING:
 
 # Diagnostics stream to the dev logfile only when MURMUR_DEV_LOG is set (make
 # dev / logging_setup). No handler otherwise, so these calls are ~free and the
-# interactive UI is never touched.
-_log = logging.getLogger("murmur.harness")
+# interactive UI is never touched. The harness firehose (every SDK message repr)
+# is DEBUG — hidden from the default `make logs` view, on tap via --level DEBUG.
+_log = get_log("harness")
 
 
 @runtime_checkable
@@ -206,10 +207,8 @@ class ClaudeBrain:
         gen = query(prompt=prompt, options=options)
         try:
             async for _message in gen:
-                if _log.isEnabledFor(logging.DEBUG):
-                    _log.debug(
-                        "task %s: %s", type(_message).__name__, repr(_message)[:800]
-                    )
+                if _log.debug_enabled:
+                    _log.debug(f"task {type(_message).__name__}: {repr(_message)[:800]}")
                 if captured is not None:
                     break
         finally:
@@ -258,10 +257,8 @@ class ClaudeBrain:
             await client.query(prompt)
             while True:
                 async for message in client.receive_response():
-                    if _log.isEnabledFor(logging.DEBUG):
-                        _log.debug(
-                            "guide %s: %s", type(message).__name__, repr(message)[:800]
-                        )
+                    if _log.debug_enabled:
+                        _log.debug(f"guide {type(message).__name__}: {repr(message)[:800]}")
                     if isinstance(message, AssistantMessage):
                         for block in message.content:
                             if isinstance(block, TextBlock) and block.text:

@@ -16,15 +16,37 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import sys
+from typing import cast
 
 from ..contracts import AudioClip
+from ..logging_setup import get_log
 from .backend import SynthesisRequest
 from .protocol import OP_HEALTH, OP_SYNTHESIZE, decode, encode
+
+_log = get_log("voice")
 
 # A generous default: a real model's load + warm can take many seconds.
 _READY_TIMEOUT = 120.0
 _SYNTH_TIMEOUT = 120.0
 _SHUTDOWN_TIMEOUT = 5.0
+
+
+def _log_synth(chars: int, timings: object) -> None:
+    """Emit one 'synth' timing event from the sidecar's returned numbers. rtf =
+    gen_s / audio_s makes 'is TTS slow?' answerable at a glance (>1 = slower than
+    real time). Tolerant of a timings-less response (older sidecar / an error)."""
+    fields: dict[str, object] = {"chars": chars}
+    if isinstance(timings, dict):
+        t = cast("dict[str, object]", timings)
+        fields.update(t)
+        gen_s, audio_s = t.get("gen_s"), t.get("audio_s")
+        if (
+            isinstance(gen_s, (int, float))
+            and isinstance(audio_s, (int, float))
+            and audio_s > 0
+        ):
+            fields["rtf"] = gen_s / audio_s
+    _log.event("synth", **fields)
 
 
 class SidecarDied(Exception):
@@ -87,6 +109,7 @@ class SidecarVoiceProvider:
         path = resp.get("audio_path")
         if not isinstance(path, str):
             raise RuntimeError(f"sidecar returned no audio_path: {resp}")
+        _log_synth(len(text), resp.get("timings"))
         return AudioClip(source=path, kind="talk")
 
     async def aclose(self) -> None:

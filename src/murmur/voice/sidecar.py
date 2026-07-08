@@ -16,8 +16,10 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from typing import TextIO
 
+from ._wav import wav_seconds
 from .backend import FakeBackend, SynthesisRequest, TtsBackend
 from .mlx_backend import PROFILES, MlxAudioBackend
 from .protocol import OP_HEALTH, OP_SYNTHESIZE, ProtocolError, decode, encode
@@ -36,7 +38,11 @@ def build_backend(name: str) -> TtsBackend:
     raise ValueError(f"unknown tts backend {name!r}; available: {available}")
 
 
-def _handle(backend: TtsBackend, req: dict[str, object]) -> dict[str, object]:
+def _handle(
+    backend: TtsBackend,
+    req: dict[str, object],
+    startup: dict[str, float],
+) -> dict[str, object]:
     op = req.get("op")
     if op == OP_HEALTH:
         # Unconditionally ready by construction: serve() runs load()+warm() to
@@ -48,7 +54,19 @@ def _handle(backend: TtsBackend, req: dict[str, object]) -> dict[str, object]:
         # from_dict takes untrusted input and validates (raises on a non-object
         # payload or missing text), so pass it through without narrowing here.
         sr = SynthesisRequest.from_dict(req.get("request"))
-        return {"audio_path": backend.synthesize(sr)}
+        start = time.monotonic()
+        path = backend.synthesize(sr)
+        # Report numbers only (no logging here — the parent is the single log
+        # writer). gen_s = model time; audio_s = clip length -> parent's rtf.
+        timings: dict[str, float] = {
+            "gen_s": time.monotonic() - start,
+            "audio_s": wav_seconds(path),
+        }
+        # load/warm ran once before the loop; ride them out on the first synth,
+        # then clear so later responses don't repeat them.
+        timings.update(startup)
+        startup.clear()
+        return {"audio_path": path, "timings": timings}
     raise ProtocolError(f"unknown op {op!r}")
 
 
@@ -60,8 +78,13 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
     a single bad call must never take the sidecar down. ``load()``/``warm()``
     failures propagate (the process exits; the client's supervision restarts it).
     """
+    load_start = time.monotonic()
     backend.load()
+    load_s = time.monotonic() - load_start
+    warm_start = time.monotonic()
     backend.warm()
+    # Startup one-shot: attached to the first synth response, then cleared.
+    startup = {"load_s": load_s, "warm_s": time.monotonic() - warm_start}
     # Explicit readline() rather than `for raw in stdin` — file-object iteration
     # can read-ahead past the single line the client sent while the client blocks
     # waiting for this line's response, a classic strict-request/response deadlock.
@@ -70,7 +93,7 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
             continue  # tolerate blank lines on the pipe
         resp: dict[str, object]
         try:
-            resp = _handle(backend, decode(raw))
+            resp = _handle(backend, decode(raw), startup)
         except ProtocolError as exc:
             resp = {"error": str(exc)}
         except Exception as exc:  # backend failure — surface, do not crash the loop

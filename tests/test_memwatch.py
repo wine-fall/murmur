@@ -75,3 +75,52 @@ def test_format_tick_totals_and_breaks_down():
     assert "sidecar 3125.0" in line
     assert "ffmpeg 46.9" in line
     assert "main 50.8" in line
+
+
+# --- system-wide memory (the machine, not just murmur) -------------------- #
+
+
+def test_parse_meminfo_available_mb():
+    text = "MemTotal:       16384000 kB\nMemAvailable:    8000000 kB\n"
+    assert memwatch.parse_meminfo_available_mb(text) == 8000000 / 1024
+
+
+def test_parse_meminfo_available_absent_is_none():
+    assert memwatch.parse_meminfo_available_mb("MemFree: 100 kB\n") is None
+
+
+def test_parse_vm_stat_available_mb():
+    text = (
+        "Mach Virtual Memory Statistics: (page size of 16384 bytes)\n"
+        "Pages free:                                4307.\n"
+        "Pages active:                            155060.\n"
+        "Pages inactive:                          151304.\n"
+        "Pages speculative:                         2341.\n"
+        "Pages purgeable:                              0.\n"
+    )
+    # available ~= (free 4307 + inactive 151304 + speculative 2341 + purgeable 0)
+    # pages * 16384 B = 2468.0 MB
+    assert round(memwatch.parse_vm_stat_available_mb(text), 1) == 2468.0
+
+
+def test_format_tick_appends_system_memory_when_given():
+    procs = memwatch.parse_ps(_PS)
+    members = memwatch.subtree(procs, root_pid=100)
+    line = memwatch.format_tick(members, peak_kb=0, sys_mem=(19792.0, 2468.0))
+    # used = total - avail = 17324; whole machine, distinct from murmur's total.
+    assert "sys used 17324 / 19792 MB (avail 2468)" in line
+
+
+def test_format_tick_omits_system_memory_when_none():
+    procs = memwatch.parse_ps(_PS)
+    line = memwatch.format_tick(memwatch.subtree(procs, root_pid=100), peak_kb=0)
+    assert "sys used" not in line  # back-compatible with the live-view caller
+
+
+def test_sys_suffix_shared_by_the_no_murmur_line():
+    # The no-murmur line reuses this suffix, so machine memory is reported even
+    # when no murmur process is up.
+    assert memwatch._sys_suffix(None) == ""
+    assert "sys used 17324 / 19792 MB (avail 2468)" in memwatch._sys_suffix(
+        (19792.0, 2468.0)
+    )

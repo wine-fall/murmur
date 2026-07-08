@@ -51,6 +51,31 @@ def test_follower_resets_after_truncation(tmp_path):
     assert follower.read_new() == ["fresh"]
 
 
+def test_level_filter_hides_below_threshold_shows_at_or_above():
+    f = devwatch.LevelFilter("INFO")
+    assert f.show("14:03:07 INFO    murmur.voice: synth  rtf=1.55") is True
+    assert f.show("14:03:07 DEBUG   murmur.harness: task SystemMessage(...)") is False
+    assert f.show("14:03:07 WARNING murmur.director: music fell back") is True
+
+
+def test_level_filter_keeps_traceback_continuation_with_its_parent():
+    f = devwatch.LevelFilter("INFO")
+    # a hidden DEBUG line's non-level continuation stays hidden...
+    assert f.show("14:03:07 DEBUG   murmur.harness: dump") is False
+    assert f.show("    continued dump line") is False
+    # ...a shown WARNING's traceback lines stay shown.
+    assert f.show("14:03:07 WARNING murmur.director: boom") is True
+    assert f.show("Traceback (most recent call last):") is True
+    assert f.show('  File "x.py", line 1, in <module>') is True
+    assert f.show("ValueError: boom") is True
+
+
+def test_level_filter_debug_shows_everything():
+    f = devwatch.LevelFilter("DEBUG")
+    assert f.show("14:03:07 DEBUG   murmur.harness: task") is True
+    assert f.show("14:03:07 INFO    murmur.voice: synth") is True
+
+
 def _proc(pid: int, rss_kb: int, command: str) -> object:
     return devwatch.memwatch.Proc(pid=pid, ppid=1, rss_kb=rss_kb, command=command)
 
