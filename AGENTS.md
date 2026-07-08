@@ -36,6 +36,10 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 
 - **Test-first per build step** — full discipline in `murmur-build-spec`; never
   backfill tests.
+- **"Prompt green" ≠ engine delivers** — the Claude brain narrating a
+  `submit_pick` or a line is not proof the song played or the pick landed.
+  Before claiming done, read the deterministic seam (the MCP tool, the engine)
+  or `.dev/dev.log` — never trust the model's self-report.
 - **English** for all committed source/specs/docs (pre-commit enforces it,
   markdown included); **Chinese** for conversation with the user.
 - **Never `git add -A` / `git add .`** — the main checkout is shared across
@@ -47,6 +51,9 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - The **ponytail** plugin is enabled on purpose (minimal-code ladder): before
   writing new code, climb it — needed at all? already in the codebase? stdlib?
   one line?
+- **Comments state current intent, not edit-history** — no "used to / renamed
+  from / now X, was Y" or date/commit stamps; delete a stale comment when you
+  move its code. This is AI-rot's most common vector.
 - **Decision style:** mid-task, pick the recommended option and keep going; log
   every decision and batch the log + reasons at the end. Reserve a clarify-gate
   stop for material, hard-to-reverse forks only.
