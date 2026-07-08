@@ -103,6 +103,20 @@ def test_serve_synthesize_reports_timings():
     assert timings["audio_s"] > 0.0  # the silent clip has a real duration
 
 
+class _MemBackend(FakeBackend):
+    """FakeBackend that reports fixed memory, to prove the sidecar folds a
+    backend's memory_stats (bytes) into the synth timings as MB."""
+
+    def memory_stats(self) -> dict[str, int]:
+        return {"active": 3 * 1024**2, "cache": 9 * 1024**2, "peak": 12 * 1024**2}
+
+
+def test_serve_folds_backend_memory_into_timings_as_mb():
+    resps = _run_serve(_MemBackend(), [{"op": "synthesize", "request": {"text": "hi"}}])
+    t = resps[0]["timings"]
+    assert t["active_mb"] == 3 and t["cache_mb"] == 9 and t["peak_mb"] == 12
+
+
 def test_first_synthesize_carries_load_and_warm_timings_then_not():
     # load/warm happen once at startup (before any request) — ride the first
     # synth response, and never repeat on later ones.

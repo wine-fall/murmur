@@ -66,6 +66,10 @@ def _handle(
         # then clear so later responses don't repeat them.
         timings.update(startup)
         startup.clear()
+        # MLX memory (bytes -> MB) rides along so the parent's synth log shows
+        # where the multi-GB footprint goes: active (needed) vs cache (reclaimable).
+        for key, value in backend.memory_stats().items():
+            timings[f"{key}_mb"] = round(value / 1024 / 1024)
         return {"audio_path": path, "timings": timings}
     raise ProtocolError(f"unknown op {op!r}")
 

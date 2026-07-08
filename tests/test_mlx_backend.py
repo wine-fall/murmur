@@ -9,6 +9,9 @@ integration test (test_mlx_backend_integration.py).
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from murmur.voice import build_voice
@@ -101,6 +104,39 @@ def test_build_voice_wires_the_mlx_names():
         provider = build_voice(name)
         assert isinstance(provider, SidecarVoiceProvider)
         assert provider._backend == name
+
+
+# --- _render releases the MLX buffer cache (spec 02 §3.5 memory hygiene) ---- #
+
+
+def test_render_releases_the_mlx_buffer_cache_after_writing(monkeypatch, tmp_path):
+    """The reclaimable Metal buffer pool (~8 GB of a synth's footprint) is
+    released after each synth, and only after the wav is written — so the
+    sidecar's resting footprint stays at the model working set. Fakes MLX +
+    mlx-audio; no real model."""
+    calls: list[str] = []
+
+    mx = types.ModuleType("mlx.core")
+    mx.reset_peak_memory = lambda: calls.append("reset_peak")  # type: ignore[attr-defined]
+    mx.clear_cache = lambda: calls.append("clear_cache")  # type: ignore[attr-defined]
+    mx.concatenate = lambda arrs, axis=0: arrs[0]  # type: ignore[attr-defined]
+    audio_io = types.ModuleType("mlx_audio.audio_io")
+    audio_io.write = lambda *a, **k: calls.append("audio_write")  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "mlx", types.ModuleType("mlx"))
+    monkeypatch.setitem(sys.modules, "mlx.core", mx)
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.ModuleType("mlx_audio"))
+    monkeypatch.setitem(sys.modules, "mlx_audio.audio_io", audio_io)
+
+    backend = _backend()
+    backend._model = types.SimpleNamespace(  # type: ignore[assignment]
+        sample_rate=16000,
+        generate=lambda text, **kw: [types.SimpleNamespace(audio=[0.0])],
+    )
+    backend._dir = tmp_path
+    backend.synthesize(SynthesisRequest(text="hello"))
+
+    assert calls.count("clear_cache") == 1
+    assert calls.index("clear_cache") > calls.index("audio_write")  # after write
 
 
 # --- normalize_tts_text (spec 02 §3.4 hygiene; found live with Spark) --------
