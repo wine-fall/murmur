@@ -85,6 +85,12 @@ class TtsBackend(Protocol):
         """Render ``req`` to a complete mono wav; return its local file path."""
         ...
 
+    def memory_stats(self) -> dict[str, int]:
+        """Live memory in bytes (empty if not model-backed): ``active`` working
+        set, ``cache`` the reclaimable Metal buffer pool, ``peak`` since the last
+        synth. Reported so the parent can log where the footprint actually goes."""
+        ...
+
 
 class FakeBackend:
     """No-model ``TtsBackend``: writes a silent wav whose length scales with the
@@ -104,3 +110,6 @@ class FakeBackend:
 
     def synthesize(self, req: SynthesisRequest) -> str:
         return self._clips.write(req.text)
+
+    def memory_stats(self) -> dict[str, int]:
+        return {}  # no model, no MLX memory to report

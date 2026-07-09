@@ -49,6 +49,22 @@ def test_find_roots_picks_the_top_of_the_murmur_tree_only():
     assert [r.pid for r in roots] == [99]
 
 
+def test_shell_wrapper_running_murmur_is_not_a_root():
+    # `make dev` backgrounds the recorder and launches murmur from ONE `/bin/sh
+    # -c` whose script names murmur. That wrapper must not root the tree (else
+    # memwatch measures itself); the real `uv run murmur` it spawns is the root.
+    ps = (
+        "300 200   1000 /bin/sh -c .venv/bin/python scripts/memwatch.py & uv run murmur\n"
+        "301 300   4000 .venv/bin/python scripts/memwatch.py --out .dev/mem.log\n"
+        "302 300  20000 /opt/homebrew/bin/uv run murmur --voice spark\n"
+        "303 302  52000 /repo/.venv/bin/python -m murmur.voice.sidecar --backend spark\n"
+    )
+    procs = memwatch.parse_ps(ps)
+    assert [r.pid for r in memwatch.find_roots(procs)] == [302]  # uv, not the sh -c
+    members = {p.pid for p in memwatch.subtree(procs, root_pid=302)}
+    assert 301 not in members  # the recorder is never measured as part of murmur
+
+
 def test_subtree_collects_all_descendants():
     procs = memwatch.parse_ps(_PS)
     members = memwatch.subtree(procs, root_pid=99)
@@ -75,6 +91,67 @@ def test_format_tick_totals_and_breaks_down():
     assert "sidecar 3125.0" in line
     assert "ffmpeg 46.9" in line
     assert "main 50.8" in line
+
+
+# --- real per-process size: phys_footprint via `top` --------------------- #
+
+_TOP = """\
+Processes: 410 total, 2 running, 408 sleeping, 1892 threads
+2024/07/08 15:13:07
+Load Avg: 3.14, 3.00, 2.71
+PhysMem: 17G used (2456M wired), 1024M unused.
+
+PID    MEM
+99     20M
+100    50M
+101    1024M
+102    47M+
+103    8722K
+201    5000000
+"""
+
+
+def test_mem_token_kb_units():
+    assert memwatch._mem_token_kb("1024M") == 1024 * 1024
+    assert memwatch._mem_token_kb("8722K") == 8722
+    assert memwatch._mem_token_kb("1G") == 1024 * 1024
+    assert memwatch._mem_token_kb("47M+") == 47 * 1024  # top's grown-value marker
+    assert memwatch._mem_token_kb("5000000") == round(5000000 / 1024)  # bare = bytes
+    assert memwatch._mem_token_kb("nope") is None
+
+
+def test_parse_top_mem_maps_pid_to_footprint_kb():
+    sizes = memwatch.parse_top_mem(_TOP)
+    assert sizes[101] == 1024 * 1024  # the multi-GB sidecar, honestly reported
+    assert sizes[103] == 8722
+    assert sizes[102] == 47 * 1024
+    assert "PID" not in str(sizes)  # header/preamble skipped, ints only
+
+
+def test_apply_footprints_swaps_rss_for_footprint_and_falls_back():
+    procs = memwatch.parse_ps(_PS)
+    # pid 101 (sidecar) reads 3.2 GB by RSS; top reports its true phys_footprint.
+    patched = {p.pid: p for p in memwatch.apply_footprints(procs, {101: 6_000_000})}
+    assert patched[101].rss_kb == 6_000_000  # footprint wins
+    assert patched[100].rss_kb == 52000  # no footprint for 100 -> RSS kept
+
+
+def test_apply_footprints_empty_map_is_a_noop():
+    procs = memwatch.parse_ps(_PS)
+    assert memwatch.apply_footprints(procs, {}) is procs
+
+
+def test_sampling_error_is_logged_not_fatal(monkeypatch, capsys):
+    # An observer script must record its own crash and keep going, never die
+    # silently and never take murmur down (it is a separate process anyway).
+    def boom() -> list[object]:
+        raise RuntimeError("ps exploded")
+
+    monkeypatch.setattr(memwatch, "snapshot", boom)
+    rc = memwatch.main(["--once"])
+    assert rc == 0  # survived
+    out = capsys.readouterr().out
+    assert "ERROR sampling" in out and "ps exploded" in out
 
 
 # --- system-wide memory (the machine, not just murmur) -------------------- #
