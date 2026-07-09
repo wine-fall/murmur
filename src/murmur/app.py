@@ -39,7 +39,12 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
 
     cli = CliHost()
     memory = InProcessMemoryStore()
-    voice = build_voice(config.voice_provider)
+    voice = build_voice(
+        config.voice_provider,
+        tts_url=config.tts_url,
+        tts_reference_id=config.tts_reference_id,
+        tts_api_key=config.tts_api_key,
+    )
     player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
 
@@ -161,11 +166,12 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         # Derived from the backend registry so a new PROFILES row is CLI-selectable
         # without editing this list. 'spark' is primary; 'sidecar-fake' exists for
         # internal plumbing diagnostics (intentionally not offered here).
-        choices=["stub", *sorted(PROFILES)],
+        choices=["stub", "remote", *sorted(PROFILES)],
         default=None,
         help=(
-            "VoiceProvider: 'stub' (silent wav, no sidecar/model) or a real MLX "
-            "voice via the warm sidecar (choices above; 'spark' is primary)."
+            "VoiceProvider: 'stub' (silent wav, no sidecar/model), a real MLX "
+            "voice via the warm sidecar ('spark' is primary), or 'remote' "
+            "(off-machine HTTP TTS — set MURMUR_TTS_URL; spec 02 §3.6)."
         ),
     )
     p.add_argument(

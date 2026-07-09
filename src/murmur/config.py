@@ -8,7 +8,8 @@ can be layered on later without changing the call sites.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .prompts import DEFAULT_PERSONA_PATH
@@ -59,8 +60,19 @@ class Config:
 
     # Which VoiceProvider adapter to construct. "stub" exercises the loop with
     # no spec-02 code present (acceptance criterion §5). spec 02 adds e.g.
-    # "qwen3".
+    # "qwen3"; "remote" is the off-machine HTTP backend (§3.6).
     voice_provider: str = "stub"
+
+    # --- remote TTS (spec 02 §3.6) — off-machine VoiceProvider via HTTP ----
+    # Read from env so a URL / key is never hardcoded; only used when
+    # voice_provider == "remote". Empty = not configured.
+    tts_url: str = field(default_factory=lambda: os.environ.get("MURMUR_TTS_URL", ""))
+    tts_reference_id: str = field(
+        default_factory=lambda: os.environ.get("MURMUR_TTS_REFERENCE_ID", "")
+    )
+    tts_api_key: str = field(
+        default_factory=lambda: os.environ.get("MURMUR_TTS_API_KEY", "")
+    )
 
     @classmethod
     def default(cls) -> "Config":

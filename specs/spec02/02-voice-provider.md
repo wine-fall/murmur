@@ -23,6 +23,17 @@
 - Streaming/partial TTS — L0 renders a complete clip per segment (see §3.4). Streaming is a later optimization, related to spec 04.
 - Voice cloning — a candidate capability (master §3.5). The boundary **reserves the slot** (`reference_audio`/`reference_text`, §3.5) so a cloning backend drops in without a contract change, but L0 does **not** wire cloning — Qwen3-TTS speaks with preset voices.
 
+### Amended (2026-07) — remote (off-machine) backend
+A **remote TTS backend** is now in scope as a config-selected `VoiceProvider`
+adapter (§3.6): the model runs on another machine and murmur calls it over HTTP.
+This **deliberately relaxes** master DESIGN's "only two network hops / TTS stays
+on-device" invariant — a remote TTS is a third hop. Rationale: heavier / higher-
+quality models (fish-speech / OpenAudio S1, …) run better on a dedicated box, and
+moving TTS off the Mac sidesteps the local MLX generation-memory spike. **Local
+(`spark` sidecar) stays the default; remote is strictly opt-in via config.** This
+is a distribution-phase direction (master §3.7 "at distribution, re-evaluate
+paid/licensed models"), pulled forward as an option — not the new default.
+
 ---
 
 ## 2. Contract / seam
@@ -133,6 +144,34 @@ core contract and IPC are still unchanged.
 
 - **Zero-shot voice cloning** (`reference_audio` / `reference_text`) stays a *designed-for axis*, **not wired in L0** — L0 uses preset voices. The slot exists so a cloning backend needs no contract change.
 - `config` (01 §3.1) selects the backend by name; the profile supplies the per-model defaults used (with the core's `synthesize(text, scenario=…)` call) to build the `SynthesisRequest`. The core contract and IPC are unchanged when swapping backends — proven by hot-swapping among the candidates.
+
+### 3.6 Remote backend (off-machine TTS) — a `VoiceProvider` adapter, not a sidecar
+The remote backend is a **new `VoiceProvider` adapter** (`RemoteVoiceProvider`),
+**not** a `TtsBackend` inside the sidecar: there is no local model or subprocess,
+so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
+`synthesize` / `aclose` → `AudioClip`). The core and Director are unchanged; only
+`build_voice` gains a branch and `config` gains the endpoint fields.
+
+- **Selection & config (no code edits per swap):** `voice_provider="remote"`
+  (or `--voice remote`). Endpoint config comes from env so a URL/key is never
+  hardcoded: `MURMUR_TTS_URL`, `MURMUR_TTS_REFERENCE_ID` (the server-side saved
+  voice), `MURMUR_TTS_API_KEY` (optional bearer). Switch back to local by setting
+  `voice_provider` to `spark`.
+- **Wire protocol — fish-speech native `/v1/tts`** (the chosen server): `POST`
+  a JSON body (`text`, `reference_id`, `format:"wav"`, `streaming:false`,
+  `normalize:true`, and the sampling defaults) with `content-type:
+  application/json` (+ `authorization: Bearer` when a key is set); the response
+  body is the complete wav, written to a temp file → `AudioClip(kind="talk")`.
+  The fish server accepts JSON as well as msgpack, so this needs **no extra
+  serialization dependency** — stdlib `json` + `urllib` (the blocking call runs
+  in `asyncio.to_thread` to keep the seam async).
+- **Protocol is per-adapter, not universal:** this adapter speaks fish-speech's
+  API. A different server (OpenAI-compatible `/v1/audio/speech`, etc.) is another
+  small adapter on the same seam — the seam does not try to be one universal
+  client.
+- **`start()`** is a lightweight readiness check (the remote is already warm);
+  **`aclose()`** is a no-op (no owned process). `synthesize` reuses the existing
+  `synth` timing/log event.
 
 ---
 
