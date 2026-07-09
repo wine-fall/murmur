@@ -63,6 +63,23 @@ def test_real_voice_off_apple_silicon_blocks(monkeypatch, capsys):
     assert "VOICE=stub" in out
 
 
+def test_remote_voice_with_url_passes_without_mlx(monkeypatch):
+    # Remote needs no MLX / Apple Silicon — only a configured endpoint.
+    _music_ok(monkeypatch)
+    monkeypatch.setattr(dev_preflight.platform, "system", lambda: "Linux")
+    monkeypatch.setenv("MURMUR_TTS_URL", "http://box:8080")
+    assert dev_preflight.main(["--voice", "remote"]) == 0
+
+
+def test_remote_voice_without_url_blocks(monkeypatch, capsys):
+    _music_ok(monkeypatch)
+    monkeypatch.delenv("MURMUR_TTS_URL", raising=False)
+    rc = dev_preflight.main(["--voice", "remote"])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "MURMUR_TTS_URL" in out
+
+
 def test_real_voice_on_apple_silicon_with_mlx_passes(monkeypatch):
     _music_ok(monkeypatch)
     _apple_silicon(monkeypatch)
