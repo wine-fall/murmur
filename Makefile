@@ -56,8 +56,10 @@ dev: install
 	@echo "  (diagnostics -> $(DEV_LOG); memory -> $(MEM_LOG))"
 	@echo ""
 	@# Side-car memory recorder (external, app-agnostic): sample the process
-	@# tree into mem.log for the whole run, torn down when the app exits.
-	@.venv/bin/python scripts/memwatch.py --out $(MEM_LOG) >/dev/null 2>&1 & \
+	@# tree into mem.log for the whole run, torn down when the app exits. It is a
+	@# separate process — its crash can never take murmur down; stderr lands in
+	@# mem.log (not /dev/null) so a fatal crash is recorded, not swallowed.
+	@.venv/bin/python scripts/memwatch.py --out $(MEM_LOG) >/dev/null 2>>$(MEM_LOG) & \
 	  MEMPID=$$!; \
 	  trap 'kill $$MEMPID 2>/dev/null || true' EXIT INT TERM; \
 	  MURMUR_DEV_LOG=$(DEV_LOG) uv run murmur $(RUN_ARGS)

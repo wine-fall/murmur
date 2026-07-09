@@ -113,6 +113,19 @@ class MlxAudioBackend:
         self._render(req, path)
         return str(path)
 
+    def memory_stats(self) -> dict[str, int]:
+        """MLX memory in bytes: ``active`` working set, ``cache`` the reclaimable
+        Metal buffer pool (suspected bulk of the per-synth balloon), and ``peak``
+        for this synth (reset in _render). Logging active-vs-cache tells us how
+        much of the multi-GB footprint is reclaimable scratch vs truly needed."""
+        import mlx.core as mx
+
+        return {
+            "active": int(mx.get_active_memory()),
+            "cache": int(mx.get_cache_memory()),
+            "peak": int(mx.get_peak_memory()),
+        }
+
     def _build_generate_kwargs(self, req: SynthesisRequest) -> dict[str, object]:
         """Merge profile defaults with the request (request wins) and map to
         mlx-audio ``generate()`` kwargs. ``text`` is passed positionally, not here.
@@ -143,6 +156,7 @@ class MlxAudioBackend:
         if not text:
             raise RuntimeError("no speakable text after normalization")
         kwargs = self._build_generate_kwargs(req)
+        mx.reset_peak_memory()  # per-synth peak: how big does THIS call balloon?
         chunks = [result.audio for result in self._model.generate(text, **kwargs)]
         if not chunks:
             raise RuntimeError(f"{self._profile.repo} produced no audio")
@@ -150,3 +164,9 @@ class MlxAudioBackend:
         audio = chunks[0] if len(chunks) == 1 else mx.concatenate(chunks, axis=0)
         # audio is an mlx array (not np.ndarray); audio_write handles it at runtime.
         audio_write(str(path), audio, self._model.sample_rate, format="wav")  # type: ignore[arg-type]
+        # Release MLX's Metal buffer-reuse pool — the ~8 GB reclaimable bulk of a
+        # synth's footprint (measured) — back to the OS. murmur synths seconds
+        # apart, so the lost reuse is immaterial while the resting footprint stays
+        # at the model working set (spec 02 §3.5 — the sidecar must stay real-time
+        # and must not destabilize the machine).
+        mx.clear_cache()
