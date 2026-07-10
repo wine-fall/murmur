@@ -28,8 +28,8 @@ from .client import log_synth  # shared 'synth' timing log (chars/gen_s/audio_s/
 
 _log = get_log("voice")
 _SYNTH_TIMEOUT = 120.0
-# A named UA: a Cloudflare-fronted endpoint (opuslab's hosted fish-speech) blocks
-# urllib's default "Python-urllib/*" UA with a 403 bot rule; any non-bot UA passes.
+# A named UA: a Cloudflare-fronted fish-speech endpoint blocks urllib's default
+# "Python-urllib/*" UA with a 403 bot rule; any non-bot UA passes.
 _USER_AGENT = "murmur"
 
 

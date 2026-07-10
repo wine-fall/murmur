@@ -54,7 +54,7 @@ dev-remote:
 	  if [ -z "$$MURMUR_TTS_URL" ]; then \
 	    echo "make dev-remote: no TTS endpoint configured."; \
 	    echo "Create a gitignored .env in this dir with, e.g.:"; \
-	    echo "    MURMUR_TTS_URL=https://fish-speech.opuslab.ai"; \
+	    echo "    MURMUR_TTS_URL=https://fish-speech.example.com"; \
 	    echo "    MURMUR_TTS_SEED=42            # optional: pin the voice"; \
 	    echo "then re-run 'make dev-remote' (keep WARP connected for Access)."; \
 	    exit 1; \
