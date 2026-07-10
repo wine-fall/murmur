@@ -1,7 +1,8 @@
 # murmur dev workflow — one command to install, preflight, and run.
 #
-#   make dev      # terminal 1: set up, check deps, launch the app (interactive)
-#   make logs     # terminal 2: tail the dev log + memory while it runs
+#   make dev         # terminal 1: set up, check deps, launch the app (interactive)
+#   make dev-remote  # same, but the off-machine HTTP TTS (loads .env)
+#   make logs        # terminal 2: tail the dev log + memory while it runs
 #
 # Knobs:  VOICE=spark|stub|qwen3|...   (real TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
@@ -23,12 +24,13 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
-.PHONY: help dev logs preflight setup-music install
+.PHONY: help dev dev-remote logs preflight setup-music install
 
 help:
 	@echo "murmur dev:"
 	@echo "  make dev          install deps, preflight, then launch the app"
 	@echo "                    (diagnostics -> $(DEV_LOG))"
+	@echo "  make dev-remote   same, but off-machine HTTP TTS (loads .env; WARP on)"
 	@echo "  make logs         tail the dev log + memory (run in a 2nd terminal)"
 	@echo "                    INFO timeline by default; DEBUG=1 unmutes the firehose"
 	@echo "                    (memory is also recorded to $(MEM_LOG) while dev runs)"
@@ -43,6 +45,21 @@ install:
 
 preflight:
 	@uv run python scripts/dev_preflight.py $(PREFLIGHT_ARGS)
+
+dev-remote:
+	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) into the environment,
+	@# then run the normal dev flow forcing the off-machine HTTP backend. Keep WARP
+	@# connected — auth to the endpoint is via Cloudflare Access (spec 02 §3.6).
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	  if [ -z "$$MURMUR_TTS_URL" ]; then \
+	    echo "make dev-remote: no TTS endpoint configured."; \
+	    echo "Create a gitignored .env in this dir with, e.g.:"; \
+	    echo "    MURMUR_TTS_URL=https://fish-speech.opuslab.ai"; \
+	    echo "    MURMUR_TTS_SEED=42            # optional: pin the voice"; \
+	    echo "then re-run 'make dev-remote' (keep WARP connected for Access)."; \
+	    exit 1; \
+	  fi; \
+	  $(MAKE) dev VOICE=remote
 
 dev: install
 	@uv run python scripts/dev_preflight.py $(PREFLIGHT_ARGS) || { \
