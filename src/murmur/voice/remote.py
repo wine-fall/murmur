@@ -28,12 +28,19 @@ from .client import log_synth  # shared 'synth' timing log (chars/gen_s/audio_s/
 
 _log = get_log("voice")
 _SYNTH_TIMEOUT = 120.0
+# A named UA: a Cloudflare-fronted endpoint (opuslab's hosted fish-speech) blocks
+# urllib's default "Python-urllib/*" UA with a 403 bot rule; any non-bot UA passes.
+_USER_AGENT = "murmur"
 
 
-def build_tts_payload(text: str, *, reference_id: str | None) -> dict[str, object]:
+def build_tts_payload(
+    text: str, *, reference_id: str | None, seed: int | None = None
+) -> dict[str, object]:
     """The fish-speech ``/v1/tts`` request body (§3.6): a whole-clip, normalized
     wav. ``reference_id`` picks the server-side saved voice; omitted → the server
-    default. Sampling defaults mirror fish-speech's own client."""
+    default. ``seed`` pins the sampled timbre (fish-speech has no preset voices,
+    so without it each call is a new voice). Sampling defaults mirror fish-speech's
+    own client."""
     payload: dict[str, object] = {
         "text": text,
         "format": "wav",
@@ -47,6 +54,8 @@ def build_tts_payload(text: str, *, reference_id: str | None) -> dict[str, objec
     }
     if reference_id:
         payload["reference_id"] = reference_id
+    if seed is not None:
+        payload["seed"] = seed
     return payload
 
 
@@ -59,11 +68,15 @@ class RemoteVoiceProvider:
         *,
         reference_id: str | None = None,
         api_key: str | None = None,
+        seed: int | None = None,
         timeout: float = _SYNTH_TIMEOUT,
     ) -> None:
-        self._url = base_url.rstrip("/") + "/v1/tts"
+        # strip() first: a .env value with trailing whitespace / CRLF would
+        # otherwise survive into the host and corrupt the URL (rstrip('/') leaves \r).
+        self._url = base_url.strip().rstrip("/") + "/v1/tts"
         self._reference_id = reference_id or None
         self._api_key = api_key or None
+        self._seed = seed
         self._timeout = timeout
         self._dir = Path(tempfile.mkdtemp(prefix="murmur-remote-"))
         self._counter = 0
@@ -77,7 +90,9 @@ class RemoteVoiceProvider:
         _log.event("voice.remote", url=self._url)
 
     async def synthesize(self, text: str, *, scenario: str = "broadcast") -> AudioClip:
-        payload = build_tts_payload(text, reference_id=self._reference_id)
+        payload = build_tts_payload(
+            text, reference_id=self._reference_id, seed=self._seed
+        )
         start = time.monotonic()
         audio = await asyncio.to_thread(self._post, payload)
         gen_s = time.monotonic() - start
@@ -95,7 +110,7 @@ class RemoteVoiceProvider:
 
     def _post(self, payload: dict[str, object]) -> bytes:
         body = json.dumps(payload).encode("utf-8")
-        headers = {"content-type": "application/json"}
+        headers = {"content-type": "application/json", "user-agent": _USER_AGENT}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
         req = urllib.request.Request(  # noqa: S310 - fixed http(s) TTS endpoint

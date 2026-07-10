@@ -31,6 +31,7 @@ def build_voice(
     tts_url: str = "",
     tts_reference_id: str = "",
     tts_api_key: str = "",
+    tts_seed: int | None = None,
 ) -> VoiceProvider:
     """Construct the configured VoiceProvider adapter (spec 02 §3.5 hot-swap).
 
@@ -51,6 +52,7 @@ def build_voice(
             tts_url,
             reference_id=tts_reference_id or None,
             api_key=tts_api_key or None,
+            seed=tts_seed,
         )
     if name in PROFILES:  # spark / qwen3 / chatterbox / dia / voxcpm2
         return SidecarVoiceProvider(name)

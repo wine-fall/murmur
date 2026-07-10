@@ -44,6 +44,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         tts_url=config.tts_url,
         tts_reference_id=config.tts_reference_id,
         tts_api_key=config.tts_api_key,
+        tts_seed=config.tts_seed,
     )
     player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
