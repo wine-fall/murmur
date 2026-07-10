@@ -31,7 +31,7 @@ _SYNTH_TIMEOUT = 120.0
 _SHUTDOWN_TIMEOUT = 5.0
 
 
-def _log_synth(chars: int, timings: object) -> None:
+def log_synth(chars: int, timings: object) -> None:
     """Emit one 'synth' timing event from the sidecar's returned numbers. rtf =
     gen_s / audio_s makes 'is TTS slow?' answerable at a glance (>1 = slower than
     real time). Tolerant of a timings-less response (older sidecar / an error)."""
@@ -109,7 +109,7 @@ class SidecarVoiceProvider:
         path = resp.get("audio_path")
         if not isinstance(path, str):
             raise RuntimeError(f"sidecar returned no audio_path: {resp}")
-        _log_synth(len(text), resp.get("timings"))
+        log_synth(len(text), resp.get("timings"))
         return AudioClip(source=path, kind="talk")
 
     async def aclose(self) -> None:

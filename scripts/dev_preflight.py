@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import os
 import platform
 import sys
 
@@ -65,6 +66,21 @@ def _check_real_voice() -> list[str]:
     return []
 
 
+def _check_remote_voice() -> list[str]:
+    """The remote HTTP backend (spec 02 §3.6) needs no local model — just a
+    configured endpoint. Check the URL is set; the server itself is proven on the
+    first synth."""
+    url = os.environ.get("MURMUR_TTS_URL", "")
+    if not url:
+        print(f"  {_NO} remote voice: MURMUR_TTS_URL not set")
+        return [
+            "remote voice needs an endpoint:  "
+            "MURMUR_TTS_URL=http://host:port VOICE=remote make dev"
+        ]
+    print(f"  {_OK} remote voice -> {url}")
+    return []
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="dev preflight for make dev")
     ap.add_argument("--voice", default="spark", help="voice backend (or 'stub')")
@@ -75,7 +91,9 @@ def main(argv: list[str] | None = None) -> int:
     fixes: list[str] = []
     if not args.no_music:
         fixes += _check_music()
-    if args.voice != "stub":
+    if args.voice == "remote":
+        fixes += _check_remote_voice()  # off-machine HTTP TTS — no local model
+    elif args.voice != "stub":
         fixes += _check_real_voice()
 
     if fixes:
