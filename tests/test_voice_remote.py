@@ -92,11 +92,10 @@ def test_url_strips_surrounding_whitespace_and_crlf():
     assert RemoteVoiceProvider("http://box:8080/\r\n")._url == "http://box:8080/v1/tts"
 
 
-def test_post_sends_a_named_user_agent(monkeypatch):
-    # A Cloudflare-fronted server 403s urllib's default "Python-urllib/*" UA;
-    # _post must send a named one. Capture the outgoing Request, no network.
-    prov = RemoteVoiceProvider("http://box:8080")
-    seen: dict[str, object] = {}
+def _post_headers(monkeypatch, prov: RemoteVoiceProvider) -> dict[str, str]:
+    """Capture the outgoing Request headers of one _post call — no network.
+    urllib title-cases header keys (``model`` -> ``Model``)."""
+    seen: dict[str, dict[str, str]] = {}
 
     class _Resp:
         def read(self) -> bytes:
@@ -109,13 +108,33 @@ def test_post_sends_a_named_user_agent(monkeypatch):
             return None
 
     def fake_urlopen(req, timeout):  # noqa: ANN001
-        seen["ua"] = req.get_header("User-agent")
+        seen["headers"] = dict(req.header_items())
         return _Resp()
 
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     prov._post({"text": "hi"})
-    ua = seen["ua"]
-    assert ua and "urllib" not in str(ua).lower()
+    return seen["headers"]
+
+
+def test_post_sends_a_named_user_agent(monkeypatch):
+    # A Cloudflare-fronted server 403s urllib's default "Python-urllib/*" UA;
+    # _post must send a named one.
+    h = _post_headers(monkeypatch, RemoteVoiceProvider("http://box:8080"))
+    assert "urllib" not in h["User-agent"].lower()
+
+
+def test_post_sends_model_header_when_set(monkeypatch):
+    # The 'model' header selects a hosted model (e.g. fish.audio s2.1-pro-free).
+    h = _post_headers(
+        monkeypatch, RemoteVoiceProvider("http://box:8080", model="s2.1-pro-free")
+    )
+    assert h["Model"] == "s2.1-pro-free"
+
+
+def test_post_omits_model_header_when_unset(monkeypatch):
+    # Self-hosted fish-speech takes no model header — don't send an empty one.
+    h = _post_headers(monkeypatch, RemoteVoiceProvider("http://box:8080"))
+    assert "Model" not in h
 
 
 # --- build_voice wiring (config switch, no code edit) --------------------- #
@@ -138,10 +157,12 @@ def test_config_reads_tts_env(monkeypatch):
     monkeypatch.setenv("MURMUR_TTS_URL", "http://box:8080")
     monkeypatch.setenv("MURMUR_TTS_REFERENCE_ID", "spk1")
     monkeypatch.setenv("MURMUR_TTS_SEED", "42")
+    monkeypatch.setenv("MURMUR_TTS_MODEL", "s2.1-pro-free")
     c = Config.default()
     assert c.tts_url == "http://box:8080"
     assert c.tts_reference_id == "spk1"
     assert c.tts_seed == 42
+    assert c.tts_model == "s2.1-pro-free"
 
 
 def test_config_seed_unset_is_none(monkeypatch):
@@ -159,3 +180,8 @@ def test_config_bad_seed_is_ignored_not_fatal(monkeypatch):
 def test_build_voice_threads_seed_to_provider():
     v = build_voice("remote", tts_url="http://box:8080", tts_seed=42)
     assert isinstance(v, RemoteVoiceProvider) and v._seed == 42
+
+
+def test_build_voice_threads_model_to_provider():
+    v = build_voice("remote", tts_url="http://box:8080", tts_model="s2.1-pro-free")
+    assert isinstance(v, RemoteVoiceProvider) and v._model == "s2.1-pro-free"

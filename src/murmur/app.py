@@ -45,6 +45,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         tts_reference_id=config.tts_reference_id,
         tts_api_key=config.tts_api_key,
         tts_seed=config.tts_seed,
+        tts_model=config.tts_model,
     )
     player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
@@ -175,6 +176,28 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
             "(off-machine HTTP TTS — set MURMUR_TTS_URL; spec 02 §3.6)."
         ),
     )
+    # Remote-backend overrides (spec 02 §3.6): switch endpoint / hosted model /
+    # voice from the command line without editing the env, e.g. local -> fish.audio
+    #   --voice remote --tts-url https://api.fish.audio --tts-model s2.1-pro-free
+    # Only consulted with --voice remote; the API key stays env-only (secret).
+    p.add_argument(
+        "--tts-url",
+        default=None,
+        metavar="URL",
+        help="remote TTS endpoint (overrides MURMUR_TTS_URL)",
+    )
+    p.add_argument(
+        "--tts-model",
+        default=None,
+        metavar="NAME",
+        help="remote 'model' header, e.g. fish.audio 's2.1-pro-free' (overrides MURMUR_TTS_MODEL)",
+    )
+    p.add_argument(
+        "--tts-reference",
+        default=None,
+        metavar="ID",
+        help="remote voice/reference id (overrides MURMUR_TTS_REFERENCE_ID)",
+    )
     p.add_argument(
         "--no-music",
         action="store_true",
@@ -197,12 +220,10 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def main(argv: list[str] | None = None) -> None:
-    # Dev-only: if $MURMUR_DEV_LOG is set (make dev sets it), stream diagnostics
-    # to that file for `make logs` to tail. A no-op otherwise (shipping default).
-    configure_dev_logging()
-    args = _parse_args(argv)
-    config = Config.default()
+def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
+    """Layer CLI flags over the (env-derived) Config — a flag left unset keeps the
+    config value. This is what lets you switch backend / hosted model / voice from
+    the command line (e.g. local -> fish.audio) without editing the env."""
     if args.persona is not None:
         config = replace(config, persona_path=args.persona)
     if args.gap is not None:
@@ -211,10 +232,25 @@ def main(argv: list[str] | None = None) -> None:
         config = replace(config, brain_provider=args.brain)
     if args.voice is not None:
         config = replace(config, voice_provider=args.voice)
+    if args.tts_url is not None:
+        config = replace(config, tts_url=args.tts_url)
+    if args.tts_model is not None:
+        config = replace(config, tts_model=args.tts_model)
+    if args.tts_reference is not None:
+        config = replace(config, tts_reference_id=args.tts_reference)
     if args.no_music:
         config = replace(config, music_enabled=False)
     if args.cadence is not None:
         config = replace(config, cadence_mode=args.cadence)
+    return config
+
+
+def main(argv: list[str] | None = None) -> None:
+    # Dev-only: if $MURMUR_DEV_LOG is set (make dev sets it), stream diagnostics
+    # to that file for `make logs` to tail. A no-op otherwise (shipping default).
+    configure_dev_logging()
+    args = _parse_args(argv)
+    config = _apply_overrides(Config.default(), args)
 
     if args.setup_music:
         try:

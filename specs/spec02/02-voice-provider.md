@@ -155,8 +155,18 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
 - **Selection & config (no code edits per swap):** `voice_provider="remote"`
   (or `--voice remote`). Endpoint config comes from env so a URL/key is never
   hardcoded: `MURMUR_TTS_URL`, `MURMUR_TTS_REFERENCE_ID` (the server-side saved
-  voice), `MURMUR_TTS_API_KEY` (optional bearer), `MURMUR_TTS_SEED` (optional).
-  Switch back to local by setting `voice_provider` to `spark`.
+  voice), `MURMUR_TTS_API_KEY` (optional bearer), `MURMUR_TTS_SEED` (optional),
+  `MURMUR_TTS_MODEL` (optional — sent as the HTTP `model` header to select a
+  hosted model, e.g. fish.audio `s2.1-pro-free`; empty → no header, which
+  self-hosted fish-speech ignores). Switch back to local by setting
+  `voice_provider` to `spark`.
+- **Switch from the command line (no env edit):** the same knobs have CLI
+  overrides that win over env — `--voice` (local `spark` ↔ `remote`), `--tts-url`,
+  `--tts-model`, `--tts-reference`. So moving between the local sidecar, the
+  self-hosted server, and a hosted API (fish.audio) is one command, e.g.
+  `--voice remote --tts-url https://api.fish.audio --tts-model s2.1-pro-free
+  --tts-reference <id>`. The API key stays env-only (a secret does not belong on
+  the command line / in the process list).
 - **Voice pinning:** fish-speech has no preset voice library — with neither a
   `reference_id` nor a fixed `seed`, every `/v1/tts` call samples a fresh timbre
   (the voice changes line to line). `MURMUR_TTS_SEED` pins the sampled voice so a

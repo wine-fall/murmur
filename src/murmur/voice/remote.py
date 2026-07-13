@@ -69,6 +69,7 @@ class RemoteVoiceProvider:
         reference_id: str | None = None,
         api_key: str | None = None,
         seed: int | None = None,
+        model: str | None = None,
         timeout: float = _SYNTH_TIMEOUT,
     ) -> None:
         # strip() first: a .env value with trailing whitespace / CRLF would
@@ -77,6 +78,7 @@ class RemoteVoiceProvider:
         self._reference_id = reference_id or None
         self._api_key = api_key or None
         self._seed = seed
+        self._model = model or None
         self._timeout = timeout
         self._dir = Path(tempfile.mkdtemp(prefix="murmur-remote-"))
         self._counter = 0
@@ -113,6 +115,8 @@ class RemoteVoiceProvider:
         headers = {"content-type": "application/json", "user-agent": _USER_AGENT}
         if self._api_key:
             headers["authorization"] = f"Bearer {self._api_key}"
+        if self._model:  # e.g. fish.audio 's2.1-pro-free'; self-hosted omits it
+            headers["model"] = self._model
         req = urllib.request.Request(  # noqa: S310 - fixed http(s) TTS endpoint
             self._url, data=body, headers=headers, method="POST"
         )

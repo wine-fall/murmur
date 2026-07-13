@@ -95,6 +95,10 @@ class Config:
     # so without a reference each call samples a fresh timbre; a pinned seed keeps
     # one stable voice across lines. Empty = unset (random per call).
     tts_seed: int | None = field(default_factory=lambda: _env_seed())
+    # HTTP `model` header for the remote backend — selects a hosted model (e.g.
+    # fish.audio "s2.1-pro-free"). Empty = no header (self-hosted fish-speech
+    # ignores it).
+    tts_model: str = field(default_factory=lambda: os.environ.get("MURMUR_TTS_MODEL", ""))
 
     @classmethod
     def default(cls) -> "Config":
