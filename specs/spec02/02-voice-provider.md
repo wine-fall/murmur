@@ -155,8 +155,23 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
 - **Selection & config (no code edits per swap):** `voice_provider="remote"`
   (or `--voice remote`). Endpoint config comes from env so a URL/key is never
   hardcoded: `MURMUR_TTS_URL`, `MURMUR_TTS_REFERENCE_ID` (the server-side saved
-  voice), `MURMUR_TTS_API_KEY` (optional bearer). Switch back to local by setting
+  voice), `MURMUR_TTS_API_KEY` (optional bearer), `MURMUR_TTS_SEED` (optional),
+  `MURMUR_TTS_MODEL` (optional — sent as the HTTP `model` header to select a
+  hosted model, e.g. fish.audio `s2.1-pro-free`; empty → no header, which
+  self-hosted fish-speech ignores). Switch back to local by setting
   `voice_provider` to `spark`.
+- **Switch from the command line (no env edit):** the same knobs have CLI
+  overrides that win over env — `--voice` (local `spark` ↔ `remote`), `--tts-url`,
+  `--tts-model`, `--tts-reference`. So moving between the local sidecar, the
+  self-hosted server, and a hosted API (fish.audio) is one command, e.g.
+  `--voice remote --tts-url https://api.fish.audio --tts-model s2.1-pro-free
+  --tts-reference <id>`. The API key stays env-only (a secret does not belong on
+  the command line / in the process list).
+- **Voice pinning:** fish-speech has no preset voice library — with neither a
+  `reference_id` nor a fixed `seed`, every `/v1/tts` call samples a fresh timbre
+  (the voice changes line to line). `MURMUR_TTS_SEED` pins the sampled voice so a
+  run keeps one consistent voice; a registered `reference_id` is the stronger,
+  cross-text-stable option once a reference is saved server-side.
 - **Wire protocol — fish-speech native `/v1/tts`** (the chosen server): `POST`
   a JSON body (`text`, `reference_id`, `format:"wav"`, `streaming:false`,
   `normalize:true`, and the sampling defaults) with `content-type:
@@ -164,7 +179,11 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
   body is the complete wav, written to a temp file → `AudioClip(kind="talk")`.
   The fish server accepts JSON as well as msgpack, so this needs **no extra
   serialization dependency** — stdlib `json` + `urllib` (the blocking call runs
-  in `asyncio.to_thread` to keep the seam async).
+  in `asyncio.to_thread` to keep the seam async). The request sends a **named
+  `User-Agent`**: a Cloudflare-fronted deployment blocks urllib's default
+  `Python-urllib/*` UA with a 403 bot rule. When the endpoint sits behind
+  Cloudflare Access, auth is the operator's concern (a WARP-enrolled host, or a
+  service token) — not baked into the adapter.
 - **Protocol is per-adapter, not universal:** this adapter speaks fish-speech's
   API. A different server (OpenAI-compatible `/v1/audio/speech`, etc.) is another
   small adapter on the same seam — the seam does not try to be one universal

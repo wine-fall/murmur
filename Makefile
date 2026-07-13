@@ -1,7 +1,9 @@
 # murmur dev workflow — one command to install, preflight, and run.
 #
-#   make dev      # terminal 1: set up, check deps, launch the app (interactive)
-#   make logs     # terminal 2: tail the dev log + memory while it runs
+#   make dev            # terminal 1: set up, check deps, launch the app (local voice)
+#   make dev-fishaudio  # remote voice via fish.audio (.env.fishaudio -> .env)
+#   make dev-opuslab    # remote voice via self-hosted opuslab (.env.opuslab; WARP on)
+#   make logs           # terminal 2: tail the dev log + memory while it runs
 #
 # Knobs:  VOICE=spark|stub|qwen3|...   (real TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
@@ -23,12 +25,15 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
-.PHONY: help dev logs preflight setup-music install
+.PHONY: help dev dev-remote dev-fishaudio dev-opuslab logs preflight setup-music install
 
 help:
 	@echo "murmur dev:"
-	@echo "  make dev          install deps, preflight, then launch the app"
+	@echo "  make dev          install deps, preflight, then launch the app (local voice)"
 	@echo "                    (diagnostics -> $(DEV_LOG))"
+	@echo "  make dev-fishaudio  remote voice via fish.audio (.env.fishaudio -> .env)"
+	@echo "  make dev-opuslab    remote voice via self-hosted opuslab (.env.opuslab; WARP on)"
+	@echo "  make dev-remote   remote voice from whatever .env currently holds"
 	@echo "  make logs         tail the dev log + memory (run in a 2nd terminal)"
 	@echo "                    INFO timeline by default; DEBUG=1 unmutes the firehose"
 	@echo "                    (memory is also recorded to $(MEM_LOG) while dev runs)"
@@ -43,6 +48,33 @@ install:
 
 preflight:
 	@uv run python scripts/dev_preflight.py $(PREFLIGHT_ARGS)
+
+dev-fishaudio:
+	@# Select the fish.audio backend: copy its config to .env, then run remote.
+	@test -f .env.fishaudio || { echo "missing .env.fishaudio (fish.audio config)"; exit 1; }
+	@cp .env.fishaudio .env
+	@$(MAKE) dev-remote
+
+dev-opuslab:
+	@# Select the self-hosted opuslab backend (keep WARP connected).
+	@test -f .env.opuslab || { echo "missing .env.opuslab (opuslab config)"; exit 1; }
+	@cp .env.opuslab .env
+	@$(MAKE) dev-remote
+
+dev-remote:
+	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) into the environment,
+	@# then run the normal dev flow forcing the off-machine HTTP backend. Keep WARP
+	@# connected — auth to the endpoint is via Cloudflare Access (spec 02 §3.6).
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	  if [ -z "$$MURMUR_TTS_URL" ]; then \
+	    echo "make dev-remote: no TTS endpoint configured."; \
+	    echo "Create a gitignored .env in this dir with, e.g.:"; \
+	    echo "    MURMUR_TTS_URL=https://fish-speech.example.com"; \
+	    echo "    MURMUR_TTS_SEED=42            # optional: pin the voice"; \
+	    echo "then re-run 'make dev-remote' (keep WARP connected for Access)."; \
+	    exit 1; \
+	  fi; \
+	  $(MAKE) dev VOICE=remote
 
 dev: install
 	@uv run python scripts/dev_preflight.py $(PREFLIGHT_ARGS) || { \

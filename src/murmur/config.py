@@ -9,10 +9,28 @@ can be layered on later without changing the call sites.
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .prompts import DEFAULT_PERSONA_PATH
+
+
+def _env_seed() -> int | None:
+    """Parse ``MURMUR_TTS_SEED`` (empty/unset → None). A non-numeric value is a
+    misconfiguration, but it only matters to the remote voice — it must not abort
+    Config construction (and thus every voice, incl. spark/stub). So we warn and
+    ignore it, falling back to the documented unpinned-voice default."""
+    raw = os.environ.get("MURMUR_TTS_SEED", "").strip()
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError:
+        print(
+            f"warning: ignoring non-numeric MURMUR_TTS_SEED={raw!r}", file=sys.stderr
+        )
+        return None
 
 
 @dataclass(frozen=True)
@@ -73,6 +91,14 @@ class Config:
     tts_api_key: str = field(
         default_factory=lambda: os.environ.get("MURMUR_TTS_API_KEY", "")
     )
+    # Fixed sampling seed for the remote voice. fish-speech has no preset voices,
+    # so without a reference each call samples a fresh timbre; a pinned seed keeps
+    # one stable voice across lines. Empty = unset (random per call).
+    tts_seed: int | None = field(default_factory=lambda: _env_seed())
+    # HTTP `model` header for the remote backend — selects a hosted model (e.g.
+    # fish.audio "s2.1-pro-free"). Empty = no header (self-hosted fish-speech
+    # ignores it).
+    tts_model: str = field(default_factory=lambda: os.environ.get("MURMUR_TTS_MODEL", ""))
 
     @classmethod
     def default(cls) -> "Config":
