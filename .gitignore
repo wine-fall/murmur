@@ -24,5 +24,6 @@ graphify-out/
 # Local dev session artifacts (make dev): the tailed diagnostics log
 .dev/
 
-# Local-only env (endpoints/keys for `set -a; source .env; set +a; make dev`)
-.env
+# Local-only env configs (endpoints/keys) — .env is generated from .env.<backend>
+# by `make dev-fishaudio` / `make dev-opuslab`; never commit any of them.
+.env*
