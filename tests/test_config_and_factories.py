@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from murmur.app import _parse_args
+from murmur.app import _apply_overrides, _parse_args
 from murmur.brain import ClaudeBrain, StubBrain, build_brain
 from murmur.config import Config
 from murmur.voice import build_voice
@@ -53,3 +53,32 @@ def test_cli_voice_flag_accepts_every_registered_voice():
     # build_voice() accepts it. Every registry name + "stub" must parse.
     for name in ("stub", *PROFILES):
         assert _parse_args(["--voice", name]).voice == name
+
+
+def test_cli_tts_flags_override_config():
+    # --tts-* let you switch the remote endpoint / model / voice from the command
+    # line (e.g. local -> fish.audio s2.1-pro-free) without editing .env; CLI wins.
+    args = _parse_args(
+        [
+            "--voice",
+            "remote",
+            "--tts-url",
+            "https://api.fish.audio",
+            "--tts-model",
+            "s2.1-pro-free",
+            "--tts-reference",
+            "ref123",
+        ]
+    )
+    cfg = _apply_overrides(Config.default(), args)
+    assert cfg.voice_provider == "remote"
+    assert cfg.tts_url == "https://api.fish.audio"
+    assert cfg.tts_model == "s2.1-pro-free"
+    assert cfg.tts_reference_id == "ref123"
+
+
+def test_cli_tts_flags_absent_leave_config_untouched(monkeypatch):
+    # No --tts-* flags -> config keeps its env-derived values (no clobber to "").
+    monkeypatch.setenv("MURMUR_TTS_URL", "http://box:8080")
+    cfg = _apply_overrides(Config.default(), _parse_args([]))
+    assert cfg.tts_url == "http://box:8080"
