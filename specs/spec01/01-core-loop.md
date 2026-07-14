@@ -17,7 +17,7 @@
 A single long-running Python `asyncio` process that:
 1. Loads a **static persona** (a System Prompt seed) at startup.
 2. Runs an **autonomous talk loop**: repeatedly asks the Brain for a short talk segment, speaks it via a `VoiceProvider`, and continues — with a natural pause between segments.
-3. Accepts **typed input** at any time; on input it interrupts playback, has the Brain respond, speaks the response, then resumes the program.
+3. Accepts **typed input** at any time; on input the Brain composes a response while the current segment keeps playing, speaks it the moment it is ready (barging in on the current segment), then resumes the program.
 4. Can be **stopped cleanly**.
 5. **Declares the outbound interface contracts** (`VoiceProvider`, `MusicProvider`, `MemoryStore`) that later specs implement — so parts stay decoupled and buildable in order.
 

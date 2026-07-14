@@ -130,16 +130,21 @@ App start runs the registered checks in order before broadcasting. The only chec
 - The Director's talk segments call `play(voice)`; auto-ducking makes them ride over any live music.
 - The engine is **source-agnostic**: the same PCM path plays a yt-dlp stream URL and a local fixture file, so it is testable without the network.
 
-### 3.5 Director control-flow change: music segments differ from talk (a required edit to the spec-01 loop)
-This engine forces a fork in the Director's arbitration (spec 01 §3.3), which today, on any typed line, calls `player.stop()` to cancel the on-air clip:
-- **Talk segment (unchanged):** a typed line still cancels the talk clip (`stop()`) and the brain replies — spec-01 cancel-and-resume.
-- **Music segment (new):** the Director must **not** `stop()` the song. It races the handle's **completion** against the next typed line; on a line it plays the reply via `play(reply)` — which auto-ducks the *still-playing* music — then keeps awaiting completion (chained interjections all ride over the ducked song). The song is truly stopped only on `/quit`/shutdown or when it ends naturally.
-So `_play_interruptible`/`_handle_user` grow a **music branch** ("await song-done vs next-line, reply-over-music on a line") distinct from the talk branch ("cancel-and-resume"). This is the concrete integration change 03-02 lands in the spec-01 loop.
+### 3.5 Director control-flow: music segments duck, talk segments cut
+This engine forks the Director's interjection handling (spec 01 §3.3). The base
+mechanism is the same for both: a typed line composes its reply while the current
+audio keeps playing and barges in only when the reply clip is ready (prepare-
+then-barge-in). What differs is the **barge-in target**:
+- **Talk (voice clip):** the ready reply cuts the on-air voice clip (`stop()` — the voice channel) and becomes the new voice clip.
+- **Music (song):** the Director must **not** `stop()` the song. It races the song's **completion** against the next typed line; a reply is played via `play(reply)` — which auto-ducks the *still-playing* music — then it keeps awaiting completion (chained interjections all ride over the ducked song). The song is truly stopped only on `/quit`/shutdown or when it ends naturally.
+Both live behind **one** arbitration path in the Director (spec 01 §3.3): the song
+is a persistent background activity, voice clips are the replaceable foreground.
+This is the concrete integration change 03-02 lands in the spec-01 loop.
 
 ---
 
 ## 4. Dependencies
-- **spec 01**: the `Player` seam, `AudioClip`, and the sole-audio-authority invariant this engine preserves. **Modifies** the `Director`'s interjection/cancel arbitration to fork music (duck-over) from talk (cancel-and-resume) — see §3.5.
+- **spec 01**: the `Player` seam, `AudioClip`, and the sole-audio-authority invariant this engine preserves. **Modifies** the `Director`'s interjection arbitration to fork music (duck-over) from talk (barge-in cut) — see §3.5.
 - **spec 03-01**: produces the music `AudioClip`s that flow through this engine (integration). The **engine core is testable independently** with local fixtures.
 - **spec 02**: supplies the voice clips mixed on top.
 - **External**: `sounddevice` (PortAudio), `numpy`, and **ffmpeg** (system binary) for decode. Per master §10.1, this backend declares its full dependency manifest so provisioning is atomic (no half-installed state). Config: `ffmpeg_cmd` replaces the retired spec-01 `player_cmd`/`--player` (the engine has no external player binary); new knobs `music_enabled`/`ytdlp_cmd`/`music_model`/`cadence_mode`/`music_every_n`, flags `--no-music`/`--cadence`.
