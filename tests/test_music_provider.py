@@ -57,6 +57,50 @@ def test_parse_resolve_output_raises_when_empty() -> None:
         _parse_resolve_output("   \n\n")
 
 
+def test_run_kills_child_on_cancel(monkeypatch) -> None:
+    """A cancelled search (e.g. an abandoned music prefetch on shutdown, spec 04)
+    must kill the yt-dlp child, not orphan it. Fakes the subprocess so no real
+    binary/network is touched."""
+    import asyncio
+
+    from murmur.music.provider import YtDlpMusicProvider
+
+    class FakeProc:
+        def __init__(self) -> None:
+            self.returncode = None
+            self.killed = False
+            self.entered = asyncio.Event()
+
+        async def communicate(self):
+            self.entered.set()
+            await asyncio.sleep(3600)  # block until cancelled
+
+        def kill(self) -> None:
+            self.killed = True
+            self.returncode = -9
+
+        async def wait(self) -> int:
+            return self.returncode  # type: ignore[return-value]
+
+    fake = FakeProc()
+
+    async def fake_exec(*args, **kwargs):
+        return fake
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+
+    async def go() -> None:
+        provider = YtDlpMusicProvider()
+        task = asyncio.ensure_future(provider.search("q"))
+        await asyncio.wait_for(fake.entered.wait(), timeout=2)  # inside communicate()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert fake.killed  # child terminated, not left running
+
+    asyncio.run(go())
+
+
 @pytest.mark.integration
 def test_yt_dlp_search_and_resolve_live() -> None:
     """On-demand (needs yt-dlp + network): real search -> resolve to a URL."""

@@ -15,6 +15,7 @@ are unit-tested directly. A real end-to-end run is the tagged integration test.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any, cast
 
@@ -103,7 +104,15 @@ class YtDlpMusicProvider:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        stdout_b, stderr_b = await proc.communicate()
+        try:
+            stdout_b, stderr_b = await proc.communicate()
+        except asyncio.CancelledError:
+            # Cancelled mid-search — e.g. an abandoned music prefetch on shutdown
+            # (spec 04). Kill the child so no orphaned yt-dlp outlives the request.
+            proc.kill()
+            with contextlib.suppress(Exception):
+                await proc.wait()
+            raise
         if proc.returncode != 0:
             detail = stderr_b.decode(errors="replace").strip()
             raise RuntimeError(f"yt-dlp failed ({proc.returncode}): {detail}")
