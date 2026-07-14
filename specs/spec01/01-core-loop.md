@@ -170,9 +170,9 @@ displaces the program, but it displaces it at the moment the reply is ready to
 air, so priority never costs dead air.
 
 ### 3.4 Pacing & token restraint (L0 minimum, master §9.2)
-- **One Brain call per talk segment** (no batching yet — spec 08).
+- **One Brain call per talk segment** as the L0 minimum. **Superseded for latency by [`spec 04`](../spec04/04-no-dead-air.md)**, which pulls forward a pre-generation buffer: music-pick prefetch (slice 1) and batched talk look-ahead (slice 2, spec 08's batch pillar as the vehicle). The L0 minimum below still holds as the fallback path; 04 is the polish layered on top.
 - A configurable **inter-segment gap** so output is a paced program, not a firehose.
-- These two bound the talk rate so testing doesn't drain the subscription. Full economy (batch/cache/tier/gate) is spec 08.
+- These two bound the talk rate so testing doesn't drain the subscription. Full economy (cache/tier/gate) is spec 08.
 
 ### 3.5 Audio playback (L0)
 - `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`. **Superseded (spec 03-02)**: the mixing `AudioEngine` replaced this player in the app; `player_cmd`/`--player` were retired (`ffmpeg_cmd` is the engine's only external binary). **Retired (2026-07 dedup pass)**: the unwired `AudioPlayer` reference impl was deleted (git history keeps it); the `Player` Protocol it declared moved to `contracts.py` with the other spec-01 seams.
