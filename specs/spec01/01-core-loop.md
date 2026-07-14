@@ -3,7 +3,7 @@
 > **Status**: Implemented (steps 1–3 done). The L0 spine is complete and verified against the stub voice; it becomes *audible* once spec 02 wires a real `VoiceProvider`.
 >   - **step 1 (done)**: scaffold + all contracts/data types (§2) + in-process `MemoryStore` + stub `VoiceProvider` + `StubBrain` + simulated `AudioPlayer` + autonomous talk loop. Runs end-to-end against the stub voice with no spec-02 code (criterion §5), paced, clean Ctrl-C shutdown. Package under `src/murmur/`, entry `murmur` / `python -m murmur`.
 >   - **step 2 (done)**: real `ClaudeBrain` on `claude-agent-sdk` (subscription-OAuth, no API key, `claude-opus-4-8`), swapped in behind the same two-method contract via a `brain_provider` config knob (`"claude"` default / `"stub"` fake); `build_brain` factory; `--brain` flag; fully isolated from the local Claude env (§3.2). Verified by a live smoke test + the stub loop regression. First third-party dependency. Voice is still the stub — real TTS is spec 02.
->   - **step 3 (done)**: real `AudioPlayer` (external-player subprocess — `afplay` default, configurable via `config.player_cmd` / `--player`; `stop()` terminates it) + typed talk-back via the `CliHost` stdin reader (a daemon thread feeding the loop) + cancel-and-resume interjection arbitrated by the `Director` (§3.3) + `/quit`. Criteria §1–§5 verified against the stub voice (interrupt → reply → resume; `/quit` + Ctrl-C clean; no orphaned player). Audible once spec 02 lands.
+>   - **step 3 (done)**: real `AudioPlayer` (external-player subprocess — `afplay` default, configurable via `config.player_cmd` / `--player`; `stop()` terminates it) + typed talk-back via the `CliHost` stdin reader (a daemon thread feeding the loop) + interjection arbitrated by the `Director` (§3.3; **revised 2026-07 to prepare-then-barge-in + `Steer`**) + `/quit`. Criteria §1–§5 verified against the stub voice (interrupt → reply → resume; `/quit` + Ctrl-C clean; no orphaned player). Audible once spec 02 lands.
 >   - **tests (DESIGN §11.1/§11.2)**: `pytest` unit layer under `tests/` — pure logic (memory, prompts, persona, config/factories, StubBrain) + the Director loop/interjection driven by fakes + `AudioPlayer` subprocess control (stand-in binaries). Fast, no network/LLM/audio. Run: `pytest`.
 > **Part**: The orchestrator spine for milestone **L0** (talk-only radio). See master [`../DESIGN.md`](../DESIGN.md) §4 (architecture), §9 (L0 definition), §10 (build order).
 > **Milestone**: L0 (with [`02-voice-provider.md`](../spec02/02-voice-provider.md), 01+02 = the first runnable, audible version).
@@ -17,7 +17,7 @@
 A single long-running Python `asyncio` process that:
 1. Loads a **static persona** (a System Prompt seed) at startup.
 2. Runs an **autonomous talk loop**: repeatedly asks the Brain for a short talk segment, speaks it via a `VoiceProvider`, and continues — with a natural pause between segments.
-3. Accepts **typed input** at any time; on input it interrupts playback, has the Brain respond, speaks the response, then resumes the program.
+3. Accepts **typed input** at any time; on input the Brain composes a response while the current segment keeps playing, speaks it the moment it is ready (barging in on the current segment), then resumes the program.
 4. Can be **stopped cleanly**.
 5. **Declares the outbound interface contracts** (`VoiceProvider`, `MusicProvider`, `MemoryStore`) that later specs implement — so parts stay decoupled and buildable in order.
 
@@ -131,17 +131,43 @@ Two concurrent tasks over a shared state, single event loop:
   1. Build `ContextPack` (persona + `memory.recent(n)`).
   2. `text = await brain.next_talk(ctx)`.
   3. `clip = await voice.synthesize(text)`.
-  4. `await player.play(clip)` — awaits until the clip finishes **or** is cancelled by an interjection.
+  4. `await player.play(clip)` — awaits until the clip finishes **or** is cut by a barge-in.
   5. `memory.record(Turn("radio", text))`.
   6. Pause for the configured inter-segment gap (cancellable).
   7. Loop.
-- **`input_task`**: read keyboard lines from stdin. On a line:
-  1. Signal interjection → `await player.stop()` (cancels the current `play`/gap).
-  2. `memory.record(Turn("user", line))`.
-  3. `reply = await brain.respond(line, ctx)` → `clip = await voice.synthesize(reply)` → `await player.play(clip)` → `memory.record(Turn("radio", reply))`.
-  4. Hand control back to `director_task`, which resumes the program from step 1.
+- **`input_task`**: read keyboard lines from stdin. A typed line is a **`Steer`** —
+  the first-class representation of a user interrupt: its `text` plus an `intent`
+  (`"quit"` for `/quit`, else `"talkback"`). `Steer` replaces the former
+  scattered `str | None` "interrupting line" convention — every race helper
+  returns `Steer | None`, and the interrupt handling is consolidated in one
+  Director method rather than duplicated per segment kind.
 
-**Arbitration invariant**: user turns take priority over the program; only one segment is "on air" at a time; `audio_player` is the only thing that emits sound. A clean abstraction for this (implementation choice): the Director awaits an `asyncio.Event`/queue for input that can cancel the in-flight `play()` task.
+  On a `talkback` steer, the interjection is **prepare-then-barge-in**, not
+  cancel-then-compose:
+  1. **The current segment keeps playing** — no immediate `stop()`. Cutting to
+     silence and then making the listener wait out the Brain call + synthesis
+     (seconds of dead air) is the failure mode this replaces.
+  2. Concurrently: `reply = await brain.respond(text, ctx)` → `clip = await voice.synthesize(reply)`.
+  3. **Merge**: any further line that arrives *before the reply clip is ready*
+     is folded into the same reply (one combined `respond` over the accumulated
+     user text), not queued as a second turn. Fresh input supersedes work in
+     flight until the reply lands.
+  4. **Barge in only when the reply is ready**: if the current talk clip is
+     still playing, `await player.stop()` cuts it now; if it already ended
+     naturally, no stop — the reply simply airs (a small gap, like the
+     inter-segment pause). Then `await player.play(clip)` and
+     `memory.record(Turn("radio", reply))`.
+  5. Hand control back to `director_task`, which resumes the program from step 1.
+
+  During a **music** segment the song never stops for an interjection (spec
+  03-02 §3.5): the ready reply airs over the ducked song, so barge-in there is
+  "play the reply," with no `stop()`. A `quit` steer sets the stop flag (§3.6).
+
+**Arbitration invariant**: user turns take priority over the program; only one
+talk segment is "on air" at a time; `audio_player` is the only thing that emits
+sound. Priority is expressed as barge-in *timing* — the user's reply always
+displaces the program, but it displaces it at the moment the reply is ready to
+air, so priority never costs dead air.
 
 ### 3.4 Pacing & token restraint (L0 minimum, master §9.2)
 - **One Brain call per talk segment** (no batching yet — spec 08).
@@ -176,4 +202,11 @@ Two concurrent tasks over a shared state, single event loop:
 ## 6. Open questions
 - Persona seed file format & location (Markdown vs plain text; path under the project or a config dir). Default proposal: a single Markdown file path in config.
 - Terminal UX richness: plain `print`/stdin for L0, or a TUI (master mentions TUI as the front-end surface). Proposal: plain async stdin for L0; the TUI is a later front-end refinement, now its own sub-spec [`10-tui.md`](../spec10/10-tui.md), which swaps in behind the same CLI Host seam.
-- Exact interjection mechanism (cancel-and-resume vs. queue-after-current). Proposal: cancel-and-resume (model C feel), but confirm during implementation.
+- ~~Exact interjection mechanism (cancel-and-resume vs. queue-after-current).~~
+  **Resolved: prepare-then-barge-in** (§3.3). A refinement of cancel-and-resume
+  that keeps the current segment on air while the reply is composed + synthesized
+  and cuts over only when the reply clip is ready — so an interjection never
+  opens a dead-air gap. Lines arriving before the reply is ready **merge** into
+  one combined reply (chosen over queue-after-current); the typed interrupt is a
+  first-class `Steer` (`text` + `intent`), consolidating the old `str | None`
+  handling.
