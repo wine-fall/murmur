@@ -235,10 +235,8 @@ class Director:
             voice = asyncio.ensure_future(self._player.play(announce_clip))
 
         # Duck, not stop: replies air OVER the song; the song stops only on
-        # /quit (or shutdown cancellation).
+        # /quit (handled inside _run_voice) or shutdown cancellation.
         await self._run_voice(voice, song=handle)
-        if self._quit:
-            await handle.stop()
         return True
 
     # -- steer arbitration (one path for every segment kind) -------------------
@@ -258,8 +256,9 @@ class Director:
         while the current audio keeps playing (prepare-then-barge-in), then cuts
         over: the reply replaces the voice clip (``player.stop()`` — never the
         song) and becomes the new voice clip. Returns when the voice channel is
-        idle and the song (if any) has ended, or on ``/quit``. An initial
-        ``steer`` seeds the loop (the gap path, where nothing is yet on air)."""
+        idle and the song (if any) has ended, or on ``/quit`` — on which it also
+        stops a still-playing song on the way out. An initial ``steer`` seeds the
+        loop (the gap path, where nothing is yet on air)."""
         song_task = asyncio.ensure_future(song.wait()) if song is not None else None
         try:
             while not self._quit:
@@ -292,6 +291,10 @@ class Director:
                 voice = asyncio.ensure_future(self._player.play(clip))
         finally:
             await _settle(voice, song_task)
+            # /quit while a song is playing: stop it on the way out (the song is
+            # never cut by an interjection, only by quit/shutdown — spec 03-02).
+            if self._quit and song is not None:
+                await song.stop()
 
     async def _race(self, current: asyncio.Future[Any]) -> Steer | None:
         """Race a live on-air activity against the next typed line. Returns the
