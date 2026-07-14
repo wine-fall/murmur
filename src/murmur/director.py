@@ -156,6 +156,11 @@ class Director:
         with _log.timed("talk") as t:
             text = await self._brain.next_talk(ctx)
             t["chars"] = len(text)
+        # Prime the next music pick now — it needs only this text (the mood), not
+        # its audio — so the search overlaps the synth below as well as playback.
+        # The turn isn't recorded yet (record waits for a successful air), so it
+        # is fed into the pick's mood directly.
+        self._prefetch_music(latest=text)
         clip = await self._synthesize_or_skip(text)
         if clip is None:
             return  # segment skipped; the loop keeps broadcasting
@@ -164,9 +169,6 @@ class Director:
         # an interjection's reply sees this segment in context.
         self._cli.on_radio_segment(text)
         self._memory.record(Turn("radio", text))
-        # Now that a talk turn is on the record (mood context), prime the next
-        # music pick in the background so its latency overlaps this playback.
-        self._prefetch_music()
         await self._run_voice(asyncio.ensure_future(self._player.play(clip)))
 
     async def _gap(self) -> None:
@@ -201,16 +203,24 @@ class Director:
         )
         return await self._cadence.next_kind(state) == MUSIC
 
-    def _prefetch_music(self) -> None:
+    def _prefetch_music(self, latest: str | None = None) -> None:
         """spec 04 slice 1: fire the next music pick in the background so its
         find-and-pull latency overlaps talk. No-op unless music can actually play
         (both music AND cadence wired — mirrors ``_wants_music``), or a pick is
-        already pending (single-slot — the Director runs one pick ahead)."""
+        already pending (single-slot — the Director runs one pick ahead).
+
+        ``latest`` is the just-generated talk turn, not yet recorded (record waits
+        for a successful air). It is folded into the mood so the pick fits the
+        current segment even though the prefetch fires before the turn lands in
+        memory."""
         if self._music is None or self._cadence is None or self._pending_pick is not None:
             return
+        lines = self._recent_lines()
+        if latest is not None:
+            lines = [*lines, f"radio: {latest}"]
         ctx = MusicContext(
             persona=self._persona,
-            situation=build_music_situation(self._recent_lines()),
+            situation=build_music_situation(lines),
         )
         self._pending_pick = asyncio.ensure_future(self._music.next_track(ctx))
 

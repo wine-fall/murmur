@@ -247,6 +247,39 @@ def test_music_pick_is_prefetched_during_talk():
     asyncio.run(go())
 
 
+def test_prefetch_fires_before_synthesis_with_fresh_mood():
+    """The prefetch needs only the talk TEXT (mood), not its audio — so it fires
+    right after the Brain produces the text, BEFORE TTS, overlapping synthesis
+    too. The just-generated (not-yet-recorded) turn is fed into the mood so the
+    pick still fits the current segment (spec 04 §3.1)."""
+
+    async def go():
+        events: list[tuple[str, str]] = []
+        cli = FakeCli()
+        programmer = FakeMusicProgrammer(picks=[_pick(announce=None)], events=events)
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=FakeBrain(),
+            # synth_delay makes synthesis yield, so the (already-scheduled)
+            # prefetch runs during it — proving the search overlaps TTS.
+            voice=FakeVoice(events=events, synth_delay=0.05),
+            player=FakeEngine(),
+            memory=InProcessMemoryStore(),
+            cli_host=cli,
+            music=programmer,
+            cadence=EveryNCadence(n=1),  # talk-1, then music
+        )
+        await director.run(max_segments=2)
+        fetches = [i for i, e in enumerate(events) if e[0] == "fetch"]
+        synths = [i for i, e in enumerate(events) if e == ("synth", "talk-1")]
+        assert fetches and synths
+        assert fetches[0] < synths[0]  # prefetch started BEFORE talk-1's TTS
+        assert "talk-1" in events[fetches[0]][1]  # fresh text rode into the mood
+
+    asyncio.run(go())
+
+
 def test_cold_fallback_when_no_prefetch_available():
     """If the music branch fires with nothing prefetched (here: music is the very
     first segment, no talk ran to prime it), it does a cold fetch — correctness
