@@ -242,14 +242,22 @@ class FakeEngine(FakePlayer):
 
 class FakeMusicProgrammer:
     """Scripted next_track: pops picks (None = nothing found); records the
-    contexts it was asked for."""
+    contexts it was asked for. ``events`` (shared with a FakeVoice) records
+    ("fetch", situation) so a test can assert the prefetch fired before synth."""
 
-    def __init__(self, picks: list[Any] | None = None) -> None:
+    def __init__(
+        self,
+        picks: list[Any] | None = None,
+        events: list[tuple[str, str]] | None = None,
+    ) -> None:
         self._picks = list(picks or [])
         self.contexts: list[Any] = []
+        self._events = events
 
     async def next_track(self, ctx: Any) -> Any:
         self.contexts.append(ctx)
+        if self._events is not None:
+            self._events.append(("fetch", ctx.situation))
         return self._picks.pop(0) if self._picks else None
 
 

@@ -47,7 +47,7 @@ from .contracts import (
 )
 from .engine.core import MixingPlayer, MusicHandle
 from .music.context import MusicContext
-from .music.programmer import TrackSource
+from .music.programmer import TrackPick, TrackSource
 from .prompts import build_music_situation
 
 # The UI keeps failures terse (one info line); the dev logfile (make dev /
@@ -103,6 +103,9 @@ class Director:
         self._music: TrackSource | None = music
         self._cadence: CadencePolicy | None = cadence
         self._mixing: MixingPlayer | None = None
+        # spec 04 slice 1: the next music pick, found in the background so its
+        # latency overlaps talk. Single-slot (one pick ahead); None = empty.
+        self._pending_pick: asyncio.Task[TrackPick | None] | None = None
         if music is not None:
             if not isinstance(player, MixingPlayer):
                 raise ValueError("music wiring requires a player with play_music")
@@ -128,17 +131,22 @@ class Director:
         """
         self._cli.start()
         produced = 0
-        while not self._quit and (max_segments is None or produced < max_segments):
-            if await self._wants_music() and await self._play_music_segment():
-                self._talks_since_music = 0
-            else:
-                await self._talk_segment()
-                self._talks_since_music += 1
-            produced += 1
+        try:
+            while not self._quit and (max_segments is None or produced < max_segments):
+                if await self._wants_music() and await self._play_music_segment():
+                    self._talks_since_music = 0
+                else:
+                    await self._talk_segment()
+                    self._talks_since_music += 1
+                produced += 1
 
-            last = max_segments is not None and produced >= max_segments
-            if not last and not self._quit:
-                await self._gap()
+                last = max_segments is not None and produced >= max_segments
+                if not last and not self._quit:
+                    await self._gap()
+        finally:
+            # No orphaned prefetch: settle an in-flight pick on the way out.
+            await _settle(self._pending_pick)
+            self._pending_pick = None
 
     # -- segments -------------------------------------------------------------
 
@@ -148,6 +156,11 @@ class Director:
         with _log.timed("talk") as t:
             text = await self._brain.next_talk(ctx)
             t["chars"] = len(text)
+        # Prime the next music pick now — it needs only this text (the mood), not
+        # its audio — so the search overlaps the synth below as well as playback.
+        # The turn isn't recorded yet (record waits for a successful air), so it
+        # is fed into the pick's mood directly.
+        self._prefetch_music(latest=text)
         clip = await self._synthesize_or_skip(text)
         if clip is None:
             return  # segment skipped; the loop keeps broadcasting
@@ -190,20 +203,54 @@ class Director:
         )
         return await self._cadence.next_kind(state) == MUSIC
 
+    def _prefetch_music(self, latest: str | None = None) -> None:
+        """spec 04 slice 1: fire the next music pick in the background so its
+        find-and-pull latency overlaps talk. No-op unless music can actually play
+        (both music AND cadence wired — mirrors ``_wants_music``), or a pick is
+        already pending (single-slot — the Director runs one pick ahead).
+
+        ``latest`` is the just-generated talk turn, not yet recorded (record waits
+        for a successful air). It is folded into the mood so the pick fits the
+        current segment even though the prefetch fires before the turn lands in
+        memory."""
+        if self._music is None or self._cadence is None or self._pending_pick is not None:
+            return
+        lines = self._recent_lines()
+        if latest is not None:
+            lines = [*lines, f"radio: {latest}"]
+        ctx = MusicContext(
+            persona=self._persona,
+            situation=build_music_situation(lines),
+        )
+        self._pending_pick = asyncio.ensure_future(self._music.next_track(ctx))
+
+    async def _take_pick(self, music: TrackSource) -> TrackPick | None:
+        """The pick for the music branch: the prefetched one if primed (await it —
+        near-instant if already resolved, so the ~seconds of search already
+        overlapped talk), else a cold fetch. Clears the slot; the next talk
+        refills it. A failed prefetch re-raises here and degrades to talk like a
+        cold failure (caller's fallback)."""
+        task, self._pending_pick = self._pending_pick, None
+        if task is not None:
+            return await task
+        ctx = MusicContext(
+            persona=self._persona,
+            situation=build_music_situation(self._recent_lines()),
+        )
+        return await music.next_track(ctx)
+
     async def _play_music_segment(self) -> bool:
         """Find, announce, and play one track (spec 03-02 §3.5 music branch).
         Returns False when nothing resolves or the machinery fails (the caller
         falls back to talk — a music error must never crash the radio)."""
         music, mixing = self._music, self._mixing
         assert music is not None and mixing is not None
-        ctx = MusicContext(
-            persona=self._persona,
-            situation=build_music_situation(self._recent_lines()),
-        )
         try:
             with _log.timed("music.pick") as t:
-                pick = await music.next_track(ctx)
+                prefetched = self._pending_pick is not None
+                pick = await self._take_pick(music)
                 t["found"] = pick is not None
+                t["prefetched"] = prefetched  # near-zero elapsed_s when True
             if pick is None:
                 self._cli.info("music: nothing suitable found; back to talk.")
                 return False
