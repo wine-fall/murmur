@@ -6,15 +6,20 @@ paces with an inter-segment gap, and arbitrates typed interjections. There is
 one arbiter (this loop), so the invariant holds: user turns take priority and
 the engine is the only thing that emits sound.
 
-Two interjection paths (spec 03-02 §3.5):
-- **Talk segment** (spec 01, unchanged): a typed line cancels the on-air clip
-  (``player.stop()`` — the voice channel), the Brain replies, the program
-  resumes. Cancel-and-resume.
-- **Music segment** (new): the song is NEVER stopped by a line. The loop races
-  the handle's completion against the next typed line; a line gets its reply
-  played OVER the still-playing music (``play`` auto-ducks), then the loop
-  keeps awaiting the song. The song stops only on /quit/shutdown or when it
-  ends naturally. Duck, not stop.
+Interjection is **prepare-then-barge-in** (spec 01 §3.3): a typed line is a
+``Steer``; the current audio keeps playing while the Brain composes the reply
+and the voice synthesizes it, and only when the reply clip is ready does the
+loop cut over — so an interjection never opens a dead-air gap. A line that lands
+while the Brain is still composing is **merged** into the one reply. All steer
+handling funnels through one method (``_run_voice`` + ``_compose``), so there is
+no per-segment-kind duplication.
+
+Two barge-in targets (spec 03-02 §3.5):
+- **Talk / voice clip**: the ready reply cuts the on-air voice clip
+  (``player.stop()`` — the voice channel) and becomes the new voice clip.
+- **Music segment**: the song is NEVER stopped by a line. The reply airs OVER
+  the still-playing song (``play`` auto-ducks); the loop then keeps awaiting the
+  song. The song stops only on /quit/shutdown or when it ends naturally.
 
 Music is optional wiring: without a ``music``+``cadence`` pair this is exactly
 the spec-01 talk-only loop (the stub/test path).
@@ -24,7 +29,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
-from typing import Any, Coroutine
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from .brain import Brain
 from .cadence import MUSIC, CadencePolicy, CadenceState
@@ -49,6 +55,26 @@ from .prompts import build_music_situation
 _log = get_log("director")
 
 _QUIT_COMMAND = "/quit"
+
+SteerIntent = Literal["quit", "talkback"]
+
+
+@dataclass(frozen=True)
+class Steer:
+    """A typed user interrupt, first-class (spec 01 §3.3).
+
+    Consolidates the former scattered ``str | None`` "interrupting line": the
+    race helpers return ``Steer | None``, and one Director path handles it. The
+    ``intent`` is the extension point for future commands (``/skip``, …); L0
+    knows only ``quit`` (``/quit``) and ``talkback`` (everything else)."""
+
+    text: str
+    intent: SteerIntent
+
+    @classmethod
+    def from_line(cls, line: str) -> "Steer":
+        intent: SteerIntent = "quit" if line.strip() == _QUIT_COMMAND else "talkback"
+        return cls(text=line, intent=intent)
 
 
 class Director:
@@ -103,39 +129,43 @@ class Director:
         self._cli.start()
         produced = 0
         while not self._quit and (max_segments is None or produced < max_segments):
-            line: str | None = None
             if await self._wants_music() and await self._play_music_segment():
                 self._talks_since_music = 0
             else:
-                line = await self._talk_segment()
+                await self._talk_segment()
                 self._talks_since_music += 1
             produced += 1
 
             last = max_segments is not None and produced >= max_segments
-            if line is None and not last and not self._quit:
-                line = await self._sleep_interruptible(self._config.inter_segment_gap)
-
-            # Handle interjection(s); a reply may itself be interrupted, so chain.
-            while line is not None and not self._quit:
-                line = await self._handle_user(line)
+            if not last and not self._quit:
+                await self._gap()
 
     # -- segments -------------------------------------------------------------
 
-    async def _talk_segment(self) -> str | None:
-        """One autonomous talk segment (spec 01). Returns an interrupting line."""
+    async def _talk_segment(self) -> None:
+        """One autonomous talk segment (spec 01), then arbitrate any steers."""
         ctx = self._context()
         with _log.timed("talk") as t:
             text = await self._brain.next_talk(ctx)
             t["chars"] = len(text)
         clip = await self._synthesize_or_skip(text)
         if clip is None:
-            return None  # segment skipped; the loop keeps broadcasting
-        # Printed at air time (when playback starts), not at generation time —
-        # synthesis takes seconds and the text/audio gap read as a glitch.
+            return  # segment skipped; the loop keeps broadcasting
+        # Printed + recorded at air time (when playback starts): synthesis takes
+        # seconds and a text/audio gap reads as a glitch; recording it now means
+        # an interjection's reply sees this segment in context.
         self._cli.on_radio_segment(text)
-        line = await self._play_interruptible(clip)
         self._memory.record(Turn("radio", text))
-        return line
+        await self._run_voice(asyncio.ensure_future(self._player.play(clip)))
+
+    async def _gap(self) -> None:
+        """Inter-segment pause, steerable. A line during the gap gets its reply;
+        the gap is not resumed afterward (the program moves to the next segment)."""
+        sleep = asyncio.ensure_future(asyncio.sleep(self._config.inter_segment_gap))
+        steer = await self._race(sleep)
+        await _settle(sleep)
+        if steer is not None:
+            await self._run_voice(None, steer=steer)
 
     async def _synthesize_or_skip(self, text: str) -> AudioClip | None:
         """Synthesize with degradation: a TTS failure skips this one spoken
@@ -196,89 +226,139 @@ class Director:
         artist = f" — {pick.clip.artist}" if pick.clip.artist else ""
         self._cli.info(f"now playing: {title}{artist}")
 
-        # The announce is an on-air spoken segment like any other: it races
-        # the next typed line (user turns take priority, spec 01) — cancelling
-        # it only cuts the intro, the song underneath keeps playing.
-        line: str | None = None
+        # The announce is an on-air voice clip; a steer cuts it (voice channel),
+        # never the song. Recorded at air time so a reply sees it in context.
+        voice: asyncio.Future[None] | None = None
         if pick.announce and announce_clip is not None:
             self._cli.on_radio_segment(pick.announce)
-            line = await self._play_interruptible(announce_clip)
             self._memory.record(Turn("radio", pick.announce))
+            voice = asyncio.ensure_future(self._player.play(announce_clip))
 
-        # Duck, not stop: lines during the song get replies OVER it; the song
-        # is stopped only by /quit (or shutdown cancellation).
-        if line is None:
-            line = await self._race_song(handle)
-        while line is not None and not self._quit:
-            line = await self._handle_user(line)
-            if line is None and not self._quit:
-                line = await self._race_song(handle)
+        # Duck, not stop: replies air OVER the song; the song stops only on
+        # /quit (or shutdown cancellation).
+        await self._run_voice(voice, song=handle)
         if self._quit:
             await handle.stop()
         return True
 
-    # -- interjection plumbing --------------------------------------------------
+    # -- steer arbitration (one path for every segment kind) -------------------
 
-    async def _handle_user(self, line: str) -> str | None:
-        """Process a typed line. Returns a line that interrupted the reply (so
-        the caller can chain), or None. Sets ``_quit`` on ``/quit``."""
-        if line.strip() == _QUIT_COMMAND:
-            self._quit = True
-            return None
-        self._cli.on_user_line(line)
-        self._memory.record(Turn("user", line))
-        ctx = self._context()
-        reply = await self._brain.respond(line, ctx)
-        clip = await self._synthesize_or_skip(reply)
-        if clip is None:
-            return None  # reply skipped; the user turn stays recorded
-        self._cli.on_radio_segment(reply)
-        interrupting = await self._play_interruptible(clip)
-        self._memory.record(Turn("radio", reply))
-        return interrupting
+    async def _run_voice(
+        self,
+        voice: asyncio.Future[None] | None,
+        *,
+        song: MusicHandle | None = None,
+        steer: Steer | None = None,
+    ) -> None:
+        """The single steer-arbitration loop (spec 01 §3.3 + 03-02 §3.5).
 
-    async def _race_line(
-        self, primary: Coroutine[Any, Any, object], *, stop_player: bool = False
-    ) -> str | None:
-        """The one race protocol: run ``primary`` against the next typed line.
-        Returns the line if it arrived first (with ``stop_player`` cancelling
-        the voice channel — the interjection), or None when ``primary`` ends."""
-        primary_task = asyncio.ensure_future(primary)
-        get_task = asyncio.ensure_future(self._cli.next_line())
+        Races the current on-air voice clip ``voice`` (a talk segment, a music
+        intro, or a reply — may be ``None``) and, when idle, the persistent
+        ``song``, against the next typed line. A talkback steer composes a reply
+        while the current audio keeps playing (prepare-then-barge-in), then cuts
+        over: the reply replaces the voice clip (``player.stop()`` — never the
+        song) and becomes the new voice clip. Returns when the voice channel is
+        idle and the song (if any) has ended, or on ``/quit``. An initial
+        ``steer`` seeds the loop (the gap path, where nothing is yet on air)."""
+        song_task = asyncio.ensure_future(song.wait()) if song is not None else None
         try:
-            await asyncio.wait(
-                {primary_task, get_task}, return_when=asyncio.FIRST_COMPLETED
-            )
-            if get_task.done() and not get_task.cancelled():
-                if stop_player:
-                    await self._player.stop()
-                return get_task.result()
+            while not self._quit:
+                if steer is None:
+                    current = voice if voice is not None and not voice.done() else None
+                    if current is None and song_task is not None and not song_task.done():
+                        current = song_task
+                    if current is None:
+                        return  # voice idle and no live song -> segment over
+                    steer = await self._race(current)
+                    if steer is None:
+                        if current is song_task:
+                            return  # song ended -> segment over
+                        voice = None  # voice clip ended; re-evaluate / finish
+                        continue
+                if steer.intent == "quit":
+                    self._quit = True
+                    return
+                reply, clip = await self._compose(steer)
+                steer = None
+                if self._quit:  # a merged-in line was /quit
+                    return
+                if clip is None:
+                    continue  # reply synthesis failed; keep racing current audio
+                if voice is not None and not voice.done():
+                    await self._player.stop()  # barge-in: cut the voice clip only
+                await _settle(voice)
+                self._cli.on_radio_segment(reply)
+                self._memory.record(Turn("radio", reply))
+                voice = asyncio.ensure_future(self._player.play(clip))
+        finally:
+            await _settle(voice, song_task)
+
+    async def _race(self, current: asyncio.Future[Any]) -> Steer | None:
+        """Race a live on-air activity against the next typed line. Returns the
+        ``Steer`` if the user typed first (``current`` left running — the caller
+        owns its lifecycle), or ``None`` when ``current`` ended. A typed line
+        wins a tie (user turns take priority)."""
+        get = asyncio.ensure_future(self._cli.next_line())
+        try:
+            await asyncio.wait({current, get}, return_when=asyncio.FIRST_COMPLETED)
+            if get.done() and not get.cancelled():
+                return Steer.from_line(get.result())
             return None
         finally:
-            await _settle(primary_task, get_task)
+            await _settle(get)
 
-    async def _play_interruptible(self, clip: AudioClip) -> str | None:
-        """Play ``clip``, racing it against the next typed line. ``stop()``
-        targets the voice channel only, so over a music segment this cancels
-        the reply/announce, never the song (spec 03-02 §3.5)."""
-        return await self._race_line(self._player.play(clip), stop_player=True)
+    async def _compose(self, steer: Steer) -> tuple[str, AudioClip | None]:
+        """Compose + synthesize the reply to ``steer``, merging any line that
+        lands *before the reply clip is ready* into one combined reply (spec 01
+        §3.3) — the whole prepare (Brain compose + synthesis) races the next
+        typed line, so fresh input supersedes work in flight until the clip
+        lands. Echoes + records each user turn. Returns ``(reply, clip)``;
+        ``clip`` is ``None`` if synthesis failed. Sets ``_quit`` (returns
+        ``("", None)``) if a merged-in line is ``/quit``.
 
-    async def _race_song(self, handle: MusicHandle) -> str | None:
-        """Await the song's natural end vs the next typed line. Returns the
-        line (song keeps playing), or None when it ended."""
-        return await self._race_line(handle.wait())
+        A merged-away prepare is discarded mid-flight; the wasted Brain/synth
+        call is the cost of merge-anytime, and merges are rare (a second line
+        within the prepare window). ``FakeBrain`` records only after its delay,
+        so a compose-window discard leaves no trace in tests."""
+        texts = [steer.text]
+        self._cli.on_user_line(steer.text)
+        self._memory.record(Turn("user", steer.text))
+        while True:
+            prep = asyncio.ensure_future(self._prepare_reply(texts))
+            get = asyncio.ensure_future(self._cli.next_line())
+            try:
+                await asyncio.wait({prep, get}, return_when=asyncio.FIRST_COMPLETED)
+                if get.done() and not get.cancelled():
+                    await _settle(prep)  # discard the in-flight reply; recompose
+                    merged = Steer.from_line(get.result())
+                    if merged.intent == "quit":
+                        self._quit = True
+                        return "", None
+                    texts.append(merged.text)
+                    self._cli.on_user_line(merged.text)
+                    self._memory.record(Turn("user", merged.text))
+                    continue
+                return prep.result()
+            finally:
+                await _settle(get)
 
-    async def _sleep_interruptible(self, seconds: float) -> str | None:
-        """Wait the inter-segment gap vs the next typed line."""
-        return await self._race_line(asyncio.sleep(seconds))
+    async def _prepare_reply(self, texts: list[str]) -> tuple[str, AudioClip | None]:
+        """Compose + synthesize one reply over the accumulated user text.
+        Cancellable: if a fresh line arrives before the clip is ready this is
+        torn down mid-flight, so the synth backend must survive cancellation
+        (the sidecar kills its now-desynced process; the remote drops the
+        in-flight HTTP result)."""
+        reply = await self._brain.respond("\n".join(texts), self._context())
+        return reply, await self._synthesize_or_skip(reply)
 
 
-async def _settle(*tasks: asyncio.Task[object]) -> None:
+async def _settle(*tasks: asyncio.Future[Any] | None) -> None:
     """Cancel any still-pending tasks and await all of them, swallowing results
-    and cancellations. Keeps the racing helpers free of leaked tasks even when
-    the caller is cancelled (shutdown)."""
-    for t in tasks:
+    and cancellations (``None`` entries are ignored). Keeps the racing helpers
+    free of leaked tasks even when the caller is cancelled (shutdown)."""
+    live = [t for t in tasks if t is not None]
+    for t in live:
         if not t.done():
             t.cancel()
     with contextlib.suppress(Exception):
-        await asyncio.gather(*tasks, return_exceptions=True)
+        await asyncio.gather(*live, return_exceptions=True)

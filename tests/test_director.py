@@ -8,8 +8,20 @@ from dataclasses import replace
 from fakes import FakeBrain, FakeCli, FakePlayer, FakeVoice
 
 from murmur.config import Config
-from murmur.director import Director
+from murmur.director import Director, Steer
 from murmur.memory import InProcessMemoryStore
+
+
+def test_steer_from_line_classifies_intent():
+    """Steer is the first-class typed-interrupt: text + intent (quit/talkback)."""
+    talk = Steer.from_line("hello there")
+    assert talk.text == "hello there"
+    assert talk.intent == "talkback"
+
+    assert Steer.from_line("/quit").intent == "quit"
+    assert Steer.from_line("  /quit  ").intent == "quit"  # surrounding space trimmed
+    # a line that merely mentions /quit is an ordinary talkback, not a quit.
+    assert Steer.from_line("what does /quit do").intent == "talkback"
 
 
 def _make(*, lines: list[str] | None = None, play_delay: float = 0.0):
@@ -142,21 +154,95 @@ def test_reply_synthesis_failure_degrades_and_resumes():
     asyncio.run(go())
 
 
-def test_chained_interjections():
-    """A line arriving during a reply is handled before the program resumes."""
+def test_interjection_prepares_reply_before_barging_in():
+    """Deferred barge-in (spec 01 §3.3): the current clip keeps playing until
+    the reply is synthesized; only then is it cut — no dead-air gap."""
 
     async def go():
-        director, cli, brain, player, memory = _make(
-            lines=["first", "second"], play_delay=0.05
+        events: list[tuple[str, str]] = []
+        cli = FakeCli(["hello"])
+        brain = FakeBrain()
+        voice = FakeVoice(events=events)
+        player = FakePlayer(play_delay=0.2, events=events)
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=brain,
+            voice=voice,
+            player=player,
+            memory=InProcessMemoryStore(),
+            cli_host=cli,
         )
         await director.run(max_segments=1)
-        assert brain.responded_to == ["first", "second"]
+        # The current clip aired, the reply was synthesized, then a stop cut over.
+        assert ("play", "fake:talk-1") in events
+        assert ("synth", "reply:hello") in events
+        assert ("stop", "") in events
+        # The key ordering: reply ready BEFORE the barge-in stop (not after).
+        assert events.index(("synth", "reply:hello")) < events.index(("stop", ""))
+
+    asyncio.run(go())
+
+
+def test_lines_before_reply_ready_merge_into_one():
+    """A line that lands while the Brain is still composing merges into one
+    combined reply (spec 01 §3.3) — not a second queued turn."""
+
+    async def go():
+        cli = FakeCli(["first", "second"])
+        brain = FakeBrain(respond_delay=0.05)  # stays composing so "second" merges
+        voice = FakeVoice()
+        player = FakePlayer(play_delay=0.3)  # talk-1 stays on air through the merge
+        memory = InProcessMemoryStore()
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=brain,
+            voice=voice,
+            player=player,
+            memory=memory,
+            cli_host=cli,
+        )
+        await director.run(max_segments=1)
+        # One reply over both lines, not two separate replies.
+        assert brain.responded_to == ["first\nsecond"]
+        assert cli.user == ["first", "second"]
+        assert cli.radio == ["talk-1", "reply:first\nsecond"]
         assert [t.text for t in memory.recent(10)] == [
             "talk-1",
             "first",
-            "reply:first",
             "second",
-            "reply:second",
+            "reply:first\nsecond",
         ]
+
+    asyncio.run(go())
+
+
+def test_line_during_synthesis_also_merges_no_stale_reply_airs():
+    """The merge window runs until the reply CLIP is ready, not just until the
+    Brain finishes composing: a line landing during synthesis still merges, so
+    a now-stale reply is never briefly aired then cut (spec 01 §3.3)."""
+
+    async def go():
+        cli = FakeCli(["first", "second"])
+        brain = FakeBrain()  # compose is instant; the merge lands during synth
+        voice = FakeVoice(synth_delay=0.1)  # reply stays "rendering" so 2nd merges
+        player = FakePlayer(play_delay=0.5)  # talk-1 on air throughout
+        memory = InProcessMemoryStore()
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=brain,
+            voice=voice,
+            player=player,
+            memory=memory,
+            cli_host=cli,
+        )
+        await director.run(max_segments=1)
+        # The stale "reply:first" clip was discarded, never aired.
+        assert "reply:first" not in cli.radio
+        assert cli.radio == ["talk-1", "reply:first\nsecond"]
+        assert brain.responded_to[-1] == "first\nsecond"
+        assert cli.user == ["first", "second"]
 
     asyncio.run(go())

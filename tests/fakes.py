@@ -13,29 +13,43 @@ from murmur.contracts import AudioClip, ContextPack, TrackCandidate
 
 
 class FakeBrain:
-    """Records calls; returns deterministic text."""
+    """Records calls; returns deterministic text. ``respond_delay`` > 0 keeps a
+    reply "in composition" long enough for a queued line to merge into it (the
+    delay is *before* recording, so a merged-away reply leaves no trace)."""
 
-    def __init__(self) -> None:
+    def __init__(self, respond_delay: float = 0.0) -> None:
         self.talk_count = 0
         self.responded_to: list[str] = []
+        self._respond_delay = respond_delay
 
     async def next_talk(self, ctx: ContextPack) -> str:
         self.talk_count += 1
         return f"talk-{self.talk_count}"
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
+        if self._respond_delay:
+            await asyncio.sleep(self._respond_delay)
         self.responded_to.append(user_text)
         return f"reply:{user_text}"
 
 
 class FakeVoice:
     """Returns an AudioClip without touching disk. ``fail_on`` lists texts
-    whose synthesis raises (the real sidecar can fail per-utterance)."""
+    whose synthesis raises (the real sidecar can fail per-utterance). ``events``
+    (shared with a FakePlayer) records ("synth", text) so a test can assert the
+    reply was synthesized before the current clip was cut (deferred barge-in)."""
 
-    def __init__(self, fail_on: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        fail_on: list[str] | None = None,
+        events: list[tuple[str, str]] | None = None,
+        synth_delay: float = 0.0,
+    ) -> None:
         self.started = False
         self.closed = False
         self._fail_on = set(fail_on or [])
+        self._events = events
+        self._synth_delay = synth_delay
 
     async def start(self) -> None:
         self.started = True
@@ -43,6 +57,10 @@ class FakeVoice:
     async def synthesize(self, text: str, *, scenario: str = "broadcast") -> AudioClip:
         if text in self._fail_on:
             raise RuntimeError(f"sidecar synthesize failed: {text!r}")
+        if self._synth_delay:  # keep a reply "rendering" so a line can merge in
+            await asyncio.sleep(self._synth_delay)
+        if self._events is not None:
+            self._events.append(("synth", text))
         return AudioClip(source=f"fake:{text}", kind="talk")
 
     async def aclose(self) -> None:
@@ -53,18 +71,27 @@ class FakePlayer:
     """Records played clips. ``play_delay`` > 0 keeps a clip "on air" long enough
     for a queued input line to win the interjection race; the Director cancels it."""
 
-    def __init__(self, play_delay: float = 0.0) -> None:
+    def __init__(
+        self,
+        play_delay: float = 0.0,
+        events: list[tuple[str, str]] | None = None,
+    ) -> None:
         self.play_delay = play_delay
         self.played: list[str] = []
         self.stops = 0
+        self._events = events
 
     async def play(self, clip: AudioClip) -> None:
         self.played.append(clip.source)
+        if self._events is not None:
+            self._events.append(("play", clip.source))
         if self.play_delay:
             await asyncio.sleep(self.play_delay)
 
     async def stop(self) -> None:
         self.stops += 1
+        if self._events is not None:
+            self._events.append(("stop", ""))
 
 
 class FakeCli:
