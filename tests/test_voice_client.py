@@ -264,6 +264,35 @@ def test_synth_timeout_kills_sidecar_to_avoid_pipe_desync(monkeypatch):
     asyncio.run(go())
 
 
+def test_synth_cancel_kills_sidecar_to_avoid_pipe_desync(monkeypatch):
+    # Regression: a synth cancelled mid-flight (the Director merges a fresh line
+    # before the reply clip is ready, spec 01 §3.3) leaves the request written
+    # but its response unread — the pipe is desynced like the timeout case. The
+    # provider must kill the still-alive sidecar so the next call respawns clean
+    # rather than reading this request's stale response forever.
+    async def go():
+        provider = SidecarVoiceProvider("fake")
+        await provider.start()
+
+        started = asyncio.Event()
+
+        async def slow(obj):
+            started.set()
+            await asyncio.sleep(5.0)  # in-flight when we cancel
+            return {"audio_path": "/never.wav"}
+
+        monkeypatch.setattr(provider, "_request", slow)
+        task = asyncio.ensure_future(provider.synthesize("hi"))
+        await asyncio.wait_for(started.wait(), timeout=20)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert provider._proc is None  # desynced sidecar was killed
+        await provider.aclose()
+
+    asyncio.run(go())
+
+
 def test_synthesize_raises_on_backend_error_response(monkeypatch):
     async def go():
         provider = SidecarVoiceProvider("fake")

@@ -99,11 +99,20 @@ class SidecarVoiceProvider:
         async with self._lock:
             await self._ensure_started()
             try:
-                resp = await self._do_synth(obj)
-            except SidecarDied:
-                # Supervise: restart once and retry rather than hang the core.
-                await self._spawn_and_ready()
-                resp = await self._do_synth(obj)
+                try:
+                    resp = await self._do_synth(obj)
+                except SidecarDied:
+                    # Supervise: restart once and retry rather than hang the core.
+                    await self._spawn_and_ready()
+                    resp = await self._do_synth(obj)
+            except asyncio.CancelledError:
+                # A cancelled synth (the Director merges a fresh line before the
+                # clip is ready, §3.3) left a request written but its response
+                # unread — the pipe is desynced, exactly like the timeout case.
+                # Kill the still-alive sidecar so the next call respawns clean
+                # instead of reading this request's stale response.
+                await self._kill_proc()
+                raise
         if "error" in resp:
             raise RuntimeError(f"sidecar synthesize failed: {resp['error']}")
         path = resp.get("audio_path")
