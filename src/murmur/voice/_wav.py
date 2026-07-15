@@ -26,12 +26,22 @@ def estimate_seconds(text: str) -> float:
 
 
 def wav_seconds(path: Path | str) -> float:
-    """Duration of a wav in seconds (frames / framerate). Used to report the
-    spoken length of a synthesized clip so callers can compute a real-time
-    factor (generation time / audio duration)."""
+    """Duration of a wav in seconds. Used to report the spoken length of a
+    synthesized clip so callers can compute a real-time factor (generation time
+    / audio duration).
+
+    Measures the PCM actually on disk rather than trusting ``getnframes()``: a
+    streaming source (e.g. fish.audio) can't know the final length up front, so
+    it writes a placeholder/oversized data-chunk size in the header — trusting it
+    reports a bogus, constant duration. ``readframes`` stops at EOF, so the byte
+    count it returns is the real audio regardless of the header's claim."""
     with wave.open(str(path), "rb") as wav:
         rate = wav.getframerate()
-        return wav.getnframes() / rate if rate else 0.0
+        framesize = wav.getsampwidth() * wav.getnchannels()
+        if not rate or not framesize:
+            return 0.0
+        actual_frames = len(wav.readframes(wav.getnframes())) // framesize
+        return actual_frames / rate
 
 
 def write_silent_wav(

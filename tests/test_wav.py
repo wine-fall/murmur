@@ -43,6 +43,25 @@ def test_wav_seconds_reads_the_clip_duration(tmp_path):
     assert wav_seconds(path) == pytest.approx(2.0, abs=0.01)
 
 
+def test_wav_seconds_ignores_a_streaming_placeholder_header(tmp_path):
+    # A streaming source (e.g. fish.audio) can't know the final length up front,
+    # so it writes a placeholder/oversized data-chunk size in the header. Trusting
+    # getnframes() then reports a bogus, constant duration (~48695s seen live).
+    # wav_seconds must report the ACTUAL clip length from the bytes on disk.
+    import struct
+
+    path = tmp_path / "streamy.wav"
+    write_silent_wav(path, seconds=2.0)  # 2.0s of 16k mono 16-bit
+    raw = bytearray(path.read_bytes())
+    # Canonical PCM header (what `wave` writes): RIFF size at [4:8], data-chunk
+    # size at [40:44]. Overwrite both with the uint32 max placeholder.
+    struct.pack_into("<I", raw, 4, 0xFFFFFFFF)
+    struct.pack_into("<I", raw, 40, 0xFFFFFFFF)
+    path.write_bytes(raw)
+
+    assert wav_seconds(path) == pytest.approx(2.0, abs=0.05)
+
+
 def test_start_is_idempotent():
     writer = SilentClipWriter(prefix="murmur-test-")
     writer.start()
