@@ -24,7 +24,6 @@ from .talk import (
     build_next_talk_prompt,
     build_next_talks_prompt,
     build_respond_prompt,
-    parse_talk_batch,
 )
 
 # The static persona System Prompt seed (L0). spec 06 will generate/evolve
@@ -34,7 +33,6 @@ DEFAULT_PERSONA_PATH = Path(__file__).resolve().parent / "persona_seed.md"
 __all__ = [
     "build_next_talk_prompt",
     "build_next_talks_prompt",
-    "parse_talk_batch",
     "build_respond_prompt",
     "build_find_music_instruction",
     "build_music_situation",

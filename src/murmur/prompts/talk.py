@@ -7,9 +7,6 @@ because the persona seed says so — these instructions stay in English.
 
 from __future__ import annotations
 
-import json
-from typing import cast
-
 from ..contracts import ContextPack
 
 # Output discipline appended to every Brain call: the result is fed straight to
@@ -52,22 +49,11 @@ def build_next_talk_prompt(ctx: ContextPack) -> str:
     return f"{head}\n{_OUTPUT_RULES}"
 
 
-# Batch output discipline (spec 04 §3.2 look-ahead): the SDK's plain query has no
-# output-schema, so the batch shape is requested in the prompt as JSON. Each array
-# item is still clean spoken text (fed straight to TTS).
-_BATCH_OUTPUT_RULES = (
-    "Output ONLY a JSON array of exactly {count} strings and nothing else — no "
-    "prose, no code fences, no keys. Each string is one spoken beat of radio (a "
-    "few sentences, clean spoken text: no markup, speaker labels, quotation "
-    "marks, or stage directions). The beats run consecutively as one flowing "
-    "stretch of the program."
-)
-
-
 def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
     """Prompt for the next ``count`` self-initiated beats in one call (the
-    look-ahead batch, spec 04 §3.2). Same head as the single builder; the output
-    rule asks for a JSON array so the beats can be split deterministically."""
+    look-ahead batch, spec 04 §3.2). Same head as the single builder; the beats
+    are returned via the ``emit_talk_beats`` tool (structured output — see
+    ``talk_tools``), so the shape lives in that tool's schema, not here."""
     transcript = _render_transcript(ctx)
     if transcript:
         head = (
@@ -79,34 +65,11 @@ def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
             f"The program is just starting. Open naturally with your first "
             f"{count} beats."
         )
-    return f"{head}\n{_BATCH_OUTPUT_RULES.format(count=count)}"
-
-
-def parse_talk_batch(text: str, count: int | None = None) -> list[str]:
-    """Split the model's batch output into spoken beats.
-
-    Expects a JSON array of strings (the shape ``build_next_talks_prompt`` asks
-    for), tolerating surrounding prose / code fences by extracting the outermost
-    ``[...]``. **Degrades gracefully** (spec 04 §3.2): malformed / non-array /
-    no-string-items output falls back to a single beat (the raw text), so a bad
-    batch costs the look-ahead that round but never the segment. Empty in ->
-    empty out. ``count`` caps the result (a model that over-produces must not
-    inflate the buffer beyond what was asked); ``None`` = no cap."""
-    raw = text.strip()
-    if not raw:
-        return []
-    start, end = raw.find("["), raw.rfind("]")
-    candidate = raw[start : end + 1] if 0 <= start < end else raw
-    try:
-        data: object = json.loads(candidate)
-    except (ValueError, TypeError):
-        return [raw]
-    if isinstance(data, list):
-        items = cast("list[object]", data)
-        beats = [b.strip() for b in items if isinstance(b, str) and b.strip()]
-        if beats:
-            return beats[:count]  # count=None -> whole list; int -> capped
-    return [raw]
+    return (
+        f"{head}\nEach beat is one small stretch of radio (a few sentences, spoken "
+        f"aloud — no markup, labels, or stage directions). Return all {count} beats "
+        f"in order by calling the emit_talk_beats tool."
+    )
 
 
 def build_respond_prompt(user_text: str, ctx: ContextPack) -> str:

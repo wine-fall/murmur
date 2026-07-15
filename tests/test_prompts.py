@@ -7,7 +7,6 @@ from murmur.prompts import (
     build_next_talk_prompt,
     build_next_talks_prompt,
     build_respond_prompt,
-    parse_talk_batch,
 )
 
 
@@ -18,44 +17,13 @@ def _ctx(recent: list[Turn]) -> ContextPack:
 # --- batch look-ahead (spec 04 §3.2) -------------------------------------- #
 
 
-def test_next_talks_prompt_asks_for_a_json_array_of_count_beats():
+def test_next_talks_prompt_asks_to_call_the_tool_for_count_beats():
+    # Structured output is via the emit_talk_beats tool (talk_tools) — the prompt
+    # points the model at it; the shape lives in the tool's schema, not here.
     prompt = build_next_talks_prompt(_ctx([]), count=2)
-    assert "JSON array" in prompt
+    assert "emit_talk_beats" in prompt
     assert "2" in prompt  # the count is stated
     assert "just starting" in prompt  # cold-open head, like the single builder
-
-
-def test_parse_talk_batch_reads_a_plain_json_array():
-    assert parse_talk_batch('["first beat", "second beat"]') == [
-        "first beat",
-        "second beat",
-    ]
-
-
-def test_parse_talk_batch_tolerates_code_fences_and_prose():
-    raw = 'Sure!\n```json\n["a", "b"]\n```\n'
-    assert parse_talk_batch(raw) == ["a", "b"]
-
-
-def test_parse_talk_batch_drops_empty_items():
-    assert parse_talk_batch('["a", "", "  ", "b"]') == ["a", "b"]
-
-
-def test_parse_talk_batch_caps_to_count():
-    # An over-producing model must not inflate the buffer beyond what was asked.
-    assert parse_talk_batch('["a", "b", "c", "d"]', count=2) == ["a", "b"]
-    assert parse_talk_batch('["a", "b"]', count=None) == ["a", "b"]  # no cap
-
-
-def test_parse_talk_batch_degrades_malformed_to_single_beat():
-    # Not JSON / no array -> treat the whole thing as one beat (no look-ahead,
-    # but the segment still airs). spec 04 §3.2 graceful degradation.
-    raw = "just one flowing beat, no json here"
-    assert parse_talk_batch(raw) == [raw]
-
-
-def test_parse_talk_batch_empty_is_empty():
-    assert parse_talk_batch("   ") == []
 
 
 def test_next_talk_cold_open_has_no_transcript():

@@ -28,8 +28,8 @@ from .prompts import (
     build_next_talk_prompt,
     build_next_talks_prompt,
     build_respond_prompt,
-    parse_talk_batch,
 )
+from .talk_tools import EmitTalkBeatsTool, parse_talk_beats
 
 if TYPE_CHECKING:
     from claude_agent_sdk import (
@@ -127,11 +127,22 @@ class ClaudeBrain:
         return await self._generate(ctx.persona, build_next_talk_prompt(ctx))
 
     async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
-        # One query for the whole batch; the beats come back as a JSON array
-        # (the SDK's plain query has no output-schema — spec 04 §3.2), parsed
-        # with graceful degradation to a single beat on malformed output.
-        text = await self._generate(ctx.persona, build_next_talks_prompt(ctx, count))
-        return parse_talk_batch(text, count)
+        # Structured output via the harness tool seam (spec 04 §3.2): the model
+        # returns its beats by calling emit_talk_beats, so the SDK hands them back
+        # as a parsed mapping — no free-text JSON to scrape. An empty result (the
+        # model never called the tool) degrades to a skipped segment upstream.
+        result = await self.run_task(
+            ctx.persona,
+            build_next_talks_prompt(ctx, count),
+            tools=[EmitTalkBeatsTool(count)],
+            model=self._model,
+            max_turns=2,
+        )
+        beats = parse_talk_beats(result)
+        # Empty means the model never made the terminal call (or emitted no usable
+        # beat). Fall back to a single plain-text beat rather than skip the segment
+        # into dead air — the look-ahead is lost this round, the segment is not.
+        return beats or [await self.next_talk(ctx)]
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_respond_prompt(user_text, ctx))
