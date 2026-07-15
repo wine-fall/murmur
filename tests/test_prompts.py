@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 from murmur.contracts import ContextPack, Turn
-from murmur.prompts import build_next_talk_prompt, build_respond_prompt
+from murmur.prompts import (
+    build_next_talk_prompt,
+    build_next_talks_prompt,
+    build_respond_prompt,
+)
 
 
 def _ctx(recent: list[Turn]) -> ContextPack:
     return ContextPack(persona="persona", recent=recent)
+
+
+# --- batch look-ahead (spec 04 §3.2) -------------------------------------- #
+
+
+def test_next_talks_prompt_asks_to_call_the_tool_for_count_beats():
+    # Structured output is via the emit_talk_beats tool (talk_tools) — the prompt
+    # points the model at it; the shape lives in the tool's schema, not here.
+    prompt = build_next_talks_prompt(_ctx([]), count=2)
+    assert "emit_talk_beats" in prompt
+    assert "2" in prompt  # the count is stated
+    assert "just starting" in prompt  # cold-open head, like the single builder
 
 
 def test_next_talk_cold_open_has_no_transcript():

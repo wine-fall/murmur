@@ -21,6 +21,19 @@ def test_next_talk_cycles_segments():
     asyncio.run(go())
 
 
+def test_next_talks_returns_count_consecutive_beats():
+    async def go():
+        b = StubBrain()
+        beats = await b.next_talks(_CTX, count=2)
+        assert len(beats) == 2
+        assert all(isinstance(x, str) and x for x in beats)
+        assert beats[0] != beats[1]  # consecutive, distinct canned segments
+        # default count is 2
+        assert len(await b.next_talks(_CTX)) == 2
+
+    asyncio.run(go())
+
+
 def test_respond_echoes_user_text():
     async def go():
         b = StubBrain()

@@ -49,6 +49,29 @@ def build_next_talk_prompt(ctx: ContextPack) -> str:
     return f"{head}\n{_OUTPUT_RULES}"
 
 
+def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
+    """Prompt for the next ``count`` self-initiated beats in one call (the
+    look-ahead batch, spec 04 §3.2). Same head as the single builder; the beats
+    are returned via the ``emit_talk_beats`` tool (structured output — see
+    ``talk_tools``), so the shape lives in that tool's schema, not here."""
+    transcript = _render_transcript(ctx)
+    if transcript:
+        head = (
+            f"(The program so far)\n{transcript}\n\n"
+            f"Now continue — say your next {count} beats."
+        )
+    else:
+        head = (
+            f"The program is just starting. Open naturally with your first "
+            f"{count} beats."
+        )
+    return (
+        f"{head}\nEach beat is one small stretch of radio (a few sentences, spoken "
+        f"aloud — no markup, labels, or stage directions). Return all {count} beats "
+        f"in order by calling the emit_talk_beats tool."
+    )
+
+
 def build_respond_prompt(user_text: str, ctx: ContextPack) -> str:
     """Prompt for an in-persona reply to a typed user line."""
     transcript = _render_transcript(ctx, drop_trailing_user=user_text)
