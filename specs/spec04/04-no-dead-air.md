@@ -6,10 +6,11 @@
 >   - **slice 1 (this build)**: **music-pick prefetch** — overlap the multi-second
 >     find-and-pull (`TrackSource.next_track`) with the opening talk segments, so
 >     the music branch airs an already-resolved pick instead of starting cold.
->   - **slice 2 (next build)**: **talk look-ahead** — one Brain call emits N talk
->     scripts, synthesized in parallel and buffered, so segment *k+1* airs with no
->     Brain+synth wait after *k*. This pulls forward spec 08's *batch-generation*
->     pillar as the latency vehicle (not the full token economy).
+>   - **slice 2 (this build)**: **talk look-ahead** — one Brain call
+>     (`next_talks`) emits N talk scripts, synthesized in parallel and buffered,
+>     so segment *k+1* airs with no Brain+synth wait after *k*. This pulls forward
+>     spec 08's *batch-generation* pillar as the latency vehicle (not the full
+>     token economy).
 > **Part**: Polish over L1 (responsiveness). Removes producer latency (Brain, TTS,
 > music search) from the listener's timeline by pre-generating behind live audio.
 > **Milestone**: post-L1 cold-start / no-dead-air. See master [`../DESIGN.md`](../DESIGN.md)
@@ -73,13 +74,33 @@ finished) `next_track` task:
 - **Shutdown:** an in-flight prefetch is cancelled + awaited (settled) on Director
   exit, so no orphaned task outlives the loop.
 
-### 3.2 Talk look-ahead (slice 2 — next build)
-One `next_talks(ctx, n)` call returns *n* scripts; the Director synthesizes them
-in parallel and buffers segments *2..n*. Segment 1 airs immediately; each later
-segment airs from the buffer with **no** Brain/synth wait. A typed line
-(`Steer`) **invalidates** the buffered look-ahead — it was generated before the
-user turn, so it is discarded and a fresh reply/segment is produced (spec 01
-§3.3 rule). Buffered voice clips are cleared on discard/shutdown.
+### 3.2 Talk look-ahead (slice 2)
+**Brain gains `next_talks(ctx, count=2) -> list[str]`** (additive; `next_talk` /
+`respond` unchanged). One call returns `count` consecutive beats:
+- **StubBrain** returns `count` canned beats; **FakeBrain** (tests) returns
+  `count` deterministic beats.
+- **ClaudeBrain** issues one `query` on the same tool-less isolated path as
+  `next_talk` (spec 01 §3.2). The SDK's plain `query` has **no output-schema**
+  (its JSON-schema support is only for *tool* inputs), so the batch shape is
+  requested in the **prompt** as a JSON array of `count` spoken strings, then
+  parsed by a deterministic `_parse_talk_batch`. Parsing **degrades gracefully**:
+  malformed / non-JSON / wrong-shape output falls back to a single beat (the raw
+  text), so a bad batch costs the look-ahead that round but never the segment.
+  (The parser is unit-tested; whether the model reliably emits a clean N-item
+  array is an eval-track concern, not a unit assertion — DESIGN §10.3.)
+
+The Director keeps a **single-ahead buffer** (one pre-synthesized segment):
+- **Empty buffer:** call `next_talks(2)`, synthesize both beats **in parallel**
+  (`asyncio.gather`), air beat 1, buffer beat 2's clip.
+- **Non-empty buffer:** air the buffered beat directly — **no Brain call, no
+  synthesis** on the segment's critical path (the inter-segment latency is gone).
+- **Music prefetch** (§3.1) still fires with the text of whatever is airing.
+
+A typed line (`Steer`, talkback) **discards** the buffer: the buffered beat was
+generated before the user turn, so it is stale (spec 01 §3.3 rule) — dropped, and
+the next segment regenerates fresh. The buffer is also cleared on shutdown.
+`count` is a call parameter (default 2), not a config knob — deepen only if
+measurement shows a remaining gap (§6).
 
 ---
 
@@ -102,8 +123,11 @@ user turn, so it is discarded and a fresh reply/segment is produced (spec 01
 2. **slice 1:** with no prefetch available, the music branch still resolves a pick
    (cold fallback) and behaves exactly as pre-spec-04.
 3. **slice 1:** no prefetch task outlives the Director (clean shutdown / `/quit`).
-4. **slice 2 (next build):** segment *k+1* airs with no Brain/synth wait after
-   *k*; a typed line discards the buffered look-ahead.
+4. **slice 2:** after a `next_talks(2)` call, segment *k+1* airs from the buffer
+   with **no** Brain call and **no** synthesis on its critical path (verified on
+   fakes: the second segment plays without a second `next_talks` / `synthesize`);
+   a talkback `Steer` discards the buffer; `_parse_talk_batch` degrades a
+   malformed batch to a single beat.
 
 ---
 

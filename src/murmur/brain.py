@@ -24,7 +24,12 @@ from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
 from .contracts import ContextPack
 from .logging_setup import get_log
-from .prompts import build_next_talk_prompt, build_respond_prompt
+from .prompts import (
+    build_next_talk_prompt,
+    build_next_talks_prompt,
+    build_respond_prompt,
+)
+from .talk_tools import EmitTalkBeatsTool, parse_talk_beats
 
 if TYPE_CHECKING:
     from claude_agent_sdk import (
@@ -49,6 +54,13 @@ class Brain(Protocol):
         """Generate the next short, self-contained talk-segment script: pick or
         continue a topic and chat, per the persona. Self-initiated — not a
         reply."""
+        ...
+
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+        """Generate the next ``count`` consecutive talk-segment scripts in one
+        call — the look-ahead batch (spec 04 §3.2). A superset of ``next_talk``
+        (``count=1``). May return fewer than ``count`` if the model's batch
+        degrades; the caller airs what it gets."""
         ...
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
@@ -86,6 +98,9 @@ class StubBrain:
     async def next_talk(self, ctx: ContextPack) -> str:
         return next(self._segments)
 
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+        return [next(self._segments) for _ in range(count)]
+
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return f'Mm -- you said "{user_text}". I heard you. Let\'s follow that thread a little.'
 
@@ -110,6 +125,24 @@ class ClaudeBrain:
 
     async def next_talk(self, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_next_talk_prompt(ctx))
+
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+        # Structured output via the harness tool seam (spec 04 §3.2): the model
+        # returns its beats by calling emit_talk_beats, so the SDK hands them back
+        # as a parsed mapping — no free-text JSON to scrape. An empty result (the
+        # model never called the tool) degrades to a skipped segment upstream.
+        result = await self.run_task(
+            ctx.persona,
+            build_next_talks_prompt(ctx, count),
+            tools=[EmitTalkBeatsTool(count)],
+            model=self._model,
+            max_turns=2,
+        )
+        beats = parse_talk_beats(result)
+        # Empty means the model never made the terminal call (or emitted no usable
+        # beat). Fall back to a single plain-text beat rather than skip the segment
+        # into dead air — the look-ahead is lost this round, the segment is not.
+        return beats or [await self.next_talk(ctx)]
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_respond_prompt(user_text, ctx))
