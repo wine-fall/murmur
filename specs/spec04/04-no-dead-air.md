@@ -94,18 +94,38 @@ finished) `next_track` task:
   model reliably fills a clean N-item array is an eval-track concern, not a unit
   assertion — DESIGN §10.3.)
 
-The Director keeps a **single-ahead buffer** (one pre-synthesized segment):
-- **Empty buffer:** call `next_talks(2)`, synthesize both beats **in parallel**
-  (`asyncio.gather`), air beat 1, buffer beat 2's clip.
-- **Non-empty buffer:** air the buffered beat directly — **no Brain call, no
-  synthesis** on the segment's critical path (the inter-segment latency is gone).
-- **Music prefetch** (§3.1) still fires with the text of whatever is airing.
+The Director keeps a **depth-`N` look-ahead buffer** (`N` = `_TALK_LOOKAHEAD`,
+default **2**) of pre-synthesized beats, kept **topped up to `N`** like the music
+slot (§3.1). Held at `N` — not drained-then-refilled — the next talk is always
+ready, including across intervening music.
+- **Consume:** a talk segment pops the front beat and airs it — **no Brain call,
+  no synthesis** on the critical path (the inter-segment latency is gone).
+- **Refill (`_prefetch_talk`):** fire-and-forget, at most one in flight (mirrors
+  `_prefetch_music`). When the buffer is **below `N`**, one batched
+  `next_talks(need)` for the shortfall, its beats synthesized **in parallel** (each
+  an independent synth task), appended (capped at `N`). Fired after a consumed beat
+  is recorded **and at the start of a music segment**, so the buffer stays full and
+  the refill's Brain+synth overlap whatever is on air (the post-song talk airs
+  warm). **Coherence:** the refill passes the queued-but-unaired beats into the
+  context as prior `radio` turns — the buffered text lives in the Director, so the
+  stateless Brain is told what is *already queued*, not only what has aired and
+  been recorded, and continues the monologue instead of duplicating it.
+- **Cold fallback:** an empty buffer (first-ever segment, or a post-steer regen)
+  does a `next_talks(N)` inline, airs beat 1, buffers the rest — correctness never
+  depends on a warm buffer.
+- **Survives music (design change from the single-slot slice-2):** a song no
+  longer **discards** the buffer. A song is the ideal window to *prepare* the next
+  talk, not a reason to drop it. This is what removes the music→talk dead air.
+- **Resilience:** the refill's `next_talks` and each synth **retry** (bounded,
+  `_LOOKAHEAD_ATTEMPTS`) before degrading — a failed batch loses the look-ahead
+  that round, a failed synth loses that one beat, never the radio. Every important
+  stage (refill fired, batch size, retries, failures) is logged to the dev log.
 
-A typed line (`Steer`, talkback) **discards** the buffer: the buffered beat was
-generated before the user turn, so it is stale (spec 01 §3.3 rule) — dropped, and
-the next segment regenerates fresh. The buffer is also cleared on shutdown.
-`count` is a call parameter (default 2), not a config knob — deepen only if
-measurement shows a remaining gap (§6).
+A typed line (`Steer`, talkback) **discards** the buffer + cancels an in-flight
+refill: the buffered beats were generated before the user turn, so they are stale
+(spec 01 §3.3 rule) — dropped, and the next segment regenerates fresh. The buffer
+and any in-flight refill are also settled on shutdown. `N` is a module constant,
+not a config knob — deepen only if measurement shows a remaining gap (§6).
 
 ---
 
@@ -128,11 +148,26 @@ measurement shows a remaining gap (§6).
 2. **slice 1:** with no prefetch available, the music branch still resolves a pick
    (cold fallback) and behaves exactly as pre-spec-04.
 3. **slice 1:** no prefetch task outlives the Director (clean shutdown / `/quit`).
-4. **slice 2:** after a `next_talks(2)` call, segment *k+1* airs from the buffer
-   with **no** Brain call and **no** synthesis on its critical path (verified on
-   fakes: the second segment plays without a second `next_talks` / `synthesize`);
-   a talkback `Steer` discards the buffer; `parse_talk_beats` degrades a
-   malformed / missing tool result to empty, and the Brain falls back to a single beat.
+4. **slice 2:** a buffered beat airs with **no** Brain call and **no** synthesis on
+   its critical path (verified on fakes: the next segment plays without a fresh
+   `next_talks` / `synthesize`); a talkback `Steer` discards the buffer;
+   `parse_talk_beats` degrades a malformed / missing tool result to empty, and the
+   Brain falls back to a single beat.
+5. **slice 2 (survives music):** a talk beat buffered before a music segment airs
+   **after** the song (not regenerated cold at the music→talk boundary) — the
+   music→talk transition has no Brain/synth wait. Verified on fakes: with a song
+   between two talks, the pre-buffered beat is the one that airs post-song.
+6. **slice 2 (depth 2):** the buffer is held at depth `N` (not drained-then-
+   refilled) — a beat buffered before **two** consecutive music segments still airs
+   after them, and each post-song talk airs a warm buffered beat.
+7. **slice 2 (coherent refill):** a top-up refill fires with the queued-but-unaired
+   beat in its context (as a prior `radio` turn), so it continues the monologue
+   rather than duplicating the buffered beat. Verified on fakes: the refill's
+   `next_talks` context contains the queued beat's text.
+8. **slice 2 (resilience):** a transient `next_talks` failure and a transient
+   synth failure are retried (the look-ahead still fills / the beat still airs);
+   exhausted retries degrade (look-ahead skipped / beat skipped) without crashing
+   the loop.
 
 ---
 

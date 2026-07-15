@@ -56,10 +56,15 @@ _log = get_log("director")
 
 _QUIT_COMMAND = "/quit"
 
-# spec 04 slice 2: beats per batched Brain call. One airs now, the rest are
-# buffered look-ahead (a call parameter, not a config knob — deepen only if
-# measurement shows a remaining gap).
+# spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept ready
+# so the next talk airs with no Brain/synth wait, even across music. Depth 2
+# covers the next two music completions. A module constant, not a config knob —
+# deepen only if measurement shows a remaining gap (§6).
 _TALK_LOOKAHEAD = 2
+
+# spec 04 §3.3: bounded attempts for a look-ahead Brain/synth call before it
+# degrades (lose the look-ahead / the one beat, never the radio).
+_LOOKAHEAD_ATTEMPTS = 2
 
 SteerIntent = Literal["quit", "talkback"]
 
@@ -111,20 +116,29 @@ class Director:
         # spec 04 slice 1: the next music pick, found in the background so its
         # latency overlaps talk. Single-slot (one pick ahead); None = empty.
         self._pending_pick: asyncio.Task[TrackPick | None] | None = None
-        # spec 04 slice 2: pre-generated talk beats (from a batched next_talks),
-        # each an in-flight synth task, so the next talk airs with no Brain/synth
-        # wait. Discarded on a talkback steer (stale) and on shutdown.
+        # spec 04 §3.3: pre-synthesized talk beats (depth _TALK_LOOKAHEAD), each an
+        # in-flight synth task, so the next talk airs with no Brain/synth wait —
+        # even across music. Discarded on a talkback steer (stale) and on shutdown.
         self._talk_ahead: list[tuple[str, asyncio.Task[AudioClip | None]]] = []
+        # The single in-flight refill that tops the buffer back up (mirrors the
+        # single-slot _pending_pick). None = no refill running.
+        self._talk_fill: asyncio.Task[None] | None = None
         if music is not None:
             if not isinstance(player, MixingPlayer):
                 raise ValueError("music wiring requires a player with play_music")
             self._mixing = player
 
-    def _context(self) -> ContextPack:
-        return ContextPack(
-            persona=self._persona,
-            recent=self._memory.recent(self._config.recent_window),
-        )
+    def _context(self, pending: list[str] | None = None) -> ContextPack:
+        """The context pack for a Brain call. ``pending`` are already-queued but
+        not-yet-aired look-ahead beats (spec 04 §3.3): they are appended to the
+        recent transcript as the host's own turns so a refill continues *after*
+        them instead of regenerating the same beat — the buffered text is right
+        here in the Director, so the stateless Brain is told what is already
+        queued rather than only what has aired (and been recorded)."""
+        recent = list(self._memory.recent(self._config.recent_window))
+        if pending:
+            recent += [Turn("radio", text) for text in pending]
+        return ContextPack(persona=self._persona, recent=recent)
 
     def _recent_lines(self) -> list[str]:
         return [
@@ -153,10 +167,13 @@ class Director:
                 if not last and not self._quit:
                     await self._gap()
         finally:
-            # No orphaned work: settle the in-flight pick + buffered talk synths.
+            # No orphaned work: settle the in-flight pick, the buffered talk
+            # synths, and the refill (which _discard only cancels, never awaits).
             await _settle(self._pending_pick)
             self._pending_pick = None
             await self._discard_talk_ahead()
+            await _settle(self._talk_fill)
+            self._talk_fill = None
 
     # -- segments -------------------------------------------------------------
 
@@ -172,20 +189,38 @@ class Director:
         # an interjection's reply sees this segment in context.
         self._cli.on_radio_segment(text)
         self._memory.record(Turn("radio", text))
+        # Refill AFTER recording so the top-up's context already includes this
+        # just-aired beat (plus the queued beats it passes as pending) — the batch
+        # continues the monologue instead of duplicating it (spec 04 §3.3).
+        self._prefetch_talk()
         await self._run_voice(asyncio.ensure_future(self._player.play(clip)))
 
     async def _next_talk_clip(self) -> tuple[str, AudioClip | None]:
         """The next talk beat to air. From the look-ahead buffer if primed (its
-        synth already ran during the previous playback — await is near-instant),
-        else a fresh batch: one ``next_talks`` call, air beat 1, and buffer the
-        rest as background synth tasks that render during beat 1's playback
-        (spec 04 §3.2)."""
+        synth already ran behind the prior audio — await is near-instant); the
+        refill is fired by the caller after this beat is recorded. Else cold: one
+        ``next_talks`` batch, air beat 1, buffer the rest (spec 04 §3.3)."""
+        # A refill fired during the previous audio (a song, or the last segment)
+        # may still be in flight — prefer its result over a cold call, both to air
+        # warm and to avoid a double-generate race (a cold call racing the refill
+        # would double-append). Await it; a refill cancelled out from under us (a
+        # superseded refill, e.g. by a steer) falls through to cold, while our own
+        # cancellation (shutdown) propagates. An exhausted refill just leaves the
+        # buffer empty (it never raises — it degrades in _generate_talks), so we
+        # fall through to the cold path, which retries once more.
+        fill = self._talk_fill
+        if not self._talk_ahead and fill is not None and not fill.done():
+            try:
+                await fill
+            except asyncio.CancelledError:
+                if not fill.cancelled():
+                    raise  # our own cancellation (shutdown) — propagate
         if self._talk_ahead:
             text, task = self._talk_ahead.pop(0)
             self._prefetch_music(latest=text)
             return text, await task
         with _log.timed("talk") as t:
-            texts = await self._brain.next_talks(self._context(), _TALK_LOOKAHEAD)
+            texts = await self._generate_talks(_TALK_LOOKAHEAD)
             t["beats"] = len(texts)
         if not texts:
             return "", None
@@ -203,9 +238,77 @@ class Director:
         first_clip = await self._synthesize_or_skip(first)
         return first, first_clip
 
+    def _prefetch_talk(self) -> None:
+        """spec 04 §3.3: keep the look-ahead **topped up to ``_TALK_LOOKAHEAD``** —
+        fire-and-forget, at most one refill in flight (mirrors ``_prefetch_music``).
+        No-op if the buffer is already full or a refill is running. Fired after a
+        talk beat is recorded AND at a music segment's start, so the buffer stays
+        full (no drain-to-empty oscillation) and the next talk always airs warm,
+        even across music."""
+        if len(self._talk_ahead) >= _TALK_LOOKAHEAD:
+            return
+        if self._talk_fill is not None and not self._talk_fill.done():
+            return
+        self._talk_fill = asyncio.ensure_future(self._fill_talk())
+
+    async def _fill_talk(self) -> None:
+        """Background refill of the shortfall to ``_TALK_LOOKAHEAD``: one batched
+        ``next_talks`` whose context carries the beats **already queued** (so it
+        continues the monologue, never duplicates it), beats synthesized **in
+        parallel** (each an independent synth task), appended to the buffer. A
+        background task — it never raises: a failed batch is logged and leaves the
+        buffer short (the next ``_prefetch_talk`` retries)."""
+        need = _TALK_LOOKAHEAD - len(self._talk_ahead)
+        if need <= 0:
+            return
+        pending = [text for text, _ in self._talk_ahead]
+        with _log.timed("talk.prefetch", need=need) as t:
+            texts = await self._generate_talks(need, pending)
+            t["beats"] = len(texts)
+        # No await between here and the appends, so this is atomic against a
+        # concurrent consume. Cap at the depth in case a consume shifted the buffer
+        # during the await — never overshoot.
+        for text in texts:
+            if len(self._talk_ahead) >= _TALK_LOOKAHEAD:
+                break
+            self._talk_ahead.append(
+                (text, asyncio.ensure_future(self._synthesize_or_skip(text)))
+            )
+
+    async def _generate_talks(
+        self, need: int, pending: list[str] | None = None
+    ) -> list[str]:
+        """Batched look-ahead generation with bounded retry; ``[]`` on ultimate
+        failure (degrade — lose the look-ahead this round, never crash the radio).
+        ``pending`` are the queued-but-unaired beats, fed into the context so the
+        batch continues after them. Every attempt/failure is logged (spec 04 §3.3)."""
+        for attempt in range(1, _LOOKAHEAD_ATTEMPTS + 1):
+            try:
+                return await self._brain.next_talks(self._context(pending), need)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if attempt < _LOOKAHEAD_ATTEMPTS:
+                    _log.warn(
+                        f"next_talks failed (attempt {attempt}/{_LOOKAHEAD_ATTEMPTS}); retrying",
+                        exc=exc,
+                    )
+                    continue
+                _log.warn("next_talks failed; look-ahead skipped this round", exc=exc)
+                return []
+        return []  # unreachable for _LOOKAHEAD_ATTEMPTS >= 1 — satisfies typing
+
     async def _discard_talk_ahead(self) -> None:
-        """Drop the buffered look-ahead, cancelling in-flight synths. Called when
-        a talkback steer makes it stale (spec 04 §3.2) and on shutdown."""
+        """Drop the buffered look-ahead and cancel an in-flight refill (spec 04
+        §3.3). Called when a talkback steer makes them stale, and on shutdown.
+
+        The buffered synth tasks (local, fast) are settled here. The refill's
+        Brain call is only **cancelled, never awaited on this path** — a talkback
+        reply must not wait on a background prefetch's teardown (spec 01 §3.3
+        user-priority). It settles on the next refill (its slot is free once
+        cancelled) or in ``run``'s shutdown finally."""
+        if self._talk_fill is not None and not self._talk_fill.done():
+            self._talk_fill.cancel()
         tasks = [task for _, task in self._talk_ahead]
         self._talk_ahead = []
         await _settle(*tasks)
@@ -220,18 +323,29 @@ class Director:
             await self._run_voice(None, steer=steer)
 
     async def _synthesize_or_skip(self, text: str) -> AudioClip | None:
-        """Synthesize with degradation: a TTS failure skips this one spoken
-        segment (info line; nothing aired or recorded) instead of crashing the
-        radio — same principle as the music branch's fallback. Found live: a
+        """Synthesize with bounded retry then degradation (spec 04 §3.3): a
+        transient TTS failure is retried; an exhausted failure skips this one
+        spoken segment (info line; nothing aired or recorded) instead of crashing
+        the radio — same principle as the music branch's fallback. Found live: a
         single bad utterance used to unwind the whole loop."""
-        try:
-            return await self._voice.synthesize(text)
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            self._cli.info(f"voice synthesis failed ({exc}); skipping this segment.")
-            _log.warn("voice synthesis failed; segment skipped", exc=exc)
-            return None
+        for attempt in range(1, _LOOKAHEAD_ATTEMPTS + 1):
+            try:
+                return await self._voice.synthesize(text)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if attempt < _LOOKAHEAD_ATTEMPTS:
+                    _log.warn(
+                        f"voice synthesis failed (attempt {attempt}/{_LOOKAHEAD_ATTEMPTS}); retrying",
+                        exc=exc,
+                    )
+                    continue
+                self._cli.info(
+                    f"voice synthesis failed ({exc}); skipping this segment."
+                )
+                _log.warn("voice synthesis failed; segment skipped", exc=exc)
+                return None
+        return None  # unreachable (the loop returns or degrades) — satisfies typing
 
     async def _wants_music(self) -> bool:
         if self._music is None or self._cadence is None:
@@ -294,11 +408,13 @@ class Director:
                 self._cli.info("music: nothing suitable found; back to talk.")
                 return False
 
-            # A song is going on air: the buffered talk look-ahead was generated
-            # as the immediate consecutive talk (no song between), so it is now
-            # stale — drop it + its synth so it neither airs post-song nor competes
-            # with the intro (spec 04 §3.2).
-            await self._discard_talk_ahead()
+            # A song is going on air: the talk look-ahead SURVIVES it and is topped
+            # up during it (spec 04 §3.3). A song is the ideal window to prepare the
+            # next talk — its whole duration overlaps the refill's Brain+synth — so
+            # the post-song talk airs warm instead of regenerating cold into dead
+            # air. (Pre-§3.3 the song discarded the buffer; that left the music->talk
+            # boundary cold.)
+            self._prefetch_talk()
 
             announce_clip: AudioClip | None = None
             if pick.announce:

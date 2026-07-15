@@ -70,12 +70,10 @@ def test_cadence_schedules_music_and_announce_rides_over_it():
     async def go():
         director, cli, brain, engine, programmer, memory = _make(picks=[_pick()])
         await director.run(max_segments=3)
-        # every_n=1: talk, then music, then talk again (counter reset). The song
-        # intervening discards the buffered talk look-ahead (talk-2, a
-        # consecutive-talk continuation is stale after a song), so the post-song
-        # talk regenerates fresh -> talk-3 (spec 04 §3.2).
-        assert cli.radio == ["talk-1", "up next: T1", "talk-3"]
-        assert "talk-2" not in cli.radio  # the stale buffered beat never aired
+        # every_n=1: talk, then music, then talk again (counter reset). The talk
+        # look-ahead SURVIVES the song (spec 04 §3.3) — the buffered talk-2 airs
+        # after the song, warm, instead of regenerating cold into dead air.
+        assert cli.radio == ["talk-1", "up next: T1", "talk-2"]
         assert [c.source for c in engine.music_played] == ["stream:r1"]
         # The announce was spoken (played on the voice channel) AFTER the
         # music started, so it rides the ducked song head.
@@ -83,8 +81,45 @@ def test_cadence_schedules_music_and_announce_rides_over_it():
         assert [t.text for t in memory.recent(10)] == [
             "talk-1",
             "up next: T1",
-            "talk-3",
+            "talk-2",
         ]
+
+    asyncio.run(go())
+
+
+def test_talk_lookahead_survives_a_song_no_cold_regen():
+    """spec 04 §3.3: a beat buffered before a music segment airs AFTER the song
+    (talk-2), not a cold-regenerated fresh beat — so the music->talk boundary has
+    no Brain/synth wait. (Pre-§3.3 the song discarded the buffer and the post-song
+    talk was a cold call.)"""
+
+    async def go():
+        director, cli, brain, engine, programmer, memory = _make(
+            picks=[_pick(announce=None)], cadence=EveryNCadence(n=1)
+        )
+        await director.run(max_segments=3)  # talk, music (no announce), talk
+        assert [c.source for c in engine.music_played] == ["stream:r1"]
+        assert cli.radio == ["talk-1", "talk-2"]  # talk-2 was buffered pre-song
+
+    asyncio.run(go())
+
+
+def test_talk_lookahead_depth_two_covers_two_music_completions():
+    """spec 04 §3.3: depth-2 buffer — across TWO music completions, each post-song
+    talk airs a warm buffered beat (talk-2 after song 1, talk-3 after song 2), with
+    no cold regeneration at either music->talk boundary."""
+
+    async def go():
+        director, cli, brain, engine, programmer, memory = _make(
+            picks=[_pick(ref="r1", announce=None), _pick(ref="r2", announce=None)],
+            cadence=ScriptedCadence(["talk", "music", "talk", "music", "talk"]),
+        )
+        await director.run(max_segments=5)
+        assert [c.source for c in engine.music_played] == ["stream:r1", "stream:r2"]
+        # talk-1 (seg1) buffers talk-2; song1; talk-2 airs warm (seg3), its record
+        # triggers the next batch (talk-3,…); song2; talk-3 airs warm (seg5). The
+        # low, gap-free numbering proves both post-song talks came from the buffer.
+        assert cli.radio == ["talk-1", "talk-2", "talk-3"]
 
     asyncio.run(go())
 
