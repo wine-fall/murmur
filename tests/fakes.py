@@ -20,11 +20,20 @@ class FakeBrain:
     def __init__(self, respond_delay: float = 0.0) -> None:
         self.talk_count = 0
         self.responded_to: list[str] = []
+        self.batch_counts: list[int] = []  # one entry per next_talks call
         self._respond_delay = respond_delay
 
     async def next_talk(self, ctx: ContextPack) -> str:
         self.talk_count += 1
         return f"talk-{self.talk_count}"
+
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+        self.batch_counts.append(count)
+        out: list[str] = []
+        for _ in range(count):
+            self.talk_count += 1
+            out.append(f"talk-{self.talk_count}")
+        return out
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         if self._respond_delay:
