@@ -30,7 +30,7 @@ first song / first reply sooner — without multi-process complexity (master §4
 - **slice 1 — music-pick prefetch (this build).** The next music pick is found +
   pulled in the background *while talk segments play*, so the ~seconds of
   `next_track` latency overlap audio the listener is already hearing.
-- **slice 2 — talk look-ahead (next build).** One Brain call yields N segment
+- **slice 2 — talk look-ahead (this build).** One Brain call yields N segment
   scripts; their TTS runs in parallel; the Director buffers the extras so the
   next segment airs with no Brain/synth wait.
 
@@ -79,15 +79,20 @@ finished) `next_track` task:
 `respond` unchanged). One call returns `count` consecutive beats:
 - **StubBrain** returns `count` canned beats; **FakeBrain** (tests) returns
   `count` deterministic beats.
-- **ClaudeBrain** issues one `query` on the same tool-less isolated path as
-  `next_talk` (spec 01 §3.2). The SDK's plain `query` has **no output-schema**
-  (its JSON-schema support is only for *tool* inputs), so the batch shape is
-  requested in the **prompt** as a JSON array of `count` spoken strings, then
-  parsed by a deterministic `_parse_talk_batch`. Parsing **degrades gracefully**:
-  malformed / non-JSON / wrong-shape output falls back to a single beat (the raw
-  text), so a bad batch costs the look-ahead that round but never the segment.
-  (The parser is unit-tested; whether the model reliably emits a clean N-item
-  array is an eval-track concern, not a unit assertion — DESIGN §10.3.)
+- **ClaudeBrain** issues one `query` on the same isolated path as `next_talk`
+  (spec 01 §3.2). The SDK's plain `query` has **no output-schema** (its JSON-schema
+  support is only for *tool* inputs), so — as with music discovery (spec 03-01) —
+  the batch shape is fixed by a single **terminal harness tool**
+  (`emit_talk_beats`, in `talk_tools.py`): the model returns its beats by *calling*
+  the tool, and the SDK delivers the call as a parsed `args` mapping, so there is
+  no free-text JSON to scrape. The wire shape is defined once (the tool's
+  `input_schema`) and trusted once (`parse_talk_beats`, the consumer). It
+  **degrades gracefully**: if the model never called the tool, the result wasn't a
+  success, or the shape drifted, `parse_talk_beats` returns empty and the Brain
+  falls back to a single `next_talk` beat — so a bad batch costs the look-ahead
+  that round but never the segment. (The parser + tool are unit-tested; whether the
+  model reliably fills a clean N-item array is an eval-track concern, not a unit
+  assertion — DESIGN §10.3.)
 
 The Director keeps a **single-ahead buffer** (one pre-synthesized segment):
 - **Empty buffer:** call `next_talks(2)`, synthesize both beats **in parallel**
@@ -126,8 +131,8 @@ measurement shows a remaining gap (§6).
 4. **slice 2:** after a `next_talks(2)` call, segment *k+1* airs from the buffer
    with **no** Brain call and **no** synthesis on its critical path (verified on
    fakes: the second segment plays without a second `next_talks` / `synthesize`);
-   a talkback `Steer` discards the buffer; `_parse_talk_batch` degrades a
-   malformed batch to a single beat.
+   a talkback `Steer` discards the buffer; `parse_talk_beats` degrades a
+   malformed / missing tool result to empty, and the Brain falls back to a single beat.
 
 ---
 
