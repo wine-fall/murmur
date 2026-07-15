@@ -56,6 +56,48 @@ def test_autonomous_loop_produces_segments():
     asyncio.run(go())
 
 
+def test_talk_lookahead_two_segments_from_one_brain_call():
+    """spec 04 slice 2: one next_talks(2) call feeds two aired segments — the
+    second plays from the buffer with no second Brain call."""
+
+    async def go():
+        director, cli, brain, player, memory = _make()
+        await director.run(max_segments=2)
+        assert brain.batch_counts == [2]  # a single batch produced both segments
+        assert cli.radio == ["talk-1", "talk-2"]
+        assert player.played == ["fake:talk-1", "fake:talk-2"]
+
+    asyncio.run(go())
+
+
+def test_steer_discards_the_talk_lookahead():
+    """A typed line discards the buffered look-ahead — it predates the user turn,
+    so the next segment regenerates fresh (spec 04 §3.2 / spec 01 §3.3)."""
+
+    async def go():
+        director, cli, brain, player, memory = _make(lines=["hi"], play_delay=0.1)
+        await director.run(max_segments=2)
+        # seg1 batched [talk-1, talk-2]; "hi" drops the buffered talk-2; seg2 is
+        # a fresh batch -> talk-3, NOT the stale talk-2.
+        assert "talk-2" not in cli.radio
+        assert cli.radio == ["talk-1", "reply:hi", "talk-3"]
+        assert brain.batch_counts == [2, 2]  # two batches (the first was discarded)
+
+    asyncio.run(go())
+
+
+def test_talk_lookahead_settled_on_shutdown():
+    """A buffered look-ahead synth must not outlive the loop (/quit before it is
+    consumed)."""
+
+    async def go():
+        director, cli, brain, player, memory = _make(lines=["/quit"], play_delay=0.1)
+        await director.run(max_segments=None)
+        assert director._talk_ahead == []  # buffered synth task settled, not orphaned
+
+    asyncio.run(go())
+
+
 def test_typed_line_interrupts_replies_and_resumes():
     """A typed line interrupts, gets an in-persona reply, then the program
     resumes with the next talk segment (§3)."""
@@ -66,8 +108,10 @@ def test_typed_line_interrupts_replies_and_resumes():
         await director.run(max_segments=2)
         assert brain.responded_to == ["hello"]
         assert cli.user == ["hello"]
-        # talk-1 (interrupted) -> reply -> talk-2 (resumed)
-        assert cli.radio == ["talk-1", "reply:hello", "talk-2"]
+        # talk-1 (interrupted) -> reply -> talk-3 (resumed). talk-2 was the
+        # buffered look-ahead, discarded by the interjection (spec 04 §3.2), so
+        # the resume regenerates fresh.
+        assert cli.radio == ["talk-1", "reply:hello", "talk-3"]
         assert [t.role for t in memory.recent(10)] == [
             "radio",
             "user",
@@ -78,7 +122,7 @@ def test_typed_line_interrupts_replies_and_resumes():
             "talk-1",
             "hello",
             "reply:hello",
-            "talk-2",
+            "talk-3",
         ]
         assert player.stops >= 1  # playback was stopped for the interjection
 
@@ -148,7 +192,9 @@ def test_reply_synthesis_failure_degrades_and_resumes():
         )
         await director.run(max_segments=2)
         assert brain.responded_to == ["hello"]
-        assert cli.radio == ["talk-1", "talk-2"]  # the reply never aired
+        # the reply never aired; talk-1 then the resumed segment (talk-3 — talk-2
+        # was the buffered look-ahead, discarded by the interjection).
+        assert cli.radio == ["talk-1", "talk-3"]
         assert any("synthesis failed" in m for m in cli.infos)
 
     asyncio.run(go())

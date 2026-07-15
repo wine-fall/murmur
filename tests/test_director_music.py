@@ -70,8 +70,12 @@ def test_cadence_schedules_music_and_announce_rides_over_it():
     async def go():
         director, cli, brain, engine, programmer, memory = _make(picks=[_pick()])
         await director.run(max_segments=3)
-        # every_n=1: talk, then music, then talk again (counter reset).
-        assert cli.radio == ["talk-1", "up next: T1", "talk-2"]
+        # every_n=1: talk, then music, then talk again (counter reset). The song
+        # intervening discards the buffered talk look-ahead (talk-2, a
+        # consecutive-talk continuation is stale after a song), so the post-song
+        # talk regenerates fresh -> talk-3 (spec 04 §3.2).
+        assert cli.radio == ["talk-1", "up next: T1", "talk-3"]
+        assert "talk-2" not in cli.radio  # the stale buffered beat never aired
         assert [c.source for c in engine.music_played] == ["stream:r1"]
         # The announce was spoken (played on the voice channel) AFTER the
         # music started, so it rides the ducked song head.
@@ -79,7 +83,7 @@ def test_cadence_schedules_music_and_announce_rides_over_it():
         assert [t.text for t in memory.recent(10)] == [
             "talk-1",
             "up next: T1",
-            "talk-2",
+            "talk-3",
         ]
 
     asyncio.run(go())

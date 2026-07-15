@@ -56,6 +56,11 @@ _log = get_log("director")
 
 _QUIT_COMMAND = "/quit"
 
+# spec 04 slice 2: beats per batched Brain call. One airs now, the rest are
+# buffered look-ahead (a call parameter, not a config knob — deepen only if
+# measurement shows a remaining gap).
+_TALK_LOOKAHEAD = 2
+
 SteerIntent = Literal["quit", "talkback"]
 
 
@@ -106,6 +111,10 @@ class Director:
         # spec 04 slice 1: the next music pick, found in the background so its
         # latency overlaps talk. Single-slot (one pick ahead); None = empty.
         self._pending_pick: asyncio.Task[TrackPick | None] | None = None
+        # spec 04 slice 2: pre-generated talk beats (from a batched next_talks),
+        # each an in-flight synth task, so the next talk airs with no Brain/synth
+        # wait. Discarded on a talkback steer (stale) and on shutdown.
+        self._talk_ahead: list[tuple[str, asyncio.Task[AudioClip | None]]] = []
         if music is not None:
             if not isinstance(player, MixingPlayer):
                 raise ValueError("music wiring requires a player with play_music")
@@ -144,24 +153,18 @@ class Director:
                 if not last and not self._quit:
                     await self._gap()
         finally:
-            # No orphaned prefetch: settle an in-flight pick on the way out.
+            # No orphaned work: settle the in-flight pick + buffered talk synths.
             await _settle(self._pending_pick)
             self._pending_pick = None
+            await self._discard_talk_ahead()
 
     # -- segments -------------------------------------------------------------
 
     async def _talk_segment(self) -> None:
-        """One autonomous talk segment (spec 01), then arbitrate any steers."""
-        ctx = self._context()
-        with _log.timed("talk") as t:
-            text = await self._brain.next_talk(ctx)
-            t["chars"] = len(text)
-        # Prime the next music pick now — it needs only this text (the mood), not
-        # its audio — so the search overlaps the synth below as well as playback.
-        # The turn isn't recorded yet (record waits for a successful air), so it
-        # is fed into the pick's mood directly.
-        self._prefetch_music(latest=text)
-        clip = await self._synthesize_or_skip(text)
+        """One autonomous talk segment (spec 01/04), then arbitrate any steers.
+        The segment comes from the look-ahead buffer when primed (no Brain/synth
+        wait), else from a fresh batched ``next_talks`` call."""
+        text, clip = await self._next_talk_clip()
         if clip is None:
             return  # segment skipped; the loop keeps broadcasting
         # Printed + recorded at air time (when playback starts): synthesis takes
@@ -170,6 +173,42 @@ class Director:
         self._cli.on_radio_segment(text)
         self._memory.record(Turn("radio", text))
         await self._run_voice(asyncio.ensure_future(self._player.play(clip)))
+
+    async def _next_talk_clip(self) -> tuple[str, AudioClip | None]:
+        """The next talk beat to air. From the look-ahead buffer if primed (its
+        synth already ran during the previous playback — await is near-instant),
+        else a fresh batch: one ``next_talks`` call, air beat 1, and buffer the
+        rest as background synth tasks that render during beat 1's playback
+        (spec 04 §3.2)."""
+        if self._talk_ahead:
+            text, task = self._talk_ahead.pop(0)
+            self._prefetch_music(latest=text)
+            return text, await task
+        with _log.timed("talk") as t:
+            texts = await self._brain.next_talks(self._context(), _TALK_LOOKAHEAD)
+            t["beats"] = len(texts)
+        if not texts:
+            return "", None
+        first, *rest = texts
+        # Prime the music pick before synth — it needs only the airing text (mood),
+        # not its audio — so the search overlaps this synth as well as playback.
+        self._prefetch_music(latest=first)
+        # Schedule the look-ahead synths first so they overlap beat 1's synth on a
+        # concurrent backend (not just its playback). Awaiting beat 1 still runs it
+        # inline and it grabs a serialized backend's lock before these tasks get
+        # loop time, so beat 1 airs first regardless.
+        self._talk_ahead = [
+            (x, asyncio.ensure_future(self._synthesize_or_skip(x))) for x in rest
+        ]
+        first_clip = await self._synthesize_or_skip(first)
+        return first, first_clip
+
+    async def _discard_talk_ahead(self) -> None:
+        """Drop the buffered look-ahead, cancelling in-flight synths. Called when
+        a talkback steer makes it stale (spec 04 §3.2) and on shutdown."""
+        tasks = [task for _, task in self._talk_ahead]
+        self._talk_ahead = []
+        await _settle(*tasks)
 
     async def _gap(self) -> None:
         """Inter-segment pause, steerable. A line during the gap gets its reply;
@@ -255,6 +294,12 @@ class Director:
                 self._cli.info("music: nothing suitable found; back to talk.")
                 return False
 
+            # A song is going on air: the buffered talk look-ahead was generated
+            # as the immediate consecutive talk (no song between), so it is now
+            # stale — drop it + its synth so it neither airs post-song nor competes
+            # with the intro (spec 04 §3.2).
+            await self._discard_talk_ahead()
+
             announce_clip: AudioClip | None = None
             if pick.announce:
                 # Synthesized before the song starts so the intro is ready to
@@ -324,6 +369,8 @@ class Director:
                 if steer.intent == "quit":
                     self._quit = True
                     return
+                # The buffered talk look-ahead predates this user turn -> stale.
+                await self._discard_talk_ahead()
                 reply, clip = await self._compose(steer)
                 steer = None
                 if self._quit:  # a merged-in line was /quit
