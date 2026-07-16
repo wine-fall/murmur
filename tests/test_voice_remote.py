@@ -18,7 +18,13 @@ import pytest
 from murmur.config import Config
 from murmur.contracts import AudioClip
 from murmur.voice import build_voice
-from murmur.voice.remote import RemoteVoiceProvider, build_tts_payload
+from murmur.voice._wav import wav_seconds
+from murmur.voice.remote import (
+    RemoteVoiceProvider,
+    build_tts_payload,
+    concat_wav_with_silence,
+    split_sentences,
+)
 
 
 def _wav_bytes(seconds: float = 0.1, rate: int = 16000) -> bytes:
@@ -52,6 +58,104 @@ def test_payload_carries_seed_only_when_set():
     # seed pins the timbre (fish-speech has no presets); omitted -> random voice.
     assert build_tts_payload("hi", reference_id=None, seed=42)["seed"] == 42
     assert "seed" not in build_tts_payload("hi", reference_id=None)
+
+
+# --- sentence pauses (split at enders + silence pad) ---------------------- #
+# Enders as codepoints so this source stays ASCII (language gate); the splitter is
+# content-agnostic, so ASCII sentence bodies exercise it exactly as CJK would.
+STOP = chr(0x3002)  # ideographic full stop
+BANG = chr(0xFF01)  # fullwidth exclamation
+QUES = chr(0xFF1F)  # fullwidth question
+
+
+def test_split_sentences_at_cjk_enders_keeps_the_ender():
+    assert split_sentences(f"one{STOP}two{STOP}") == [f"one{STOP}", f"two{STOP}"]
+    assert split_sentences(f"hi{BANG}how{QUES}ok{STOP}") == [
+        f"hi{BANG}",
+        f"how{QUES}",
+        f"ok{STOP}",
+    ]
+
+
+def test_split_sentences_coalesces_an_ender_run_and_keeps_a_trailing_fragment():
+    # A "?!" run stays with its sentence; text after the last ender is its own item.
+    assert split_sentences(f"what{QUES}{BANG}really") == [f"what{QUES}{BANG}", "really"]
+
+
+def test_split_sentences_leaves_decimals_and_abbreviations_whole():
+    # ASCII '.' is not an ender -> a decimal sentence is ONE item (no false split),
+    # and an English clause stays whole.
+    assert split_sentences(f"price 3.5 usd{STOP}") == [f"price 3.5 usd{STOP}"]
+    assert split_sentences("the U.S. economy") == ["the U.S. economy"]
+
+
+def test_split_sentences_single_or_blank():
+    assert split_sentences("one clause no ender") == ["one clause no ender"]
+    assert split_sentences("") == []
+    assert split_sentences("   ") == []
+
+
+def test_concat_wav_with_silence_sums_durations_plus_the_pad(tmp_path):
+    a, b = _wav_bytes(0.20), _wav_bytes(0.30)
+    out = concat_wav_with_silence([a, b], pad_s=0.25)
+    path = tmp_path / "joined.wav"
+    path.write_bytes(out)
+    # 0.20 + 0.30 speech + one 0.25 pad between -> ~0.75s (one pad, not trailing).
+    assert abs(wav_seconds(path) - 0.75) < 0.02
+
+
+def test_synthesize_splits_multi_sentence_and_pads(monkeypatch, tmp_path):
+    # A 2-sentence beat -> one _post per sentence, joined with a real silence pad.
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1")
+    calls: list[str] = []
+
+    def fake_post(payload: dict[str, object]) -> bytes:
+        calls.append(str(payload["text"]))
+        return _wav_bytes(0.20)
+
+    monkeypatch.setattr(prov, "_post", fake_post)
+    clip = asyncio.run(prov.synthesize(f"one{STOP}two{STOP}"))
+    assert calls == [f"one{STOP}", f"two{STOP}"]  # split into two synth calls
+    # 0.20 + 0.20 + one 0.30 default pad = ~0.70s of joined audio.
+    assert abs(wav_seconds(Path(clip.source)) - 0.70) < 0.03
+
+
+def test_synthesize_single_sentence_is_one_call_no_pad(monkeypatch):
+    # No interior ender -> exactly the pre-split path (one _post, verbatim text).
+    prov = RemoteVoiceProvider("http://box:8080")
+    calls: list[str] = []
+    monkeypatch.setattr(
+        prov, "_post", lambda p: (calls.append(str(p["text"])) or _wav_bytes())
+    )
+    asyncio.run(prov.synthesize("just one sentence"))
+    assert calls == ["just one sentence"]
+
+
+def test_synthesize_pins_one_voice_across_the_split_when_no_seed(monkeypatch):
+    # Without a reference_id or seed, each raw call would sample a fresh timbre;
+    # a split beat must pin ONE seed for every sentence so the voice is stable.
+    prov = RemoteVoiceProvider("http://box:8080")  # no reference_id, no seed
+    seeds: list[object] = []
+    monkeypatch.setattr(
+        prov, "_post", lambda p: (seeds.append(p.get("seed")) or _wav_bytes())
+    )
+    asyncio.run(prov.synthesize(f"one{STOP}two{STOP}three{STOP}"))
+    assert len(seeds) == 3
+    assert all(s is not None for s in seeds)  # a seed was pinned...
+    assert len(set(seeds)) == 1  # ...and it is the SAME across sentences
+
+
+def test_synthesize_does_not_inject_a_seed_when_a_reference_is_set(monkeypatch):
+    # A reference_id already pins the voice across calls, so the split path must
+    # NOT add a random seed (it would contradict voice-pinning and can perturb the
+    # referenced voice / diverge from the single-sentence path).
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1")  # no seed
+    seeds: list[object] = []
+    monkeypatch.setattr(
+        prov, "_post", lambda p: (seeds.append(p.get("seed")) or _wav_bytes())
+    )
+    asyncio.run(prov.synthesize(f"one{STOP}two{STOP}"))
+    assert seeds == [None, None]  # reference pins the voice; no seed injected
 
 
 # --- synthesize (stubbed transport, no network) --------------------------- #
