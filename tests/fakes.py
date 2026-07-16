@@ -17,17 +17,29 @@ class FakeBrain:
     reply "in composition" long enough for a queued line to merge into it (the
     delay is *before* recording, so a merged-away reply leaves no trace)."""
 
-    def __init__(self, respond_delay: float = 0.0) -> None:
+    def __init__(
+        self, respond_delay: float = 0.0, next_talks_fail_times: int = 0
+    ) -> None:
         self.talk_count = 0
         self.responded_to: list[str] = []
-        self.batch_counts: list[int] = []  # one entry per next_talks call
+        self.batch_counts: list[int] = []  # one entry per successful next_talks call
+        # recent-turn texts seen by each next_talks call — lets a test assert the
+        # queued look-ahead beats were threaded into the refill context (§3.3).
+        self.talk_contexts: list[list[str]] = []
         self._respond_delay = respond_delay
+        # Raise from the first N next_talks calls, then succeed — exercises the
+        # Director's bounded look-ahead retry (spec 04 §3.3).
+        self._next_talks_fail = next_talks_fail_times
 
     async def next_talk(self, ctx: ContextPack) -> str:
         self.talk_count += 1
         return f"talk-{self.talk_count}"
 
     async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+        if self._next_talks_fail > 0:
+            self._next_talks_fail -= 1
+            raise RuntimeError("transient next_talks failure")
+        self.talk_contexts.append([t.text for t in ctx.recent])
         self.batch_counts.append(count)
         out: list[str] = []
         for _ in range(count):
@@ -53,12 +65,16 @@ class FakeVoice:
         fail_on: list[str] | None = None,
         events: list[tuple[str, str]] | None = None,
         synth_delay: float = 0.0,
+        transient_fail_on: dict[str, int] | None = None,
     ) -> None:
         self.started = False
         self.closed = False
         self._fail_on = set(fail_on or [])
         self._events = events
         self._synth_delay = synth_delay
+        # text -> number of leading failures before it synthesizes: a transient
+        # TTS fault the Director's bounded retry should ride out (spec 04 §3.3).
+        self._transient = dict(transient_fail_on or {})
 
     async def start(self) -> None:
         self.started = True
@@ -66,6 +82,9 @@ class FakeVoice:
     async def synthesize(self, text: str, *, scenario: str = "broadcast") -> AudioClip:
         if text in self._fail_on:
             raise RuntimeError(f"sidecar synthesize failed: {text!r}")
+        if self._transient.get(text, 0) > 0:
+            self._transient[text] -= 1
+            raise RuntimeError(f"transient synthesize failure: {text!r}")
         if self._synth_delay:  # keep a reply "rendering" so a line can merge in
             await asyncio.sleep(self._synth_delay)
         if self._events is not None:

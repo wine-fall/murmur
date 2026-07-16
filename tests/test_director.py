@@ -56,44 +56,104 @@ def test_autonomous_loop_produces_segments():
     asyncio.run(go())
 
 
-def test_talk_lookahead_two_segments_from_one_brain_call():
-    """spec 04 slice 2: one next_talks(2) call feeds two aired segments — the
-    second plays from the buffer with no second Brain call."""
+def test_talk_lookahead_second_segment_from_the_buffer():
+    """spec 04 §3.3: the first (cold) batch is a next_talks(2); the second segment
+    airs the buffered beat (talk-2) — a cold call at seg2 would have produced a
+    fresh higher-numbered beat, so airing talk-2 proves the buffer was consumed."""
 
     async def go():
         director, cli, brain, player, memory = _make()
         await director.run(max_segments=2)
-        assert brain.batch_counts == [2]  # a single batch produced both segments
+        assert brain.batch_counts[0] == 2  # the cold path opens with a batch
         assert cli.radio == ["talk-1", "talk-2"]
         assert player.played == ["fake:talk-1", "fake:talk-2"]
 
     asyncio.run(go())
 
 
+def test_refill_context_carries_the_queued_beat():
+    """spec 04 §3.3: the top-up refill feeds the queued-but-unaired beat into the
+    Brain context (as a prior 'radio' turn), so the batch continues after it
+    rather than duplicating it — the fix for stale-context duplication."""
+
+    async def go():
+        # play_delay keeps talk-1 on air long enough for the (instant-fake) refill
+        # to run its next_talks before the bounded run exits.
+        director, cli, brain, player, memory = _make(play_delay=0.05)
+        await director.run(max_segments=1)
+        # Call 0 is the cold batch (empty context); call 1 is the top-up, whose
+        # context carries the just-aired talk-1 (recorded) AND the queued talk-2.
+        assert brain.talk_contexts[0] == []
+        assert len(brain.talk_contexts) >= 2
+        assert "talk-1" in brain.talk_contexts[1]
+        assert "talk-2" in brain.talk_contexts[1]
+
+    asyncio.run(go())
+
+
 def test_steer_discards_the_talk_lookahead():
     """A typed line discards the buffered look-ahead — it predates the user turn,
-    so the next segment regenerates fresh (spec 04 §3.2 / spec 01 §3.3)."""
+    so the next segment regenerates fresh (spec 04 §3.3 / spec 01 §3.3)."""
 
     async def go():
         director, cli, brain, player, memory = _make(lines=["hi"], play_delay=0.1)
         await director.run(max_segments=2)
-        # seg1 batched [talk-1, talk-2]; "hi" drops the buffered talk-2; seg2 is
-        # a fresh batch -> talk-3, NOT the stale talk-2.
+        # "hi" drops the buffered talk-2; the resume airs a fresh beat, never the
+        # stale one (the exact number depends on how much the background refill
+        # generated before the discard — assert the invariant, not the count).
         assert "talk-2" not in cli.radio
-        assert cli.radio == ["talk-1", "reply:hi", "talk-3"]
-        assert brain.batch_counts == [2, 2]  # two batches (the first was discarded)
+        assert cli.radio[:2] == ["talk-1", "reply:hi"]
+        assert len(cli.radio) == 3 and cli.radio[2].startswith("talk-")
 
     asyncio.run(go())
 
 
 def test_talk_lookahead_settled_on_shutdown():
-    """A buffered look-ahead synth must not outlive the loop (/quit before it is
-    consumed)."""
+    """A buffered look-ahead synth / in-flight refill must not outlive the loop
+    (/quit before it is consumed)."""
 
     async def go():
         director, cli, brain, player, memory = _make(lines=["/quit"], play_delay=0.1)
         await director.run(max_segments=None)
-        assert director._talk_ahead == []  # buffered synth task settled, not orphaned
+        assert director._talk_ahead == []  # buffered synth tasks settled
+        assert director._talk_fill is None  # in-flight refill cancelled + cleared
+
+    asyncio.run(go())
+
+
+def test_talk_refill_retries_a_transient_brain_failure():
+    """spec 04 §3.3: a transient next_talks failure is retried, so the look-ahead
+    still fills and the segment airs (without retry the cold gen would degrade to
+    a skipped segment)."""
+
+    async def go():
+        director, cli, brain, player, memory = _make()
+        director._brain = FakeBrain(next_talks_fail_times=1)  # type: ignore[attr-defined]
+        await director.run(max_segments=1)
+        assert cli.radio == ["talk-1"]  # first attempt raised, retry produced it
+
+    asyncio.run(go())
+
+
+def test_talk_synth_retries_a_transient_failure():
+    """spec 04 §3.3: a transient TTS failure on the aired beat is retried, so the
+    beat still airs (without retry it would be skipped)."""
+
+    async def go():
+        cli = FakeCli()
+        player = FakePlayer()
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=FakeBrain(),
+            voice=FakeVoice(transient_fail_on={"talk-1": 1}),
+            player=player,
+            memory=InProcessMemoryStore(),
+            cli_host=cli,
+        )
+        await director.run(max_segments=1)
+        assert cli.radio == ["talk-1"]  # failed once, retried, then aired
+        assert player.played == ["fake:talk-1"]
 
     asyncio.run(go())
 
@@ -108,22 +168,22 @@ def test_typed_line_interrupts_replies_and_resumes():
         await director.run(max_segments=2)
         assert brain.responded_to == ["hello"]
         assert cli.user == ["hello"]
-        # talk-1 (interrupted) -> reply -> talk-3 (resumed). talk-2 was the
-        # buffered look-ahead, discarded by the interjection (spec 04 §3.2), so
-        # the resume regenerates fresh.
-        assert cli.radio == ["talk-1", "reply:hello", "talk-3"]
+        # talk-1 (interrupted) -> reply -> a FRESH talk (resumed). talk-2 was the
+        # buffered look-ahead, discarded by the interjection (spec 04 §3.3), so the
+        # resume regenerates fresh (never the stale talk-2; the exact number
+        # depends on how far the background refill got before the discard).
+        assert cli.radio[:2] == ["talk-1", "reply:hello"]
+        assert len(cli.radio) == 3
+        assert cli.radio[2].startswith("talk-") and cli.radio[2] != "talk-2"
         assert [t.role for t in memory.recent(10)] == [
             "radio",
             "user",
             "radio",
             "radio",
         ]
-        assert [t.text for t in memory.recent(10)] == [
-            "talk-1",
-            "hello",
-            "reply:hello",
-            "talk-3",
-        ]
+        texts = [t.text for t in memory.recent(10)]
+        assert texts[:3] == ["talk-1", "hello", "reply:hello"]
+        assert texts[3].startswith("talk-") and texts[3] != "talk-2"
         assert player.stops >= 1  # playback was stopped for the interjection
 
     asyncio.run(go())
@@ -192,9 +252,11 @@ def test_reply_synthesis_failure_degrades_and_resumes():
         )
         await director.run(max_segments=2)
         assert brain.responded_to == ["hello"]
-        # the reply never aired; talk-1 then the resumed segment (talk-3 — talk-2
-        # was the buffered look-ahead, discarded by the interjection).
-        assert cli.radio == ["talk-1", "talk-3"]
+        # the reply never aired; talk-1 then a FRESH resumed segment (talk-2 was
+        # the buffered look-ahead, discarded by the interjection — spec 04 §3.3).
+        assert cli.radio[0] == "talk-1"
+        assert len(cli.radio) == 2
+        assert cli.radio[1].startswith("talk-") and cli.radio[1] != "talk-2"
         assert any("synthesis failed" in m for m in cli.infos)
 
     asyncio.run(go())
