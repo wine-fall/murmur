@@ -398,6 +398,16 @@ class Director:
         falls back to talk — a music error must never crash the radio)."""
         music, mixing = self._music, self._mixing
         assert music is not None and mixing is not None
+        # spec 04 §3.1 (dead-air fix): never block the loop on a prefetch that is
+        # still resolving. If a pick is in flight but not yet done, air a buffered
+        # talk beat instead and re-attempt music at the next boundary — the pick
+        # keeps resolving in the background and the depth-2 talk look-ahead covers
+        # the search adaptively, however long it takes, with no dead air. (A
+        # resolved pick, or none prefetched, falls through to _take_pick: consume
+        # the warm result, or a cold fetch on the first-ever segment.)
+        pending = self._pending_pick
+        if pending is not None and not pending.done():
+            return False
         try:
             with _log.timed("music.pick") as t:
                 prefetched = self._pending_pick is not None
