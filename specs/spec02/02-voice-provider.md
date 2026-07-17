@@ -184,6 +184,27 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
   `Python-urllib/*` UA with a 403 bot rule. When the endpoint sits behind
   Cloudflare Access, auth is the operator's concern (a WARP-enrolled host, or a
   service token) — not baked into the adapter.
+- **Sentence pacing (split + silence pad):** fish TTS runs each sentence straight
+  into the next with too small a gap — it reads as "AI" (a real listening
+  finding). fish.audio's own inline pause hints (`[pause]` / `[long pause]`) are
+  documented for S2 but proved **inert** on `s2.1-pro-free` — a real-boundary
+  smoke measured **zero** added silence (the server strips the brackets under
+  `normalize:true`). So the adapter adds the silence itself: `synthesize` splits a
+  beat at sentence-enders (`split_sentences`), synthesizes each sentence, and
+  concatenates the wavs with a fixed silence pad (`_SENTENCE_PAD_S`, default
+  0.3 s) **between** each (`concat_wav_with_silence`). Enders: the CJK marks
+  U+3002 / U+FF01 / U+FF1F and the ellipsis U+2026, plus ASCII `!?`; ASCII `.` is
+  excluded (decimals / abbreviations, and the persona speaks Chinese where the
+  fullwidth marks are the real enders). A **single** sentence takes the one-shot
+  path — no split,
+  no pad — so single-sentence beats are byte-for-byte the pre-split behavior. A
+  split beat **pins one seed** across its sentences so the voice can't drift
+  mid-beat when neither a `reference_id` nor a `seed` is configured (voice
+  pinning, above). Costs: one synth call per sentence (hidden behind the spec-04
+  talk look-ahead; an interjection reply pays them in sequence) and a possible
+  prosody seam at joins. The split/pad scaffolding is deterministic (unit-tested);
+  whether it *sounds* less "AI" and the exact pad length are by-ear/eval judgments
+  (DESIGN §10.3), not unit assertions.
 - **Protocol is per-adapter, not universal:** this adapter speaks fish-speech's
   API. A different server (OpenAI-compatible `/v1/audio/speech`, etc.) is another
   small adapter on the same seam — the seam does not try to be one universal
