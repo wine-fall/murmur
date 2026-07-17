@@ -9,6 +9,15 @@ repos:
         language: system
         # no-CJK applies to code and docs alike; comment check is Python-only.
         types_or: [python, markdown, yaml, toml]
+      - id: any-budget
+        name: Any budget (no new typing.Any past the baseline)
+        # A ratchet: counts real Any references per root (AST) and fails if any
+        # root exceeds its frozen baseline in the script. Scans whole roots, so it
+        # takes no filenames and runs whenever any Python file changes.
+        entry: python scripts/check_any_budget.py
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: pyright
         name: pyright (static type-check)
         # Enforces the Protocol seams (contracts.py, Brain, TtsBackend, Player,
