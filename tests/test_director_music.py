@@ -319,6 +319,47 @@ def test_prefetch_fires_before_synthesis_with_fresh_mood():
     asyncio.run(go())
 
 
+def test_music_does_not_block_on_an_unresolved_pick_airs_talk():
+    """spec 04 (dead-air fix): music due but the prefetched pick still resolving
+    must NOT block the loop awaiting the search — it airs a buffered talk beat and
+    re-attempts music at the next boundary. With a pick that never resolves, the
+    run still completes on talk alone (no dead air). Pre-fix the music branch
+    awaited the in-flight pick and the run would hang here (observed live:
+    `music.pick prefetched=True elapsed_s=56.52`)."""
+
+    class NeverProgrammer:
+        def __init__(self) -> None:
+            self.contexts: list[object] = []
+
+        async def next_track(self, ctx):
+            self.contexts.append(ctx)
+            await asyncio.Event().wait()  # in flight, never resolves
+
+    async def go():
+        cli = FakeCli()
+        engine = FakeEngine()
+        prog = NeverProgrammer()
+        director = Director(
+            config=replace(Config.default(), inter_segment_gap=0.0),
+            persona="p",
+            brain=FakeBrain(),
+            voice=FakeVoice(),
+            player=engine,
+            memory=InProcessMemoryStore(),
+            cli_host=cli,
+            music=prog,
+            # talk primes the prefetch, then music is due every boundary while the
+            # pick stays in flight.
+            cadence=ScriptedCadence(["talk", "music", "music", "music"]),
+        )
+        await asyncio.wait_for(director.run(max_segments=4), 2.0)  # pre-fix: hangs
+        assert cli.radio == ["talk-1", "talk-2", "talk-3", "talk-4"]  # all talk
+        assert engine.music_played == []  # the unresolved pick never aired
+        assert len(prog.contexts) == 1  # the single in-flight prefetch, never re-fired
+
+    asyncio.run(go())
+
+
 def test_cold_fallback_when_no_prefetch_available():
     """If the music branch fires with nothing prefetched (here: music is the very
     first segment, no talk ran to prime it), it does a cold fetch — correctness

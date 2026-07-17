@@ -60,10 +60,21 @@ finished) `next_track` task:
   real mood), if music is wired and the slot is empty, start
   `asyncio.create_task(music.next_track(ctx))` and park it in the slot. The talk
   segment then airs as normal — the pick resolves in the background.
-- **Consume:** when the music branch fires, if the slot holds a task, `await` it
-  (near-instant if already resolved; otherwise finish what's left) instead of a
-  cold `next_track`. Clear the slot; the next talk segment refills it. So the
-  Director always runs **one pick ahead**.
+- **Consume:** when the music branch fires, the slot must hold a **resolved**
+  pick to air a song. If it holds a task that is *already done*, `await` it
+  (near-instant) instead of a cold `next_track`, clear the slot, and air the
+  song; the next talk segment refills it. So the Director always runs **one pick
+  ahead**.
+- **Never block on a resolving pick (dead-air fix):** if the slot holds a task
+  that is **still in flight** when music is due, the branch does **not** await it
+  — it returns to talk and airs a buffered look-ahead beat, then re-attempts
+  music at the next boundary. The in-flight pick keeps resolving in the
+  background (the slot is *not* cleared, so no duplicate prefetch fires), and the
+  depth-2 talk look-ahead (§3.3) covers the search **adaptively** — however long
+  the resolve takes — with no dead air and no hardcoded "talk for N" duration.
+  (Observed live before this fix: a long-playlist resolve blocked the music
+  branch ~56s — `music.pick prefetched=True elapsed_s=56.52` — while a warm talk
+  beat sat buffered.)
 - **Cold fallback:** if the slot is empty when the music branch fires (e.g. the
   very first segment, or a pick just consumed), do a cold `next_track` exactly as
   before — correctness never depends on the buffer being warm.
@@ -148,23 +159,29 @@ not a config knob — deepen only if measurement shows a remaining gap (§6).
 2. **slice 1:** with no prefetch available, the music branch still resolves a pick
    (cold fallback) and behaves exactly as pre-spec-04.
 3. **slice 1:** no prefetch task outlives the Director (clean shutdown / `/quit`).
-4. **slice 2:** a buffered beat airs with **no** Brain call and **no** synthesis on
+4. **slice 1 (no-block / dead-air):** when music is due but the prefetched pick is
+   still in flight (not done), the loop does **not** await it — it airs a buffered
+   talk beat and re-attempts music at the next boundary; the pick keeps resolving
+   in the background. Verified on fakes: with a pick that never resolves, the run
+   completes on talk alone (music never airs, the loop never blocks); pre-fix the
+   music branch awaited the pick and the run hung.
+5. **slice 2:** a buffered beat airs with **no** Brain call and **no** synthesis on
    its critical path (verified on fakes: the next segment plays without a fresh
    `next_talks` / `synthesize`); a talkback `Steer` discards the buffer;
    `parse_talk_beats` degrades a malformed / missing tool result to empty, and the
    Brain falls back to a single beat.
-5. **slice 2 (survives music):** a talk beat buffered before a music segment airs
+6. **slice 2 (survives music):** a talk beat buffered before a music segment airs
    **after** the song (not regenerated cold at the music→talk boundary) — the
    music→talk transition has no Brain/synth wait. Verified on fakes: with a song
    between two talks, the pre-buffered beat is the one that airs post-song.
-6. **slice 2 (depth 2):** the buffer is held at depth `N` (not drained-then-
+7. **slice 2 (depth 2):** the buffer is held at depth `N` (not drained-then-
    refilled) — a beat buffered before **two** consecutive music segments still airs
    after them, and each post-song talk airs a warm buffered beat.
-7. **slice 2 (coherent refill):** a top-up refill fires with the queued-but-unaired
+8. **slice 2 (coherent refill):** a top-up refill fires with the queued-but-unaired
    beat in its context (as a prior `radio` turn), so it continues the monologue
    rather than duplicating the buffered beat. Verified on fakes: the refill's
    `next_talks` context contains the queued beat's text.
-8. **slice 2 (resilience):** a transient `next_talks` failure and a transient
+9. **slice 2 (resilience):** a transient `next_talks` failure and a transient
    synth failure are retried (the look-ahead still fills / the beat still airs);
    exhausted retries degrade (look-ahead skipped / beat skipped) without crashing
    the loop.
