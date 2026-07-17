@@ -191,8 +191,10 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
   smoke measured **zero** added silence (the server strips the brackets under
   `normalize:true`). So the adapter adds the silence itself: `synthesize` splits a
   beat at sentence-enders (`split_sentences`), synthesizes each sentence, and
-  concatenates the wavs with a fixed silence pad (`_SENTENCE_PAD_S`, default
-  0.3 s) **between** each (`concat_wav_with_silence`). Enders: the CJK marks
+  concatenates the wavs with a silence pad (default 0.6 s, by-ear tunable live via
+  `MURMUR_TTS_SENTENCE_PAD_S` / `Config.tts_sentence_pad_s`; **0 disables** the
+  split, restoring the raw one-shot voice) **between** each
+  (`concat_wav_with_silence`). Enders: the CJK marks
   U+3002 / U+FF01 / U+FF1F and the ellipsis U+2026, plus ASCII `!?`; ASCII `.` is
   excluded (decimals / abbreviations, and the persona speaks Chinese where the
   fullwidth marks are the real enders). A **single** sentence takes the one-shot

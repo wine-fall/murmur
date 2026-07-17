@@ -46,6 +46,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         tts_api_key=config.tts_api_key,
         tts_seed=config.tts_seed,
         tts_model=config.tts_model,
+        tts_sentence_pad_s=config.tts_sentence_pad_s,
     )
     player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
