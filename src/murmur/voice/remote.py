@@ -50,8 +50,9 @@ _USER_AGENT = "murmur"
 # U+FF01 fullwidth !, U+FF1F fullwidth ?, U+2026 ellipsis, plus ASCII ! and ?.
 _ENDERS = "".join(map(chr, (0x3002, 0xFF01, 0xFF1F, 0x2026))) + "!?"
 _SENTENCE_RE = re.compile("[^%(e)s]*[%(e)s]+|[^%(e)s]+" % {"e": _ENDERS})
-# The inter-sentence gap. A clear breath without dragging; by-ear tunable (§10.3).
-_SENTENCE_PAD_S = 0.3
+# Default inter-sentence gap. A clear breath without dragging; by-ear tunable live
+# via MURMUR_TTS_SENTENCE_PAD_S (Config.tts_sentence_pad_s). 0 disables splitting.
+_SENTENCE_PAD_S = 0.6
 
 
 def split_sentences(text: str) -> list[str]:
@@ -120,6 +121,7 @@ class RemoteVoiceProvider:
         api_key: str | None = None,
         seed: int | None = None,
         model: str | None = None,
+        sentence_pad_s: float | None = None,
         timeout: float = _SYNTH_TIMEOUT,
     ) -> None:
         # strip() first: a .env value with trailing whitespace / CRLF would
@@ -129,6 +131,7 @@ class RemoteVoiceProvider:
         self._api_key = api_key or None
         self._seed = seed
         self._model = model or None
+        self._pad_s = _SENTENCE_PAD_S if sentence_pad_s is None else sentence_pad_s
         self._timeout = timeout
         self._dir = Path(tempfile.mkdtemp(prefix="murmur-remote-"))
         self._counter = 0
@@ -146,11 +149,12 @@ class RemoteVoiceProvider:
 
     async def synthesize(self, text: str, *, scenario: str = "broadcast") -> AudioClip:
         # Split a multi-sentence beat and pad the joins with real silence (§3.6):
-        # the model itself won't pause enough. A single sentence takes the plain
-        # one-shot path (no split, no concat) — identical to the pre-split behavior.
+        # the model itself won't pause enough. A single sentence — or a zero/negative
+        # pad (splitting disabled via config) — takes the plain one-shot path (no
+        # split, no concat), identical to the pre-split behavior.
         sentences = split_sentences(text)
         start = time.monotonic()
-        if len(sentences) <= 1:
+        if len(sentences) <= 1 or self._pad_s <= 0:
             audio = await asyncio.to_thread(self._post, self._payload(text, self._seed))
         else:
             # Pin ONE voice across the parts. A reference_id (or a configured seed)
@@ -165,7 +169,7 @@ class RemoteVoiceProvider:
                 await asyncio.to_thread(self._post, self._payload(s, seed))
                 for s in sentences
             ]
-            audio = concat_wav_with_silence(parts, _SENTENCE_PAD_S)
+            audio = concat_wav_with_silence(parts, self._pad_s)
         gen_s = time.monotonic() - start
         self._counter += 1
         path = self._dir / f"clip-{self._counter:04d}.wav"

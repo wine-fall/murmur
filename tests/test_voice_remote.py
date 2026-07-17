@@ -104,9 +104,9 @@ def test_concat_wav_with_silence_sums_durations_plus_the_pad(tmp_path):
     assert abs(wav_seconds(path) - 0.75) < 0.02
 
 
-def test_synthesize_splits_multi_sentence_and_pads(monkeypatch, tmp_path):
+def test_synthesize_splits_multi_sentence_and_pads(monkeypatch):
     # A 2-sentence beat -> one _post per sentence, joined with a real silence pad.
-    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1")
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1", sentence_pad_s=0.3)
     calls: list[str] = []
 
     def fake_post(payload: dict[str, object]) -> bytes:
@@ -116,8 +116,30 @@ def test_synthesize_splits_multi_sentence_and_pads(monkeypatch, tmp_path):
     monkeypatch.setattr(prov, "_post", fake_post)
     clip = asyncio.run(prov.synthesize(f"one{STOP}two{STOP}"))
     assert calls == [f"one{STOP}", f"two{STOP}"]  # split into two synth calls
-    # 0.20 + 0.20 + one 0.30 default pad = ~0.70s of joined audio.
+    # 0.20 + 0.20 + one 0.30 pad = ~0.70s of joined audio.
     assert abs(wav_seconds(Path(clip.source)) - 0.70) < 0.03
+
+
+def test_synthesize_pad_length_is_configurable(monkeypatch):
+    # The knob (Config.tts_sentence_pad_s -> sentence_pad_s) changes the gap: a
+    # longer pad yields a longer joined clip for the same two sentences.
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1", sentence_pad_s=0.8)
+    monkeypatch.setattr(prov, "_post", lambda p: _wav_bytes(0.20))
+    clip = asyncio.run(prov.synthesize(f"one{STOP}two{STOP}"))
+    # 0.20 + 0.20 + one 0.80 pad = ~1.20s.
+    assert abs(wav_seconds(Path(clip.source)) - 1.20) < 0.03
+
+
+def test_synthesize_pad_zero_disables_splitting(monkeypatch):
+    # pad <= 0 turns the feature off: a multi-sentence beat is one plain call
+    # (no split, no concat) — the escape hatch for "give me back the raw voice".
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1", sentence_pad_s=0.0)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        prov, "_post", lambda p: (calls.append(str(p["text"])) or _wav_bytes())
+    )
+    asyncio.run(prov.synthesize(f"one{STOP}two{STOP}"))
+    assert calls == [f"one{STOP}two{STOP}"]  # a single call with the whole text
 
 
 def test_synthesize_single_sentence_is_one_call_no_pad(monkeypatch):
@@ -262,11 +284,25 @@ def test_config_reads_tts_env(monkeypatch):
     monkeypatch.setenv("MURMUR_TTS_REFERENCE_ID", "spk1")
     monkeypatch.setenv("MURMUR_TTS_SEED", "42")
     monkeypatch.setenv("MURMUR_TTS_MODEL", "s2.1-pro-free")
+    monkeypatch.setenv("MURMUR_TTS_SENTENCE_PAD_S", "0.8")
     c = Config.default()
     assert c.tts_url == "http://box:8080"
     assert c.tts_reference_id == "spk1"
     assert c.tts_seed == 42
     assert c.tts_model == "s2.1-pro-free"
+    assert c.tts_sentence_pad_s == 0.8
+
+
+def test_config_sentence_pad_default_and_bad_value(monkeypatch):
+    monkeypatch.delenv("MURMUR_TTS_SENTENCE_PAD_S", raising=False)
+    assert Config.default().tts_sentence_pad_s == 0.6  # documented default
+    monkeypatch.setenv("MURMUR_TTS_SENTENCE_PAD_S", "not-a-number")
+    assert Config.default().tts_sentence_pad_s == 0.6  # bad value degrades, not fatal
+
+
+def test_build_voice_threads_sentence_pad_to_provider():
+    v = build_voice("remote", tts_url="http://box:8080", tts_sentence_pad_s=0.9)
+    assert isinstance(v, RemoteVoiceProvider) and v._pad_s == 0.9
 
 
 def test_config_seed_unset_is_none(monkeypatch):

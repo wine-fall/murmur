@@ -33,6 +33,31 @@ def _env_seed() -> int | None:
         return None
 
 
+# The inter-sentence silence pad (seconds) the remote voice splices between
+# sentences (spec 02 §3.6). A by-ear knob: fish TTS runs sentences together, and
+# the model's own pause hints proved inert, so we insert this gap ourselves.
+# 0 disables splitting entirely (one-shot synth). Tunable live via env.
+_DEFAULT_SENTENCE_PAD_S = 0.6
+
+
+def _env_sentence_pad() -> float:
+    """Parse ``MURMUR_TTS_SENTENCE_PAD_S`` (empty/unset → default). Non-numeric or
+    negative degrades to the default with a warning — a bad value must not abort
+    Config (same posture as ``_env_seed``)."""
+    raw = os.environ.get("MURMUR_TTS_SENTENCE_PAD_S", "").strip()
+    if not raw:
+        return _DEFAULT_SENTENCE_PAD_S
+    try:
+        value = float(raw)
+    except ValueError:
+        print(
+            f"warning: ignoring non-numeric MURMUR_TTS_SENTENCE_PAD_S={raw!r}",
+            file=sys.stderr,
+        )
+        return _DEFAULT_SENTENCE_PAD_S
+    return value if value >= 0 else _DEFAULT_SENTENCE_PAD_S
+
+
 @dataclass(frozen=True)
 class Config:
     # --- persona -----------------------------------------------------------
@@ -99,6 +124,9 @@ class Config:
     # fish.audio "s2.1-pro-free"). Empty = no header (self-hosted fish-speech
     # ignores it).
     tts_model: str = field(default_factory=lambda: os.environ.get("MURMUR_TTS_MODEL", ""))
+    # Inter-sentence silence pad (seconds) for the remote voice (§3.6). By-ear
+    # knob via MURMUR_TTS_SENTENCE_PAD_S; 0 disables sentence-splitting.
+    tts_sentence_pad_s: float = field(default_factory=lambda: _env_sentence_pad())
 
     @classmethod
     def default(cls) -> "Config":
