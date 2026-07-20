@@ -6,17 +6,26 @@
 # instrumental backdrop under all talk. The repo stays binary-free: only this
 # text list is committed; the audio lives in the per-user cache.
 #
-# Curation posture (L1): a small rotating set of long, calm, instrumental
-# ambient pieces — no vocals, no strong hooks (the bed is the backdrop, never
-# the foreground; the featured song is the foreground event). License: prefer
-# Creative Commons / royalty-free sources; note attribution per source below.
-#
-# Refs are `ytsearch1:` queries so curation is by description rather than a
-# brittle hand-copied video id (an id that rots takes the whole line with it);
-# the pulled file is cached and stable thereafter. Upgrade path: pin explicit
-# CC-BY URLs (e.g. Kevin MacLeod / incompetech) once verified. Keep this set
-# small (a handful) — see spec 03-04 §6 "bed track length / rotation policy".
+# Curation (L1): a small rotating set of calm, instrumental, no-vocal pieces —
+# the bed is the backdrop, never the foreground (the featured song is the
+# foreground event). One per style: solo piano, ambient, light lofi, classical.
+# Refs are pinned watch URLs (not search queries) so the set is reproducible;
+# license noted per line. yt-dlp's `license` field is quoted where it reports
+# Creative Commons; attribute per the source's terms if you redistribute.
 
-ytsearch1:Kevin MacLeod Ambient royalty free long
-ytsearch1:calm ambient instrumental no copyright 1 hour
-ytsearch1:relaxing lofi ambient background music no copyright
+# -- solo piano -- Kevin MacLeod, official channel; yt-dlp reports CC-BY.
+# "Relaxing Piano Music" (24:48). Attribution: Kevin MacLeod (incompetech.com).
+https://www.youtube.com/watch?v=yz819hMG8Zo
+
+# -- ambient -- "Fluidscape" by Kevin MacLeod (CC-BY composition; incompetech).
+# Long calm ambient loop (~30 min) via a re-upload (upload license unmarked;
+# the underlying work is CC-BY — attribute Kevin MacLeod).
+https://www.youtube.com/watch?v=9p9PZRre8VE
+
+# -- light lofi -- Classic Hero, "Free Chill Lo-fi Instrumental" (3:52);
+# yt-dlp reports CC-BY. Soft beat, no vocals.
+https://www.youtube.com/watch?v=h6upipJGrY8
+
+# -- classical -- Satie "Gymnopedie No. 1" (public-domain work), YuuhiPiano
+# performance; yt-dlp reports CC-BY (10:25). The quintessential calm night piece.
+https://www.youtube.com/watch?v=wh9KetgxR1Q
