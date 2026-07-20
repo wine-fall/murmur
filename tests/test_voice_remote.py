@@ -295,9 +295,9 @@ def test_config_reads_tts_env(monkeypatch):
 
 def test_config_sentence_pad_default_and_bad_value(monkeypatch):
     monkeypatch.delenv("MURMUR_TTS_SENTENCE_PAD_S", raising=False)
-    assert Config.default().tts_sentence_pad_s == 0.6  # documented default
+    assert Config.default().tts_sentence_pad_s == 0.8  # documented default
     monkeypatch.setenv("MURMUR_TTS_SENTENCE_PAD_S", "not-a-number")
-    assert Config.default().tts_sentence_pad_s == 0.6  # bad value degrades, not fatal
+    assert Config.default().tts_sentence_pad_s == 0.8  # bad value degrades, not fatal
 
 
 def test_build_voice_threads_sentence_pad_to_provider():

@@ -52,7 +52,7 @@ _ENDERS = "".join(map(chr, (0x3002, 0xFF01, 0xFF1F, 0x2026))) + "!?"
 _SENTENCE_RE = re.compile("[^%(e)s]*[%(e)s]+|[^%(e)s]+" % {"e": _ENDERS})
 # Default inter-sentence gap. A clear breath without dragging; by-ear tunable live
 # via MURMUR_TTS_SENTENCE_PAD_S (Config.tts_sentence_pad_s). 0 disables splitting.
-_SENTENCE_PAD_S = 0.6
+_SENTENCE_PAD_S = 0.8
 
 
 def split_sentences(text: str) -> list[str]:

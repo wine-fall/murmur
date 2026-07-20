@@ -37,7 +37,7 @@ def _env_seed() -> int | None:
 # sentences (spec 02 §3.6). A by-ear knob: fish TTS runs sentences together, and
 # the model's own pause hints proved inert, so we insert this gap ourselves.
 # 0 disables splitting entirely (one-shot synth). Tunable live via env.
-_DEFAULT_SENTENCE_PAD_S = 0.6
+_DEFAULT_SENTENCE_PAD_S = 0.8
 
 
 def _env_sentence_pad() -> float:
