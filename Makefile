@@ -25,7 +25,7 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
-.PHONY: help dev dev-remote dev-fishaudio dev-opuslab logs preflight setup-music install bed-refresh
+.PHONY: help dev dev-remote dev-fishaudio dev-opuslab logs preflight setup-music install sync-env bed-refresh
 
 help:
 	@echo "murmur dev:"
@@ -43,26 +43,41 @@ help:
 	@echo ""
 	@echo "  knobs:  VOICE=spark|stub|...   STUB=1 (full offline)"
 
-install:
+install: sync-env
 	uv sync $(SYNC_ARGS)
 	@uv run pre-commit install >/dev/null 2>&1 || true
+
+sync-env:
+	@# A fresh linked git worktree does not inherit the gitignored .env* config
+	@# (remote-voice creds: .env.fishaudio / .env.opuslab / .env) that lives in the
+	@# main worktree. Copy any that are missing here so `make dev*` works out of the
+	@# box. Read-only from main (never written back); a no-op in the main worktree;
+	@# copy-if-absent, so a local override is never clobbered (rm to re-sync).
+	@main=$$(git worktree list --porcelain 2>/dev/null | awk '/^worktree /{print $$2; exit}'); \
+	  here=$$(git rev-parse --show-toplevel 2>/dev/null); \
+	  [ -n "$$main" ] && [ -n "$$here" ] && [ "$$main" != "$$here" ] || exit 0; \
+	  for f in "$$main"/.env*; do \
+	    [ -e "$$f" ] || continue; \
+	    dst="$$here/$$(basename "$$f")"; \
+	    [ -e "$$dst" ] || { cp "$$f" "$$dst" && echo "sync-env: copied $$(basename "$$f") from main worktree"; }; \
+	  done
 
 preflight:
 	@uv run python scripts/dev_preflight.py $(PREFLIGHT_ARGS)
 
-dev-fishaudio:
+dev-fishaudio: sync-env
 	@# Select the fish.audio backend: copy its config to .env, then run remote.
 	@test -f .env.fishaudio || { echo "missing .env.fishaudio (fish.audio config)"; exit 1; }
 	@cp .env.fishaudio .env
 	@$(MAKE) dev-remote
 
-dev-opuslab:
+dev-opuslab: sync-env
 	@# Select the self-hosted opuslab backend (keep WARP connected).
 	@test -f .env.opuslab || { echo "missing .env.opuslab (opuslab config)"; exit 1; }
 	@cp .env.opuslab .env
 	@$(MAKE) dev-remote
 
-dev-remote:
+dev-remote: sync-env
 	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) into the environment,
 	@# then run the normal dev flow forcing the off-machine HTTP backend. Keep WARP
 	@# connected — auth to the endpoint is via Cloudflare Access (spec 02 §3.6).

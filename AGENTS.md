@@ -44,6 +44,10 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
   markdown included); **Chinese** for conversation with the user.
 - **Never `git add -A` / `git add .`** — the main checkout is shared across
   sessions and holds other sessions' scratch; stage explicit paths.
+- **Linked worktree env**: a fresh linked worktree does not inherit the
+  gitignored `.env*` (remote-voice creds); `make install` / `make dev` auto-sync
+  them from the main worktree via `make sync-env` (copy-if-absent). They never
+  carry over on their own.
 - **Never gate a commit/push on a piped command's exit code** (`pytest | tail`
   reports `tail`'s exit) — run the gating command bare and check its real code.
 - `git commit` needs the project venv on PATH (`PATH="$PWD/.venv/bin:$PATH"`)
