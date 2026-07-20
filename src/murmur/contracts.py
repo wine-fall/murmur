@@ -58,11 +58,15 @@ class Turn:
 class ContextPack:
     """The compact context handed to the Brain per call (master §6).
 
-    L0 fields only; spec 05/07 add profile/ledger/time/activity fields.
+    ``scene`` is the time-of-day bucket (spec 04 §3.4) the Director derives from
+    the local clock so the host's talk can speak to the current time; ``None``
+    when unset (the prompt then omits any time-of-day cue). Remaining L0 fields
+    only; spec 05/07 add the profile/ledger/activity fields.
     """
 
     persona: str
     recent: list[Turn]
+    scene: str | None = None
 
 
 # --------------------------------------------------------------------------- #

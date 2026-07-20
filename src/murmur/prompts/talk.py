@@ -17,6 +17,32 @@ _OUTPUT_RULES = (
     "prefixes, speaker labels, quotation marks, or stage directions."
 )
 
+# Per-scene mood cue threaded into the self-initiated talk prompts (spec 04
+# §3.4). The Director derives ``ctx.scene`` from the local clock; the host then
+# speaks to the current time of day. English scaffolding, like the rest of this
+# module — the persona still produces Chinese. A scene with no entry here (or
+# ``None``) simply gets no cue, so an unknown bucket degrades silently.
+_SCENE_GUIDANCE = {
+    "morning": (
+        "It's morning where they are — meet it with a gentle, just-waking warmth."
+    ),
+    "afternoon": (
+        "It's the afternoon — an easy, unhurried mid-day company."
+    ),
+    "evening": (
+        "It's the evening — the day winding down, warm and settling."
+    ),
+    "late-night": (
+        "It's late at night — keep it hushed and intimate, the small-hours mood."
+    ),
+}
+
+
+def _scene_line(ctx: ContextPack) -> str:
+    """One trailing cue naming the time of day, or ``""`` when unset/unknown."""
+    cue = _SCENE_GUIDANCE.get(ctx.scene or "")
+    return f"\n{cue}" if cue else ""
+
 
 def _render_transcript(
     ctx: ContextPack, *, drop_trailing_user: str | None = None
@@ -46,7 +72,7 @@ def build_next_talk_prompt(ctx: ContextPack) -> str:
         )
     else:
         head = "The program is just starting. Open naturally with your first beat."
-    return f"{head}\n{_OUTPUT_RULES}"
+    return f"{head}{_scene_line(ctx)}\n{_OUTPUT_RULES}"
 
 
 def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
@@ -66,9 +92,9 @@ def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
             f"{count} beats."
         )
     return (
-        f"{head}\nEach beat is one small stretch of radio (a few sentences, spoken "
-        f"aloud — no markup, labels, or stage directions). Return all {count} beats "
-        f"in order by calling the emit_talk_beats tool."
+        f"{head}{_scene_line(ctx)}\nEach beat is one small stretch of radio (a few "
+        f"sentences, spoken aloud — no markup, labels, or stage directions). Return "
+        f"all {count} beats in order by calling the emit_talk_beats tool."
     )
 
 
