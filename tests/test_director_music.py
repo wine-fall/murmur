@@ -45,7 +45,7 @@ def _make(
     picks: list[TrackPick] | None = None,
     cadence=None,
     auto_finish: bool = True,
-    started: bool = True,
+    started: bool | list[bool] = True,
 ):
     cli = FakeCli(lines)
     brain = FakeBrain()
@@ -152,24 +152,44 @@ def test_next_track_none_falls_back_to_talk():
     asyncio.run(go())
 
 
-def test_stream_that_never_starts_degrades_to_talk_without_announcing():
+def test_stream_that_never_starts_retries_then_degrades_without_announcing():
     """spec 04: play_music can hand back a handle whose stream 403s and never
-    decodes a frame. The Director must catch that (wait_started False) and fall
-    back to talk WITHOUT airing the intro or claiming 'now playing' — the announce
-    must never narrate a song that never played."""
+    decodes a frame. The Director confirms audio (wait_started) before committing
+    the announce; on no audio it tries a fresh pick, and only degrades to talk —
+    WITHOUT ever airing the intro or 'now playing' — once the attempts are spent."""
 
     async def go():
         director, cli, brain, engine, programmer, memory = _make(
-            picks=[_pick()], started=False, auto_finish=False
+            picks=[_pick(ref="r1"), _pick(ref="r2")], started=False, auto_finish=False
         )
         await director.run(max_segments=2)
-        assert [c.source for c in engine.music_played] == ["stream:r1"]  # attempted
+        # Both attempts tried a stream (bounded retry), neither announced.
+        assert [c.source for c in engine.music_played] == ["stream:r1", "stream:r2"]
         assert "fake:up next: T1" not in engine.played  # intro never aired
         assert "up next: T1" not in cli.radio
         assert not any("now playing" in m for m in cli.infos)  # never claimed
         assert any("failed to start" in m for m in cli.infos)  # visible degrade
-        assert engine.handles[0].stops == 1  # the dead handle was torn down
+        assert all(h.stops == 1 for h in engine.handles)  # dead handles torn down
         assert cli.radio == ["talk-1", "talk-2"]  # fell back to talk
+
+    asyncio.run(go())
+
+
+def test_stream_retry_plays_the_next_pick_when_the_first_never_starts():
+    """spec 04: the payoff of the bounded retry — the first pick's stream never
+    decodes, the second one does, so a song ACTUALLY plays (and its intro airs)
+    instead of the segment silently becoming talk."""
+
+    async def go():
+        director, cli, brain, engine, programmer, memory = _make(
+            picks=[_pick(ref="r1"), _pick(ref="r2")], started=[False, True]
+        )
+        await director.run(max_segments=2)
+        assert [c.source for c in engine.music_played] == ["stream:r1", "stream:r2"]
+        assert engine.handles[0].stops == 1  # the dead first pick was torn down
+        assert "fake:up next: T1" in engine.played  # the second pick's intro aired
+        assert any("now playing" in m for m in cli.infos)  # the song played
+        assert "up next: T1" in cli.radio
 
     asyncio.run(go())
 

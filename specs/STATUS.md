@@ -28,9 +28,10 @@ _Last updated: 2026-07-20_
   first-frame / EOF-reason+frames / surfaced ffmpeg stderr / `music.segment`
   timing), the decoder RAISES on abnormal ffmpeg exit (no longer masquerades as a
   clean end), and the Director confirms real audio (`MusicHandle.wait_started`)
-  before committing the announce — degrading visibly to talk otherwise. The bed
-  now covers stream startup (bed<->song crossfade deferred to first audio), so a
-  dead pick never leaves dead air. **Owed (by-ear pass):** the announce can still
+  before committing the announce; on no audio it retries a fresh pick (usually a
+  different, working stream) and only degrades visibly to talk once the bounded
+  attempts are spent. The bed now covers stream startup (bed<->song crossfade
+  deferred to first audio), so a dead pick never leaves dead air. **Owed (by-ear pass):** the announce can still
   land a beat into the song when TTS synth outruns stream startup — sensory tuning.
 - **Open: end-to-end latency measurement.** Acceptance so far is mechanism-level
   (fakes prove the buffers work); the motivating ~76s first-music wait has **not**

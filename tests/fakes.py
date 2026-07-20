@@ -265,17 +265,29 @@ class FakeEngine(FakePlayer):
         self,
         play_delay: float = 0.0,
         auto_finish: bool = True,
-        started: bool = True,
+        started: bool | list[bool] = True,
     ) -> None:
         super().__init__(play_delay=play_delay)
         self._auto_finish = auto_finish
+        # bool -> every handle starts (or not); list -> scripted per play_music
+        # (for the bounded-retry path), defaulting to True once exhausted.
         self._started = started
+        self._start_idx = 0
         self.music_played: list[AudioClip] = []
         self.handles: list[FakeMusicHandle] = []
 
     async def play_music(self, clip: AudioClip) -> FakeMusicHandle:
         self.music_played.append(clip)
-        handle = FakeMusicHandle(auto_finish=self._auto_finish, started=self._started)
+        if isinstance(self._started, list):
+            started = (
+                self._started[self._start_idx]
+                if self._start_idx < len(self._started)
+                else True
+            )
+            self._start_idx += 1
+        else:
+            started = self._started
+        handle = FakeMusicHandle(auto_finish=self._auto_finish, started=started)
         self.handles.append(handle)
         return handle
 

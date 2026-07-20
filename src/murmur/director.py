@@ -62,6 +62,12 @@ _log = get_log("director")
 # the wait is never dead air — it only bounds how long a typed /quit can lag.
 _STREAM_START_TIMEOUT_S = 8.0
 
+# How many picks to try before degrading to talk when a stream never produces
+# audio (spec 04). A googlevideo 403 is usually per-stream/per-format, so a fresh
+# pick typically plays; the bed covers the retry. Bounded so a network-wide 403
+# (nothing resolves/decodes) still degrades promptly instead of spinning.
+_MUSIC_START_ATTEMPTS = 2
+
 _QUIT_COMMAND = "/quit"
 
 # spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept ready
@@ -416,45 +422,56 @@ class Director:
         pending = self._pending_pick
         if pending is not None and not pending.done():
             return False
+        pick: TrackPick | None = None
+        handle: MusicHandle | None = None
+        announce_clip: AudioClip | None = None
         try:
-            with _log.timed("music.pick") as t:
-                prefetched = self._pending_pick is not None
-                pick = await self._take_pick(music)
-                t["found"] = pick is not None
-                t["prefetched"] = prefetched  # near-zero elapsed_s when True
-            if pick is None:
-                self._cli.info("music: nothing suitable found; back to talk.")
-                return False
-
             # A song is going on air: the talk look-ahead SURVIVES it and is topped
             # up during it (spec 04 §3.3). A song is the ideal window to prepare the
             # next talk — its whole duration overlaps the refill's Brain+synth — so
             # the post-song talk airs warm instead of regenerating cold into dead
-            # air. (Pre-§3.3 the song discarded the buffer; that left the music->talk
-            # boundary cold.)
+            # air. Primed once here; it also covers any retry latency below.
             self._prefetch_talk()
 
-            # Start the stream, then synthesize the intro WHILE it spins up
-            # (~3s of network startup). Do NOT commit the announce until the
-            # stream is confirmed producing audio: an intermittent googlevideo
-            # 403 makes play_music hand back a handle that never decodes a frame,
-            # and announcing first made the narration claim a song that never
-            # played (spec 04 no-dead-air). No audio -> degrade visibly to talk.
-            handle = await mixing.play_music(pick.clip)
-            announce_task: asyncio.Future[AudioClip | None] | None = (
-                asyncio.ensure_future(self._synthesize_or_skip(pick.announce))
-                if pick.announce
-                else None
-            )
-            if not await handle.wait_started(_STREAM_START_TIMEOUT_S):
+            # Bounded retry (spec 04): an intermittent googlevideo 403 makes
+            # play_music hand back a handle that never decodes a frame. Confirm
+            # real audio (wait_started) BEFORE committing the announce — announcing
+            # first made the narration claim a song that never played — and on no
+            # audio drop this pick for a fresh one (usually a different, working
+            # stream) rather than silently skipping. The bed covers the gap;
+            # degrade to talk only once the attempts are spent.
+            for attempt in range(_MUSIC_START_ATTEMPTS):
+                with _log.timed("music.pick") as t:
+                    prefetched = self._pending_pick is not None
+                    candidate = await self._take_pick(music)
+                    t["found"] = candidate is not None
+                    t["prefetched"] = prefetched  # near-zero elapsed_s when True
+                if candidate is None:
+                    self._cli.info("music: nothing suitable found; back to talk.")
+                    return False
+
+                # Start the stream, then synthesize the intro WHILE it spins up
+                # (~3s of network startup) so a confirmed song airs its intro warm.
+                started_handle = await mixing.play_music(candidate.clip)
+                announce_task: asyncio.Future[AudioClip | None] | None = (
+                    asyncio.ensure_future(self._synthesize_or_skip(candidate.announce))
+                    if candidate.announce
+                    else None
+                )
+                if await started_handle.wait_started(_STREAM_START_TIMEOUT_S):
+                    pick, handle = candidate, started_handle
+                    announce_clip = (
+                        await announce_task if announce_task is not None else None
+                    )
+                    break
                 await _settle(announce_task)
-                await handle.stop()
+                await started_handle.stop()
+                _log.event("music.no_audio_retry", attempt=attempt)
+
+            if handle is None or pick is None:
                 self._cli.info("music: stream failed to start; back to talk.")
-                _log.warn("music stream produced no audio; fell back to talk")
+                _log.warn("music stream never started; fell back to talk")
                 return False
-            announce_clip: AudioClip | None = (
-                await announce_task if announce_task is not None else None
-            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
