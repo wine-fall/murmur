@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import contextlib
 import subprocess
+import tempfile
 import wave
-from typing import Any, Callable
+from typing import IO, Any, Callable
 
 import numpy as np
 
@@ -30,8 +31,14 @@ class FfmpegDecoder:
     """One track's PCM source: an ffmpeg subprocess piping f32le to stdout.
 
     ``read`` blocks on the pipe and returns (frames, channels) float32 chunks;
-    None at end-of-stream. ``close`` terminates the subprocess (which unblocks
-    a pending read) and reaps it — the no-orphans path (spec §5.4).
+    None at a clean end-of-stream, and RAISES if ffmpeg exited abnormally (a
+    network 403 mid-stream, bad input) — a died-mid-track and a clean end used
+    to be indistinguishable (both hit stdout EOF), which made an announced song
+    that silently never played look identical to one that finished. ``close``
+    terminates the subprocess (which unblocks a pending read) and reaps it — the
+    no-orphans path (spec §5.4). ffmpeg's stderr goes to a temp file (not a pipe:
+    an undrained stderr pipe would deadlock a long track), read back only on an
+    abnormal exit to name the cause.
     """
 
     def __init__(
@@ -46,6 +53,8 @@ class FfmpegDecoder:
         self._frame_bytes = 4 * channels
         self._chunk_bytes = _CHUNK_FRAMES * self._frame_bytes
         self._remainder = b""
+        self._closing = False  # our own terminate() -> not an ffmpeg failure
+        self._errfile: IO[bytes] = tempfile.TemporaryFile()
         self._proc = subprocess.Popen(
             [
                 ffmpeg,
@@ -63,7 +72,7 @@ class FfmpegDecoder:
                 "pipe:1",
             ],
             stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
+            stderr=self._errfile,
         )
 
     def read(self) -> "np.ndarray[Any, np.dtype[np.float32]] | None":
@@ -73,6 +82,14 @@ class FfmpegDecoder:
         while True:
             data = stdout.read(self._chunk_bytes)
             if not data:
+                # stdout EOF. Clean end -> None; a nonzero exit that we did not
+                # trigger means the decode failed -> raise so the feeder logs it
+                # as an error instead of a silent, normal-looking end-of-stream.
+                with contextlib.suppress(Exception):
+                    self._proc.wait(timeout=2.0)
+                rc = self._proc.returncode
+                if not self._closing and rc not in (0, None):
+                    raise RuntimeError(f"ffmpeg exited {rc}: {self._stderr_tail()}")
                 return None  # EOF (a trailing partial frame is dropped)
             buf = self._remainder + data
             usable = len(buf) - (len(buf) % self._frame_bytes)
@@ -81,7 +98,15 @@ class FfmpegDecoder:
                 flat: Any = np.frombuffer(buf[:usable], dtype=np.float32)
                 return flat.reshape(-1, self._channels)
 
+    def _stderr_tail(self, limit: int = 500) -> str:
+        try:
+            self._errfile.seek(0)
+            return self._errfile.read().decode("utf-8", "replace")[-limit:].strip()
+        except Exception:
+            return ""
+
     def close(self) -> None:
+        self._closing = True
         with contextlib.suppress(ProcessLookupError):
             self._proc.terminate()
         if self._proc.stdout is not None:
@@ -93,6 +118,8 @@ class FfmpegDecoder:
             with contextlib.suppress(Exception):
                 self._proc.kill()
                 self._proc.wait(timeout=1.0)
+        with contextlib.suppress(Exception):
+            self._errfile.close()
 
 
 class SounddeviceSink:

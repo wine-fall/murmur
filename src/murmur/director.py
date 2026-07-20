@@ -54,6 +54,14 @@ from .prompts import build_music_situation
 # MURMUR_DEV_LOG) gets the full exception + traceback. No-op when unconfigured.
 _log = get_log("director")
 
+# How long to wait for a music stream to produce its first audio before treating
+# it as dead and degrading to talk (spec 04). Real stream startup is ~3s; the
+# margin covers a slow-but-valid CDN without letting an intermittent 403 (which
+# never decodes a frame) silently strand the segment. The bed keeps playing
+# through this window (engine defers the bed<->song crossfade to first audio), so
+# the wait is never dead air — it only bounds how long a typed /quit can lag.
+_STREAM_START_TIMEOUT_S = 8.0
+
 _QUIT_COMMAND = "/quit"
 
 # spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept ready
@@ -426,14 +434,27 @@ class Director:
             # boundary cold.)
             self._prefetch_talk()
 
-            announce_clip: AudioClip | None = None
-            if pick.announce:
-                # Synthesized before the song starts so the intro is ready to
-                # ride the ducked head with no gap. A synthesis failure only
-                # costs the intro, never the song.
-                announce_clip = await self._synthesize_or_skip(pick.announce)
-
+            # Start the stream, then synthesize the intro WHILE it spins up
+            # (~3s of network startup). Do NOT commit the announce until the
+            # stream is confirmed producing audio: an intermittent googlevideo
+            # 403 makes play_music hand back a handle that never decodes a frame,
+            # and announcing first made the narration claim a song that never
+            # played (spec 04 no-dead-air). No audio -> degrade visibly to talk.
             handle = await mixing.play_music(pick.clip)
+            announce_task: asyncio.Future[AudioClip | None] | None = (
+                asyncio.ensure_future(self._synthesize_or_skip(pick.announce))
+                if pick.announce
+                else None
+            )
+            if not await handle.wait_started(_STREAM_START_TIMEOUT_S):
+                await _settle(announce_task)
+                await handle.stop()
+                self._cli.info("music: stream failed to start; back to talk.")
+                _log.warn("music stream produced no audio; fell back to talk")
+                return False
+            announce_clip: AudioClip | None = (
+                await announce_task if announce_task is not None else None
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -453,8 +474,11 @@ class Director:
             voice = asyncio.ensure_future(self._player.play(announce_clip))
 
         # Duck, not stop: replies air OVER the song; the song stops only on
-        # /quit (handled inside _run_voice) or shutdown cancellation.
-        await self._run_voice(voice, song=handle)
+        # /quit (handled inside _run_voice) or shutdown cancellation. Timed so a
+        # song that ends far too soon (the "announced but silent" bug) is visible
+        # against the engine's music.feed frame count.
+        with _log.timed("music.segment", title=title):
+            await self._run_voice(voice, song=handle)
         return True
 
     # -- steer arbitration (one path for every segment kind) -------------------

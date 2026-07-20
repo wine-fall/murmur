@@ -21,6 +21,17 @@ _Last updated: 2026-07-20_
   - **building**: spec 04 §3.3 — **talk look-ahead survives music** (depth-2
     buffer, refilled when drained — including during a song — so the music→talk
     boundary has no Brain/synth wait; bounded retry + dev-log on the refill path).
+- **Fixed (spec 03-02/04): "announced song but silent."** An intermittent
+  googlevideo 403 made `play_music` hand back a handle that never decoded a
+  frame; the announce had already claimed the song, then the loop silently cut to
+  talk. Now: the music path has observability (`play_music` / feeder
+  first-frame / EOF-reason+frames / surfaced ffmpeg stderr / `music.segment`
+  timing), the decoder RAISES on abnormal ffmpeg exit (no longer masquerades as a
+  clean end), and the Director confirms real audio (`MusicHandle.wait_started`)
+  before committing the announce — degrading visibly to talk otherwise. The bed
+  now covers stream startup (bed<->song crossfade deferred to first audio), so a
+  dead pick never leaves dead air. **Owed (by-ear pass):** the announce can still
+  land a beat into the song when TTS synth outruns stream startup — sensory tuning.
 - **Open: end-to-end latency measurement.** Acceptance so far is mechanism-level
   (fakes prove the buffers work); the motivating ~76s first-music wait has **not**
   been re-measured on a real run. Owed: a `make dev-fishaudio` before/after.

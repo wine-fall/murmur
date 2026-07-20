@@ -77,6 +77,21 @@ def test_ffmpeg_decoder_decodes_a_local_wav(tmp_path: Path):
 
 
 @pytest.mark.integration
+def test_ffmpeg_decoder_raises_on_abnormal_exit(tmp_path: Path):
+    # A source ffmpeg cannot open exits nonzero. read() must surface that as an
+    # error (the "announced but silent" bug: a died decode used to look like a
+    # clean end-of-stream), not return None.
+    decoder = FfmpegDecoder(
+        str(tmp_path / "does-not-exist.mp3"), samplerate=_ENGINE_SR, channels=_CH
+    )
+    try:
+        with pytest.raises(RuntimeError, match="ffmpeg exited"):
+            decoder.read()
+    finally:
+        decoder.close()
+
+
+@pytest.mark.integration
 def test_engine_plays_a_local_file_through_real_ffmpeg(tmp_path: Path):
     """Acceptance #5 (local-file half): the same engine, real decode, no
     audio device (the test pumps render() itself)."""

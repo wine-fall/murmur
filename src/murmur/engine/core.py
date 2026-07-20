@@ -78,6 +78,12 @@ class MusicHandle(Protocol):
 
     async def wait(self) -> None: ...
 
+    async def wait_started(self, timeout: float) -> bool:
+        """True once the source has produced real audio; False if it ends (or
+        times out) before a single frame — an intermittent stream 403 hands back
+        a handle that never decodes (spec 04): the caller must not announce it."""
+        ...
+
 
 @runtime_checkable
 class MixingPlayer(Player, Protocol):
@@ -159,6 +165,9 @@ class MixedHandle:
         duck_target: float,
         loop: asyncio.AbstractEventLoop,
         on_finished: Callable[["MixedHandle"], None],
+        on_started: Callable[["MixedHandle"], None] | None = None,
+        label: str = "music",
+        samplerate: int = 48_000,
     ) -> None:
         self._decoder = decoder
         self._ring = ring
@@ -166,10 +175,17 @@ class MixedHandle:
         self._duck_target = duck_target
         self._loop = loop
         self._on_finished = on_finished
+        self._on_started = on_started
+        self._label = label
+        self._samplerate = samplerate
         self._done = asyncio.Event()
         self._stopping = threading.Event()
         self._eof = threading.Event()
         self._finished = False  # loop-thread only
+        # start-confirmation (spec 04): resolved once the feeder either produces
+        # a first frame (audio began) or ends without one (dead stream).
+        self._start_resolved = asyncio.Event()
+        self._audio_began = False
         self._thread = threading.Thread(target=self._feed, daemon=True)
 
     def start(self) -> None:
@@ -177,23 +193,50 @@ class MixedHandle:
 
     # -- feeder thread ------------------------------------------------------
     def _feed(self) -> None:
+        # Observability (spec 03-02): the whole music path was blind — a song
+        # that yielded zero audio or drained early looked identical to a clean
+        # play. Track frames produced and WHY the feed ended (eos / decoder
+        # error / stopped), and surface the swallowed decoder exception.
+        frames = 0
+        reason = "eos"
+        exc: Exception | None = None
         try:
             while not self._stopping.is_set():
                 try:
                     block = self._decoder.read()
-                except Exception:
-                    break  # a dying decoder ends the track, not the radio
+                except Exception as err:  # a dying decoder ends the track, not the radio
+                    reason, exc = "error", err
+                    break
                 if block is None:
                     break
+                if frames == 0:
+                    _log.event("music.feed first-frame", label=self._label)
+                    self._audio_began = True
+                    self._loop.call_soon_threadsafe(self._signal_started)
+                frames += len(block)
                 offset = 0
                 while offset < len(block) and not self._stopping.is_set():
                     offset += self._ring.write(block[offset:])
                     if offset < len(block):
                         time.sleep(0.002)  # ring full — backpressure
         finally:
+            if self._stopping.is_set():
+                reason = "stopped"
             self._eof.set()
             with contextlib.suppress(Exception):
                 self._decoder.close()
+            _log.event(
+                "music.feed done",
+                label=self._label,
+                reason=reason,
+                frames=frames,
+                seconds=frames / self._samplerate,
+            )
+            if exc is not None:
+                _log.warn(f"music decoder died: {self._label}", exc=exc)
+            # Wake any wait_started() waiter — if we got here with no frame, the
+            # stream is dead and the caller must degrade, not announce (spec 04).
+            self._loop.call_soon_threadsafe(self._start_resolved.set)
 
     # -- audio-thread hooks (called by the engine's render) ------------------
     def drained(self) -> bool:
@@ -203,6 +246,11 @@ class MixedHandle:
         self._loop.call_soon_threadsafe(self._finish)
 
     # -- loop thread ---------------------------------------------------------
+    def _signal_started(self) -> None:
+        self._start_resolved.set()
+        if self._on_started is not None:
+            self._on_started(self)
+
     def _finish(self) -> None:
         if not self._finished:
             self._finished = True
@@ -226,6 +274,13 @@ class MixedHandle:
 
     async def wait(self) -> None:
         await self._done.wait()
+
+    async def wait_started(self, timeout: float) -> bool:
+        try:
+            await asyncio.wait_for(self._start_resolved.wait(), timeout)
+        except asyncio.TimeoutError:
+            return False  # no frame in time -> treat as a dead stream
+        return self._audio_began
 
 
 class _BedFeeder:
@@ -476,17 +531,20 @@ class AudioEngine:
             # Fresh track, fresh envelope; born ducked if a voice is on air.
             target = self._duck_target if voice_live else FULL_GAIN
             if self._bed is not None:
-                # Bed<->song crossfade (spec 03-04 §3.1): fade the bed out while
-                # the song crossfades in (born at 0), both over the bed xfade.
-                self._bed_envelope.set_target(0.0)
+                # Bed<->song crossfade (spec 03-04 §3.1) is DEFERRED to the first
+                # decoded frame (_on_music_started): the bed keeps covering the
+                # stream's ~3s startup, and an intermittent 403 that never decodes
+                # leaves the bed untouched, so a dead stream degrades to talk with
+                # no dead air (spec 04). Song born silent until that crossfade.
                 self._envelope = GainEnvelope(
                     samplerate=self._samplerate, ramp_s=self._ramp_s, initial=0.0
                 )
-                self._envelope.set_target(target, ramp_s=self._bed_xfade_s)
             else:
                 self._envelope = GainEnvelope(
                     samplerate=self._samplerate, ramp_s=self._ramp_s, initial=target
                 )
+        label = clip.title or "music"
+        _log.event("play_music", label=label, ducked=voice_live, bed=self._bed is not None)
         handle = MixedHandle(
             decoder=decoder,
             ring=self._music_ring,
@@ -494,6 +552,9 @@ class AudioEngine:
             duck_target=self._duck_target,
             loop=asyncio.get_running_loop(),
             on_finished=self._on_music_finished,
+            on_started=self._on_music_started,
+            label=label,
+            samplerate=self._samplerate,
         )
         self._music_ring.clear()
         handle.start()
@@ -505,6 +566,19 @@ class AudioEngine:
         """Make an externally-managed music source (e.g. a black-box player's
         ``ControlledHandle``) the live music for duck dispatch (spec §2.2)."""
         self._music = handle
+
+    def _on_music_started(self, handle: MixedHandle) -> None:
+        # First decoded frame (spec 03-04 §3.1 + 04): NOW crossfade the bed out
+        # and the song in, together over the bed xfade — synced to real audio, so
+        # the bed covers startup and a never-starting stream never fades it.
+        if self._mixed is not handle or self._bed is None:
+            return
+        with self._voice_lock:
+            voice_live = self._voice_pcm is not None
+        with self._env_lock:
+            self._bed_envelope.set_target(0.0)
+            target = self._duck_target if voice_live else FULL_GAIN
+            self._envelope.set_target(target, ramp_s=self._bed_xfade_s)
 
     def _on_music_finished(self, handle: MixedHandle) -> None:
         if self._mixed is handle:

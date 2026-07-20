@@ -107,6 +107,33 @@ def test_music_plays_at_full_gain_and_completes_on_eof():
     asyncio.run(go())
 
 
+def test_wait_started_true_once_the_stream_decodes_a_frame():
+    # spec 04: the handle confirms real audio began (not just that play_music
+    # returned) — driven by the feeder, no render() pumping needed.
+    async def go():
+        eng, _ = _engine(FakeDecoder(0.5, 400))
+        handle = await eng.play_music(_music_clip())
+        assert await asyncio.wait_for(handle.wait_started(1.0), 2.0) is True
+        await handle.stop()
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
+def test_wait_started_false_when_stream_yields_no_audio():
+    # The intermittent-403 fingerprint: play_music hands back a handle whose
+    # decoder ends before a single frame. wait_started must report False so the
+    # Director degrades instead of announcing a song that never plays.
+    async def go():
+        eng, _ = _engine(FakeDecoder(0.5, 0))  # zero frames -> immediate EOF
+        handle = await eng.play_music(_music_clip())
+        assert await asyncio.wait_for(handle.wait_started(1.0), 2.0) is False
+        await handle.stop()
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
 def test_voice_auto_ducks_live_music_and_unducks_after():
     async def go():
         eng, _ = _engine(FakeDecoder(0.5, 100_000), voice_frames=400)
@@ -156,6 +183,9 @@ def test_auto_duck_dispatches_through_the_music_handle_protocol():
         async def wait(self) -> None:
             pass
 
+        async def wait_started(self, timeout: float) -> bool:
+            return True
+
     async def go():
         eng, _ = _engine(voice_frames=100)
         fake = FakeControlledHandle()
@@ -187,6 +217,9 @@ def test_play_music_stops_an_adopted_external_handle_first():
             self.stops += 1
 
         async def wait(self) -> None: ...
+
+        async def wait_started(self, timeout: float) -> bool:
+            return True
 
     async def go():
         eng, _ = _engine(FakeDecoder(0.5, 400))
@@ -330,17 +363,23 @@ class FakeBedSource:
         return list(self._paths)
 
 
-def _bed_engine(bed_value: float, song_value: float = 0.8, bed_frames: int = 100_000):
+def _bed_engine(
+    bed_value: float,
+    song_value: float = 0.8,
+    bed_frames: int = 100_000,
+    song_frames: int = 400,
+):
     """An engine wired so each source has a distinct constant value and a FRESH
     decoder per open (the bed feeder reopens tracks when it loops). Records
-    every source the decoder factory was asked for."""
+    every source the decoder factory was asked for. ``song_frames=0`` models a
+    stream that never produces audio (the intermittent 403)."""
     opened: list[str] = []
 
     def decoder_factory(source: str) -> FakeDecoder:
         opened.append(source)
         # Music (play_music) uses fake://; bed uses the scripted paths.
         value = song_value if source.startswith("fake://") else bed_value
-        frames = 400 if source.startswith("fake://") else bed_frames
+        frames = song_frames if source.startswith("fake://") else bed_frames
         return FakeDecoder(value, frames)
 
     def voice_loader(source: str) -> np.ndarray:
@@ -397,6 +436,28 @@ def test_bed_crossfades_out_under_the_song_and_back_when_it_ends():
         await _pump_until(eng, lambda b: np.allclose(b, 0.0))
         # Song is short (400 frames); drain it -> bed crossfades back in.
         await _pump_until(eng, lambda b: np.allclose(b, 0.2))
+        await eng.aclose()
+
+    asyncio.run(go())
+
+
+def test_bed_stays_up_when_the_song_never_produces_audio():
+    """spec 04: a stream that never decodes a frame must NOT fade the bed out.
+    The bed<->song crossfade is deferred to the first real frame, so a dead pick
+    leaves the bed covering the gap (no dead air); the Director then degrades to
+    talk via wait_started (which reports False here)."""
+
+    async def go():
+        eng, _ = _bed_engine(bed_value=0.5, song_frames=0)  # song = immediate EOF
+        await eng.start_bed(FakeBedSource(["a.wav"]))
+        await _pump_until(eng, lambda b: np.allclose(b, 0.2))  # steady bed
+        handle = await eng.play_music(_music_clip())
+        assert await asyncio.wait_for(handle.wait_started(1.0), 2.0) is False
+        # The bed never crossfaded out: output holds at bed gain, no dead air.
+        for _ in range(10):
+            assert np.allclose(eng.render(_BLOCK), 0.2), "bed faded despite no song"
+            await asyncio.sleep(0.001)
+        await handle.stop()
         await eng.aclose()
 
     asyncio.run(go())

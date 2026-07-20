@@ -45,11 +45,12 @@ def _make(
     picks: list[TrackPick] | None = None,
     cadence=None,
     auto_finish: bool = True,
+    started: bool = True,
 ):
     cli = FakeCli(lines)
     brain = FakeBrain()
     voice = FakeVoice()
-    engine = FakeEngine(play_delay=play_delay, auto_finish=auto_finish)
+    engine = FakeEngine(play_delay=play_delay, auto_finish=auto_finish, started=started)
     programmer = FakeMusicProgrammer(picks=picks)
     memory = InProcessMemoryStore()
     director = Director(
@@ -147,6 +148,28 @@ def test_next_track_none_falls_back_to_talk():
         assert len(programmer.contexts) == 2
         # The silent fallback is observable (found live: invisible otherwise).
         assert any("back to talk" in m for m in cli.infos)
+
+    asyncio.run(go())
+
+
+def test_stream_that_never_starts_degrades_to_talk_without_announcing():
+    """spec 04: play_music can hand back a handle whose stream 403s and never
+    decodes a frame. The Director must catch that (wait_started False) and fall
+    back to talk WITHOUT airing the intro or claiming 'now playing' — the announce
+    must never narrate a song that never played."""
+
+    async def go():
+        director, cli, brain, engine, programmer, memory = _make(
+            picks=[_pick()], started=False, auto_finish=False
+        )
+        await director.run(max_segments=2)
+        assert [c.source for c in engine.music_played] == ["stream:r1"]  # attempted
+        assert "fake:up next: T1" not in engine.played  # intro never aired
+        assert "up next: T1" not in cli.radio
+        assert not any("now playing" in m for m in cli.infos)  # never claimed
+        assert any("failed to start" in m for m in cli.infos)  # visible degrade
+        assert engine.handles[0].stops == 1  # the dead handle was torn down
+        assert cli.radio == ["talk-1", "talk-2"]  # fell back to talk
 
     asyncio.run(go())
 
