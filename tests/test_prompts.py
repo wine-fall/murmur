@@ -26,6 +26,33 @@ def test_next_talks_prompt_asks_to_call_the_tool_for_count_beats():
     assert "just starting" in prompt  # cold-open head, like the single builder
 
 
+# --- time-of-day scene (spec 04 §3.4) ------------------------------------- #
+
+
+def test_next_talks_prompt_threads_scene_guidance_when_set():
+    ctx = ContextPack(persona="persona", recent=[], scene="late-night")
+    prompt = build_next_talks_prompt(ctx, count=2)
+    assert "late at night" in prompt  # the late-night scene guidance is present
+
+
+def test_next_talk_prompt_threads_scene_guidance_when_set():
+    ctx = ContextPack(persona="persona", recent=[], scene="morning")
+    prompt = build_next_talk_prompt(ctx)
+    assert "morning" in prompt  # the morning scene guidance is present
+
+
+def test_prompts_omit_scene_guidance_when_absent():
+    # scene defaults to None -> no time-of-day sentence leaks into the prompt.
+    assert "late at night" not in build_next_talk_prompt(_ctx([]))
+    assert "late at night" not in build_next_talks_prompt(_ctx([]), count=2)
+
+
+def test_unknown_scene_is_ignored_not_crashed():
+    # A label with no guidance mapping degrades to no scene line (never raises).
+    ctx = ContextPack(persona="persona", recent=[], scene="zzz-unknown")
+    assert "zzz-unknown" not in build_next_talk_prompt(ctx)
+
+
 def test_next_talk_cold_open_has_no_transcript():
     prompt = build_next_talk_prompt(_ctx([]))
     assert "just starting" in prompt
