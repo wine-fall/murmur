@@ -91,6 +91,13 @@ class Config:
     cadence_mode: str = "every_n"
     music_every_n: int = 2
 
+    # --- background bed (spec 03-04) ---------------------------------------
+    # A continuous low-volume instrumental under all talk, so pure-talk stretches
+    # are never dead silence. On by default when the cache has tracks; the pull
+    # happens at first-run loading (bed.py), never on the audio path. The bed
+    # gain / crossfade are module constants (engine/mixer.py), by-ear tunable.
+    bed_enabled: bool = True
+
     # --- memory (master §6) -----------------------------------------------
     # Size of the recent-turns window handed to the Brain per call.
     recent_window: int = 12

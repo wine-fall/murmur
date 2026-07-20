@@ -1,8 +1,28 @@
 # spec/03-04 · background bed — always-on low-volume music under talk
 
-> **Status**: **Design — awaiting sign-off.** No code yet. Written for a coding
-> agent; the build follows once the design is approved (test-first per
-> `murmur-build-spec`).
+> **Status**: **Built** (mechanism-level; by-ear tuning open). The bed channel,
+> crossfade primitive, cached source, first-run pull, and CLI/Make wiring are
+> implemented and unit-green; a real-boundary smoke pulled a bed and played it
+> under talk with a bed↔song crossfade. The sensory pass (§5.8) — bed level,
+> crossfade smoothness, loop inaudibility, and tuning `_BED_GAIN`/`_BED_XFADE_S`
+> — is a by-ear checklist owed to the user (like the L0/L1 sensory bars).
+>
+> **As-built notes (divergences from the design, all minor):**
+> - **Gains stay module constants**, not config. §1.6 listed "bed gain as
+>   config"; §3.3 said "module constants". Kept them constants in
+>   `engine/mixer.py` (`BED_GAIN`, `BED_XFADE_S`, mirroring 03-02's
+>   `DUCK_TARGET`); config/CLI carry only on/off (`bed_enabled` / `--no-bed`).
+>   The engine also accepts them as constructor params (tests inject tiny
+>   values); adding env/CLI overrides later is a one-liner if wanted.
+> - **First-run pull runs as an app-loading step** (`app.py`, before the radio
+>   loop), not as a `StartupCheck` instance. The pull is non-interactive and
+>   self-degrading; the `StartupCheck` seam is for interactive preflights. Intent
+>   of §2.3 (loading-time, before the loop, degrades cleanly) is met.
+> - **Manifest uses `ytsearch1:` refs** for the L1 curated set (a rotating
+>   handful of calm instrumentals) rather than hand-pinned video ids — a copied
+>   id that rots takes its line with it, and ids can't be verified offline. The
+>   pulled file is cached and stable thereafter (the cache key is the ref string).
+>   Upgrade path: pin explicit CC-BY URLs once verified.
 > **Part**: An extension of the [`03-02`](03-02-ducking.md) mixing engine. 03-02
 > plays a **featured song** and ducks it under voice, but during pure talk there
 > is **no music at all** — silence under the host. This spec adds a continuous,

@@ -1,0 +1,27 @@
+# murmur background-bed manifest (spec 03-04)
+#
+# One yt-dlp-resolvable ref per line; blank lines and lines starting with "#"
+# are ignored. These are pulled to ~/.cache/murmur/bed/ at first-run loading
+# (or via `make bed-refresh` after editing this file) and played as a low-volume
+# instrumental backdrop under all talk. The repo stays binary-free: only this
+# text list is committed; the audio lives in the per-user cache.
+#
+# Curation (L1): an all-lofi set of calm, instrumental, ~1-hour mixes with a bit
+# of vibe variety (chill/study, rainy, reggae-dub, classic). Refs are pinned
+# watch URLs (reproducible); audio-only is pulled (yt-dlp -f bestaudio). License:
+# these are "no copyright / royalty free" lofi channels; yt-dlp reports no CC
+# license for them — the same acquisition posture as the featured songs, which
+# also stream from arbitrary YouTube (master §10.1). Swap in verified CC-BY
+# sources if a stricter posture is wanted.
+
+# -- lofi, chill/study -- eL FeuS, "City of gameRS — Chill/Gaming/Studying" (~61m)
+https://www.youtube.com/watch?v=Htp5SsP9WK0
+
+# -- lofi, rainy/sleepy -- realluis089, "1 Hour of Rain Lofi HipHop" (~60m)
+https://www.youtube.com/watch?v=KuC4dBSHUoA
+
+# -- lofi, reggae-dub -- Walking in Lofi, "Relaxing Lofi Reggae Dub" (~60m)
+https://www.youtube.com/watch?v=xVhRsq4ukjo
+
+# -- lofi, classic mix -- Super Lofi World, "No Copyright 1 Hour Lofi Mix" (~1h41)
+https://www.youtube.com/watch?v=LTphVIore3A
