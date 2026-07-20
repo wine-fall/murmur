@@ -8,6 +8,9 @@
 # Knobs:  VOICE=spark|stub|qwen3|...   (real TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
 #                                        no music — needs no network/model/binaries)
+#         MURMUR_SCENE=morning|afternoon|evening|late-night
+#                                      (force the time-of-day scene for by-ear
+#                                       testing; unset = derive from the clock)
 
 .DEFAULT_GOAL := help
 

@@ -165,9 +165,15 @@ this makes the host speak to the actual local time.
   12:00–17:59, **evening** 18:00–22:59, **late-night** 23:00–04:59 (wraps past
   midnight). Clock-free: the caller passes the `datetime`, so the boundaries are
   pinned in tests with injected values (never `datetime.now()`).
-- **Population:** the Director derives `scene_for(datetime.now())` where it builds
-  the `ContextPack` (`_context`), so every Brain call this turn carries the current
-  scene. The real wall clock lives in the Director; `scene_for` is the tested seam.
+- **Population:** the Director calls `scene.current_scene(datetime.now())` where it
+  builds the `ContextPack` (`_context`), so every Brain call this turn carries the
+  current scene. The real wall clock lives in the Director; `scene_for` is the pure
+  tested seam that `current_scene` wraps.
+- **Override (by-ear / testing):** `MURMUR_SCENE=morning|afternoon|evening|late-night`
+  forces the scene regardless of the clock, so a scene can be auditioned without
+  waiting for the hour. Handled in `current_scene`; an empty/unset value derives
+  from the clock, a non-empty invalid value warns and degrades to the clock (a typo
+  never breaks the radio — same posture as the `Config` env knobs).
 - **Prompt:** the self-initiated talk builders (`build_next_talk_prompt`,
   `build_next_talks_prompt`) append a short per-scene mood cue keyed by
   `ctx.scene`. A `None` or unmapped scene appends nothing (degrades silently).
@@ -234,6 +240,10 @@ this makes the host speak to the actual local time.
     self-initiated talk prompts; a `None` / unmapped scene appends nothing.
     Verified on the prompt strings (deterministic). The host's actual time-of-day
     voice is an eval / by-ear item, not a unit assertion.
+12. **§3.4 (scene override):** a valid `MURMUR_SCENE` wins over the clock; an
+    empty/unset value derives from the clock; a non-empty invalid value degrades
+    to the clock (never raises). Verified with a fixed clock whose derived bucket
+    differs from the override, so the env is proven to win.
 
 ---
 

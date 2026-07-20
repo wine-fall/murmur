@@ -11,7 +11,7 @@ from datetime import datetime
 
 import pytest
 
-from murmur.scene import scene_for
+from murmur.scene import current_scene, scene_for
 
 
 def _at(hour: int, minute: int = 0) -> datetime:
@@ -38,3 +38,33 @@ def _at(hour: int, minute: int = 0) -> datetime:
 )
 def test_scene_boundaries(hour: int, minute: int, expected: str) -> None:
     assert scene_for(_at(hour, minute)) == expected
+
+
+# --- MURMUR_SCENE override (by-ear / testing knob) ------------------------ #
+
+# 15:00 would derive "afternoon" from the clock — a distinct value, so an
+# override test proves the env won, not a coincidental match.
+_CLOCK = _at(15, 0)
+
+
+def test_valid_override_wins_over_the_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("MURMUR_SCENE", "late-night")
+    assert current_scene(_CLOCK) == "late-night"  # not the clock's "afternoon"
+
+
+def test_no_override_falls_back_to_the_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("MURMUR_SCENE", raising=False)
+    assert current_scene(_CLOCK) == scene_for(_CLOCK) == "afternoon"
+
+
+def test_blank_or_invalid_override_falls_back_to_the_clock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # A typo / empty value must never break the radio — it degrades to the clock.
+    for bad in ("", "   ", "mornin", "noon"):
+        monkeypatch.setenv("MURMUR_SCENE", bad)
+        assert current_scene(_CLOCK) == "afternoon"
