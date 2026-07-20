@@ -6,27 +6,22 @@
 # instrumental backdrop under all talk. The repo stays binary-free: only this
 # text list is committed; the audio lives in the per-user cache.
 #
-# Curation (L1): a small rotating set of calm, instrumental, no-vocal, ~1-hour
-# radio-style mixes — long enough that the loop is inaudible, one per style
-# (piano, ambient, lofi, classical). Refs are pinned watch URLs (reproducible),
-# audio-only is pulled (yt-dlp -f bestaudio). Note on license: these are
-# "relaxing / no copyright" mix channels; yt-dlp does not report a CC license
-# for them (unlike a strict CC-BY set), but this is the same acquisition posture
-# as the featured songs, which also stream from arbitrary YouTube (master §10.1).
-# Swap in verified CC-BY / public-domain sources if a stricter posture is wanted.
+# Curation (L1): an all-lofi set of calm, instrumental, ~1-hour mixes with a bit
+# of vibe variety (chill/study, rainy, reggae-dub, classic). Refs are pinned
+# watch URLs (reproducible); audio-only is pulled (yt-dlp -f bestaudio). License:
+# these are "no copyright / royalty free" lofi channels; yt-dlp reports no CC
+# license for them — the same acquisition posture as the featured songs, which
+# also stream from arbitrary YouTube (master §10.1). Swap in verified CC-BY
+# sources if a stricter posture is wanted.
 
-# -- solo piano -- Soothing Relaxation (Peder B. Helland), "1 Hour of Relaxing
-# Piano Music" (~64 min).
-https://www.youtube.com/watch?v=C5dOIYD7TeU
+# -- lofi, chill/study -- eL FeuS, "City of gameRS — Chill/Gaming/Studying" (~61m)
+https://www.youtube.com/watch?v=Htp5SsP9WK0
 
-# -- ambient -- Dandelion Meditation, "1 Hour Royalty Free / No Copyright, Soft
-# Piano / ambient" (~58 min).
-https://www.youtube.com/watch?v=6AprmkxM9H0
+# -- lofi, rainy/sleepy -- realluis089, "1 Hour of Rain Lofi HipHop" (~60m)
+https://www.youtube.com/watch?v=KuC4dBSHUoA
 
-# -- light lofi -- Super Lofi World, "No Copyright 1 Hour Lofi Hip Hop Mix"
-# (~1h41; the calmest clean-labelled lofi mix found near an hour).
+# -- lofi, reggae-dub -- Walking in Lofi, "Relaxing Lofi Reggae Dub" (~60m)
+https://www.youtube.com/watch?v=xVhRsq4ukjo
+
+# -- lofi, classic mix -- Super Lofi World, "No Copyright 1 Hour Lofi Mix" (~1h41)
 https://www.youtube.com/watch?v=LTphVIore3A
-
-# -- classical -- Le sofa, "1 Hour of Chopin — Relaxing Classical Piano"
-# (~60 min; public-domain Chopin works).
-https://www.youtube.com/watch?v=LLHJqxyyOq4

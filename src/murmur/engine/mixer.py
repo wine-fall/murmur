@@ -15,7 +15,7 @@ DUCK_TARGET = 0.3  # starting value, tuned by ear (spec 03-02 §6)
 RAMP_S = 0.3
 
 # Background bed (spec 03-04 §3.3) — module constants, by-ear tunable (§6).
-BED_GAIN = 0.18  # bed level under talk (well below voice; no per-voice duck)
+BED_GAIN = 0.5  # bed level under talk (below voice; no per-voice duck) — by ear
 BED_XFADE_S = 1.5  # bed<->song and bed-loop crossfade duration (start linear)
 
 
