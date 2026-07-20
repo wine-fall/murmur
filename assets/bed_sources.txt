@@ -1,0 +1,22 @@
+# murmur background-bed manifest (spec 03-04)
+#
+# One yt-dlp-resolvable ref per line; blank lines and lines starting with "#"
+# are ignored. These are pulled to ~/.cache/murmur/bed/ at first-run loading
+# (or via `make bed-refresh` after editing this file) and played as a low-volume
+# instrumental backdrop under all talk. The repo stays binary-free: only this
+# text list is committed; the audio lives in the per-user cache.
+#
+# Curation posture (L1): a small rotating set of long, calm, instrumental
+# ambient pieces — no vocals, no strong hooks (the bed is the backdrop, never
+# the foreground; the featured song is the foreground event). License: prefer
+# Creative Commons / royalty-free sources; note attribution per source below.
+#
+# Refs are `ytsearch1:` queries so curation is by description rather than a
+# brittle hand-copied video id (an id that rots takes the whole line with it);
+# the pulled file is cached and stable thereafter. Upgrade path: pin explicit
+# CC-BY URLs (e.g. Kevin MacLeod / incompetech) once verified. Keep this set
+# small (a handful) — see spec 03-04 §6 "bed track length / rotation policy".
+
+ytsearch1:Kevin MacLeod Ambient royalty free long
+ytsearch1:calm ambient instrumental no copyright 1 hour
+ytsearch1:relaxing lofi ambient background music no copyright

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from murmur.engine.mixer import GainEnvelope, mix
+from murmur.engine.mixer import GainEnvelope, crossfade, mix
 
 _SR = 48_000
 
@@ -85,3 +85,74 @@ def test_mix_limits_to_unit_range():
     assert np.all(out >= -1.0)
     loud_negative = mix(-music, -voice, gains)
     assert np.all(loud_negative >= -1.0)
+
+
+# --- spec 03-04: bed channel + crossfade primitive ------------------------- #
+
+
+def test_mix_sums_the_optional_bed_channel():
+    """The bed (spec 03-04) is a third gained source summed before limiting."""
+    n = 4
+    music = np.full((n, 2), 0.5, dtype=np.float32)
+    voice = np.full((n, 2), 0.1, dtype=np.float32)
+    bed = np.full((n, 2), 0.4, dtype=np.float32)
+    music_gains = np.ones(n, dtype=np.float32)
+    bed_gains = np.full(n, 0.5, dtype=np.float32)
+    out = mix(music, voice, music_gains, bed, bed_gains)
+    expected = music * music_gains[:, None] + bed * bed_gains[:, None] + voice
+    assert out.dtype == np.float32
+    assert np.array_equal(out, expected)
+
+
+def test_mix_without_bed_is_unchanged():
+    """Bed is optional — omitting it keeps the exact 03-02 behavior."""
+    n = 3
+    music = np.full((n, 2), 0.5, dtype=np.float32)
+    voice = np.full((n, 2), 0.25, dtype=np.float32)
+    gains = np.ones(n, dtype=np.float32)
+    assert np.array_equal(mix(music, voice, gains), music * gains[:, None] + voice)
+
+
+def test_crossfade_is_complementary_with_no_gap():
+    """Loop/rotation primitive (acceptance #3): the boundary overlaps with
+    complementary gains — for a steady signal there is no dip and no gap."""
+    n = 8
+    a = np.ones((n, 2), dtype=np.float32)
+    b = np.ones((n, 2), dtype=np.float32)
+    out = crossfade(a, b)
+    assert out.shape == (n, 2)
+    assert out.dtype == np.float32
+    # Equal steady signals -> the sum of the two ramps is flat (no zero-gap).
+    assert np.allclose(out, 1.0)
+    assert not np.any(np.all(out == 0.0, axis=1))  # no silent frame
+
+
+def test_crossfade_ramps_from_a_to_b():
+    n = 5
+    a = np.ones((n, 2), dtype=np.float32)  # outgoing
+    b = np.zeros((n, 2), dtype=np.float32)  # incoming
+    out = crossfade(a, b)
+    # a fades out: starts near full, ends near zero, monotonically down.
+    assert out[0, 0] > out[-1, 0]
+    assert np.all(np.diff(out[:, 0]) <= 0)
+    a2 = np.zeros((n, 2), dtype=np.float32)
+    b2 = np.ones((n, 2), dtype=np.float32)
+    up = crossfade(a2, b2)  # b fades in: monotonically up
+    assert np.all(np.diff(up[:, 0]) >= 0)
+
+
+def test_set_target_ramp_override_does_not_change_the_default_ramp():
+    """A one-off long crossfade-in must not slow the subsequent fast duck
+    (spec 03-04: the song crossfades in over _BED_XFADE_S, then ducks over
+    RAMP_S)."""
+    env = GainEnvelope(samplerate=_SR, ramp_s=0.3, initial=0.0)
+    env.set_target(1.0, ramp_s=1.5)  # slow crossfade-in
+    # After 0.3 s (the default ramp) it is NOT yet at full — the override is slow.
+    partial = _drain(env, int(0.3 * _SR))
+    assert partial[-1] < 1.0
+    # Finish the slow ramp, then a default-ramp retarget uses 0.3 s again.
+    _drain(env, int(1.3 * _SR))
+    assert env.current == np.float32(1.0)
+    env.set_target(0.3)  # no override -> the fast default ramp
+    fast = _drain(env, int(0.3 * _SR))
+    assert fast[-1] == np.float32(0.3)

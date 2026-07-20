@@ -17,7 +17,7 @@ MEM_LOG := .dev/mem.log
 
 ifdef STUB
   SYNC_ARGS      := --extra dev
-  RUN_ARGS       := --brain stub --voice stub --no-music
+  RUN_ARGS       := --brain stub --voice stub --no-music --no-bed
   PREFLIGHT_ARGS := --no-music --voice stub
 else
   SYNC_ARGS      := --all-extras
@@ -25,7 +25,7 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
-.PHONY: help dev dev-remote dev-fishaudio dev-opuslab logs preflight setup-music install
+.PHONY: help dev dev-remote dev-fishaudio dev-opuslab logs preflight setup-music install bed-refresh
 
 help:
 	@echo "murmur dev:"
@@ -39,6 +39,7 @@ help:
 	@echo "                    (memory is also recorded to $(MEM_LOG) while dev runs)"
 	@echo "  make preflight    check music/voice deps without launching"
 	@echo "  make setup-music  run the guided binary (yt-dlp/ffmpeg) repair"
+	@echo "  make bed-refresh  (re-)pull the background-bed manifest into the cache"
 	@echo ""
 	@echo "  knobs:  VOICE=spark|stub|...   STUB=1 (full offline)"
 
@@ -106,3 +107,8 @@ logs:
 
 setup-music:
 	uv run murmur --setup-music
+
+bed-refresh:
+	@# (Re-)pull the curated background-bed manifest into the local cache after
+	@# editing assets/bed_sources.txt (spec 03-04). Warm entries are skipped.
+	uv run python -m murmur.bed

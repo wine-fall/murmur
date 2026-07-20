@@ -94,6 +94,34 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     elif config.music_enabled:
         cli.info("music needs the claude brain; running talk-only.")
 
+    # Background bed (spec 03-04): a one-time loading pull of the curated
+    # manifest into the local cache (onboarding-style, off the audio path), then
+    # start the continuous backdrop before the first talk. Degrades to no bed on
+    # any failure (offline / empty cache / --no-bed) — the radio still starts.
+    if config.bed_enabled:
+        from .bed import (
+            DEFAULT_CACHE_DIR,
+            DEFAULT_MANIFEST,
+            CachedBedSource,
+            pull_bed,
+            ytdlp_download,
+        )
+
+        async def _download(ref: str, dest_base: Path) -> None:
+            await ytdlp_download(ref, dest_base, ytdlp=config.ytdlp_cmd)
+
+        await pull_bed(
+            manifest=DEFAULT_MANIFEST,
+            cache_dir=DEFAULT_CACHE_DIR,
+            download=_download,
+            log=cli.info,
+        )
+        bed_source = CachedBedSource(DEFAULT_CACHE_DIR)
+        if bed_source.tracks():
+            await player.start_bed(bed_source)
+        else:
+            cli.info("no background bed this session (empty cache).")
+
     director = Director(
         config=config,
         persona=persona,
@@ -205,6 +233,11 @@ def _parse_args(argv: list[str] | None) -> argparse.Namespace:
         help="skip the music startup check and scheduling (talk-only session)",
     )
     p.add_argument(
+        "--no-bed",
+        action="store_true",
+        help="skip the always-on background music bed (spec 03-04)",
+    )
+    p.add_argument(
         "--cadence",
         choices=["every_n", "random", "brain"],
         default=None,
@@ -241,6 +274,8 @@ def _apply_overrides(config: Config, args: argparse.Namespace) -> Config:
         config = replace(config, tts_reference_id=args.tts_reference)
     if args.no_music:
         config = replace(config, music_enabled=False)
+    if args.no_bed:
+        config = replace(config, bed_enabled=False)
     if args.cadence is not None:
         config = replace(config, cadence_mode=args.cadence)
     return config

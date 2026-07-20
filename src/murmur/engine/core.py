@@ -19,13 +19,23 @@ import asyncio
 import contextlib
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable, Protocol, TypeAlias, runtime_checkable
 
 import numpy as np
 
 from ..contracts import AudioClip, Player
 from ..logging_setup import get_log
-from .mixer import DUCK_TARGET, FULL_GAIN, RAMP_S, GainEnvelope, mix
+from .mixer import (
+    BED_GAIN,
+    BED_XFADE_S,
+    DUCK_TARGET,
+    FULL_GAIN,
+    RAMP_S,
+    GainEnvelope,
+    crossfade,
+    mix,
+)
 
 _log = get_log("engine")
 
@@ -76,6 +86,15 @@ class MixingPlayer(Player, Protocol):
     real impl; tests inject a fake."""
 
     async def play_music(self, clip: AudioClip) -> MusicHandle: ...
+
+
+@runtime_checkable
+class BedSource(Protocol):
+    """The cached local bed tracks (spec 03-04 §2.2), in play order (empty ->
+    no bed). Local files only: resolving/pulling happened at first-run loading,
+    never on the audio path — no network at this seam."""
+
+    def tracks(self) -> list[Path]: ...
 
 
 class _Ring:
@@ -209,6 +228,119 @@ class MixedHandle:
         await self._done.wait()
 
 
+class _BedFeeder:
+    """Feeds the bed ring (spec 03-04 §3.1): streams each cached track through
+    the decoder, crossfades track->track (and a single track into itself) so the
+    backdrop loops gap-free, and rotates the list forever until stopped. A
+    bad/empty track is skipped; if no track yields audio the bed degrades to
+    silence. Local files only — the source paths are handed straight to the
+    decoder factory, never resolved over the network.
+
+    Streaming (not load-fully): the real bed tracks are long ambient pieces, so
+    we emit blocks as they decode and hold back only the last ``xfade`` samples
+    as the tail to crossfade into the next track. Memory stays bounded to ~one
+    crossfade window, and the ring fills immediately instead of after the whole
+    (possibly hour-long) track decodes.
+    """
+
+    def __init__(
+        self,
+        *,
+        bed: BedSource,
+        ring: _Ring,
+        decoder_factory: Callable[[str], Decoder],
+        xfade_samples: int,
+        channels: int,
+    ) -> None:
+        self._sources = [str(p) for p in bed.tracks()]
+        self._ring = ring
+        self._decoder_factory = decoder_factory
+        self._xfade = max(1, xfade_samples)
+        self._channels = channels
+        self._stopping = threading.Event()
+        self._thread = threading.Thread(target=self._feed, daemon=True)
+
+    def start(self) -> None:
+        self._thread.start()
+
+    async def stop(self) -> None:
+        self._stopping.set()
+        if self._thread.is_alive():
+            await asyncio.to_thread(self._thread.join, 2.0)
+
+    def _write(self, block: _Block) -> None:
+        offset = 0
+        while offset < len(block) and not self._stopping.is_set():
+            offset += self._ring.write(block[offset:])
+            if offset < len(block):
+                time.sleep(0.002)  # ring full — backpressure paces the feeder
+
+    def _stream_track(self, source: str, carry: _Block | None) -> _Block | None:
+        """Stream one track to the ring, crossfading its head against ``carry``
+        (the previous track's tail). Returns this track's tail (held back, to
+        crossfade into the next track), or None on open failure / empty track."""
+        try:
+            decoder = self._decoder_factory(source)
+        except Exception:
+            return None
+        xf = self._xfade
+        # Prime the buffer with the carry so the first xf samples crossfade it.
+        hold: _Block = (
+            carry
+            if carry is not None
+            else np.zeros((0, self._channels), dtype=np.float32)
+        )
+        need_fade = carry is not None
+        try:
+            while not self._stopping.is_set():
+                block = decoder.read()
+                if block is None:
+                    break
+                hold = np.concatenate((hold, block))  # pyright: ignore[reportUnknownMemberType]
+                if need_fade:
+                    if len(hold) < 2 * xf:
+                        continue  # still collecting carry-tail + this-head
+                    self._write(crossfade(hold[:xf], hold[xf : 2 * xf]))
+                    hold = hold[2 * xf :]
+                    need_fade = False
+                if len(hold) > xf:  # emit all but the trailing xf (potential tail)
+                    self._write(hold[:-xf])
+                    hold = hold[-xf:]
+        except Exception:
+            pass  # a dying decoder ends this track, not the bed
+        finally:
+            with contextlib.suppress(Exception):
+                decoder.close()
+        if need_fade:
+            # Track shorter than a crossfade window: flush what we have (carry +
+            # the stub track), no clean tail to carry forward. Rare, and only for
+            # a sub-xfade track — a tiny seam, never a crash.
+            if len(hold):
+                self._write(hold)
+            return None
+        return hold if len(hold) else None
+
+    def _feed(self) -> None:
+        if not self._sources:
+            return
+        carry: _Block | None = None  # tail of the previous track, awaiting xfade
+        idx = 0
+        misses = 0
+        while not self._stopping.is_set():
+            source = self._sources[idx % len(self._sources)]
+            idx += 1
+            tail = self._stream_track(source, carry)
+            if tail is None and carry is not None:
+                carry = None  # its carry was flushed inside; start the next fresh
+            if tail is None:
+                misses += 1
+                if misses >= len(self._sources):
+                    return  # every track dead this pass -> degrade to no bed
+                continue
+            misses = 0
+            carry = tail
+
+
 class AudioEngine:
     """Sole audio authority (spec 03-02 §2.1): music + voice, mixed, ducked.
 
@@ -232,6 +364,8 @@ class AudioEngine:
         ramp_s: float = RAMP_S,
         music_buffer_s: float = 4.0,
         voice_timeout_margin_s: float = 5.0,
+        bed_gain: float = BED_GAIN,
+        bed_xfade_s: float = BED_XFADE_S,
     ) -> None:
         self._decoder_factory = decoder_factory
         self._voice_loader = voice_loader
@@ -242,17 +376,30 @@ class AudioEngine:
         self._duck_target = duck_target
         self._ramp_s = ramp_s
         self._voice_timeout_margin_s = voice_timeout_margin_s
+        self._bed_gain = bed_gain
+        self._bed_xfade_s = bed_xfade_s
         self._sink: Sink | None = None
         # Scratch buffers reused by render() — the audio callback must not
         # allocate per block (an allocator stall there is an audible dropout).
         self._music_buf: _Block = np.zeros((blocksize, channels), dtype=np.float32)
         self._voice_buf: _Block = np.zeros((blocksize, channels), dtype=np.float32)
+        self._bed_buf: _Block = np.zeros((blocksize, channels), dtype=np.float32)
 
-        self._env_lock = threading.Lock()
+        self._env_lock = threading.Lock()  # guards both envelopes below
         self._envelope = GainEnvelope(samplerate=samplerate, ramp_s=ramp_s)
         self._music_ring = _Ring(int(music_buffer_s * samplerate), channels)
         self._music: MusicHandle | None = None  # whatever duck() dispatches to
         self._mixed: MixedHandle | None = None  # our own PCM-backed handle
+
+        # The background bed (spec 03-04): its own ring + envelope. The envelope
+        # starts at 0 (silent) and crossfades up over bed_xfade_s on start_bed;
+        # it is driven only by start/stop and the bed<->song crossfade — never by
+        # a voice clip, so the bed does NOT pump-duck under talk (§1.5).
+        self._bed_ring = _Ring(int(music_buffer_s * samplerate), channels)
+        self._bed_envelope = GainEnvelope(
+            samplerate=samplerate, ramp_s=bed_xfade_s, initial=0.0
+        )
+        self._bed: _BedFeeder | None = None
 
         self._voice_lock = threading.Lock()
         self._voice_pcm: _Block | None = None
@@ -327,10 +474,19 @@ class AudioEngine:
             voice_live = self._voice_pcm is not None
         with self._env_lock:
             # Fresh track, fresh envelope; born ducked if a voice is on air.
-            initial = self._duck_target if voice_live else FULL_GAIN
-            self._envelope = GainEnvelope(
-                samplerate=self._samplerate, ramp_s=self._ramp_s, initial=initial
-            )
+            target = self._duck_target if voice_live else FULL_GAIN
+            if self._bed is not None:
+                # Bed<->song crossfade (spec 03-04 §3.1): fade the bed out while
+                # the song crossfades in (born at 0), both over the bed xfade.
+                self._bed_envelope.set_target(0.0)
+                self._envelope = GainEnvelope(
+                    samplerate=self._samplerate, ramp_s=self._ramp_s, initial=0.0
+                )
+                self._envelope.set_target(target, ramp_s=self._bed_xfade_s)
+            else:
+                self._envelope = GainEnvelope(
+                    samplerate=self._samplerate, ramp_s=self._ramp_s, initial=target
+                )
         handle = MixedHandle(
             decoder=decoder,
             ring=self._music_ring,
@@ -355,15 +511,57 @@ class AudioEngine:
             self._mixed = None
         if self._music is handle:
             self._music = None
+        # Song over -> crossfade the bed back in (spec 03-04 §3.1). Harmless if
+        # a new song is starting: play_music re-targets the bed to 0 right after.
+        if self._bed is not None:
+            with self._env_lock:
+                self._bed_envelope.set_target(self._bed_gain)
 
     def _set_gain_target(self, target: float) -> None:
         with self._env_lock:
             self._envelope.set_target(target)
 
+    # -- background bed (spec 03-04) -----------------------------------------
+    async def start_bed(self, bed: BedSource) -> None:
+        """Begin the continuous low-gain backdrop (idempotent). Pulls PCM from
+        ``bed``'s local tracks, looping/rotating with a crossfade so it never
+        gaps, and crossfades it up to the bed gain. No-op if a bed is already
+        running or the source is empty (degrade to no bed)."""
+        if self._bed is not None:
+            return
+        if not bed.tracks():
+            return  # empty cache -> no bed, radio still runs (§3.4)
+        self._ensure_sink()
+        self._bed_ring.clear()
+        with self._env_lock:
+            self._bed_envelope.set_target(self._bed_gain)  # crossfade up from 0
+        feeder = _BedFeeder(
+            bed=bed,
+            ring=self._bed_ring,
+            decoder_factory=self._decoder_factory,
+            xfade_samples=int(self._bed_xfade_s * self._samplerate),
+            channels=self._channels,
+        )
+        self._bed = feeder
+        feeder.start()
+
+    async def stop_bed(self) -> None:
+        """Fade the bed out and stop pulling from the source (on /quit /
+        shutdown). No bed task outlives the engine (§3.1)."""
+        feeder = self._bed
+        if feeder is None:
+            return
+        with self._env_lock:
+            self._bed_envelope.set_target(0.0)
+        await feeder.stop()
+        self._bed = None
+        self._bed_ring.clear()
+
     # -- lifecycle ------------------------------------------------------------
     async def aclose(self) -> None:
         """Stop everything and release the output stream. No orphans."""
         await self.stop()
+        await self.stop_bed()
         mixed = self._mixed
         if mixed is not None:
             await mixed.stop()
@@ -385,6 +583,7 @@ class AudioEngine:
         if len(self._music_buf) != frames:  # sink blocksize changed — rare
             self._music_buf = np.zeros((frames, self._channels), dtype=np.float32)
             self._voice_buf = np.zeros((frames, self._channels), dtype=np.float32)
+            self._bed_buf = np.zeros((frames, self._channels), dtype=np.float32)
         music = self._music_buf
         music.fill(0.0)
         self._music_ring.read_into(music, frames)
@@ -392,8 +591,13 @@ class AudioEngine:
         if mixed is not None and mixed.drained():
             mixed.signal_finished()
 
+        bed = self._bed_buf
+        bed.fill(0.0)
+        self._bed_ring.read_into(bed, frames)
+
         with self._env_lock:
             gains = self._envelope.next_block(frames)
+            bed_gains = self._bed_envelope.next_block(frames)
 
         voice = self._voice_buf
         voice.fill(0.0)
@@ -408,4 +612,4 @@ class AudioEngine:
                     self._voice_notify()
                     self._voice_notify = None
 
-        return mix(music, voice, gains)
+        return mix(music, voice, gains, bed, bed_gains)
