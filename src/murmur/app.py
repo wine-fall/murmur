@@ -110,6 +110,11 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         async def _download(ref: str, dest_base: Path) -> None:
             await ytdlp_download(ref, dest_base, ytdlp=config.ytdlp_cmd)
 
+        if not CachedBedSource(DEFAULT_CACHE_DIR).tracks():
+            cli.info(
+                "preparing background music (one-time setup — downloading a few "
+                "tracks; this only happens on first run)..."
+            )
         await pull_bed(
             manifest=DEFAULT_MANIFEST,
             cache_dir=DEFAULT_CACHE_DIR,

@@ -104,6 +104,28 @@ def test_pull_bed_continues_past_a_failing_ref(tmp_path: Path):
     assert count == 2  # the two good refs landed; the bad one was skipped
 
 
+def test_pull_bed_failure_is_quiet_in_the_user_log(tmp_path: Path):
+    """A dead ref must not spew the raw yt-dlp ERROR to the user — the gory
+    detail goes to the debug log, the user sees only a calm summary."""
+    manifest = tmp_path / "m.txt"
+    manifest.write_text("good\nbad\n", encoding="utf-8")
+    cache = tmp_path / "cache"
+
+    async def flaky(ref: str, dest_base: Path) -> None:
+        if ref == "bad":
+            raise RuntimeError("yt-dlp failed (1): ERROR: HTTP Error 403: Forbidden")
+        dest_base.with_suffix(".wav").write_bytes(b"pcm")
+
+    lines: list[str] = []
+    count = asyncio.run(
+        pull_bed(manifest=manifest, cache_dir=cache, download=flaky, log=lines.append)
+    )
+    assert count == 1
+    blob = "\n".join(lines)
+    assert "403" not in blob and "Forbidden" not in blob  # raw error not surfaced
+    assert any("unavailable" in ln for ln in lines)  # calm summary instead
+
+
 def test_pull_bed_offline_leaves_empty_cache_no_crash(tmp_path: Path):
     """Every ref dead (offline) -> empty cache, no exception (degrade §3.4)."""
     manifest = tmp_path / "m.txt"

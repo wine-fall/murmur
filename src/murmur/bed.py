@@ -103,6 +103,7 @@ async def pull_bed(
     if not refs:
         return len(_cached_files(cache_dir))
     cache_dir.mkdir(parents=True, exist_ok=True)
+    failures = 0
     for ref in refs:
         key = _cache_key(ref)
         if any(cache_dir.glob(f"{key}.*")):
@@ -111,8 +112,18 @@ async def pull_bed(
         try:
             await download(ref, cache_dir / key)
         except Exception as exc:  # a dead ref must not abort the pull
-            log(f"bed: failed to pull {ref!r}: {exc}")
-    return len(_cached_files(cache_dir))
+            failures += 1
+            # The raw yt-dlp error (e.g. a 403 on one source) is noise to the
+            # user: the pull degrades cleanly, so keep the detail in the debug
+            # log and surface only a calm summary below.
+            _log.debug(f"bed: pull failed for {ref!r}: {exc}")
+    cached = len(_cached_files(cache_dir))
+    if failures:
+        log(
+            f"bed: {failures} source(s) unavailable, skipped "
+            f"({cached}/{len(refs)} ready)"
+        )
+    return cached
 
 
 def main() -> None:
