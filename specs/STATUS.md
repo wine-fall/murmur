@@ -51,12 +51,19 @@ _Last updated: 2026-07-21_
 - **Open: by-ear / sensory acceptance** (L0/L1 "sounds human, feels like radio",
   PR #24's gapless-barge-in feel) — owed once the TUI is ready; a real listening
   pass, not an assertion.
+- **Shipped (storage consolidation, chore ahead of spec 05):** `paths.py` — the
+  single resolver for murmur's user storage under **one home** (`~/.murmur`,
+  `$MURMUR_HOME`-relocatable; data/ + cache/ split by replaceable-or-not). The
+  bed cache migrated from `~/.cache/murmur/bed`; a pre-commit gate
+  (`scripts/check_paths.py`) forbids hardcoded home paths elsewhere. `DESIGN.md`
+  §6.1 + spec 05 §2.3 updated from the earlier XDG plan to this one-home layout.
 - **Designed (spec 05, `specs/spec05/05-memory.md`): persistent memory —
   approved 2026-07-21, build not started.** Three persistent tiers
-  (profile/history/ledger, local files) + context-pack assembly (ratifies the
-  spec-04 §3.4 `scene` field; adds `profile` / `covered_topics`) + background
-  compaction + the repo path-governance rule (`paths.py`, XDG data/cache
-  roots). Motivated in part by issue #44 (cold-open repetition); library
-  research recorded in issue #45 (verdict: stdlib files, no dependency).
+  (profile/history/ledger, local files under `paths.data_root()/memory`) +
+  context-pack assembly (ratifies the spec-04 §3.4 `scene` field; adds `profile`
+  / `covered_topics`) + background compaction. The path-governance foundation it
+  §2.3-specified is now in place (see the storage line above). Motivated in part
+  by issue #44 (cold-open repetition); library research in issue #45 (verdict:
+  stdlib files, no dependency).
   **Building spec 05 is the next focus after spec 04 §3.3 closes.**
 - Later specs (06–09) are expected to change as we learn — not frozen.

@@ -18,6 +18,15 @@ repos:
         language: system
         pass_filenames: false
         types: [python]
+      - id: path-governance
+        name: Path governance (user paths only via murmur.paths)
+        # Fails a hardcoded Path.home()/expanduser outside src/murmur/paths.py —
+        # the single resolver for murmur's ~/.murmur storage (spec 05 §2.3).
+        # Scans the whole src root (AST), so it takes no filenames.
+        entry: python scripts/check_paths.py
+        language: system
+        pass_filenames: false
+        types: [python]
       - id: pyright
         name: pyright (static type-check)
         # Enforces the Protocol seams (contracts.py, Brain, TtsBackend, Player,
