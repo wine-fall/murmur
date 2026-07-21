@@ -43,6 +43,9 @@ class _SpyBackend:
         self.calls.append("synthesize")
         return "/tmp/spy.wav"
 
+    def close(self) -> None:
+        self.calls.append("close")
+
 
 class _FailingBackend:
     """Healthy load/warm, but synthesize blows up — to prove the loop survives a
@@ -56,6 +59,9 @@ class _FailingBackend:
 
     def synthesize(self, req: SynthesisRequest) -> str:
         raise RuntimeError("kaboom")
+
+    def close(self) -> None:
+        pass
 
 
 # --- FakeBackend ---------------------------------------------------------- #
@@ -77,6 +83,15 @@ def test_fake_backend_synthesize_implicitly_loads():
     assert Path(path).exists()
 
 
+def test_fake_backend_close_removes_the_clip_dir():
+    # issue #46: the clip temp dir is owned by its creator and cleaned on close.
+    backend = FakeBackend()
+    path = Path(backend.synthesize(SynthesisRequest(text="hi")))
+    assert path.exists()
+    backend.close()
+    assert not path.parent.exists()
+
+
 # --- serve() loop --------------------------------------------------------- #
 
 
@@ -87,10 +102,13 @@ def test_serve_loads_and_warms_before_first_request():
     assert resps == [{"ready": True}]
 
 
-def test_serve_synthesize_returns_an_existing_wav_path():
+def test_serve_synthesize_returns_a_real_wav_path_then_cleans_up():
     resps = _run_serve(FakeBackend(), [{"op": "synthesize", "request": {"text": "hi"}}])
     assert len(resps) == 1
-    assert Path(resps[0]["audio_path"]).exists()
+    # audio_s > 0 proves the wav existed and was real when serve measured it;
+    # by the time serve returns (EOF), close() has removed the dir (issue #46).
+    assert resps[0]["timings"]["audio_s"] > 0.0
+    assert not Path(resps[0]["audio_path"]).parent.exists()
 
 
 def test_serve_synthesize_reports_timings():
@@ -152,6 +170,14 @@ def test_serve_backend_failure_returns_error_and_keeps_serving():
     )
     assert "error" in resps[0] and "kaboom" in resps[0]["error"]
     assert resps[1] == {"ready": True}
+
+
+def test_serve_closes_the_backend_when_input_ends():
+    # issue #46: the serve loop's exit (EOF or a graceful SIGTERM) must release
+    # the backend's temp artifacts — close() is the hook.
+    spy = _SpyBackend()
+    _run_serve(spy, [{"op": "health"}])
+    assert spy.calls[-1] == "close"
 
 
 def test_serve_skips_blank_lines():

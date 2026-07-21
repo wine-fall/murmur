@@ -19,6 +19,7 @@ import io
 import json
 import random
 import re
+import shutil
 import tempfile
 import time
 import urllib.request
@@ -178,8 +179,9 @@ class RemoteVoiceProvider:
         return AudioClip(source=str(path), kind="talk")
 
     async def aclose(self) -> None:
-        # No owned process/socket to release (each request is one-shot).
-        return None
+        # No owned process/socket to release (each request is one-shot) — only
+        # the mkdtemp'd clip dir, which must not outlive the provider (issue #46).
+        shutil.rmtree(self._dir, ignore_errors=True)
 
     # --- transport (the untested network boundary) ------------------------ #
 

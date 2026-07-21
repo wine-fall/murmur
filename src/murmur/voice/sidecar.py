@@ -81,6 +81,11 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
     failure becomes an ``{"error": ...}`` response and the loop keeps serving —
     a single bad call must never take the sidecar down. ``load()``/``warm()``
     failures propagate (the process exits; the client's supervision restarts it).
+
+    On the way out (stdin EOF — the client's graceful ``aclose()``, or a dead
+    parent) the backend's ``close()`` runs so its temp clip dir does not outlive
+    the process (issue #46). A hard kill (the client's supervised-restart path)
+    deliberately skips it: clips already returned may still be queued for playback.
     """
     load_start = time.monotonic()
     backend.load()
@@ -89,21 +94,24 @@ def serve(backend: TtsBackend, *, stdin: TextIO, stdout: TextIO) -> None:
     backend.warm()
     # Startup one-shot: attached to the first synth response, then cleared.
     startup = {"load_s": load_s, "warm_s": time.monotonic() - warm_start}
-    # Explicit readline() rather than `for raw in stdin` — file-object iteration
-    # can read-ahead past the single line the client sent while the client blocks
-    # waiting for this line's response, a classic strict-request/response deadlock.
-    for raw in iter(stdin.readline, ""):
-        if not raw.strip():
-            continue  # tolerate blank lines on the pipe
-        resp: dict[str, object]
-        try:
-            resp = _handle(backend, decode(raw), startup)
-        except ProtocolError as exc:
-            resp = {"error": str(exc)}
-        except Exception as exc:  # backend failure — surface, do not crash the loop
-            resp = {"error": f"{type(exc).__name__}: {exc}"}
-        stdout.write(encode(resp))
-        stdout.flush()  # essential: unbuffer so the client's read returns
+    try:
+        # Explicit readline() rather than `for raw in stdin` — file-object iteration
+        # can read-ahead past the single line the client sent while the client blocks
+        # waiting for this line's response, a classic strict-request/response deadlock.
+        for raw in iter(stdin.readline, ""):
+            if not raw.strip():
+                continue  # tolerate blank lines on the pipe
+            resp: dict[str, object]
+            try:
+                resp = _handle(backend, decode(raw), startup)
+            except ProtocolError as exc:
+                resp = {"error": str(exc)}
+            except Exception as exc:  # backend failure — surface, don't crash the loop
+                resp = {"error": f"{type(exc).__name__}: {exc}"}
+            stdout.write(encode(resp))
+            stdout.flush()  # essential: unbuffer so the client's read returns
+    finally:
+        backend.close()
 
 
 def _serve_protected(backend: TtsBackend) -> None:

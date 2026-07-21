@@ -115,6 +115,39 @@ def test_start_then_synthesize_returns_playable_clip():
     asyncio.run(go())
 
 
+def test_aclose_removes_the_sidecar_clip_dir():
+    # issue #46: aclose() shuts the sidecar down gracefully (stdin EOF), so the
+    # serve loop exits and removes its mkdtemp'd clip dir instead of leaking it.
+    async def go() -> Path:
+        provider = SidecarVoiceProvider("fake")
+        clip = await asyncio.wait_for(provider.synthesize("hello there"), timeout=20)
+        assert Path(clip.source).exists()
+        await provider.aclose()
+        return Path(clip.source)
+
+    clip_path = asyncio.run(go())
+    assert not clip_path.parent.exists()
+
+
+def test_supervised_restart_does_not_delete_returned_clips():
+    # Peer-review catch: a supervised restart (synth timeout / cancelled synth
+    # kills the sidecar) must NOT clean the clip dir — clips already returned may
+    # still be queued for playback (spec 04 look-ahead). Only aclose() cleans.
+    import shutil
+
+    async def go() -> Path:
+        provider = SidecarVoiceProvider("fake")
+        clip = await asyncio.wait_for(provider.synthesize("hello there"), timeout=20)
+        await provider._kill_proc()  # the restart paths' hard kill
+        return Path(clip.source)
+
+    clip_path = asyncio.run(go())
+    try:
+        assert clip_path.exists()  # the returned clip survived the kill
+    finally:
+        shutil.rmtree(clip_path.parent, ignore_errors=True)
+
+
 def test_synthesize_lazy_starts_without_explicit_start():
     async def go():
         provider = SidecarVoiceProvider("fake")

@@ -194,18 +194,34 @@ def test_synthesize_writes_the_remote_wav_and_returns_a_talk_clip(monkeypatch):
 
     monkeypatch.setattr(prov, "_post", fake_post)
 
-    async def go() -> AudioClip:
+    async def go() -> tuple[AudioClip, bytes]:
         await prov.start()
         clip = await prov.synthesize("good evening")
+        written = Path(clip.source).read_bytes()  # before aclose removes the dir
         await prov.aclose()
-        return clip
+        return clip, written
 
-    clip = asyncio.run(go())
+    clip, written = asyncio.run(go())
     assert isinstance(clip, AudioClip) and clip.kind == "talk"
-    assert Path(clip.source).read_bytes() == audio  # the server's wav, verbatim
+    assert written == audio  # the server's wav, verbatim
     payload = sent["payload"]
     assert isinstance(payload, dict)
     assert payload["text"] == "good evening" and payload["reference_id"] == "spk1"
+
+
+def test_aclose_removes_the_clip_temp_dir(monkeypatch):
+    # issue #46: the mkdtemp'd clip dir must not outlive the provider — a long
+    # session otherwise leaks every synthesized wav into the system tmp.
+    prov = RemoteVoiceProvider("http://box:8080", reference_id="spk1")
+    monkeypatch.setattr(prov, "_post", lambda p: _wav_bytes())
+
+    async def go() -> Path:
+        clip = await prov.synthesize("good evening")
+        await prov.aclose()
+        return Path(clip.source)
+
+    clip_path = asyncio.run(go())
+    assert not clip_path.parent.exists()  # the whole temp dir is gone
 
 
 def test_url_gets_the_v1_tts_path():
