@@ -15,6 +15,7 @@ never pulls in MLX.
 
 from __future__ import annotations
 
+import shutil
 import tempfile
 from collections.abc import Iterable
 from dataclasses import dataclass, field
@@ -112,6 +113,11 @@ class MlxAudioBackend:
         path = self._dir / f"clip-{self._counter:04d}.wav"
         self._render(req, path)
         return str(path)
+
+    def close(self) -> None:
+        if self._dir is not None:
+            shutil.rmtree(self._dir, ignore_errors=True)
+            self._dir = None
 
     def memory_stats(self) -> dict[str, int]:
         """MLX memory in bytes: ``active`` working set, ``cache`` the reclaimable

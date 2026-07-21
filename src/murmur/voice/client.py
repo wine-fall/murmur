@@ -123,7 +123,7 @@ class SidecarVoiceProvider:
 
     async def aclose(self) -> None:
         async with self._lock:
-            await self._kill_proc()
+            await self._shutdown_proc()
 
     # --- supervision internals -------------------------------------------- #
 
@@ -198,6 +198,20 @@ class SidecarVoiceProvider:
         if not line:  # EOF — the sidecar exited
             raise SidecarDied("sidecar closed the connection")
         return decode(line.decode())
+
+    async def _shutdown_proc(self) -> None:
+        """Graceful shutdown, final-close only: stdin EOF lets the sidecar's
+        serve loop exit and remove its temp clip dir (issue #46), then escalate
+        to the hard kill if it does not exit in time. The supervised-restart
+        paths use _kill_proc directly — no cleanup — because clips already
+        returned may still be queued for playback (spec 04 look-ahead)."""
+        proc = self._proc
+        if proc is not None and proc.returncode is None and proc.stdin is not None:
+            with contextlib.suppress(Exception):
+                proc.stdin.close()
+            with contextlib.suppress(asyncio.TimeoutError):
+                await asyncio.wait_for(proc.wait(), timeout=_SHUTDOWN_TIMEOUT)
+        await self._kill_proc()  # reap, or escalate if still alive
 
     async def _kill_proc(self) -> None:
         proc = self._proc

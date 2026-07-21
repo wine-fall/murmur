@@ -91,6 +91,11 @@ class TtsBackend(Protocol):
         synth. Reported so the parent can log where the footprint actually goes."""
         ...
 
+    def close(self) -> None:
+        """Release temp artifacts (the clip dir) — the creator owns its temp
+        files and must clean them at exit (issue #46). Idempotent."""
+        ...
+
 
 class FakeBackend:
     """No-model ``TtsBackend``: writes a silent wav whose length scales with the
@@ -113,3 +118,6 @@ class FakeBackend:
 
     def memory_stats(self) -> dict[str, int]:
         return {}  # no model, no MLX memory to report
+
+    def close(self) -> None:
+        self._clips.close()

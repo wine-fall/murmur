@@ -139,6 +139,23 @@ def test_render_releases_the_mlx_buffer_cache_after_writing(monkeypatch, tmp_pat
     assert calls.index("clear_cache") > calls.index("audio_write")  # after write
 
 
+# --- close() removes the clip temp dir (issue #46) ------------------------- #
+
+
+def test_close_removes_the_clip_temp_dir(tmp_path):
+    backend = _backend()
+    clips = tmp_path / "clips"
+    clips.mkdir()
+    (clips / "clip-0001.wav").write_bytes(b"riff")
+    backend._dir = clips
+    backend.close()
+    assert not clips.exists()
+
+
+def test_close_before_load_is_a_noop():
+    _backend().close()  # no dir yet -> must not raise
+
+
 # --- normalize_tts_text (spec 02 §3.4 hygiene; found live with Spark) --------
 
 
