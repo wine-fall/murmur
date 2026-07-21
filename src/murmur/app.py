@@ -15,18 +15,20 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import shutil
 from dataclasses import replace
 from pathlib import Path
 
 from .brain import ClaudeBrain, build_brain
 from .cadence import CadencePolicy, build_cadence
 from .cli_host import CliHost
+from .compaction import Compactor
 from .config import Config
-from .contracts import MusicProvider
+from .contracts import MemoryStore, MusicProvider
 from .director import Director
 from .engine import build_engine, build_probe
 from .logging_setup import configure_dev_logging
-from .memory import InProcessMemoryStore
+from .memory import InProcessMemoryStore, PersistentMemoryStore
 from .music.programmer import MusicProgrammer, TrackSource
 from .music.provider import YtDlpMusicProvider
 from .persona import load_persona
@@ -34,11 +36,37 @@ from .startup import MusicStartupCheck, run_startup_checks
 from .voice import PROFILES, build_voice
 
 
+def build_memory(config: Config, *, persistent: bool) -> MemoryStore:
+    """The memory store for a run (spec 05 §3.7). A real (claude) run persists to
+    ``memory_dir``; a stub run stays in-process so canned chatter never touches
+    the real memory dir (stub isolation)."""
+    if persistent:
+        return PersistentMemoryStore(config.memory_dir)
+    return InProcessMemoryStore()
+
+
+def resolve_persona_path(config: Config, *, persistent: bool) -> Path:
+    """Where to load the persona from (spec 05 §3.2). On a persistent run the
+    persona is homed in the memory dir (the living asset's writable home for
+    spec 06): the seed is copied there once on first run, and loaded from there
+    thereafter. A stub run loads the seed directly (no memory-dir writes)."""
+    if not persistent:
+        return config.persona_path
+    home = config.memory_dir / "persona.md"
+    if not home.exists():
+        config.memory_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(config.persona_path, home)
+    return home
+
+
 async def _run(config: Config, *, max_segments: int | None) -> None:
-    persona = load_persona(config.persona_path)
+    # A real (claude) run persists memory + homes the persona in the memory dir;
+    # a stub run stays fully in-process (spec 05 §3.2/§3.7).
+    persistent = config.brain_provider == "claude"
+    persona = load_persona(resolve_persona_path(config, persistent=persistent))
 
     cli = CliHost()
-    memory = InProcessMemoryStore()
+    memory = build_memory(config, persistent=persistent)
     voice = build_voice(
         config.voice_provider,
         tts_url=config.tts_url,
@@ -50,6 +78,13 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
     )
     player = build_engine(ffmpeg=config.ffmpeg_cmd)
     brain = build_brain(config.brain_provider, model=config.model)
+
+    # Periodic profile compaction (spec 05 §3.6), off the live loop, only when
+    # persisting: a dedicated cheap-tier brain folds history into profile.md.
+    # An in-process (stub) store has no compaction surface, so no compactor.
+    compactor: Compactor | None = None
+    if isinstance(memory, PersistentMemoryStore):
+        compactor = Compactor(memory, ClaudeBrain(config.compact_model))
 
     await voice.start()
     cli.banner(
@@ -140,6 +175,7 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
         cli_host=cli,
         music=music,
         cadence=cadence,
+        compactor=compactor,
     )
     try:
         await director.run(max_segments=max_segments)
@@ -153,6 +189,12 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
                 await provider.aclose()
         with contextlib.suppress(asyncio.CancelledError):
             await voice.aclose()
+        # Final compaction flush (spec 05 §3.6): fold any remaining backlog so a
+        # long session's tail lands in the profile. Best-effort; never blocks exit
+        # on failure (the Compactor swallows its own errors).
+        if compactor is not None:
+            with contextlib.suppress(Exception):
+                await compactor.flush()
         cli.info("stopped cleanly.")
 
 

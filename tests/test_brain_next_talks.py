@@ -7,7 +7,7 @@ from __future__ import annotations
 import asyncio
 
 from murmur.brain import ClaudeBrain
-from murmur.contracts import ContextPack
+from murmur.contracts import ContextPack, TalkBeat
 
 _CTX = ContextPack(persona="p", recent=[])
 
@@ -17,17 +17,24 @@ def test_next_talks_returns_the_tool_beats(monkeypatch):
         brain = ClaudeBrain("m")
 
         async def tool_result(*args, **kwargs):
-            return {"ok": True, "beats": ["one", "two"]}  # the emit_talk_beats call
+            # the emit_talk_beats call: objects with text + optional topic
+            return {
+                "ok": True,
+                "beats": [{"text": "one", "topic": "t1"}, {"text": "two"}],
+            }
 
         monkeypatch.setattr(brain, "run_task", tool_result)
-        assert await brain.next_talks(_CTX, count=2) == ["one", "two"]
+        assert await brain.next_talks(_CTX, count=2) == [
+            TalkBeat("one", "t1"),
+            TalkBeat("two", None),
+        ]
 
     asyncio.run(go())
 
 
 def test_next_talks_falls_back_to_one_beat_on_empty_batch(monkeypatch):
     # Model never made the terminal call -> run_task returns None. Degrade to a
-    # single plain-text beat, not a skipped segment (no dead air).
+    # single plain-text (topic-less) beat, not a skipped segment (no dead air).
     async def go():
         brain = ClaudeBrain("m")
 
@@ -39,6 +46,6 @@ def test_next_talks_falls_back_to_one_beat_on_empty_batch(monkeypatch):
 
         monkeypatch.setattr(brain, "run_task", no_tool_call)
         monkeypatch.setattr(brain, "next_talk", solo)
-        assert await brain.next_talks(_CTX, count=2) == ["solo beat"]
+        assert await brain.next_talks(_CTX, count=2) == [TalkBeat("solo beat", None)]
 
     asyncio.run(go())

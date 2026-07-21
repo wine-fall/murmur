@@ -26,8 +26,8 @@ def test_next_talks_returns_count_consecutive_beats():
         b = StubBrain()
         beats = await b.next_talks(_CTX, count=2)
         assert len(beats) == 2
-        assert all(isinstance(x, str) and x for x in beats)
-        assert beats[0] != beats[1]  # consecutive, distinct canned segments
+        assert all(b.text for b in beats)  # each carries spoken text (topic-less)
+        assert beats[0].text != beats[1].text  # consecutive, distinct segments
         # default count is 2
         assert len(await b.next_talks(_CTX)) == 2
 

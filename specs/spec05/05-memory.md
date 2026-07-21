@@ -1,9 +1,14 @@
 # spec/05 · memory — persistent three tiers + context-pack assembly
 
-> **Status**: **Design — approved 2026-07-21; build not started.** The five
-> design forks (topic tagging, persona homing, freshness cutoff, compaction
-> cadence, path governance) were resolved with the user — see §6 for the
-> record; the constants remain by-feel tunables.
+> **Status**: **Built (mechanism-level) 2026-07-21.** All contracts and wiring
+> land and the unit suite is green; the real `compact_profile` and `next_talks`
+> tool paths were smoke-tested through the SDK. The five design forks (topic
+> tagging, persona homing, freshness cutoff, compaction cadence, path
+> governance) were resolved with the user — see §6; the by-feel constants
+> (`_RECENT_MAX_AGE_H`, `_COMPACT_EVERY_TURNS`, the profile cap) remain tunable.
+> **Owed (real-run pass):** the on-demand two-run "run 2 sees run 1's tail +
+> compaction produces a plausible profile" smoke (§5.10), and profile/topic
+> quality by feel (eval track).
 > **Part**: The persistent Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6):
 > three tiers — ① **Profile** (long-term: who you are, prefs, the persona living
 > asset) · ② **History** (conversation log, recent window) · ③ **Ledger**
@@ -39,10 +44,10 @@
 3. **Context-pack assembly** — `ContextPack` grows the master-§6 fields
    (`profile`, `covered_topics`; `scene` is **ratified** from spec 04 §3.4 — see
    §2.2) and the Director assembles them from the store per Brain call.
-   *Master touch (flagged)*: DESIGN §6 words the pack field as "topics already
-   covered **today**"; issue #44 shows anti-repeat must survive the midnight
-   boundary, so the field is **recent topics (cross-day)** — DESIGN §6 gets a
-   one-word amendment when this spec lands.
+   *Master touch (applied)*: DESIGN §6 formerly worded the pack field as "topics
+   already covered **today**"; issue #44 shows anti-repeat must survive the
+   midnight boundary, so the field is **recent topics (cross-day)** — DESIGN §6
+   was amended to match when this spec landed.
 4. **Periodic compaction** — a background, off-the-live-loop Brain call that
    folds un-compacted history into `profile.md`, so the profile improves over
    time and the pack never grows unbounded.

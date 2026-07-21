@@ -36,6 +36,7 @@ from typing import Any, Literal
 from .brain import Brain
 from .cadence import MUSIC, CadencePolicy, CadenceState
 from .cli_host import Host
+from .compaction import Compactor
 from .config import Config
 from .logging_setup import get_log
 from .contracts import (
@@ -43,6 +44,7 @@ from .contracts import (
     ContextPack,
     MemoryStore,
     Player,
+    TalkBeat,
     Turn,
     VoiceProvider,
 )
@@ -116,6 +118,7 @@ class Director:
         cli_host: Host,
         music: TrackSource | None = None,
         cadence: CadencePolicy | None = None,
+        compactor: Compactor | None = None,
     ) -> None:
         self._config: Config = config
         self._persona: str = persona
@@ -128,6 +131,10 @@ class Director:
         self._talks_since_music: int = 0
         self._music: TrackSource | None = music
         self._cadence: CadencePolicy | None = cadence
+        # spec 05 §3.6: off-the-loop profile compaction. None = disabled (stub
+        # runs, tests). Poked once per loop iteration; single-flight + never
+        # blocks (a fold runs in the background).
+        self._compactor: Compactor | None = compactor
         self._mixing: MixingPlayer | None = None
         # spec 04 slice 1: the next music pick, found in the background so its
         # latency overlaps talk. Single-slot (one pick ahead); None = empty.
@@ -135,7 +142,9 @@ class Director:
         # spec 04 §3.3: pre-synthesized talk beats (depth _TALK_LOOKAHEAD), each an
         # in-flight synth task, so the next talk airs with no Brain/synth wait —
         # even across music. Discarded on a talkback steer (stale) and on shutdown.
-        self._talk_ahead: list[tuple[str, asyncio.Task[AudioClip | None]]] = []
+        # Each entry pairs a beat (text + optional topic key, spec 05 §3.9) with
+        # its in-flight synth task.
+        self._talk_ahead: list[tuple[TalkBeat, asyncio.Task[AudioClip | None]]] = []
         # The single in-flight refill that tops the buffer back up (mirrors the
         # single-slot _pending_pick). None = no refill running.
         self._talk_fill: asyncio.Task[None] | None = None
@@ -157,9 +166,22 @@ class Director:
         # Local wall clock -> time-of-day scene (spec 04 §3.4), so the host speaks
         # to the current hour. The real clock lives here; current_scene applies a
         # MURMUR_SCENE override (by-ear) over the pure, unit-tested bucketing.
+        # Profile + recent topics come from the persistent store (spec 05 §3.5):
+        # profile is the stable-prefix block, covered_topics the cross-day
+        # anti-repeat cue.
         return ContextPack(
-            persona=self._persona, recent=recent, scene=current_scene(datetime.now())
+            persona=self._persona,
+            recent=recent,
+            scene=current_scene(datetime.now()),
+            profile=self._memory.profile(),
+            covered_topics=tuple(
+                self._memory.recent_topics(self._config.recent_window)
+            ),
         )
+
+    def _recent_songs(self) -> list[str]:
+        """Recently-played song keys for the music avoid-list (spec 05 §3.5)."""
+        return self._memory.recent_songs(self._config.recent_window)
 
     def _recent_lines(self) -> list[str]:
         return [
@@ -183,6 +205,8 @@ class Director:
                     await self._talk_segment()
                     self._talks_since_music += 1
                 produced += 1
+                if self._compactor is not None:
+                    self._compactor.maybe_schedule()  # background, single-flight
 
                 last = max_segments is not None and produced >= max_segments
                 if not last and not self._quit:
@@ -202,21 +226,25 @@ class Director:
         """One autonomous talk segment (spec 01/04), then arbitrate any steers.
         The segment comes from the look-ahead buffer when primed (no Brain/synth
         wait), else from a fresh batched ``next_talks`` call."""
-        text, clip = await self._next_talk_clip()
+        beat, clip = await self._next_talk_clip()
         if clip is None:
             return  # segment skipped; the loop keeps broadcasting
         # Printed + recorded at air time (when playback starts): synthesis takes
         # seconds and a text/audio gap reads as a glitch; recording it now means
-        # an interjection's reply sees this segment in context.
-        self._cli.on_radio_segment(text)
-        self._memory.record(Turn("radio", text))
+        # an interjection's reply sees this segment in context. A tagged beat also
+        # ledgers its topic here (air time — a buffered beat dropped by a steer is
+        # never ledgered), feeding cross-day anti-repeat (spec 05 §3.9).
+        self._cli.on_radio_segment(beat.text)
+        self._memory.record(Turn("radio", beat.text))
+        if beat.topic:
+            self._memory.record_event("topic", beat.topic)
         # Refill AFTER recording so the top-up's context already includes this
         # just-aired beat (plus the queued beats it passes as pending) — the batch
         # continues the monologue instead of duplicating it (spec 04 §3.3).
         self._prefetch_talk()
         await self._run_voice(asyncio.ensure_future(self._player.play(clip)))
 
-    async def _next_talk_clip(self) -> tuple[str, AudioClip | None]:
+    async def _next_talk_clip(self) -> tuple[TalkBeat, AudioClip | None]:
         """The next talk beat to air. From the look-ahead buffer if primed (its
         synth already ran behind the prior audio — await is near-instant); the
         refill is fired by the caller after this beat is recorded. Else cold: one
@@ -237,26 +265,26 @@ class Director:
                 if not fill.cancelled():
                     raise  # our own cancellation (shutdown) — propagate
         if self._talk_ahead:
-            text, task = self._talk_ahead.pop(0)
-            self._prefetch_music(latest=text)
-            return text, await task
+            beat, task = self._talk_ahead.pop(0)
+            self._prefetch_music(latest=beat.text)
+            return beat, await task
         with _log.timed("talk") as t:
-            texts = await self._generate_talks(_TALK_LOOKAHEAD)
-            t["beats"] = len(texts)
-        if not texts:
-            return "", None
-        first, *rest = texts
+            beats = await self._generate_talks(_TALK_LOOKAHEAD)
+            t["beats"] = len(beats)
+        if not beats:
+            return TalkBeat(""), None
+        first, *rest = beats
         # Prime the music pick before synth — it needs only the airing text (mood),
         # not its audio — so the search overlaps this synth as well as playback.
-        self._prefetch_music(latest=first)
+        self._prefetch_music(latest=first.text)
         # Schedule the look-ahead synths first so they overlap beat 1's synth on a
         # concurrent backend (not just its playback). Awaiting beat 1 still runs it
         # inline and it grabs a serialized backend's lock before these tasks get
         # loop time, so beat 1 airs first regardless.
         self._talk_ahead = [
-            (x, asyncio.ensure_future(self._synthesize_or_skip(x))) for x in rest
+            (b, asyncio.ensure_future(self._synthesize_or_skip(b.text))) for b in rest
         ]
-        first_clip = await self._synthesize_or_skip(first)
+        first_clip = await self._synthesize_or_skip(first.text)
         return first, first_clip
 
     def _prefetch_talk(self) -> None:
@@ -282,23 +310,23 @@ class Director:
         need = _TALK_LOOKAHEAD - len(self._talk_ahead)
         if need <= 0:
             return
-        pending = [text for text, _ in self._talk_ahead]
+        pending = [beat.text for beat, _ in self._talk_ahead]
         with _log.timed("talk.prefetch", need=need) as t:
-            texts = await self._generate_talks(need, pending)
-            t["beats"] = len(texts)
+            beats = await self._generate_talks(need, pending)
+            t["beats"] = len(beats)
         # No await between here and the appends, so this is atomic against a
         # concurrent consume. Cap at the depth in case a consume shifted the buffer
         # during the await — never overshoot.
-        for text in texts:
+        for beat in beats:
             if len(self._talk_ahead) >= _TALK_LOOKAHEAD:
                 break
             self._talk_ahead.append(
-                (text, asyncio.ensure_future(self._synthesize_or_skip(text)))
+                (beat, asyncio.ensure_future(self._synthesize_or_skip(beat.text)))
             )
 
     async def _generate_talks(
         self, need: int, pending: list[str] | None = None
-    ) -> list[str]:
+    ) -> list[TalkBeat]:
         """Batched look-ahead generation with bounded retry; ``[]`` on ultimate
         failure (degrade — lose the look-ahead this round, never crash the radio).
         ``pending`` are the queued-but-unaired beats, fed into the context so the
@@ -394,7 +422,7 @@ class Director:
             lines = [*lines, f"radio: {latest}"]
         ctx = MusicContext(
             persona=self._persona,
-            situation=build_music_situation(lines),
+            situation=build_music_situation(lines, avoid=self._recent_songs()),
         )
         self._pending_pick = asyncio.ensure_future(self._music.next_track(ctx))
 
@@ -409,7 +437,9 @@ class Director:
             return await task
         ctx = MusicContext(
             persona=self._persona,
-            situation=build_music_situation(self._recent_lines()),
+            situation=build_music_situation(
+                self._recent_lines(), avoid=self._recent_songs()
+            ),
         )
         return await music.next_track(ctx)
 
@@ -488,6 +518,10 @@ class Director:
         title = pick.clip.title or "music"
         artist = f" — {pick.clip.artist}" if pick.clip.artist else ""
         self._cli.info(f"now playing: {title}{artist}")
+        # Ledger the song at air time (spec 05 §3.5): the "title — artist" key
+        # feeds recent_songs -> the music avoid-list, so the next pick does not
+        # repeat it. A confirmed, playing song only — not a dropped candidate.
+        self._memory.record_event("song", f"{title}{artist}")
 
         # The announce is an on-air voice clip; a steer cuts it (voice channel),
         # never the song. Recorded at air time so a reply sees it in context.

@@ -57,13 +57,15 @@ _Last updated: 2026-07-21_
   bed cache migrated from `~/.cache/murmur/bed`; a pre-commit gate
   (`scripts/check_paths.py`) forbids hardcoded home paths elsewhere. `DESIGN.md`
   §6.1 + spec 05 §2.3 updated from the earlier XDG plan to this one-home layout.
-- **Designed (spec 05, `specs/spec05/05-memory.md`): persistent memory —
-  approved 2026-07-21, build not started.** Three persistent tiers
-  (profile/history/ledger, local files under `paths.data_root()/memory`) +
-  context-pack assembly (ratifies the spec-04 §3.4 `scene` field; adds `profile`
-  / `covered_topics`) + background compaction. The path-governance foundation it
-  §2.3-specified is now in place (see the storage line above). Motivated in part
-  by issue #44 (cold-open repetition); library research in issue #45 (verdict:
-  stdlib files, no dependency).
-  **Building spec 05 is the next focus after spec 04 §3.3 closes.**
+- **Built (spec 05, `specs/spec05/05-memory.md`): persistent memory —
+  mechanism-level, 2026-07-21.** Three persistent tiers (profile/history/ledger,
+  local files under `paths.data_root()/memory`) + cross-session context-pack
+  assembly (ratifies the spec-04 §3.4 `scene` field; adds `profile` /
+  `covered_topics`) + background compaction through the Brain seam. `emit_talk_beats`
+  gained an optional per-beat topic (cross-day anti-repeat, issue #44); songs are
+  ledgered at air time and feed the music avoid-list. Unit-green; real
+  `compact_profile`/`next_talks` smoke-tested through the SDK. Library research in
+  issue #45 (verdict: stdlib files, no dependency).
+  **Owed:** the on-demand two-run persistence smoke + profile/topic quality by
+  ear (eval track); persona **evolution** is spec 06 (this only homes persona.md).
 - Later specs (06–09) are expected to change as we learn — not frozen.
