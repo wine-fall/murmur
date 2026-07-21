@@ -170,20 +170,36 @@ three different prefixes. Since this spec introduces the first *data*
 directory, it also sets the repo-wide rule:
 
 **`paths.py` (new, stdlib-only) is the single module allowed to resolve
-user-level paths.** Two roots, one criterion:
+user-level paths.** Everything murmur keeps lives under **one home** —
+`~/.murmur` by default, relocatable with `$MURMUR_HOME` (a blank value degrades
+to the default) — so backing up or moving murmur is one directory, not a hunt
+across `~/.cache` and `~/.local/share` (chosen over strict XDG split: this is a
+single-user local companion, where "one visible home, one directory to take with
+you" beats XDG orthodoxy; `$MURMUR_HOME` keeps the escape hatch). Two roots
+beneath it, one criterion — "what happens if you delete it":
 
 | Root | Resolution | Holds | Criterion |
 |---|---|---|---|
-| `data_root()` | `$XDG_DATA_HOME/murmur`, fallback `~/.local/share/murmur` | `memory/` (this spec, §3.1 — incl. `persona.md`, the living asset's writable home) | **irreplaceable** — deleting it loses user state |
-| `cache_root()` | `$XDG_CACHE_HOME/murmur`, fallback `~/.cache/murmur` | `bed/` (migrates here: same default location, now env-aware) | **rebuildable** — deleting it only costs a re-pull |
+| `data_root()` | `$MURMUR_HOME/data`, fallback `~/.murmur/data` | `memory/` (this spec, §3.1 — incl. `persona.md`, the living asset's writable home) | **irreplaceable** — deleting it loses user state |
+| `cache_root()` | `$MURMUR_HOME/cache`, fallback `~/.murmur/cache` | `bed/` (migrates here from `~/.cache/murmur/bed`, now under the one home) | **rebuildable** — deleting it only costs a re-pull |
 
+- Resolvers are **pure** (compute a path, don't create it); each writer
+  `mkdir(parents=True, exist_ok=True)` at its own write site, as today.
 - **Ephemeral clips** stay in the system tmp (`tempfile`, `murmur-*` prefixes),
-  owned and cleaned by their creator on `aclose`. (Two pre-existing leaks —
-  `voice/remote.py` and `voice/mlx_backend.py` never `rmtree` their dirs — are
-  an independent chore, tracked in its own issue, not this spec's build.)
+  owned and cleaned by their creator on `aclose` — throwaway, not user storage,
+  so out of `paths.py`'s scope. (The pre-existing leaks in `voice/remote.py` /
+  `voice/mlx_backend.py` were a separate chore, issue #46 — fixed independently.)
 - **Repo-relative `.dev/`, `scratch/`, `graphify-out/`** are dev-loop tooling,
-  not app storage — out of `paths.py`'s scope, unchanged.
-- No module outside `paths.py` may hardcode `Path.home()`-derived locations.
+  not app storage — out of scope, unchanged. A user-supplied path (e.g. the
+  `$MURMUR_DEV_LOG` target) may still be `expanduser`'d at its use site: honoring
+  a `~` the user typed is not hardcoding a location.
+- No module outside `paths.py` may hardcode a `Path.home()` / `~`-literal
+  location; a pre-commit gate (`scripts/check_paths.py`, AST-based) enforces it.
+
+**Build order note:** `paths.py` + the `bed/` migration + the gate landed
+**ahead of the rest of this spec** (a storage-consolidation chore, PR alongside
+issue #46), since the two persistent roots are the shared foundation the memory
+store writes into. This spec's build adds `memory/` beneath `data_root()`.
 
 **Config additions**:
 

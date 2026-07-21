@@ -7,7 +7,25 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from murmur.bed import CachedBedSource, pull_bed, read_manifest
+from murmur import paths
+from murmur.bed import DEFAULT_CACHE_DIR, CachedBedSource, pull_bed, read_manifest
+
+
+def test_default_cache_dir_lives_under_the_murmur_cache_root(monkeypatch, tmp_path):
+    # spec 05 §2.3: the bed cache is rebuildable state -> cache_root()/bed, and
+    # relocates with $MURMUR_HOME instead of being hardcoded under ~/.cache.
+    monkeypatch.setenv("MURMUR_HOME", str(tmp_path))
+    from importlib import reload
+
+    import murmur.bed as bed
+
+    reload(bed)
+    try:
+        assert bed.DEFAULT_CACHE_DIR == paths.cache_root() / "bed"
+        assert bed.DEFAULT_CACHE_DIR == tmp_path / "cache" / "bed"
+    finally:
+        monkeypatch.delenv("MURMUR_HOME", raising=False)
+        reload(bed)
 
 
 def test_read_manifest_skips_comments_and_blank_lines(tmp_path: Path):
