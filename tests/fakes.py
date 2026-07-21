@@ -224,12 +224,15 @@ class FakeMusicBrain:
 
 class FakeMusicHandle:
     """Scripted MusicHandle (spec 03-02 §2.2): finishes when told (or at once
-    with ``auto_finish``), records duck/unduck/stop calls."""
+    with ``auto_finish``), records duck/unduck/stop calls. ``started`` scripts
+    ``wait_started`` — False models a stream that resolved but never decoded a
+    frame (the intermittent 403), which the Director must catch (spec 04)."""
 
-    def __init__(self, auto_finish: bool = False) -> None:
+    def __init__(self, auto_finish: bool = False, started: bool = True) -> None:
         self._done = asyncio.Event()
         if auto_finish:
             self._done.set()
+        self._started = started
         self.ducks = 0
         self.unducks = 0
         self.stops = 0
@@ -250,20 +253,41 @@ class FakeMusicHandle:
     async def wait(self) -> None:
         await self._done.wait()
 
+    async def wait_started(self, timeout: float) -> bool:
+        return self._started
+
 
 class FakeEngine(FakePlayer):
     """FakePlayer + play_music (the spec 03-02 mixing-player capability):
     records music clips, hands out FakeMusicHandles."""
 
-    def __init__(self, play_delay: float = 0.0, auto_finish: bool = True) -> None:
+    def __init__(
+        self,
+        play_delay: float = 0.0,
+        auto_finish: bool = True,
+        started: bool | list[bool] = True,
+    ) -> None:
         super().__init__(play_delay=play_delay)
         self._auto_finish = auto_finish
+        # bool -> every handle starts (or not); list -> scripted per play_music
+        # (for the bounded-retry path), defaulting to True once exhausted.
+        self._started = started
+        self._start_idx = 0
         self.music_played: list[AudioClip] = []
         self.handles: list[FakeMusicHandle] = []
 
     async def play_music(self, clip: AudioClip) -> FakeMusicHandle:
         self.music_played.append(clip)
-        handle = FakeMusicHandle(auto_finish=self._auto_finish)
+        if isinstance(self._started, list):
+            started = (
+                self._started[self._start_idx]
+                if self._start_idx < len(self._started)
+                else True
+            )
+            self._start_idx += 1
+        else:
+            started = self._started
+        handle = FakeMusicHandle(auto_finish=self._auto_finish, started=started)
         self.handles.append(handle)
         return handle
 

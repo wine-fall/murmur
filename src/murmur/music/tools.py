@@ -8,10 +8,15 @@ rebuild the ``AudioClip`` with no side-channel).
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Any, Literal, TypedDict
 
 from ..contracts import MusicProvider
+
+# Pull-time playability check (spec 04): given a resolved stream source, return
+# True if it actually decodes. Injected (real impl opens ffmpeg and reads a
+# frame) so this module stays free of the audio engine.
+StreamProbe = Callable[[str], Awaitable[bool]]
 
 
 # --------------------------------------------------------------------------- #
@@ -150,8 +155,9 @@ class SubmitPickTool:
     input_schema = _SUBMIT_SCHEMA
     terminal = True
 
-    def __init__(self, provider: MusicProvider) -> None:
+    def __init__(self, provider: MusicProvider, probe: StreamProbe | None = None) -> None:
         self._provider: MusicProvider = provider
+        self._probe = probe
 
     async def run(self, args: Mapping[str, object]) -> SubmitSuccess | SubmitError:
         raw_ref = args.get("ref")
@@ -162,6 +168,15 @@ class SubmitPickTool:
             clip = await self._provider.resolve(ref)
         except Exception as exc:  # any resolve failure -> let the model retry
             return SubmitError(ok=False, error=str(exc))
+
+        # Validate playability at pull time (spec 04): a resolved googlevideo URL
+        # can still 403 in ffmpeg and never decode a frame. Reject it as a
+        # non-terminating error so the model picks another candidate now (during
+        # talk), instead of the announce claiming a track that never plays.
+        if self._probe is not None and not await self._probe(clip.source):
+            return SubmitError(
+                ok=False, error=f"{ref} resolved but the stream did not play; pick another"
+            )
 
         # Metadata rides the terminal result (spec 03-02): the model supplies
         # title/artist from the candidate it judged and writes the announce

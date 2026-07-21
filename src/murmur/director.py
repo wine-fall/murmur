@@ -56,6 +56,20 @@ from .scene import current_scene
 # MURMUR_DEV_LOG) gets the full exception + traceback. No-op when unconfigured.
 _log = get_log("director")
 
+# How long to wait for a music stream to produce its first audio before treating
+# it as dead and degrading to talk (spec 04). Real stream startup is ~3s; the
+# margin covers a slow-but-valid CDN without letting an intermittent 403 (which
+# never decodes a frame) silently strand the segment. The bed keeps playing
+# through this window (engine defers the bed<->song crossfade to first audio), so
+# the wait is never dead air — it only bounds how long a typed /quit can lag.
+_STREAM_START_TIMEOUT_S = 8.0
+
+# How many picks to try before degrading to talk when a stream never produces
+# audio (spec 04). A googlevideo 403 is usually per-stream/per-format, so a fresh
+# pick typically plays; the bed covers the retry. Bounded so a network-wide 403
+# (nothing resolves/decodes) still degrades promptly instead of spinning.
+_MUSIC_START_ATTEMPTS = 2
+
 _QUIT_COMMAND = "/quit"
 
 # spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept ready
@@ -415,32 +429,56 @@ class Director:
         pending = self._pending_pick
         if pending is not None and not pending.done():
             return False
+        pick: TrackPick | None = None
+        handle: MusicHandle | None = None
+        announce_clip: AudioClip | None = None
         try:
-            with _log.timed("music.pick") as t:
-                prefetched = self._pending_pick is not None
-                pick = await self._take_pick(music)
-                t["found"] = pick is not None
-                t["prefetched"] = prefetched  # near-zero elapsed_s when True
-            if pick is None:
-                self._cli.info("music: nothing suitable found; back to talk.")
-                return False
-
             # A song is going on air: the talk look-ahead SURVIVES it and is topped
             # up during it (spec 04 §3.3). A song is the ideal window to prepare the
             # next talk — its whole duration overlaps the refill's Brain+synth — so
             # the post-song talk airs warm instead of regenerating cold into dead
-            # air. (Pre-§3.3 the song discarded the buffer; that left the music->talk
-            # boundary cold.)
+            # air. Primed once here; it also covers any retry latency below.
             self._prefetch_talk()
 
-            announce_clip: AudioClip | None = None
-            if pick.announce:
-                # Synthesized before the song starts so the intro is ready to
-                # ride the ducked head with no gap. A synthesis failure only
-                # costs the intro, never the song.
-                announce_clip = await self._synthesize_or_skip(pick.announce)
+            # Bounded retry (spec 04): an intermittent googlevideo 403 makes
+            # play_music hand back a handle that never decodes a frame. Confirm
+            # real audio (wait_started) BEFORE committing the announce — announcing
+            # first made the narration claim a song that never played — and on no
+            # audio drop this pick for a fresh one (usually a different, working
+            # stream) rather than silently skipping. The bed covers the gap;
+            # degrade to talk only once the attempts are spent.
+            for attempt in range(_MUSIC_START_ATTEMPTS):
+                with _log.timed("music.pick") as t:
+                    prefetched = self._pending_pick is not None
+                    candidate = await self._take_pick(music)
+                    t["found"] = candidate is not None
+                    t["prefetched"] = prefetched  # near-zero elapsed_s when True
+                if candidate is None:
+                    self._cli.info("music: nothing suitable found; back to talk.")
+                    return False
 
-            handle = await mixing.play_music(pick.clip)
+                # Start the stream, then synthesize the intro WHILE it spins up
+                # (~3s of network startup) so a confirmed song airs its intro warm.
+                started_handle = await mixing.play_music(candidate.clip)
+                announce_task: asyncio.Future[AudioClip | None] | None = (
+                    asyncio.ensure_future(self._synthesize_or_skip(candidate.announce))
+                    if candidate.announce
+                    else None
+                )
+                if await started_handle.wait_started(_STREAM_START_TIMEOUT_S):
+                    pick, handle = candidate, started_handle
+                    announce_clip = (
+                        await announce_task if announce_task is not None else None
+                    )
+                    break
+                await _settle(announce_task)
+                await started_handle.stop()
+                _log.event("music.no_audio_retry", attempt=attempt)
+
+            if handle is None or pick is None:
+                self._cli.info("music: stream failed to start; back to talk.")
+                _log.warn("music stream never started; fell back to talk")
+                return False
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -460,8 +498,11 @@ class Director:
             voice = asyncio.ensure_future(self._player.play(announce_clip))
 
         # Duck, not stop: replies air OVER the song; the song stops only on
-        # /quit (handled inside _run_voice) or shutdown cancellation.
-        await self._run_voice(voice, song=handle)
+        # /quit (handled inside _run_voice) or shutdown cancellation. Timed so a
+        # song that ends far too soon (the "announced but silent" bug) is visible
+        # against the engine's music.feed frame count.
+        with _log.timed("music.segment", title=title):
+            await self._run_voice(voice, song=handle)
         return True
 
     # -- steer arbitration (one path for every segment kind) -------------------

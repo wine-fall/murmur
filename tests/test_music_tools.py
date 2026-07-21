@@ -88,6 +88,62 @@ def test_submit_pick_resolve_failure_is_a_nonterminating_result():
     asyncio.run(go())
 
 
+def test_submit_pick_rejects_an_unplayable_stream_as_a_retryable_error():
+    # spec 04: resolve can succeed but the stream 403s and never decodes. A
+    # pull-time probe rejects it as a NON-terminating error so the model picks
+    # another candidate — the pick is validated before it can be announced.
+    cands = [TrackCandidate(ref="r1", title="T1", uploader="U", duration_s=200)]
+    provider = FakeMusicProvider(candidates=cands, resolvable={"r1"})
+
+    async def probe_dead(source: str) -> bool:
+        return False
+
+    tool = SubmitPickTool(provider, probe=probe_dead)
+
+    async def go():
+        out = await tool.run({"ref": "r1", "why": "x"})
+        assert out["ok"] is False
+        assert "error" in out
+        assert provider.resolved == ["r1"]  # resolved, then rejected on the probe
+
+    asyncio.run(go())
+
+
+def test_submit_pick_accepts_a_stream_that_decodes():
+    cands = [TrackCandidate(ref="r1", title="T1", uploader="U", duration_s=200)]
+    provider = FakeMusicProvider(candidates=cands, resolvable={"r1"})
+
+    async def probe_ok(source: str) -> bool:
+        return True
+
+    tool = SubmitPickTool(provider, probe=probe_ok)
+
+    async def go():
+        out = await tool.run({"ref": "r1", "why": "x"})
+        assert out["ok"] is True
+        assert out["source"] == "stream:r1"
+
+    asyncio.run(go())
+
+
+def test_submit_pick_does_not_probe_when_resolve_fails():
+    provider = FakeMusicProvider(candidates=[], resolvable=set())
+    probed: list[str] = []
+
+    async def probe(source: str) -> bool:
+        probed.append(source)
+        return True
+
+    tool = SubmitPickTool(provider, probe=probe)
+
+    async def go():
+        out = await tool.run({"ref": "missing", "why": "x"})
+        assert out["ok"] is False
+        assert probed == []  # resolve failed first — nothing to probe
+
+    asyncio.run(go())
+
+
 def test_submit_pick_missing_ref_is_a_clean_error_not_a_crash():
     # The model controls args; an omitted 'ref' must degrade to a retryable
     # error result, never raise (it used to KeyError on args["ref"]).

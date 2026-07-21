@@ -14,7 +14,7 @@ from ..contracts import AudioClip, MusicProvider
 from ..harness import BrainTool, Harness
 from ..prompts import build_find_music_instruction
 from .context import MusicContext, render_context
-from .tools import SearchMusicTool, SubmitPickTool, parse_submit_success
+from .tools import SearchMusicTool, StreamProbe, SubmitPickTool, parse_submit_success
 
 _DEFAULT_MAX_TURNS = 6
 
@@ -47,6 +47,7 @@ class MusicProgrammer:
         model: str,
         max_turns: int = _DEFAULT_MAX_TURNS,
         instruction: str | None = None,
+        probe: StreamProbe | None = None,
     ) -> None:
         self._brain: Harness = brain
         self._provider: MusicProvider = provider
@@ -55,10 +56,13 @@ class MusicProgrammer:
         self._instruction: str = (
             instruction if instruction is not None else build_find_music_instruction()
         )
-        # The tool set is fixed (the provider never changes) — build it once.
+        # The tool set is fixed (the provider never changes) — build it once. The
+        # probe (spec 04) validates each resolved stream in submit_pick, so a dead
+        # 403 stream is retried away here at pull time (the model picks another,
+        # overlapping talk) rather than surfacing as a silent skip at playback.
         self._tools: list[BrainTool] = [
             SearchMusicTool(provider),
-            SubmitPickTool(provider),
+            SubmitPickTool(provider, probe=probe),
         ]
 
     async def next_track(self, ctx: MusicContext) -> TrackPick | None:
