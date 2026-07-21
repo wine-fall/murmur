@@ -1,0 +1,11 @@
+{
+  "//": "Disable the Codebook spell-check language server in this repo. Specs and prompts carry domain jargon and non-word tokens; its inline squiggles are noise here. '...' keeps every other default language server; '!codebook' drops just the spell checker.",
+  "languages": {
+    "Python": { "language_servers": ["...", "!codebook"] },
+    "Markdown": { "language_servers": ["...", "!codebook"] },
+    "TOML": { "language_servers": ["...", "!codebook"] },
+    "YAML": { "language_servers": ["...", "!codebook"] },
+    "JSON": { "language_servers": ["...", "!codebook"] },
+    "JSONC": { "language_servers": ["...", "!codebook"] }
+  }
+}
