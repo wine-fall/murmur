@@ -9,7 +9,25 @@ decoder + sounddevice sink (integration layer).
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+
 from .core import AudioEngine
+
+
+def build_probe(*, ffmpeg: str = "ffmpeg") -> Callable[[str], Awaitable[bool]]:
+    """A pull-time playability probe (spec 04) for the music pick pipeline: does
+    this resolved stream actually decode? Same ffmpeg/format as ``build_engine``,
+    off the audio path (opened, one frame read, torn down)."""
+    from .ffmpeg_io import stream_decodes
+
+    samplerate, channels = 48_000, 2
+
+    async def probe(source: str) -> bool:
+        return await stream_decodes(
+            source, samplerate=samplerate, channels=channels, ffmpeg=ffmpeg
+        )
+
+    return probe
 
 
 def build_engine(*, ffmpeg: str = "ffmpeg") -> AudioEngine:
@@ -31,4 +49,4 @@ def build_engine(*, ffmpeg: str = "ffmpeg") -> AudioEngine:
     )
 
 
-__all__ = ["AudioEngine", "build_engine"]
+__all__ = ["AudioEngine", "build_engine", "build_probe"]

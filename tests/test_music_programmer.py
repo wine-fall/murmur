@@ -67,6 +67,30 @@ def test_next_track_retries_when_a_pick_fails_to_resolve():
     asyncio.run(go())
 
 
+def test_next_track_skips_a_pick_whose_stream_never_plays():
+    # spec 04: both refs resolve, but only "good" actually decodes. The pull-time
+    # probe drops the dead stream so next_track returns a PLAYABLE pick — the
+    # model never announces a track that would 403 at playback.
+    provider = FakeMusicProvider(
+        candidates=_cands("dead", "good"), resolvable={"dead", "good"}
+    )
+
+    async def probe(source: str) -> bool:
+        return source == "stream:good"
+
+    prog = MusicProgrammer(
+        brain=FakeMusicBrain(), provider=provider, model="haiku", probe=probe
+    )
+
+    async def go():
+        pick = await prog.next_track(MusicContext(persona="P", situation="S"))
+        assert pick is not None
+        assert pick.clip.source == "stream:good"
+        assert provider.resolved == ["dead", "good"]  # probed dead, then took good
+
+    asyncio.run(go())
+
+
 def test_next_track_returns_none_when_nothing_resolves():
     provider = FakeMusicProvider(candidates=_cands("a", "b"), resolvable=set())
     prog = MusicProgrammer(brain=FakeMusicBrain(), provider=provider, model="haiku")

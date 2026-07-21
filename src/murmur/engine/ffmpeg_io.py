@@ -16,6 +16,7 @@ format here.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import subprocess
 import tempfile
@@ -25,6 +26,38 @@ from typing import IO, Any, Callable
 import numpy as np
 
 _CHUNK_FRAMES = 4_096
+
+
+async def stream_decodes(
+    source: str,
+    *,
+    samplerate: int,
+    channels: int,
+    ffmpeg: str = "ffmpeg",
+    timeout_s: float = 6.0,
+) -> bool:
+    """Pull-time playability probe (spec 04): True if ffmpeg can open ``source``
+    and decode at least one frame within ``timeout_s``. A resolved googlevideo
+    URL that 403s never yields a frame (``read`` raises / returns None), so this
+    returns False and the pick is dropped before it can be announced. Bounded and
+    always tears the subprocess down — a hung stream times out to False, never
+    leaks."""
+    decoder = await asyncio.to_thread(
+        FfmpegDecoder, source, samplerate=samplerate, channels=channels, ffmpeg=ffmpeg
+    )
+
+    def _first_frame() -> bool:
+        try:
+            return decoder.read() is not None
+        except Exception:
+            return False
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_first_frame), timeout_s)
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        await asyncio.to_thread(decoder.close)  # terminates ffmpeg; unblocks read
 
 
 class FfmpegDecoder:

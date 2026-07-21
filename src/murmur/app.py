@@ -24,7 +24,7 @@ from .cli_host import CliHost
 from .config import Config
 from .contracts import MusicProvider
 from .director import Director
-from .engine import build_engine
+from .engine import build_engine, build_probe
 from .logging_setup import configure_dev_logging
 from .memory import InProcessMemoryStore
 from .music.programmer import MusicProgrammer, TrackSource
@@ -78,7 +78,10 @@ async def _run(config: Config, *, max_segments: int | None) -> None:
             provider = YtDlpMusicProvider(config.ytdlp_cmd)
             await provider.start()
             music = MusicProgrammer(
-                brain=brain, provider=provider, model=config.music_model
+                brain=brain,
+                provider=provider,
+                model=config.music_model,
+                probe=build_probe(ffmpeg=config.ffmpeg_cmd),
             )
             cadence = build_cadence(
                 config.cadence_mode,

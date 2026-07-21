@@ -12,7 +12,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from murmur.engine.ffmpeg_io import FfmpegDecoder, load_voice_wav
+from murmur.engine.ffmpeg_io import FfmpegDecoder, load_voice_wav, stream_decodes
 
 _ENGINE_SR = 8_000
 _CH = 2
@@ -89,6 +89,24 @@ def test_ffmpeg_decoder_raises_on_abnormal_exit(tmp_path: Path):
             decoder.read()
     finally:
         decoder.close()
+
+
+@pytest.mark.integration
+def test_stream_decodes_probe_true_for_audio_false_for_a_dead_source(tmp_path: Path):
+    # The pull-time playability probe (spec 04): a real file decodes -> True; a
+    # source ffmpeg cannot open (the 403 stand-in) -> False, not a hang/raise.
+    seconds = 0.25
+    values = np.full((int(_ENGINE_SR * seconds), _CH), 0.5, dtype=np.float32)
+    good = tmp_path / "music.wav"
+    _write_wav(good, values, rate=_ENGINE_SR, channels=_CH)
+
+    async def go():
+        assert await stream_decodes(str(good), samplerate=_ENGINE_SR, channels=_CH)
+        assert not await stream_decodes(
+            str(tmp_path / "nope.mp3"), samplerate=_ENGINE_SR, channels=_CH
+        )
+
+    asyncio.run(go())
 
 
 @pytest.mark.integration

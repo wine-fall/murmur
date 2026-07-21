@@ -30,7 +30,11 @@ _Last updated: 2026-07-20_
   clean end), and the Director confirms real audio (`MusicHandle.wait_started`)
   before committing the announce; on no audio it retries a fresh pick (usually a
   different, working stream) and only degrades visibly to talk once the bounded
-  attempts are spent. The bed now covers stream startup (bed<->song crossfade
+  attempts are spent. Picks are also validated at PULL time: `submit_pick` probes
+  the resolved stream (decodes one frame) and rejects a dead 403 as a retryable
+  error, so the model picks another candidate during talk — the music boundary
+  usually gets an already-playable stream, with `wait_started` as the play-time
+  backstop. The bed now covers stream startup (bed<->song crossfade
   deferred to first audio), so a dead pick never leaves dead air. **Owed (by-ear pass):** the announce can still
   land a beat into the song when TTS synth outruns stream startup — sensory tuning.
 - **Open: end-to-end latency measurement.** Acceptance so far is mechanism-level
