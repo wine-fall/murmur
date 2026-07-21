@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-20_
+_Last updated: 2026-07-21_
 
 - **Milestone: L0 + L1 — code-complete.** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the
@@ -35,4 +35,12 @@ _Last updated: 2026-07-20_
 - **Open: by-ear / sensory acceptance** (L0/L1 "sounds human, feels like radio",
   PR #24's gapless-barge-in feel) — owed once the TUI is ready; a real listening
   pass, not an assertion.
-- Later specs (05–09) are expected to change as we learn — not frozen.
+- **Designed (spec 05, `specs/spec05/05-memory.md`): persistent memory —
+  approved 2026-07-21, build not started.** Three persistent tiers
+  (profile/history/ledger, local files) + context-pack assembly (ratifies the
+  spec-04 §3.4 `scene` field; adds `profile` / `covered_topics`) + background
+  compaction + the repo path-governance rule (`paths.py`, XDG data/cache
+  roots). Motivated in part by issue #44 (cold-open repetition); library
+  research recorded in issue #45 (verdict: stdlib files, no dependency).
+  **Building spec 05 is the next focus after spec 04 §3.3 closes.**
+- Later specs (06–09) are expected to change as we learn — not frozen.
