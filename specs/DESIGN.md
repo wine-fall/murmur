@@ -203,6 +203,28 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 - Writes: append history and record the ledger after each segment / each input; the profile is updated via **periodic compaction** so it doesn't grow unbounded.
 - Each Brain call gets a compact **context pack**: `persona + profile + recent window + topics already covered today + current time/activity`.
 
+### 6.1 Local storage layout (one home)
+
+Everything murmur keeps lives under **one home**: `~/.murmur` by default,
+relocatable with `$MURMUR_HOME`. Chosen over a strict XDG split (`~/.cache` +
+`~/.local/share`) because this is a single-user local companion — "one visible
+home, one directory to back up or take with you" beats XDG orthodoxy, and
+`$MURMUR_HOME` keeps the relocation escape hatch. Split by **what happens if you
+delete it**:
+
+| Under `~/.murmur/` | Holds | If deleted |
+|---|---|---|
+| `data/` | the Memory tiers (§6), incl. the evolving persona | **irreplaceable** — loses user state; this is the thing to back up |
+| `cache/` | the background-music `bed/` | **rebuildable** — costs a re-pull |
+
+- **`paths.py` is the single module allowed to resolve these locations** — no
+  other module hardcodes a home-derived path (a pre-commit gate enforces it), so
+  the layout has exactly one source of truth. Sub-spec 05 §2.3 owns the detail.
+- **Ephemeral TTS clips** are throwaway and live in the **system tmp**, cleaned
+  by their creator — not part of this home. Model weights sit in their own
+  third-party cache (`~/.cache/huggingface`). Repo-relative `.dev/` / `scratch/`
+  are dev-loop tooling, not app storage.
+
 ---
 
 ## 7. Token economy (the radio talks nonstop; without care it burns the subscription)

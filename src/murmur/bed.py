@@ -16,14 +16,17 @@ import hashlib
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from . import paths
 from .logging_setup import get_log
 
 _log = get_log("bed")
 
 # The committed manifest and the per-user cache (outside the repo, survives
-# clones) — spec 03-04 §2.3 "cache location — decided".
+# clones) — spec 03-04 §2.3 "cache location — decided". The cache is rebuildable
+# state, so it lives under murmur's cache root (spec 05 §2.3 path governance);
+# $MURMUR_HOME relocates it.
 DEFAULT_MANIFEST = Path(__file__).resolve().parent.parent.parent / "assets" / "bed_sources.txt"
-DEFAULT_CACHE_DIR = Path.home() / ".cache" / "murmur" / "bed"
+DEFAULT_CACHE_DIR = paths.cache_root() / "bed"
 
 # Partial / hidden files are not playable tracks.
 _SKIP_SUFFIXES = {".part", ".ytdl", ".tmp"}
