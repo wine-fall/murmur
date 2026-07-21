@@ -9,10 +9,14 @@ next_track returns a TrackPick (clip with title/artist + the announce line).
 from __future__ import annotations
 
 import asyncio
+import wave
+from pathlib import Path
 
+import numpy as np
+import pytest
 from fakes import FakeMusicBrain, FakeMusicProvider
 
-from murmur.contracts import TrackCandidate
+from murmur.contracts import AudioClip, TrackCandidate
 from murmur.music.context import MusicContext
 from murmur.music.programmer import MusicProgrammer, TrackPick
 
@@ -86,6 +90,54 @@ def test_next_track_skips_a_pick_whose_stream_never_plays():
         pick = await prog.next_track(MusicContext(persona="P", situation="S"))
         assert pick is not None
         assert pick.clip.source == "stream:good"
+        assert provider.resolved == ["dead", "good"]  # probed dead, then took good
+
+    asyncio.run(go())
+
+
+@pytest.mark.integration
+def test_next_track_e2e_drops_a_dead_stream_with_the_real_probe(tmp_path: Path):
+    """e2e (real ffmpeg, no network): the REAL build_probe wired through the REAL
+    pull pipeline. Local files stand in for resolved stream URLs — one decodes,
+    one cannot be opened (the 403 stand-in). next_track must probe the dead one,
+    reject it, and return the pick that actually plays (spec 04)."""
+    from murmur.engine import build_probe
+
+    good = tmp_path / "good.wav"
+    with wave.open(str(good), "wb") as w:
+        w.setnchannels(2)
+        w.setsampwidth(2)
+        w.setframerate(8_000)
+        w.writeframes((np.full((2_000, 2), 0.3) * 32767).astype(np.int16).tobytes())
+    dead = tmp_path / "nope.mp3"  # nonexistent -> ffmpeg cannot open it
+
+    class LocalProvider:
+        def __init__(self) -> None:
+            self.resolved: list[str] = []
+
+        async def start(self) -> None: ...
+
+        async def search(self, query: str, *, limit: int = 5) -> list[TrackCandidate]:
+            return _cands("dead", "good")
+
+        async def resolve(self, ref: str) -> AudioClip:
+            self.resolved.append(ref)
+            return AudioClip(source=str(good if ref == "good" else dead), kind="music")
+
+        async def aclose(self) -> None: ...
+
+    provider = LocalProvider()
+    prog = MusicProgrammer(
+        brain=FakeMusicBrain(),
+        provider=provider,
+        model="haiku",
+        probe=build_probe(ffmpeg="ffmpeg"),
+    )
+
+    async def go():
+        pick = await prog.next_track(MusicContext(persona="P", situation="S"))
+        assert pick is not None
+        assert pick.clip.source == str(good)
         assert provider.resolved == ["dead", "good"]  # probed dead, then took good
 
     asyncio.run(go())
