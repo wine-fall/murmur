@@ -12,8 +12,9 @@
 >     spec 08's *batch-generation* pillar as the latency vehicle (not the full
 >     token economy).
 >   - **§3.4 (later add)**: **time-of-day scene** — a small adjacent
->     context-enrichment that lands here (no separate spec was opened; the future
->     spec-07 time/activity home is still owed). Derives a scene bucket from the
+>     context-enrichment that lands here (no separate spec was opened; the
+>     `ContextPack` field/assembly contract is ratified by spec 05,
+>     [`../spec05/05-memory.md`](../spec05/05-memory.md) §2.2). Derives a scene bucket from the
 >     local clock and threads it into the talk prompt so the host speaks to the
 >     current time of day. Independent of the latency buffers above.
 > **Part**: Polish over L1 (responsiveness). Removes producer latency (Brain, TTS,
@@ -48,9 +49,10 @@ first song / first reply sooner — without multi-process complexity (master §4
   budget/degradation) — spec 08. Slice 2 borrows only 08's *batch-generate-N*
   as a latency vehicle, not the economy.
 - Buffering across restarts; semantic recall.
-- **Activity-aware pacing** and the richer profile/ledger context (spec 07). The
-  time-of-day scene (§3.4) is only the *clock* slice of that future work, pulled
-  in early; activity/profile fields are still deferred.
+- **Activity-aware pacing** (spec 07) and the richer profile/ledger context
+  (spec 05). The time-of-day scene (§3.4) is only the *clock* slice of that
+  future work, pulled in early; spec 05 ratifies the `scene` field as the
+  pack's canonical time field, and the `activity` field stays spec 07's.
 
 ---
 
@@ -255,5 +257,6 @@ this makes the host speak to the actual local time.
   restrict to the first cold-start pick.
 - **Mood-staleness tolerance** for a prefetched pick (how far ahead is too far).
 - **§3.4 scene granularity / boundaries:** 4 buckets with fixed hour cuts is a
-  by-ear start; the boundaries and the per-scene cue wording are tunable, and the
-  proper home is the future spec-07 time/activity context (this is an early slice).
+  by-ear start; the boundaries and the per-scene cue wording are tunable. The
+  field's contract home is spec 05 ([`../spec05/05-memory.md`](../spec05/05-memory.md)
+  §2.2, which ratifies it); time-driven *behavior* (anchors, pacing) is spec 07's.
