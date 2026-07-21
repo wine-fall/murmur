@@ -171,7 +171,7 @@ air, so priority never costs dead air.
 
 ### 3.4 Pacing & token restraint (L0 minimum, master §9.2)
 - **One Brain call per talk segment** as the L0 minimum. **Superseded for latency by [`spec 04`](../spec04/04-no-dead-air.md)**, which pulls forward a pre-generation buffer: music-pick prefetch (slice 1) and batched talk look-ahead (slice 2, spec 08's batch pillar as the vehicle). The L0 minimum below still holds as the fallback path; 04 is the polish layered on top.
-- A configurable **inter-segment gap** so output is a paced program, not a firehose.
+- A configurable **inter-segment gap** so output is a paced program, not a firehose. Default ~2.0s — a by-ear value tuned to feel continuous without running the segments together; live-overridable via `--gap`.
 - These two bound the talk rate so testing doesn't drain the subscription. Full economy (cache/tier/gate) is spec 08.
 
 ### 3.5 Audio playback (L0)

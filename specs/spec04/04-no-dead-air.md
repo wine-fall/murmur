@@ -11,6 +11,11 @@
 >     so segment *k+1* airs with no Brain+synth wait after *k*. This pulls forward
 >     spec 08's *batch-generation* pillar as the latency vehicle (not the full
 >     token economy).
+>   - **§3.4 (later add)**: **time-of-day scene** — a small adjacent
+>     context-enrichment that lands here (no separate spec was opened; the future
+>     spec-07 time/activity home is still owed). Derives a scene bucket from the
+>     local clock and threads it into the talk prompt so the host speaks to the
+>     current time of day. Independent of the latency buffers above.
 > **Part**: Polish over L1 (responsiveness). Removes producer latency (Brain, TTS,
 > music search) from the listener's timeline by pre-generating behind live audio.
 > **Milestone**: post-L1 cold-start / no-dead-air. See master [`../DESIGN.md`](../DESIGN.md)
@@ -33,12 +38,19 @@ first song / first reply sooner — without multi-process complexity (master §4
 - **slice 2 — talk look-ahead (this build).** One Brain call yields N segment
   scripts; their TTS runs in parallel; the Director buffers the extras so the
   next segment airs with no Brain/synth wait.
+- **§3.4 — time-of-day scene (later add).** The Director reads the local clock
+  into a coarse scene bucket (morning / afternoon / evening / late-night) and
+  threads it into the talk prompt, so the host's talk varies by time of day.
+  Not a latency feature — an adjacent context-enrichment that landed here.
 
 ### Out of scope
 - **Full token economy** (prompt caching, tiered models, activity-gating,
   budget/degradation) — spec 08. Slice 2 borrows only 08's *batch-generate-N*
   as a latency vehicle, not the economy.
-- Buffering across restarts; activity-aware pacing (spec 07); semantic recall.
+- Buffering across restarts; semantic recall.
+- **Activity-aware pacing** and the richer profile/ledger context (spec 07). The
+  time-of-day scene (§3.4) is only the *clock* slice of that future work, pulled
+  in early; activity/profile fields are still deferred.
 
 ---
 
@@ -47,6 +59,11 @@ No new outbound seam. Reuses `TrackSource.next_track` (spec 03-01) and, for
 slice 2, a **new** batch method on the Brain, `next_talks(ctx, count) -> list[str]`
 (additive; the single `next_talk`/`respond` stay). The look-ahead **buffers live
 inside the Director** — they are private scheduling state, not a cross-spec seam.
+
+For §3.4, `ContextPack` (spec 01 §2.1) gains an **optional** `scene: str | None`
+field (additive, default `None`) — the time-of-day bucket. Derivation is a pure
+function `scene.scene_for(now: datetime) -> str`; the Director supplies the real
+local clock, so the bucketing is unit-testable without `datetime.now()`.
 
 ---
 
@@ -138,6 +155,36 @@ refill: the buffered beats were generated before the user turn, so they are stal
 and any in-flight refill are also settled on shutdown. `N` is a module constant,
 not a config knob — deepen only if measurement shows a remaining gap (§6).
 
+### 3.4 Time-of-day scene (context enrichment)
+Adjacent to the latency work above; it rides in this spec (see the header note).
+The radio was permanently "night" because the persona seed was night-flavored;
+this makes the host speak to the actual local time.
+
+- **Derivation (pure, unit-tested):** `scene.scene_for(now)` maps a local
+  `datetime` to a coarse bucket by hour — **morning** 05:00–11:59, **afternoon**
+  12:00–17:59, **evening** 18:00–22:59, **late-night** 23:00–04:59 (wraps past
+  midnight). Clock-free: the caller passes the `datetime`, so the boundaries are
+  pinned in tests with injected values (never `datetime.now()`).
+- **Population:** the Director calls `scene.current_scene(datetime.now())` where it
+  builds the `ContextPack` (`_context`), so every Brain call this turn carries the
+  current scene. The real wall clock lives in the Director; `scene_for` is the pure
+  tested seam that `current_scene` wraps.
+- **Override (by-ear / testing):** `MURMUR_SCENE=morning|afternoon|evening|late-night`
+  forces the scene regardless of the clock, so a scene can be auditioned without
+  waiting for the hour. Handled in `current_scene`; an empty/unset value derives
+  from the clock, a non-empty invalid value warns and degrades to the clock (a typo
+  never breaks the radio — same posture as the `Config` env knobs).
+- **Prompt:** the self-initiated talk builders (`build_next_talk_prompt`,
+  `build_next_talks_prompt`) append a short per-scene mood cue keyed by
+  `ctx.scene`. A `None` or unmapped scene appends nothing (degrades silently).
+  English scaffolding as always — the persona still produces Chinese.
+- **Persona seed:** generalized from its hard "late-night" framing to be
+  time-neutral, so the per-scene cue (not a night-locked seed) sets the mood.
+- **Stochastic quality is eval-track:** *that the scene reaches the prompt* is a
+  deterministic unit assertion; *whether the host's phrasing actually reads as
+  morning vs. late-night* is a by-ear / eval concern (DESIGN §10.3), not a unit
+  assertion on model text.
+
 ---
 
 ## 4. Dependencies
@@ -185,6 +232,18 @@ not a config knob — deepen only if measurement shows a remaining gap (§6).
    synth failure are retried (the look-ahead still fills / the beat still airs);
    exhausted retries degrade (look-ahead skipped / beat skipped) without crashing
    the loop.
+10. **§3.4 (scene bucketing):** `scene_for` maps each hour to the right bucket,
+    with the boundary hours (05:00, 12:00, 18:00, 23:00) and the midnight wrap
+    pinned. Verified with an **injected** clock (fixed `datetime` values), never
+    `datetime.now()`.
+11. **§3.4 (prompt assembly):** a set `ctx.scene` threads its mood cue into the
+    self-initiated talk prompts; a `None` / unmapped scene appends nothing.
+    Verified on the prompt strings (deterministic). The host's actual time-of-day
+    voice is an eval / by-ear item, not a unit assertion.
+12. **§3.4 (scene override):** a valid `MURMUR_SCENE` wins over the clock; an
+    empty/unset value derives from the clock; a non-empty invalid value degrades
+    to the clock (never raises). Verified with a fixed clock whose derived bucket
+    differs from the override, so the env is proven to win.
 
 ---
 
@@ -195,3 +254,6 @@ not a config knob — deepen only if measurement shows a remaining gap (§6).
   (one pick ahead, every music cycle); if the mood-staleness ever reads wrong,
   restrict to the first cold-start pick.
 - **Mood-staleness tolerance** for a prefetched pick (how far ahead is too far).
+- **§3.4 scene granularity / boundaries:** 4 buckets with fixed hour cuts is a
+  by-ear start; the boundaries and the per-scene cue wording are tunable, and the
+  proper home is the future spec-07 time/activity context (this is an early slice).

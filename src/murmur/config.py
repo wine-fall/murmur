@@ -64,9 +64,11 @@ class Config:
     persona_path: Path = DEFAULT_PERSONA_PATH
 
     # --- pacing (spec 01 §3.4) --------------------------------------------
-    # Natural pause between talk segments, in seconds. Bounds the talk rate so
-    # testing does not drain the subscription; full economy is spec 08.
-    inter_segment_gap: float = 4.0
+    # Natural pause between talk segments, in seconds. A by-ear knob (live via
+    # --gap): short enough to feel like a continuous program, long enough to
+    # read as breathing room. Also bounds the talk rate so testing does not
+    # drain the subscription; full economy is spec 08.
+    inter_segment_gap: float = 2.0
 
     # --- audio engine (spec 03-02) -----------------------------------------
     # The mixing AudioEngine replaced the spec-01 afplay player; its only

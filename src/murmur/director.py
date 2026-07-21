@@ -30,6 +30,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Literal
 
 from .brain import Brain
@@ -49,6 +50,7 @@ from .engine.core import MixingPlayer, MusicHandle
 from .music.context import MusicContext
 from .music.programmer import TrackPick, TrackSource
 from .prompts import build_music_situation
+from .scene import current_scene
 
 # The UI keeps failures terse (one info line); the dev logfile (make dev /
 # MURMUR_DEV_LOG) gets the full exception + traceback. No-op when unconfigured.
@@ -152,7 +154,12 @@ class Director:
         recent = list(self._memory.recent(self._config.recent_window))
         if pending:
             recent += [Turn("radio", text) for text in pending]
-        return ContextPack(persona=self._persona, recent=recent)
+        # Local wall clock -> time-of-day scene (spec 04 §3.4), so the host speaks
+        # to the current hour. The real clock lives here; current_scene applies a
+        # MURMUR_SCENE override (by-ear) over the pure, unit-tested bucketing.
+        return ContextPack(
+            persona=self._persona, recent=recent, scene=current_scene(datetime.now())
+        )
 
     def _recent_lines(self) -> list[str]:
         return [
