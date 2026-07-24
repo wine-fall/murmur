@@ -201,7 +201,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 
 - **Semantic memory (vector recall) is deferred to v1.5**; the MVP gets ~80% of the "it gets me" feel from "profile + recent window + ledger," with structure reserved for it.
 - Writes: append history and record the ledger after each segment / each input; the profile is updated via **periodic compaction** so it doesn't grow unbounded.
-- Each Brain call gets a compact **context pack**: `persona + profile + recent window + topics already covered today + current time/activity`.
+- Each Brain call gets a compact **context pack**: `persona + profile + recent window + recently covered topics + current time/activity`. (Anti-repeat spans sessions/days, not just "today" — a midnight reset would re-surface the same openers on a cold boot; see spec 05 §2.2 and issue #44.)
 
 ### 6.1 Local storage layout (one home)
 

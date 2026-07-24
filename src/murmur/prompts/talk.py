@@ -44,6 +44,26 @@ def _scene_line(ctx: ContextPack) -> str:
     return f"\n{cue}" if cue else ""
 
 
+def _profile_block(ctx: ContextPack) -> str:
+    """The tier-① listener profile as a leading stable block (spec 05 §3.5): it
+    precedes the volatile transcript so persona + profile form the cache-friendly
+    stable prefix (master §7 pillar 4). Empty profile → nothing (degrade silently)."""
+    profile = ctx.profile.strip()
+    if not profile:
+        return ""
+    return f"(What you know about the listener)\n{profile}\n\n"
+
+
+def _covered_line(ctx: ContextPack) -> str:
+    """A single volatile 'recently covered — don't repeat' cue from the tier-③
+    ledger (spec 05 §3.5). Ledger-backed and cross-day, so it holds even when the
+    transcript is empty (the issue-#44 cold-open case). Empty → nothing."""
+    if not ctx.covered_topics:
+        return ""
+    topics = ", ".join(ctx.covered_topics)
+    return f"\n(Recently covered — don't repeat these: {topics})"
+
+
 def _render_transcript(
     ctx: ContextPack, *, drop_trailing_user: str | None = None
 ) -> str:
@@ -72,7 +92,10 @@ def build_next_talk_prompt(ctx: ContextPack) -> str:
         )
     else:
         head = "The program is just starting. Open naturally with your first beat."
-    return f"{head}{_scene_line(ctx)}\n{_OUTPUT_RULES}"
+    return (
+        f"{_profile_block(ctx)}{head}{_covered_line(ctx)}"
+        f"{_scene_line(ctx)}\n{_OUTPUT_RULES}"
+    )
 
 
 def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
@@ -92,17 +115,20 @@ def build_next_talks_prompt(ctx: ContextPack, count: int) -> str:
             f"{count} beats."
         )
     return (
-        f"{head}{_scene_line(ctx)}\nEach beat is one small stretch of radio (a few "
+        f"{_profile_block(ctx)}{head}{_covered_line(ctx)}{_scene_line(ctx)}\n"
+        f"Each beat is one small stretch of radio (a few "
         f"sentences, spoken aloud — no markup, labels, or stage directions). Return "
         f"all {count} beats in order by calling the emit_talk_beats tool."
     )
 
 
 def build_respond_prompt(user_text: str, ctx: ContextPack) -> str:
-    """Prompt for an in-persona reply to a typed user line."""
+    """Prompt for an in-persona reply to a typed user line. Carries the profile
+    block too (spec 05 §3.5): a direct reply is exactly where cross-session
+    listener facts should shape what the host says back."""
     transcript = _render_transcript(ctx, drop_trailing_user=user_text)
     head = f"(The program so far)\n{transcript}\n\n" if transcript else ""
     return (
-        f'{head}The listener just said to you: "{user_text}"\n'
+        f'{_profile_block(ctx)}{head}The listener just said to you: "{user_text}"\n'
         f"Respond in character, then ease back into the program.\n{_OUTPUT_RULES}"
     )

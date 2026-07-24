@@ -13,6 +13,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .paths import data_root
 from .prompts import DEFAULT_PERSONA_PATH
 
 
@@ -100,9 +101,14 @@ class Config:
     # gain / crossfade are module constants (engine/mixer.py), by-ear tunable.
     bed_enabled: bool = True
 
-    # --- memory (master §6) -----------------------------------------------
+    # --- memory (master §6; spec 05) --------------------------------------
     # Size of the recent-turns window handed to the Brain per call.
     recent_window: int = 12
+    # Persistent memory dir (spec 05 §2.3): irreplaceable user data under the
+    # XDG data root, governed by paths.py. Holds the three tiers + persona.md.
+    memory_dir: Path = field(default_factory=lambda: data_root() / "memory")
+    # Cheap tier for periodic profile compaction (spec 05 §3.6; master §7 #3).
+    compact_model: str = "claude-haiku-4-5-20251001"
 
     # --- provider selection (spec 01 §3.1) --------------------------------
     # Which Brain to construct. "claude" = real claude-agent-sdk Brain (L0

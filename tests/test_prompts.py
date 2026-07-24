@@ -80,3 +80,74 @@ def test_respond_keeps_unrelated_listener_lines():
     prompt = build_respond_prompt("now", ctx)
     assert "Listener: earlier" in prompt
     assert 'said to you: "now"' in prompt
+
+
+# --- profile + covered-topics (spec 05 §3.5) ------------------------------ #
+
+
+def test_profile_renders_as_a_stable_block_before_transcript():
+    ctx = ContextPack(
+        persona="persona",
+        recent=[Turn("radio", "a")],
+        profile="Listener likes jazz and late walks.",
+    )
+    prompt = build_next_talk_prompt(ctx)
+    assert "Listener likes jazz and late walks." in prompt
+    # Stable prefix (master §7 pillar 4): the profile block precedes the
+    # volatile program transcript.
+    assert prompt.index("likes jazz") < prompt.index("You: a")
+
+
+def test_covered_topics_render_a_dont_repeat_line():
+    ctx = ContextPack(
+        persona="persona",
+        recent=[],
+        covered_topics=("night walks", "old films"),
+    )
+    prompt = build_next_talk_prompt(ctx)
+    assert "night walks" in prompt
+    assert "old films" in prompt
+
+
+def test_empty_profile_and_topics_render_nothing_extra():
+    plain = build_next_talk_prompt(_ctx([]))
+    # No stray headers when both are empty (degrade silently, like the scene cue).
+    assert "profile" not in plain.lower()
+    assert "don't repeat" not in plain.lower()
+
+
+def test_next_talks_prompt_also_carries_profile_and_topics():
+    ctx = ContextPack(
+        persona="persona",
+        recent=[],
+        profile="Likes jazz.",
+        covered_topics=("night walks",),
+    )
+    prompt = build_next_talks_prompt(ctx, count=2)
+    assert "Likes jazz." in prompt
+    assert "night walks" in prompt
+
+
+def test_respond_prompt_carries_the_profile():
+    # A direct reply is exactly where cross-session facts should shape the answer.
+    ctx = ContextPack(persona="persona", recent=[], profile="Night-shift nurse.")
+    prompt = build_respond_prompt("hey", ctx)
+    assert "Night-shift nurse." in prompt
+    assert 'said to you: "hey"' in prompt
+
+
+# --- music avoid-list (spec 05 §3.5) -------------------------------------- #
+
+
+def test_music_situation_carries_avoid_list():
+    from murmur.prompts import build_music_situation
+
+    prompt = build_music_situation(["radio: hi"], avoid=["Song A — X", "Song B — Y"])
+    assert "Song A — X" in prompt
+    assert "Song B — Y" in prompt
+
+
+def test_music_situation_without_avoid_list_is_unchanged():
+    from murmur.prompts import build_music_situation
+
+    assert "avoid" not in build_music_situation(["radio: hi"]).lower()

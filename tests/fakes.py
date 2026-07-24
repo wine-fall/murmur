@@ -9,16 +9,20 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from murmur.contracts import AudioClip, ContextPack, TrackCandidate
+from murmur.contracts import AudioClip, ContextPack, TalkBeat, TrackCandidate, Turn
 
 
 class FakeBrain:
     """Records calls; returns deterministic text. ``respond_delay`` > 0 keeps a
     reply "in composition" long enough for a queued line to merge into it (the
-    delay is *before* recording, so a merged-away reply leaves no trace)."""
+    delay is *before* recording, so a merged-away reply leaves no trace).
+    ``tag_topics`` makes each batch beat carry a ``topic-N`` key (spec 05 §3.9)."""
 
     def __init__(
-        self, respond_delay: float = 0.0, next_talks_fail_times: int = 0
+        self,
+        respond_delay: float = 0.0,
+        next_talks_fail_times: int = 0,
+        tag_topics: bool = False,
     ) -> None:
         self.talk_count = 0
         self.responded_to: list[str] = []
@@ -26,26 +30,34 @@ class FakeBrain:
         # recent-turn texts seen by each next_talks call — lets a test assert the
         # queued look-ahead beats were threaded into the refill context (§3.3).
         self.talk_contexts: list[list[str]] = []
+        # The full ContextPack seen by each next_talks call (spec 05 pack fields).
+        self.packs: list[ContextPack] = []
         self._respond_delay = respond_delay
         # Raise from the first N next_talks calls, then succeed — exercises the
         # Director's bounded look-ahead retry (spec 04 §3.3).
         self._next_talks_fail = next_talks_fail_times
+        self._tag_topics = tag_topics
 
     async def next_talk(self, ctx: ContextPack) -> str:
         self.talk_count += 1
         return f"talk-{self.talk_count}"
 
-    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[TalkBeat]:
         if self._next_talks_fail > 0:
             self._next_talks_fail -= 1
             raise RuntimeError("transient next_talks failure")
         self.talk_contexts.append([t.text for t in ctx.recent])
+        self.packs.append(ctx)
         self.batch_counts.append(count)
-        out: list[str] = []
+        out: list[TalkBeat] = []
         for _ in range(count):
             self.talk_count += 1
-            out.append(f"talk-{self.talk_count}")
+            topic = f"topic-{self.talk_count}" if self._tag_topics else None
+            out.append(TalkBeat(f"talk-{self.talk_count}", topic))
         return out
+
+    async def compact_profile(self, profile: str, transcript: list[Turn]) -> str:
+        return profile
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         if self._respond_delay:

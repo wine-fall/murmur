@@ -40,17 +40,22 @@ def build_find_music_instruction() -> str:
 _MUSIC_SITUATION_TEMPLATE = """\
 Recent on-air turns:
 {recent}
-
+{avoid}
 Intent: a music break in the program. Pick something that fits the mood and
 subjects of the conversation above (or the persona's taste if it is quiet).
 """
 
 
-def build_music_situation(recent: list[str]) -> str:
-    """Render the first real ``MusicContext.situation`` (spec 03-02 §1 #9):
-    the session's recent turns (as ``role: text`` lines) + the Director's
-    intent. Richer signals (ledger, time-of-day) join as later specs land."""
+def build_music_situation(recent: list[str], *, avoid: list[str] | None = None) -> str:
+    """Render the ``MusicContext.situation`` (spec 03-02 §1 #9): the session's
+    recent turns (as ``role: text`` lines) + the Director's intent, plus the
+    tier-③ ledger's recently-played songs to avoid repeating (spec 05 §3.5).
+    An empty ``avoid`` list renders nothing (degrade silently)."""
     lines = "\n".join(f"- {line}" for line in recent)
+    avoid_block = ""
+    if avoid:
+        played = "\n".join(f"- {song}" for song in avoid)
+        avoid_block = f"\nRecently played — do not repeat these:\n{played}\n"
     return _MUSIC_SITUATION_TEMPLATE.format(
-        recent=lines or "- (the program just started)"
+        recent=lines or "- (the program just started)", avoid=avoid_block
     )

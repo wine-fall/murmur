@@ -22,9 +22,10 @@ from collections.abc import Awaitable, Callable, Mapping
 from itertools import cycle
 from typing import TYPE_CHECKING, Any, Protocol, cast, runtime_checkable
 
-from .contracts import ContextPack
+from .contracts import ContextPack, TalkBeat, Turn
 from .logging_setup import get_log
 from .prompts import (
+    build_compaction_prompt,
     build_next_talk_prompt,
     build_next_talks_prompt,
     build_respond_prompt,
@@ -56,15 +57,21 @@ class Brain(Protocol):
         reply."""
         ...
 
-    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
-        """Generate the next ``count`` consecutive talk-segment scripts in one
-        call — the look-ahead batch (spec 04 §3.2). A superset of ``next_talk``
-        (``count=1``). May return fewer than ``count`` if the model's batch
-        degrades; the caller airs what it gets."""
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[TalkBeat]:
+        """Generate the next ``count`` consecutive talk beats in one call — the
+        look-ahead batch (spec 04 §3.2). Each beat carries its spoken ``text`` and
+        an optional ``topic`` key (spec 05 §3.9). May return fewer than ``count``
+        if the model's batch degrades; the caller airs what it gets."""
         ...
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         """Respond in-persona to a typed user line; then the program resumes."""
+        ...
+
+    async def compact_profile(self, profile: str, transcript: list[Turn]) -> str:
+        """Fold the transcript's durable facts into ``profile`` and return the
+        updated profile (spec 05 §2.4). A pure text fold — no tools; runs off
+        the live loop (the Compactor drives it)."""
         ...
 
 
@@ -98,11 +105,16 @@ class StubBrain:
     async def next_talk(self, ctx: ContextPack) -> str:
         return next(self._segments)
 
-    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
-        return [next(self._segments) for _ in range(count)]
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[TalkBeat]:
+        return [TalkBeat(next(self._segments)) for _ in range(count)]
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return f'Mm -- you said "{user_text}". I heard you. Let\'s follow that thread a little.'
+
+    async def compact_profile(self, profile: str, transcript: list[Turn]) -> str:
+        # Offline: leave the profile unchanged so a stub run's canned chatter
+        # never rewrites it (spec 05 §2.4 — compaction is a no-op on the stub).
+        return profile
 
 
 # --------------------------------------------------------------------------- #
@@ -126,7 +138,7 @@ class ClaudeBrain:
     async def next_talk(self, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_next_talk_prompt(ctx))
 
-    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[str]:
+    async def next_talks(self, ctx: ContextPack, count: int = 2) -> list[TalkBeat]:
         # Structured output via the harness tool seam (spec 04 §3.2): the model
         # returns its beats by calling emit_talk_beats, so the SDK hands them back
         # as a parsed mapping — no free-text JSON to scrape. An empty result (the
@@ -142,10 +154,21 @@ class ClaudeBrain:
         # Empty means the model never made the terminal call (or emitted no usable
         # beat). Fall back to a single plain-text beat rather than skip the segment
         # into dead air — the look-ahead is lost this round, the segment is not.
-        return beats or [await self.next_talk(ctx)]
+        return beats or [TalkBeat(await self.next_talk(ctx))]
 
     async def respond(self, user_text: str, ctx: ContextPack) -> str:
         return await self._generate(ctx.persona, build_respond_prompt(user_text, ctx))
+
+    async def compact_profile(self, profile: str, transcript: list[Turn]) -> str:
+        # A plain tool-less generation (same isolation as next_talk/respond). A
+        # neutral system framing (not the persona) keeps the fold as bookkeeping,
+        # not the host speaking — and a non-empty system_prompt still replaces the
+        # SDK's claude_code preset. The Compactor runs this off the live loop
+        # (spec 05 §3.6).
+        return await self._generate(
+            "You maintain a concise long-term profile of a radio listener.",
+            build_compaction_prompt(profile, transcript),
+        )
 
     async def _generate(self, persona: str, prompt: str) -> str:
         # Imported lazily so the stdlib-only stub path (tests) never imports the

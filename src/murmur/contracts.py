@@ -55,18 +55,32 @@ class Turn:
 
 
 @dataclass(frozen=True)
+class TalkBeat:
+    """One self-initiated talk beat from the batch call (spec 04 §3.2). ``topic``
+    is the optional 2–5 word ledger key the model tags it with (spec 05 §3.9);
+    ``None`` when untagged (the beat then ledgers no topic — degrade silently)."""
+
+    text: str
+    topic: str | None = None
+
+
+@dataclass(frozen=True)
 class ContextPack:
     """The compact context handed to the Brain per call (master §6).
 
     ``scene`` is the time-of-day bucket (spec 04 §3.4) the Director derives from
     the local clock so the host's talk can speak to the current time; ``None``
-    when unset (the prompt then omits any time-of-day cue). Remaining L0 fields
-    only; spec 05/07 add the profile/ledger/activity fields.
+    when unset (the prompt then omits any time-of-day cue). ``profile`` is the
+    tier-① listener facts (spec 05 §2.2; ``""`` = no profile yet) and
+    ``covered_topics`` the recent cross-day topic keys from the tier-③ ledger
+    (anti-repeat; empty = nothing recorded). Spec 07 adds ``activity``.
     """
 
     persona: str
     recent: list[Turn]
     scene: str | None = None
+    profile: str = ""
+    covered_topics: tuple[str, ...] = ()
 
 
 # --------------------------------------------------------------------------- #
@@ -162,3 +176,22 @@ class MemoryStore(Protocol):
     def record(self, turn: Turn) -> None: ...
 
     def recent(self, n: int) -> list[Turn]: ...
+
+    # --- spec 05 additions (additive; spec-01 signatures unchanged) --------- #
+
+    def profile(self) -> str:
+        """Tier-① listener facts (natural language); ``""`` when none yet."""
+        ...
+
+    def record_event(self, kind: str, key: str) -> None:
+        """Append a tier-③ ledger event; ``kind`` is ``"topic"`` or ``"song"``."""
+        ...
+
+    def recent_topics(self, n: int) -> list[str]:
+        """Last ``n`` topic keys, oldest-first — spans sessions/days (anti-repeat
+        must survive cold boots and the midnight boundary, spec 05 §2.1)."""
+        ...
+
+    def recent_songs(self, n: int) -> list[str]:
+        """Last ``n`` song keys (``"title — artist"``), oldest-first."""
+        ...

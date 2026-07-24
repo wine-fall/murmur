@@ -15,6 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from .cadence import CADENCE_INSTRUCTION, CADENCE_STATE_HEADER
+from .memory import PROFILE_CHAR_CAP, build_compaction_prompt
 from .music import (
     MUSIC_CONTEXT_HEADER,
     build_find_music_instruction,
@@ -36,6 +37,8 @@ __all__ = [
     "build_respond_prompt",
     "build_find_music_instruction",
     "build_music_situation",
+    "build_compaction_prompt",
+    "PROFILE_CHAR_CAP",
     "MUSIC_CONTEXT_HEADER",
     "CADENCE_INSTRUCTION",
     "CADENCE_STATE_HEADER",
