@@ -27,12 +27,20 @@ Drive one murmur task from intent to a **delivered PR** through fixed gates, **i
 - Watch: `gh pr checks <n> --watch`. Follow through in the same turn — stay in the loop or exit with an explicit "needs human" line.
 - No checks registered after ~5 min → one empty `ci: nudge` commit → still none → exit **"CI not picking up."**
 - Failed check → `gh run view --log-failed`. Infra flake (runner evicted / step canceled with no failing test) → rerun once, don't open a fix round. Real failure → targeted fix → push → **re-enter the watch**.
-- Green → **merge is always squash**. If the invocation pre-authorized it ("merge it" / "just merge"), `gh pr merge --squash` then delete the local branch. Otherwise exit: **"PR green, awaiting your merge — <url>."**
+- Green → **merge is always squash**. If the invocation pre-authorized it ("merge it" / "just merge"), `gh pr merge --squash`, then run **Post-merge cleanup** below. Otherwise exit: **"PR green, awaiting your merge — <url>."** (run the cleanup on the next invocation, once the user has merged.)
 - Re-enter the watch after any push. Exit only when no check is queued / in-progress / failed.
+
+## Post-merge cleanup (once the PR is actually merged)
+
+After the PR merges — whether you merged it or the user did — leave the local repo clean for the next task. **Verify the merge first** (`gh pr view <n> --json state` → `MERGED`); never delete a branch/worktree that still has unmerged or uncommitted work.
+
+- Delete the merged local branch and prune its stale remote-tracking ref.
+- If the build ran in a git worktree, remove that worktree (`git worktree remove`).
+- Switch back to `main` and pull the latest, so the next build starts from the merged tip — which now includes your change and anything else that landed.
 
 ## Exit in exactly one of
 
-- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`).
+- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). When merged: the local branch/worktree are cleaned up and the repo is back on an up-to-date `main` (see Post-merge cleanup). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`).
 - **Paused — needs human input** — a gate failed past budget, a sensory checklist is owed, CI won't pick up, or a decision is needed (spec divergence, an open question, a multi-source conflict). State exactly what's needed.
 - **Won't-do** — decided against the change: close the PR, delete the branch, revert the working changes, and say why.
 
@@ -46,3 +54,4 @@ Drive one murmur task from intent to a **delivered PR** through fixed gates, **i
 - Asserting on Claude's exact output in a unit test — that belongs in the eval track.
 - Charging into a fix on an investigation-phrased ask without checkpointing.
 - Declaring "done" before a user-set acceptance bar is met.
+- Leaving the merged branch/worktree behind or a stale local `main` after shipping — always run Post-merge cleanup once the PR is merged.
