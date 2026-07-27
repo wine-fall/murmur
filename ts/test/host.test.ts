@@ -36,6 +36,14 @@ describe('LineQueue', () => {
     expect(await a).toBe('x')
     expect(await b).toBe('x')
   })
+
+  it('abandoned race losers share one pending promise (no waiter leak)', () => {
+    // Regression (codex review): every race the Director loses must not add a
+    // fresh waiter — an always-on idle run would grow one per segment/gap.
+    const q = new LineQueue()
+    const first = q.peek()
+    for (let i = 0; i < 100; i++) expect(q.peek()).toBe(first)
+  })
 })
 
 describe('CliHost', () => {

@@ -33,8 +33,12 @@ export class SubprocessPlayer implements Player {
   }
 
   async stop(): Promise<void> {
-    if (this.child === null) return
-    this.child.kill('SIGTERM')
-    await this.current // resolves via the exit handler; no orphaned player
+    const child = this.child
+    if (child === null) return
+    // A failed spawn has no pid; kill() would then signal THIS process's own
+    // group instead of the (nonexistent) child. Skip the kill and just await
+    // settlement via the pending 'error' event.
+    if (child.pid !== undefined) child.kill('SIGTERM')
+    await this.current // resolves via the exit/error handler; no orphaned player
   }
 }

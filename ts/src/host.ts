@@ -22,18 +22,26 @@ export interface Host {
 
 export class LineQueue {
   private lines: string[] = []
-  private waiters: (() => void)[] = []
+  // The single shared wait-for-a-line promise. Memoized so that every race
+  // loser holds the SAME pending promise — an always-on idle run must not
+  // accumulate one abandoned waiter per segment/gap race (peek offers no
+  // cancellation, so unbounded per-caller waiters would leak).
+  private waiting: { promise: Promise<string>; resolve: (line: string) => void } | null = null
 
   push(line: string): void {
     this.lines.push(line)
-    for (const wake of this.waiters.splice(0)) wake()
+    this.waiting?.resolve(this.lines[0]!)
+    this.waiting = null
   }
 
-  async peek(): Promise<string> {
-    while (this.lines.length === 0) {
-      await new Promise<void>((resolve) => this.waiters.push(resolve))
+  peek(): Promise<string> {
+    if (this.lines.length > 0) return Promise.resolve(this.lines[0]!)
+    if (this.waiting === null) {
+      let resolve!: (line: string) => void
+      const promise = new Promise<string>((r) => (resolve = r))
+      this.waiting = { promise, resolve }
     }
-    return this.lines[0]!
+    return this.waiting.promise
   }
 
   take(): string | undefined {
