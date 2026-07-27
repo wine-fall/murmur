@@ -23,6 +23,14 @@
 >   id that rots takes its line with it, and ids can't be verified offline. The
 >   pulled file is cached and stable thereafter (the cache key is the ref string).
 >   Upgrade path: pin explicit CC-BY URLs once verified.
+> **TS port (issue #54 Phase 3, 2026-07-27)**: ported with the TS engine — the
+> bed is a per-track gain chain under a bed master gain in the Web Audio graph
+> (`ts/src/engine.ts`), with the track-loop crossfade scheduled declaratively at
+> each track's known end and the bed↔song crossfade still deferred to the
+> song's first scheduled frame. Acquisition/cache (`ts/src/bed.ts`) keeps the
+> Python cache layout and sha256[:16] key, so an existing warm cache is reused
+> as-is. Gains remain module constants (`BED_GAIN` 0.5 / `BED_XFADE_S` 1.5 s,
+> the Python as-built values); config/CLI carry only `--no-bed`.
 > **Part**: An extension of the [`03-02`](03-02-ducking.md) mixing engine. 03-02
 > plays a **featured song** and ducks it under voice, but during pure talk there
 > is **no music at all** — silence under the host. This spec adds a continuous,

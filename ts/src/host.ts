@@ -75,7 +75,7 @@ export class CliHost implements Host {
   }
 
   banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
-    console.log('┌─ murmur · ts (issue #54 phase 2) ────────────────────────────')
+    console.log('┌─ murmur · ts (issue #54 phase 3) ────────────────────────────')
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')

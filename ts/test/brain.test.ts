@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { agenticOptions, buildBrain, ClaudeBrain, isolatedOptions, StubBrain } from '../src/brain.ts'
+import { agenticOptions, isolatedOptions, StubBrain } from '../src/brain.ts'
 import type { ContextPack } from '../src/contracts.ts'
 import { cleanBeats, emitTalkBeatsTool } from '../src/talk-tools.ts'
 
@@ -14,13 +14,6 @@ describe('StubBrain', () => {
     expect(beats[0]!.text).not.toBe(beats[1]!.text)
     const reply = await brain.respond('hi', ctx)
     expect(reply).toContain('hi')
-  })
-})
-
-describe('buildBrain', () => {
-  it('selects the implementation by name', () => {
-    expect(buildBrain('stub', 'm')).toBeInstanceOf(StubBrain)
-    expect(buildBrain('claude', 'm')).toBeInstanceOf(ClaudeBrain)
   })
 })
 

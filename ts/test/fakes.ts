@@ -8,12 +8,17 @@ import type {
   Brain,
   ContextPack,
   Harness,
+  MixingPlayer,
+  MusicContext,
+  MusicHandle,
   MusicProvider,
   Player,
   TalkBeat,
   Task,
   TaskTool,
   TrackCandidate,
+  TrackPick,
+  TrackSource,
 } from '../src/contracts.ts'
 import type { Host } from '../src/host.ts'
 import { LineQueue } from '../src/host.ts'
@@ -141,6 +146,80 @@ export class FakePlayer implements Player {
   get playing(): boolean {
     return this.release !== null
   }
+}
+
+export class FakeMusicHandle implements MusicHandle {
+  ducks = 0
+  unducks = 0
+  stopped = false
+  // Scripted: does the stream produce real audio? (false = the dead-403 case)
+  startedOk = true
+
+  private ended: Promise<void>
+  private release!: () => void
+
+  constructor(startedOk = true) {
+    this.startedOk = startedOk
+    this.ended = new Promise((resolve) => (this.release = resolve))
+  }
+
+  // Test control: the song reaches its natural end.
+  end(): void {
+    this.release()
+  }
+
+  duck(): void {
+    this.ducks++
+  }
+
+  unduck(): void {
+    this.unducks++
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true
+    this.release()
+  }
+
+  wait(): Promise<void> {
+    return this.ended
+  }
+
+  async waitStarted(_timeoutS: number): Promise<boolean> {
+    return this.startedOk
+  }
+}
+
+export class FakeMixingPlayer extends FakePlayer implements MixingPlayer {
+  music: AudioClip[] = []
+  handles: FakeMusicHandle[] = []
+  // Scripted handles for upcoming playMusic calls; default = started-ok handle.
+  nextHandles: FakeMusicHandle[] = []
+
+  async playMusic(clip: AudioClip): Promise<MusicHandle> {
+    this.music.push(clip)
+    const handle = this.nextHandles.shift() ?? new FakeMusicHandle()
+    this.handles.push(handle)
+    return handle
+  }
+}
+
+export class FakeTrackSource implements TrackSource {
+  picks: (TrackPick | null)[] = []
+  contexts: MusicContext[] = []
+  delayMs = 0
+  calls = 0
+
+  async nextTrack(ctx: MusicContext): Promise<TrackPick | null> {
+    this.calls++
+    this.contexts.push(ctx)
+    if (this.delayMs > 0) await sleep(this.delayMs)
+    return this.picks.shift() ?? null
+  }
+}
+
+export function pickOf(source: string, extras: Partial<TrackPick> = {}): TrackPick {
+  return { clip: { source, kind: 'music' }, ...extras }
 }
 
 export class FakeHost implements Host {

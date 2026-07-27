@@ -32,8 +32,9 @@ export const ConfigSchema = z.object({
   recentWindow: z.coerce.number().int().positive().default(12),
   // Beats per batched next_talks call (spec 04 §3.2 / token-economy pillar 2).
   talkBatch: z.coerce.number().int().positive().default(2),
-  // External player binary (interim; Phase 3's engine replaces it).
-  playerCmd: z.string().default('afplay'),
+  // The decode binary behind the engine (spec 03-02 §4; replaces the retired
+  // spec-01 playerCmd/--player — the engine has no external player).
+  ffmpegCmd: z.string().default('ffmpeg'),
 
   // --- hosted voice (spec 02 §3.6) --------------------------------------- //
   // Empty url = not configured; the hosted voice then fails loudly at startup.
@@ -55,6 +56,9 @@ export const ConfigSchema = z.object({
   // Talk<->music scheduling mode (spec 03-02 §2.3).
   cadenceMode: z.enum(['every_n', 'random', 'brain']).default('every_n'),
   musicEveryN: z.coerce.number().int().positive().default(2),
+  // The always-on background bed (spec 03-04); --no-bed or an empty cache
+  // degrades to talk-with-silence.
+  bedEnabled: z.boolean().default(true),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
@@ -105,11 +109,11 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       model: { type: 'string' },
       persona: { type: 'string' },
       gap: { type: 'string' },
-      player: { type: 'string' },
       'tts-url': { type: 'string' },
       'tts-model': { type: 'string' },
       'tts-reference': { type: 'string' },
       'no-music': { type: 'boolean' },
+      'no-bed': { type: 'boolean' },
       cadence: { type: 'string' },
       'max-segments': { type: 'string' },
     },
@@ -121,11 +125,11 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values.model !== undefined && { model: values.model }),
     ...(values.persona !== undefined && { personaPath: values.persona }),
     ...(values.gap !== undefined && { gapSeconds: values.gap }),
-    ...(values.player !== undefined && { playerCmd: values.player }),
     ...(values['tts-url'] !== undefined && { ttsUrl: values['tts-url'] }),
     ...(values['tts-model'] !== undefined && { ttsModel: values['tts-model'] }),
     ...(values['tts-reference'] !== undefined && { ttsReferenceId: values['tts-reference'] }),
     ...(values['no-music'] === true && { musicEnabled: false }),
+    ...(values['no-bed'] === true && { bedEnabled: false }),
     ...(values.cadence !== undefined && { cadenceMode: values.cadence }),
   })
   const maxSegments =

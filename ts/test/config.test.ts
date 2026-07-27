@@ -29,12 +29,12 @@ describe('parseCli', () => {
 
   it('layers flags over defaults and coerces numbers', () => {
     const { config, maxSegments } = parseCli(
-      ['--brain', 'stub', '--gap', '0.5', '--max-segments', '3', '--player', 'ffplay'],
+      ['--brain', 'stub', '--gap', '0.5', '--max-segments', '3', '--no-bed'],
       NO_ENV,
     )
     expect(config.brain).toBe('stub')
     expect(config.gapSeconds).toBe(0.5)
-    expect(config.playerCmd).toBe('ffplay')
+    expect(config.bedEnabled).toBe(false)
     expect(maxSegments).toBe(3)
   })
 
