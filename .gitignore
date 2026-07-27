@@ -8,6 +8,9 @@ dist/
 .venv/
 venv/
 
+# Node (ts/ — issue #54 migration)
+node_modules/
+
 # Tooling / OS
 .DS_Store
 .mypy_cache/

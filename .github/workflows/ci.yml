@@ -64,3 +64,23 @@ jobs:
           enable-cache: true
       - run: uv sync --locked --extra dev --extra tts-mlx
       - run: uv run pre-commit run --all-files
+
+  # TS migration (issue #54): typecheck + lint + unit suite for the ts/ tree.
+  # Runs alongside the Python jobs until the Phase 5 cutover swaps the
+  # required checks; the existing Python jobs above are untouched.
+  ts:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ts
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: ts/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
