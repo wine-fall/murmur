@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { framedChunks, ffmpegDecode } from '../src/ffmpeg.ts'
+import { framedChunks, ffmpegDecode, probeStream } from '../src/ffmpeg.ts'
 
 async function* bytes(...chunks: Buffer[]): AsyncGenerator<Buffer> {
   for (const c of chunks) yield c
@@ -44,5 +44,17 @@ describe('ffmpegDecode', () => {
   it('raises when the decoder cannot be spawned', async () => {
     const stream = ffmpegDecode('anything', { ffmpegCmd: '/nonexistent/ffmpeg-binary' })
     await expect(collect(stream)).rejects.toThrow()
+  })
+})
+
+describe('probeStream', () => {
+  it('kills a hung probe at the deadline and reports unplayable', async () => {
+    // `yes` ignores the ffmpeg args and never exits — the stand-in for a
+    // stalled stream open. Without the bound this would wedge the pick task.
+    expect(await probeStream('src', 'yes', 300)).toBe(false)
+  })
+
+  it('reports false for a probe binary that cannot spawn', async () => {
+    expect(await probeStream('src', '/nonexistent/ffmpeg-binary')).toBe(false)
   })
 })

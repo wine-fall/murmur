@@ -26,11 +26,15 @@ export async function runStartupChecks(
   return results
 }
 
-export type BinaryProbe = (cmd: string, args: string[]) => Promise<boolean>
+// requireStdout: exit 0 alone is not proof of life for a fetch probe — the
+// trivial search must actually produce output (spec 03-03 §2).
+export type BinaryProbe = (cmd: string, args: string[], requireStdout: boolean) => Promise<boolean>
 
-const execProbe: BinaryProbe = (cmd, args) =>
+const execProbe: BinaryProbe = (cmd, args, requireStdout) =>
   new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 10_000 }, (err) => resolve(err === null))
+    execFile(cmd, args, { timeout: 30_000 }, (err, stdout) =>
+      resolve(err === null && (!requireStdout || stdout.trim() !== '')),
+    )
   })
 
 export type MusicCheckOptions = {
@@ -40,14 +44,19 @@ export type MusicCheckOptions = {
 }
 
 // The music-dependency preflight (spec 03-02 §2.4, wrapping 03-03's
-// deterministic half): both acquisition binaries must answer.
+// deterministic half): both acquisition binaries must actually work. yt-dlp is
+// probed with a trivial flat search (network — an installed-but-broken binary,
+// e.g. a rotted extractor or a proxy failure, must degrade to talk-only here,
+// not at the first pick); ffmpeg with -version (local).
 export function musicCheck({ ytdlpCmd, ffmpegCmd, probe = execProbe }: MusicCheckOptions): StartupCheck {
   return {
     name: 'music',
     async run(host) {
       const missing: string[] = []
-      if (!(await probe(ytdlpCmd, ['--version']))) missing.push(ytdlpCmd)
-      if (!(await probe(ffmpegCmd, ['-version']))) missing.push(ffmpegCmd)
+      if (!(await probe(ytdlpCmd, ['--dump-json', '--flat-playlist', 'ytsearch1:test'], true))) {
+        missing.push(ytdlpCmd)
+      }
+      if (!(await probe(ffmpegCmd, ['-version'], false))) missing.push(ffmpegCmd)
       if (missing.length === 0) return true
       host.info(
         `music is unavailable: ${missing.join(' and ')} not working. ` +

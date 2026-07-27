@@ -334,11 +334,7 @@ export class AudioEngine implements MixingPlayer {
     handle.audible = !bedLive
 
     void stream.started.then((ok) => {
-      if (!ok) {
-        const err = stream.failed()
-        if (err !== null) this.log(`music stream failed: ${err.message}`)
-        return
-      }
+      if (!ok) return // failure is logged once, from the done path below
       if (this.mixed !== handle) return
       if (this.bedMaster !== null) {
         const now = this.ctx.currentTime
@@ -354,6 +350,10 @@ export class AudioEngine implements MixingPlayer {
       ramp(this.bedMaster.gain, this.bedGain, this.ctx.currentTime, this.bedXfadeS, endT, 0)
     })
     void stream.done.then(() => {
+      // One log site for decoder death, whether it died before the first frame
+      // or mid-song — an abnormal exit must never read as a clean short track.
+      const err = stream.failed()
+      if (err !== null) this.log(`music stream failed: ${err.message}`)
       if (this.mixed === handle) this.mixed = null
       if (this.music === handle) this.music = null
       // Covers early stops; harmless after the eof-anchored return (same target).

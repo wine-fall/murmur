@@ -70,8 +70,12 @@ _Last updated: 2026-07-27_
     buffer). Cost today: after a song ends, the next talk generates cold
     (Brain+synth wait); the music boundary itself never blocks (prefetch).
     **Owed:** the by-ear pass over the TS engine (duck/crossfade smoothness —
-    same sensory bar as Python), and the spec-04 talk look-ahead in a later
-    phase.
+    same sensory bar as Python), the spec-04 talk look-ahead in a later phase,
+    and a cancellable-task seam (an AbortSignal through `Harness.runTask`) so
+    an in-flight background pick can be settled on shutdown — today the
+    Director drops the reference and the orphaned subprocess self-terminates
+    on EPIPE after process exit (bounded leak, accepted for now; Python could
+    cancel because asyncio tasks are cancellable, TS promises are not).
   - **Next: Phase 4** — memory + compaction (spec 05) in TS.
 - **Milestone: L0 + L1 — code-complete (Python).** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the

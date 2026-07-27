@@ -97,13 +97,23 @@ export async function* ffmpegDecode(
 // Pull-time playability probe (spec 03-01 §2.3 seam, owned here with the rest of
 // the ffmpeg boundary): does the source actually decode audio? Used by
 // submit_pick so a resolved-but-dead stream (an intermittent 403) is rejected
-// while the model can still pick another candidate.
-export function probeStream(source: string, ffmpegCmd = 'ffmpeg'): Promise<boolean> {
+// while the model can still pick another candidate. Bounded: a probe that hangs
+// (a stalled stream open) is killed and reported unplayable — it must never
+// wedge the pick task that awaits it.
+export function probeStream(source: string, ffmpegCmd = 'ffmpeg', timeoutMs = 15_000): Promise<boolean> {
   return new Promise((resolve) => {
     const proc = spawn(ffmpegCmd, ['-nostdin', '-i', source, '-t', '0.5', '-f', 'null', '-'], {
       stdio: 'ignore',
     })
-    proc.on('exit', (code) => resolve(code === 0))
-    proc.on('error', () => resolve(false))
+    const deadline = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
+    deadline.unref()
+    proc.on('exit', (code) => {
+      clearTimeout(deadline)
+      resolve(code === 0)
+    })
+    proc.on('error', () => {
+      clearTimeout(deadline)
+      resolve(false)
+    })
   })
 }

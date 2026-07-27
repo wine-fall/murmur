@@ -53,6 +53,25 @@ describe('musicCheck', () => {
     expect(infos).toEqual([])
   })
 
+  it('probes yt-dlp with a real trivial search requiring output, not just --version', async () => {
+    // An installed-but-broken yt-dlp (rotted extractor, proxy failure) still
+    // answers --version; the preflight must exercise a fetch (spec 03-03 §2).
+    const probed: { cmd: string; args: string[]; requireStdout: boolean }[] = []
+    const check = musicCheck({
+      ytdlpCmd: 'yt-dlp',
+      ffmpegCmd: 'ffmpeg',
+      probe: async (cmd, args, requireStdout) => {
+        probed.push({ cmd, args, requireStdout })
+        return true
+      },
+    })
+    const { host } = fakeHost()
+    await check.run(host)
+    const ytdlp = probed.find((p) => p.cmd === 'yt-dlp')!
+    expect(ytdlp.args.join(' ')).toContain('ytsearch1:')
+    expect(ytdlp.requireStdout).toBe(true)
+  })
+
   it('fails plainly, naming the missing binary (session degrades to talk-only)', async () => {
     const check = musicCheck({
       ytdlpCmd: 'yt-dlp',

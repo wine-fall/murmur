@@ -166,6 +166,23 @@ describe('music lifecycle', () => {
     await engine.aclose()
   })
 
+  it('a decoder that dies mid-song is logged, never a clean short track', async () => {
+    // one real chunk, then an abnormal decoder exit
+    const dieMidStream: Decode = async function* () {
+      yield new Float32Array(4800 * 2).fill(0.5)
+      throw new Error('ffmpeg exited 1 mid-stream')
+    }
+    const logs: string[] = []
+    const { context, engine } = build(1, dieMidStream, { log: (m) => void logs.push(m) })
+    const handle = await engine.playMusic(MUSIC)
+    expect(await handle.waitStarted(0.5)).toBe(true) // it DID start
+    await settle()
+    await context.startRendering() // the scheduled chunk plays out
+    await handle.wait()
+    expect(logs.join('\n')).toContain('music stream failed')
+    await engine.aclose()
+  })
+
   it('a second playMusic stops the first (one music at a time)', async () => {
     const { engine } = build(2, dcChunks(0.4, 10))
     const first = await engine.playMusic(MUSIC)
