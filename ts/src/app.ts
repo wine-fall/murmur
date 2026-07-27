@@ -91,8 +91,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   }
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
-  // failure degrades to no bed; the radio still starts.
-  if (config.bedEnabled && musicOk) {
+  // failure degrades to no bed; the radio still starts. Independent of the
+  // music check — a warm cache needs no yt-dlp, so talk-only sessions keep it.
+  if (config.bedEnabled) {
     const cacheDir = defaultBedCacheDir()
     await pullBed({
       manifest: DEFAULT_MANIFEST,

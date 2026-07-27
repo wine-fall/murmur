@@ -91,6 +91,12 @@ describe('voice channel', () => {
     expect(level(rendered, 0.1, 0.9)).toBeCloseTo(0.25, 1)
   })
 
+  it('an unreadable clip degrades to a silent segment, never a rejection', async () => {
+    const { engine } = build(1, dcChunks(0, 0))
+    await engine.play({ source: '/nonexistent/clip.wav', kind: 'talk' }) // must not throw
+    await engine.aclose()
+  })
+
   it('stop() cuts the voice; play() resolves', async () => {
     const { context, engine } = build(1, dcChunks(0, 0))
     const played = engine.play(voiceClip)

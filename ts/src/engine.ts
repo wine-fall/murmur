@@ -260,10 +260,18 @@ export class AudioEngine implements MixingPlayer {
   // -- Player seam (spec 01): the voice channel ----------------------------- //
 
   async play(clip: AudioClip): Promise<void> {
-    const bytes = await readFile(clip.source)
-    const buf = await this.ctx.decodeAudioData(
-      bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
-    )
+    let buf: AudioBuffer
+    try {
+      const bytes = await readFile(clip.source)
+      buf = await this.ctx.decodeAudioData(
+        bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer,
+      )
+    } catch (err) {
+      // An unreadable clip degrades to a silent segment — a voice fault must
+      // never unwind the radio loop (spec-01 Player posture).
+      this.log(`voice clip failed to load (${clip.source}): ${String(err)}`)
+      return
+    }
     const handle = this.music
     const src = this.ctx.createBufferSource()
     src.buffer = buf
