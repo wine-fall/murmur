@@ -3,9 +3,26 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-21_
+_Last updated: 2026-07-27_
 
-- **Milestone: L0 + L1 — code-complete.** L0 = specs `01-core-loop` +
+- **Migration in progress: Python → TypeScript (issue #54).** The TS
+  implementation grows in top-level `ts/` beside the Python `src/` (the
+  behavior oracle) until the Phase 5 cutover. Structure is designed fresh from
+  the specs, never transliterated (issue ground rule).
+  - **Phase 0 (done 2026-07-27):** audio-output binding decided —
+    `node-web-audio-api` (Web Audio graph as the mixer; `OfflineAudioContext`
+    for deterministic engine tests). Details in the issue's Phase 0 comment.
+  - **Phase 1 (done 2026-07-27):** toolchain (`ts/` ESM skeleton, strict
+    `tsc`, vitest, oxlint, zod-at-boundaries) + the spec-01 core loop in TS:
+    contracts, config, in-process memory, persona, prompts, stub voice,
+    subprocess player, CLI host, Director (batched talk + prepare-then-barge-in
+    + `/quit`), StubBrain + ClaudeBrain on `@anthropic-ai/claude-agent-sdk`
+    (isolated one-shot query + the `emit_talk_beats` in-process MCP tool seam).
+    TS CI job added alongside the untouched Python jobs; the source-language
+    gate now covers `.ts`. Unit-green; real-SDK smoke passed (MCP tool called,
+    Chinese beats + reply).
+  - **Next: Phase 2** — voice (hosted only) + music + cadence in TS.
+- **Milestone: L0 + L1 — code-complete (Python).** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the
   `03-03` guided install). The code and unit gate are done and green.
 - **Current focus: cold-start / responsiveness — `spec 04` (no-dead-air),
