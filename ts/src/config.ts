@@ -1,6 +1,10 @@
-// Configuration (spec 01 §3.1): CLI flags layered over defaults, parsed with
-// zod at the boundary (issue #54 rule) so every knob is validated once and the
-// static type derives from the schema.
+// Configuration (spec 01 §3.1): CLI flags layered over env layered over
+// defaults, parsed with zod at the boundary (issue #54 rule) so every knob is
+// validated once and the static type derives from the schema.
+//
+// The hosted voice's endpoint knobs come from env (spec 02 §3.6) so a URL or key
+// is never hardcoded; the CLI overrides all of them except the API key, which
+// stays env-only — a secret does not belong on the command line.
 
 import { parseArgs } from 'node:util'
 
@@ -8,11 +12,16 @@ import { z } from 'zod'
 
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 
+// The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
+// by-ear knob: fish TTS runs sentences together and its own pause hints are
+// inert, so we insert the gap ourselves. 0 disables splitting entirely.
+const DEFAULT_SENTENCE_PAD_S = 0.8
+
 export const ConfigSchema = z.object({
   // Which Brain to construct: 'claude' (real, default) or 'stub' (canned, no network).
   brain: z.enum(['claude', 'stub']).default('claude'),
-  // Phase 1 has only the stub voice; Phase 2 adds the hosted provider.
-  voice: z.enum(['stub']).default('stub'),
+  // 'hosted' is the real voice (spec 02 §3.6); local MLX voices are dropped.
+  voice: z.enum(['stub', 'hosted']).default('stub'),
   // Model id for the core loop; tiered models are spec 08.
   model: z.string().default('claude-opus-4-8'),
   personaPath: z.string().default(DEFAULT_PERSONA_PATH),
@@ -25,6 +34,27 @@ export const ConfigSchema = z.object({
   talkBatch: z.coerce.number().int().positive().default(2),
   // External player binary (interim; Phase 3's engine replaces it).
   playerCmd: z.string().default('afplay'),
+
+  // --- hosted voice (spec 02 §3.6) --------------------------------------- //
+  // Empty url = not configured; the hosted voice then fails loudly at startup.
+  ttsUrl: z.string().default(''),
+  ttsReferenceId: z.string().default(''),
+  ttsApiKey: z.string().default(''),
+  ttsModel: z.string().default(''),
+  // Pins the sampled timbre — fish-speech has no preset voices, so an unset
+  // seed with no reference means a fresh voice per call.
+  ttsSeed: z.coerce.number().int().optional(),
+  ttsSentencePadS: z.coerce.number().min(0).default(DEFAULT_SENTENCE_PAD_S),
+
+  // --- music (specs 03-01/03-02) ----------------------------------------- //
+  musicEnabled: z.boolean().default(true),
+  ytdlpCmd: z.string().default('yt-dlp'),
+  // Cheap tier for the music-discovery task and the opt-in brain cadence
+  // (master §7 pillar 3).
+  musicModel: z.string().default('claude-haiku-4-5-20251001'),
+  // Talk<->music scheduling mode (spec 03-02 §2.3).
+  cadenceMode: z.enum(['every_n', 'random', 'brain']).default('every_n'),
+  musicEveryN: z.coerce.number().int().positive().default(2),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
@@ -34,7 +64,33 @@ export type CliInvocation = {
   maxSegments: number | undefined
 }
 
-export function parseCli(argv: string[]): CliInvocation {
+// A misconfigured number in a .env must not abort Config construction (and with
+// it every voice) — warn and fall back to the documented default. Empty/unset is
+// not a misconfiguration, so it degrades silently.
+function envNumber(env: NodeJS.ProcessEnv, name: string): number | undefined {
+  const raw = env[name]?.trim()
+  if (!raw) return undefined
+  const parsed = z.coerce.number().nonnegative().safeParse(raw)
+  if (parsed.success) return parsed.data
+  console.warn(`warning: ignoring unusable ${name}=${JSON.stringify(raw)}`)
+  return undefined
+}
+
+// The MURMUR_TTS_* boundary (spec 02 §3.6) as Config fields.
+function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
+  const seed = envNumber(env, 'MURMUR_TTS_SEED')
+  const padS = envNumber(env, 'MURMUR_TTS_SENTENCE_PAD_S')
+  return {
+    ttsUrl: env.MURMUR_TTS_URL?.trim() ?? '',
+    ttsReferenceId: env.MURMUR_TTS_REFERENCE_ID?.trim() ?? '',
+    ttsApiKey: env.MURMUR_TTS_API_KEY?.trim() ?? '',
+    ttsModel: env.MURMUR_TTS_MODEL?.trim() ?? '',
+    ...(seed !== undefined && { ttsSeed: seed }),
+    ...(padS !== undefined && { ttsSentencePadS: padS }),
+  }
+}
+
+export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
   const { values } = parseArgs({
     args: argv,
     options: {
@@ -44,16 +100,27 @@ export function parseCli(argv: string[]): CliInvocation {
       persona: { type: 'string' },
       gap: { type: 'string' },
       player: { type: 'string' },
+      'tts-url': { type: 'string' },
+      'tts-model': { type: 'string' },
+      'tts-reference': { type: 'string' },
+      'no-music': { type: 'boolean' },
+      cadence: { type: 'string' },
       'max-segments': { type: 'string' },
     },
   })
   const config = ConfigSchema.parse({
+    ...ttsFromEnv(env),
     ...(values.brain !== undefined && { brain: values.brain }),
     ...(values.voice !== undefined && { voice: values.voice }),
     ...(values.model !== undefined && { model: values.model }),
     ...(values.persona !== undefined && { personaPath: values.persona }),
     ...(values.gap !== undefined && { gapSeconds: values.gap }),
     ...(values.player !== undefined && { playerCmd: values.player }),
+    ...(values['tts-url'] !== undefined && { ttsUrl: values['tts-url'] }),
+    ...(values['tts-model'] !== undefined && { ttsModel: values['tts-model'] }),
+    ...(values['tts-reference'] !== undefined && { ttsReferenceId: values['tts-reference'] }),
+    ...(values['no-music'] === true && { musicEnabled: false }),
+    ...(values.cadence !== undefined && { cadenceMode: values.cadence }),
   })
   const maxSegments =
     values['max-segments'] === undefined
