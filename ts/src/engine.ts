@@ -237,6 +237,7 @@ export class AudioEngine implements MixingPlayer {
   private leadS: number
   private log: (message: string) => void
 
+  private closed = false
   private voice: LiveVoice | null = null
   private music: MusicHandle | null = null // whatever duck() dispatches to (§2.2)
   private mixed: MixedHandle | null = null // our own PCM-backed handle
@@ -272,6 +273,10 @@ export class AudioEngine implements MixingPlayer {
       this.log(`voice clip failed to load (${clip.source}): ${String(err)}`)
       return
     }
+    // aclose() may have landed while the clip was loading: a closing engine
+    // takes no new audio (otherwise this clip would wait out its dead-sink
+    // guard with nothing to ever play it).
+    if (this.closed) return
     const handle = this.music
     const src = this.ctx.createBufferSource()
     src.buffer = buf
@@ -445,6 +450,7 @@ export class AudioEngine implements MixingPlayer {
   // -- lifecycle ------------------------------------------------------------- //
 
   async aclose(): Promise<void> {
+    this.closed = true
     await this.stop()
     await this.stopBed()
     const music = this.mixed ?? this.music

@@ -244,6 +244,7 @@ describe('background bed (spec 03-04)', () => {
     const context = new OfflineAudioContext(2, seconds * RATE, RATE)
     const engine = new AudioEngine({ context, decode, rampS: 0.2, bedGain: 0.5, bedXfadeS: 0.2 })
     await engine.startBed({ tracks: () => ['bed://a'] })
+    await settle() // bed fully scheduled before the render can outrun it
     // song starts mid-render (t=1): mutate under suspend, then resume
     let handle: MusicHandle | null = null
     const suspended = context.suspend(1.0).then(async () => {
@@ -294,6 +295,14 @@ describe('background bed (spec 03-04)', () => {
 })
 
 describe('teardown', () => {
+  it('a closed engine takes no new clip (no dead-sink wait)', async () => {
+    const { engine } = build(1, dcChunks(0, 0))
+    await engine.aclose()
+    const t0 = performance.now()
+    await engine.play(voiceClip) // degrades immediately; never waits out the guard
+    expect(performance.now() - t0).toBeLessThan(1000)
+  })
+
   it('aclose stops voice, music, and bed cleanly', async () => {
     const { engine } = build(2, dcChunks(0.4, 10), { bedGain: 0.5 })
     await engine.startBed({ tracks: () => ['bed://a'] })
