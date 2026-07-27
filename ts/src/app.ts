@@ -6,23 +6,37 @@ import type { Config } from './config.ts'
 import type { VoiceProvider } from './contracts.ts'
 import { Director } from './director.ts'
 import { CliHost } from './host.ts'
+import { HostedVoice } from './hosted-voice.ts'
 import { InProcessMemoryStore } from './memory.ts'
 import { loadPersona } from './persona.ts'
 import { SubprocessPlayer } from './player.ts'
 import { StubVoice } from './voice.ts'
 
-export function buildVoice(name: Config['voice']): VoiceProvider {
-  // Phase 1 knows only the stub; Phase 2 adds the hosted provider here.
-  switch (name) {
+export function buildVoice(config: Config): VoiceProvider {
+  switch (config.voice) {
     case 'stub':
       return new StubVoice()
+    case 'hosted':
+      // Fail here rather than on the first beat: an unconfigured endpoint is a
+      // setup mistake, and the message has to name the knob to fix.
+      if (config.ttsUrl === '') {
+        throw new Error('the hosted voice needs an endpoint: set MURMUR_TTS_URL or pass --tts-url')
+      }
+      return new HostedVoice({
+        baseUrl: config.ttsUrl,
+        sentencePadS: config.ttsSentencePadS,
+        ...(config.ttsReferenceId !== '' && { referenceId: config.ttsReferenceId }),
+        ...(config.ttsApiKey !== '' && { apiKey: config.ttsApiKey }),
+        ...(config.ttsModel !== '' && { model: config.ttsModel }),
+        ...(config.ttsSeed !== undefined && { seed: config.ttsSeed }),
+      })
   }
 }
 
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
   const persona = loadPersona(config.personaPath)
   const host = new CliHost()
-  const voice = buildVoice(config.voice)
+  const voice = buildVoice(config)
   const player = new SubprocessPlayer(config.playerCmd)
   const brain = buildBrain(config.brain, config.model)
   const memory = new InProcessMemoryStore()

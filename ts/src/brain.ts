@@ -16,7 +16,7 @@ import {
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Brain, ContextPack, TalkBeat } from './contracts.ts'
+import type { Brain, ContextPack, Harness, TalkBeat, Task } from './contracts.ts'
 import { buildNextTalkPrompt, buildNextTalksPrompt, buildRespondPrompt } from './prompts.ts'
 import { emitTalkBeatsTool } from './talk-tools.ts'
 
@@ -92,27 +92,41 @@ export function agenticOptions(
   }
 }
 
-export class ClaudeBrain implements Brain {
+export class ClaudeBrain implements Brain, Harness {
   private model: string
 
   constructor(model: string) {
     this.model = model
   }
 
-  async nextTalks(ctx: ContextPack, count: number): Promise<TalkBeat[]> {
-    let captured: TalkBeat[] = []
-    const server = createSdkMcpServer({
-      name: 'murmur',
-      tools: [emitTalkBeatsTool(count, (beats) => (captured = beats))],
-    })
+  // The harness (spec 03-01 §2.1): a bounded tool-use loop over murmur's OWN
+  // in-process tools, capability-agnostic — music discovery and brain cadence
+  // ride the same entry point. The task ends as soon as a tool calls `finish`;
+  // breaking the iteration closes the query subprocess.
+  async runTask<T>(task: Task<T>): Promise<T | null> {
+    let captured: T | null = null
+    const tools = task.tools((value) => (captured = value))
+    const server = createSdkMcpServer({ name: 'murmur', tools })
+    const allowed = tools.map((t) => `mcp__murmur__${t.name}`)
     const q = query({
-      prompt: buildNextTalksPrompt(ctx, count),
-      options: agenticOptions(ctx.persona, this.model, server, ['mcp__murmur__emit_talk_beats'], 2),
+      prompt: task.prompt,
+      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns),
     })
     for await (const _message of q) {
-      if (captured.length > 0) break // breaking closes the query subprocess
+      if (captured !== null) break
     }
-    if (captured.length > 0) return captured
+    return captured
+  }
+
+  async nextTalks(ctx: ContextPack, count: number): Promise<TalkBeat[]> {
+    const beats = await this.runTask<TalkBeat[]>({
+      systemPrompt: ctx.persona,
+      prompt: buildNextTalksPrompt(ctx, count),
+      model: this.model,
+      maxTurns: 2,
+      tools: (finish) => [emitTalkBeatsTool(count, finish)],
+    })
+    if (beats !== null) return beats
     // The model never made the terminal call. Degrade to one plain-text beat
     // rather than skip the segment into dead air (spec 04 §3.2).
     return [{ text: await this.generate(ctx.persona, buildNextTalkPrompt(ctx)) }]

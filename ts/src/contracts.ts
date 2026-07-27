@@ -8,6 +8,8 @@
 //   MemoryStore   -> in-process here; persistent three-tier in Phase 4 (spec 05)
 //   Brain         -> stub + claude-agent-sdk implementations in brain.ts
 
+import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
+
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
   readonly source: string
@@ -51,6 +53,83 @@ export interface Player {
 export interface MemoryStore {
   record(turn: Turn): void
   recent(n: number): Turn[]
+}
+
+// A search hit the brain judges (spec 03-01 §2.2): enough signal to reject junk
+// (hour-long loops, low-quality re-uploads) and prefer official audio.
+export type TrackCandidate = {
+  readonly ref: string // opaque provider handle, passed back to resolve()
+  readonly title: string
+  readonly uploader: string
+  readonly durationS: number
+  readonly extra: Readonly<Record<string, unknown>> // provider passthrough (viewCount, ...)
+}
+
+// The low-level music source (spec 03-01 §2.2). No start/close: the default
+// adapter is a binary invoked per call, with nothing to warm or release.
+export interface MusicProvider {
+  search(query: string, limit?: number): Promise<TrackCandidate[]>
+  resolve(ref: string): Promise<AudioClip> // AudioClip(kind: 'music')
+}
+
+// One found-and-pulled track (spec 03-01 §2.4, widened by 03-02): the playable
+// clip, the display metadata the model read off the candidate, and the one-line
+// in-persona DJ intro to speak over its ducked head (absent -> no intro).
+export type TrackPick = {
+  readonly clip: AudioClip
+  readonly title?: string
+  readonly artist?: string
+  readonly announce?: string
+}
+
+// What the Director consumes at a music boundary (spec 03-01 §2.4): find + pull
+// one track. MusicProgrammer is the real implementation; tests inject a fake.
+export interface TrackSource {
+  nextTrack(ctx: MusicContext): Promise<TrackPick | null>
+}
+
+// The carrier passed to nextTrack (spec 03-01 §2.4): a stable cacheable prefix
+// plus a volatile block. Which signals ride in `situation` grows with later
+// specs; adding one touches only the renderer, never the harness.
+export type MusicContext = {
+  readonly persona: string
+  readonly situation: string
+}
+
+// --- the brain harness (spec 03-01 §2.1) ---------------------------------- //
+//
+// In TS the SDK's own `tool()` already carries a tool's name, description, zod
+// schema and handler, so there is no murmur-side BrainTool type to declare: a
+// task's tool set IS a list of SDK tools. What murmur adds is the termination
+// rule — the tools are built around a `finish` callback, and the tool that calls
+// it ends the task with a typed value (the Python `terminal` flag + `ok` result
+// convention collapses into the closure).
+//
+// A tool in a task's list, with its schema erased: the argument type differs per
+// tool, so the only shape a mixed list can hold is one whose handler args are
+// unconstrained (the SDK does the same for its own server config). Each tool's
+// arguments are still validated by its own zod schema before its handler runs.
+export type TaskTool = Omit<SdkMcpToolDefinition, 'inputSchema' | 'handler'> & {
+  inputSchema: unknown
+  // oxlint-disable-next-line no-explicit-any
+  handler: (args: any, extra: unknown) => ReturnType<SdkMcpToolDefinition['handler']>
+}
+
+export type Task<T> = {
+  readonly systemPrompt: string // stable, cacheable prefix
+  readonly prompt: string // first turn: instruction + volatile context
+  readonly model: string // tier per task (music search -> Haiku)
+  readonly maxTurns: number // hard bound on the tool-use loop
+  readonly tools: (finish: (value: T) => void) => TaskTool[]
+}
+
+// The agentic capability, separate from the tool-less Brain so talk-only brains
+// (stub / fakes) are not forced to fake a tool-use loop and each consumer
+// depends only on what it needs.
+export interface Harness {
+  // Runs the bounded loop; returns the value a tool finished with, or null if
+  // the turn budget ran out first.
+  runTask<T>(task: Task<T>): Promise<T | null>
 }
 
 // Two-method Brain contract (spec 01 §3.2). Talk generation is batched from

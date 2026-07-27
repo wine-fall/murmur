@@ -3,9 +3,74 @@
 
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import type { AudioClip, Brain, ContextPack, Player, TalkBeat } from '../src/contracts.ts'
+import type {
+  AudioClip,
+  Brain,
+  ContextPack,
+  Harness,
+  MusicProvider,
+  Player,
+  TalkBeat,
+  Task,
+  TaskTool,
+  TrackCandidate,
+} from '../src/contracts.ts'
 import type { Host } from '../src/host.ts'
 import { LineQueue } from '../src/host.ts'
+
+// Stands in for the model driving an agentic task: `play` is handed the task's
+// tools and calls them the way the model would. Whatever a tool passes to
+// `finish` is what runTask returns — so the termination rule is exercised for
+// real, with no SDK or network.
+export class FakeHarness implements Harness {
+  lastTask: Task<unknown> | null = null
+  calls = 0
+
+  private play: (tools: TaskTool[]) => Promise<void>
+
+  constructor(play: (tools: TaskTool[]) => Promise<void> = async () => {}) {
+    this.play = play
+  }
+
+  async runTask<T>(task: Task<T>): Promise<T | null> {
+    this.calls++
+    this.lastTask = task as Task<unknown>
+    let captured: T | null = null
+    await this.play(task.tools((value) => (captured = value)))
+    return captured
+  }
+}
+
+// Call one of a task's tools by name, as the model would.
+export async function callTool(
+  tools: TaskTool[],
+  name: string,
+  args: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const tool = tools.find((t) => t.name === name)
+  if (tool === undefined) throw new Error(`no such tool: ${name}`)
+  const result = await tool.handler(args, {})
+  const first = result.content[0]
+  if (first === undefined || first.type !== 'text') throw new Error('tool returned no text')
+  return JSON.parse(first.text) as Record<string, unknown>
+}
+
+export class FakeMusicProvider implements MusicProvider {
+  candidates: TrackCandidate[] = []
+  searches: { query: string; limit: number | undefined }[] = []
+  // refs that fail to resolve (a dead link the model must pick away from)
+  broken = new Set<string>()
+
+  async search(query: string, limit?: number): Promise<TrackCandidate[]> {
+    this.searches.push({ query, limit })
+    return this.candidates
+  }
+
+  async resolve(ref: string): Promise<AudioClip> {
+    if (this.broken.has(ref)) throw new Error(`cannot resolve ${ref}`)
+    return { source: `https://stream/${ref}`, kind: 'music' }
+  }
+}
 
 export class FakeBrain implements Brain {
   // Each nextTalks call shifts one batch; empty list -> throws (failure mode).

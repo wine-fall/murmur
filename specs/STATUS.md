@@ -21,7 +21,33 @@ _Last updated: 2026-07-27_
     TS CI job added alongside the untouched Python jobs; the source-language
     gate now covers `.ts`. Unit-green; real-SDK smoke passed (MCP tool called,
     Chinese beats + reply).
-  - **Next: Phase 2** — voice (hosted only) + music + cadence in TS.
+  - **Phase 2 (done 2026-07-27):** hosted voice + music find/pull + cadence in
+    TS. `HostedVoice` (spec 02 §3.6: fish-speech `/v1/tts` over `fetch`,
+    `MURMUR_TTS_*` via zod, model header, seed pinning, sentence split + silence
+    pad) is now the real voice — local MLX backends are not ported. Music
+    (spec 03-01): yt-dlp `search`/`resolve`, the `search_music` + `submit_pick`
+    tools with the pull-time probe seam, context insertion, `MusicProgrammer`.
+    Cadence (spec 03-02 §2.3): `every_n` / `random` / `brain` + hard fallback.
+    The harness is TS-native: `Harness.runTask<T>` over SDK `tool()`s built
+    around a `finish` callback replaces Python's `BrainTool`/`terminal` protocol,
+    and `nextTalks` was refactored onto it.
+    **Decision — music does not air in Phase 2** (deliberate scope line): the
+    only playback available is the interim subprocess player, which cannot mix,
+    duck, or decode a stream URL, so wiring music into the Director now would
+    mean interim playback that Phase 3 deletes (spec 03-02 §6 already settled
+    "the interim player is moot"). Phase 2 therefore ships find+pull+cadence as
+    verified seams; the Director's music branch, announce, and startup checks
+    land with the engine in Phase 3.
+    Real-boundary smokes all passed: fish.audio TTS (rtf 0.34-0.36, split beat
+    spliced with a real pad), real yt-dlp search+resolve, and a real Haiku pick
+    task that searched, judged, and returned title/artist/announce in Chinese
+    with the resolved stream probed as playable.
+    **Owed:** by-ear pass on the TS voice (same sensory bar as Python) and the
+    music-pick latency — one `nextTrack` measured ~118s (a yt-dlp search alone is
+    ~11s and the model runs several); spec 04's prefetch is what hides it, and it
+    is not wired until the Director consumes music in Phase 3.
+  - **Next: Phase 3** — the audio engine as Web Audio graph orchestration on
+    `node-web-audio-api`, then the Director's music branch on top of it.
 - **Milestone: L0 + L1 — code-complete (Python).** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the
   `03-03` guided install). The code and unit gate are done and green.

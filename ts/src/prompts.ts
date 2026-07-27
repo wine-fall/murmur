@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from 'node:url'
 
-import type { ContextPack } from './contracts.ts'
+import type { ContextPack, Turn } from './contracts.ts'
 
 // The bundled static persona seed (L0). Spec 06 will generate/evolve personas
 // at runtime; this is only the default.
@@ -61,6 +61,59 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     `all ${count} beats in order by calling the emit_talk_beats tool.`
   )
 }
+
+// --- music discovery (spec 03-01 §2.3/§2.5) ------------------------------- //
+
+// Header prefixing the volatile context block in the music task turn.
+export const MUSIC_CONTEXT_HEADER = 'Current context for choosing music:\n'
+
+// The selection heuristics live in the task instruction (not scattered in code,
+// and not a formal SDK skill for now). English scaffolding; the listener's
+// language and taste come from the persona.
+export const FIND_MUSIC_INSTRUCTION = `Choose ONE piece of music to play next on a personal radio.
+
+Use the search_music tool to find candidates, judge them against the persona and
+the context below, then call submit_pick with the single best track and a short
+reason.
+
+Guidance:
+- Prefer official audio / studio versions; avoid hour-long loops, low-quality
+  re-uploads, and live or cover versions unless they clearly fit the moment.
+- Match the listener's taste and language as expressed by the persona.
+- Do not repeat something already noted as recently played.
+- If your pick fails to resolve, pick another candidate and submit again.
+- In submit_pick, also pass the track's title and artist (from the candidate),
+  and write \`announce\`: ONE short spoken line introducing the track, in the
+  persona's voice and language — like a radio DJ's "up next". No quotes around
+  it, no markdown; it will be read aloud over the song's opening.`
+
+// The volatile situation block (spec 03-02 §1 #9): the session's recent turns
+// plus the Director's intent. Recently-played songs to avoid arrive with the
+// spec-05 ledger; an empty list renders nothing.
+export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = []): string {
+  const turns = recent.map((t) => `- ${t.role === 'radio' ? 'You' : 'Listener'}: ${t.text}`).join('\n')
+  const avoidBlock =
+    avoid.length === 0
+      ? ''
+      : `\nRecently played -- do not repeat these:\n${avoid.map((song) => `- ${song}`).join('\n')}\n`
+  return (
+    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}` +
+    'Intent: a music break in the program. Pick something that fits the mood and\n' +
+    "subjects of the conversation above (or the persona's taste if it is quiet)."
+  )
+}
+
+// --- cadence (spec 03-02 §2.3, brain mode only) --------------------------- //
+
+export const CADENCE_INSTRUCTION = `You are pacing a personal radio program. Decide what the NEXT segment should
+be: more talk, or a piece of music.
+
+Think like a radio host: talk builds connection, music gives the listener room
+to breathe. Avoid long talk-only stretches and avoid wall-to-wall music.
+
+Call choose_segment exactly once with your decision.`
+
+export const CADENCE_STATE_HEADER = 'Current program state:\n'
 
 // Prompt for an in-persona reply to a typed user line.
 export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
