@@ -67,10 +67,16 @@ export type CliInvocation = {
 // A misconfigured number in a .env must not abort Config construction (and with
 // it every voice) — warn and fall back to the documented default. Empty/unset is
 // not a misconfiguration, so it degrades silently.
-function envNumber(env: NodeJS.ProcessEnv, name: string): number | undefined {
+function envNumber(
+  env: NodeJS.ProcessEnv,
+  name: string,
+  schema: z.ZodType<number>,
+): number | undefined {
   const raw = env[name]?.trim()
   if (!raw) return undefined
-  const parsed = z.coerce.number().nonnegative().safeParse(raw)
+  // Validated to the SAME shape the field itself requires, so a value that gets
+  // past here can never make ConfigSchema.parse throw.
+  const parsed = schema.safeParse(raw)
   if (parsed.success) return parsed.data
   console.warn(`warning: ignoring unusable ${name}=${JSON.stringify(raw)}`)
   return undefined
@@ -78,8 +84,8 @@ function envNumber(env: NodeJS.ProcessEnv, name: string): number | undefined {
 
 // The MURMUR_TTS_* boundary (spec 02 §3.6) as Config fields.
 function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
-  const seed = envNumber(env, 'MURMUR_TTS_SEED')
-  const padS = envNumber(env, 'MURMUR_TTS_SENTENCE_PAD_S')
+  const seed = envNumber(env, 'MURMUR_TTS_SEED', z.coerce.number().int().nonnegative())
+  const padS = envNumber(env, 'MURMUR_TTS_SENTENCE_PAD_S', z.coerce.number().nonnegative())
   return {
     ttsUrl: env.MURMUR_TTS_URL?.trim() ?? '',
     ttsReferenceId: env.MURMUR_TTS_REFERENCE_ID?.trim() ?? '',

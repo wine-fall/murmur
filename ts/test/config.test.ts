@@ -108,6 +108,17 @@ describe('hosted-voice config', () => {
     warn.mockRestore()
   })
 
+  // A numeric-but-unusable seed (fractional) must degrade like any other bad
+  // value — not throw out of parseCli and take every voice down with it.
+  it('degrades on a fractional seed instead of aborting startup', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { config } = parseCli([], { MURMUR_TTS_SEED: '1.5' })
+    expect(config.ttsSeed).toBeUndefined()
+    expect(config.voice).toBe('stub')
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
   it('treats an empty env value as unset, silently', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const { config } = parseCli([], { MURMUR_TTS_SEED: '  ', MURMUR_TTS_SENTENCE_PAD_S: '' })
