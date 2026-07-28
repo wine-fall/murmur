@@ -32,6 +32,7 @@ import type {
 } from './contracts.ts'
 import type { Host } from './host.ts'
 import { buildMusicSituation } from './prompts.ts'
+import { currentScene } from './scene.ts'
 
 const QUIT_COMMAND = '/quit'
 
@@ -44,8 +45,8 @@ const ATTEMPTS = 2
 const STREAM_START_TIMEOUT_S = 8
 const MUSIC_START_ATTEMPTS = 2
 
-// Session-local anti-repeat depth for the music avoid-list (the persistent
-// ledger is spec 05, Phase 4).
+// Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
+// (spec 05 §3.5) — cross-session on the persistent store.
 const AVOID_DEPTH = 8
 
 export type Steer = { intent: 'quit' } | { intent: 'talkback'; text: string }
@@ -86,6 +87,10 @@ export type DirectorDeps = {
   recentWindow: number
   talkBatch: number
   music?: MusicWiring
+  // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
+  // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
+  // scheduling, single-flight, and failure posture live in the Compactor.
+  compactor?: { maybeSchedule(): boolean }
 }
 
 export class Director {
@@ -97,8 +102,6 @@ export class Director {
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
   private pendingPick: Pending<TrackPick | null> | null = null
-  // Songs aired this session, newest last — the pick avoid-list.
-  private playedSongs: string[] = []
 
   private deps: DirectorDeps
 
@@ -123,15 +126,23 @@ export class Director {
         this.talksSinceMusic++
       }
       produced++
+      this.deps.compactor?.maybeSchedule() // background, single-flight
       const last = maxSegments !== undefined && produced >= maxSegments
       if (!last && !this.quit) await this.gap()
     }
   }
 
+  // The real clock lives here; currentScene applies a MURMUR_SCENE override
+  // (by-ear) over the pure, unit-tested bucketing. Profile + recent topics come
+  // from the persistent store (spec 05 §3.5): profile is the stable-prefix
+  // block, coveredTopics the cross-day anti-repeat cue.
   private context(): ContextPack {
     return {
       persona: this.deps.persona,
       recent: this.deps.memory.recent(this.deps.recentWindow),
+      scene: currentScene(new Date()),
+      profile: this.deps.memory.profile(),
+      coveredTopics: this.deps.memory.recentTopics(this.deps.recentWindow),
     }
   }
 
@@ -146,9 +157,11 @@ export class Director {
     const clip = await this.synthesizeOrSkip(beat.text)
     if (clip === null) return
     // Printed + recorded at air time, so an interjection's reply sees this
-    // segment in context.
+    // segment in context. The topic tag (when the model provided one) feeds the
+    // cross-day anti-repeat ledger (spec 05 §3.9).
     this.deps.host.onRadioSegment(beat.text)
     this.deps.memory.record({ role: 'radio', text: beat.text })
+    if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
     await this.runVoice(onAir(this.deps.player.play(clip)))
   }
 
@@ -167,7 +180,7 @@ export class Director {
       persona: this.deps.persona,
       situation: buildMusicSituation(
         this.deps.memory.recent(this.deps.recentWindow),
-        this.playedSongs.slice(-AVOID_DEPTH),
+        this.deps.memory.recentSongs(AVOID_DEPTH),
       ),
     }
   }
@@ -221,7 +234,9 @@ export class Director {
         }
         const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
         this.deps.host.info(`now playing: ${label}`)
-        this.playedSongs.push(label)
+        // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
+        // only — not a dropped candidate. Feeds the music avoid-list.
+        this.deps.memory.recordEvent('song', label)
         let voice: OnAir | null = null
         const announceClip = announced === null ? null : await announced
         if (pick.announce !== undefined && announceClip !== null) {

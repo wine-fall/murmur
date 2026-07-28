@@ -136,3 +136,18 @@ describe('music flags', () => {
     expect(config.cadenceMode).toBe('random')
   })
 })
+
+// spec 05 §2.3: memory lives under dataRoot()/memory, relocatable with
+// MURMUR_HOME; compaction runs on the cheap tier.
+describe('memory config', () => {
+  it('defaults memoryDir under the (relocatable) data root', () => {
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
+    expect(config.memoryDir).toBe('/tmp/mh/data/memory')
+    expect(parseCli([], NO_ENV).config.memoryDir.endsWith('/.murmur/data/memory')).toBe(true)
+  })
+
+  it('defaults compactModel to the cheap tier', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect(config.compactModel).toBe('claude-haiku-4-5-20251001')
+  })
+})

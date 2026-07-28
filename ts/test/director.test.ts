@@ -1,7 +1,12 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
-import { InProcessMemoryStore } from '../src/memory.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { Director, steerFromLine, type DirectorDeps } from '../src/director.ts'
+import { SCENES } from '../src/scene.ts'
 import { FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
 function setup(over: Partial<DirectorDeps> = {}) {
@@ -144,6 +149,39 @@ describe('Director — prepare-then-barge-in interjection', () => {
     expect(brain.nextTalksCalls).toBe(2)
     player.finish()
     await run
+  })
+})
+
+describe('Director — memory wiring (spec 05)', () => {
+  it('assembles the pack from the store: profile, covered topics, scene', async () => {
+    const store = new PersistentMemoryStore({ dir: mkdtempSync(join(tmpdir(), 'murmur-dir-')) })
+    store.applyCompaction('knows jazz', 0)
+    store.recordEvent('topic', 'rain')
+    store.recordEvent('topic', 'coffee')
+    const { brain, director } = setup({ memory: store })
+    brain.batches = [['a']]
+    await director.run(1)
+    const ctx = brain.talkContexts.at(-1)!
+    expect(ctx.profile).toBe('knows jazz')
+    expect(ctx.coveredTopics).toEqual(['rain', 'coffee'])
+    expect(SCENES).toContain(ctx.scene)
+  })
+
+  it('ledgers a beat topic at air time; untagged beats ledger nothing', async () => {
+    const { brain, memory, director } = setup()
+    brain.batches = [[{ text: 'tagged', topic: 'night walks' }, { text: 'plain' }]]
+    await director.run(2)
+    expect(memory.recentTopics(10)).toEqual(['night walks'])
+    expect(memory.recent(10).map((t) => t.text)).toEqual(['tagged', 'plain'])
+  })
+
+  it('pokes the compactor once per segment boundary', async () => {
+    const pokes: number[] = []
+    const compactor = { maybeSchedule: () => (pokes.push(1), false) }
+    const { brain, director } = setup({ compactor })
+    brain.batches = [['a', 'b'], ['c']]
+    await director.run(3)
+    expect(pokes.length).toBe(3)
   })
 })
 

@@ -28,11 +28,17 @@ export type TalkBeat = {
   readonly topic?: string
 }
 
-// The compact context handed to the Brain per call (master §6). Spec-01 fields
-// only; later phases add scene/profile/coveredTopics.
+// The compact context handed to the Brain per call (master §6). Beyond the
+// spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
+// spec 05 §2.2); `profile` and `coveredTopics` are the tier-①/③ memory reads
+// (spec 05 §3.5 — coveredTopics is cross-day, the issue-#44 anti-repeat).
+// All optional: absent renders nothing, so spec-01 call sites stay valid.
 export type ContextPack = {
   readonly persona: string
   readonly recent: readonly Turn[]
+  readonly scene?: string
+  readonly profile?: string
+  readonly coveredTopics?: readonly string[]
 }
 
 export interface VoiceProvider {
@@ -79,9 +85,18 @@ export interface BedSource {
   tracks(): string[]
 }
 
+export type LedgerKind = 'topic' | 'song'
+
+// The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
+// profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
+// recentSongs span sessions and days on the persistent store (issue #44).
 export interface MemoryStore {
   record(turn: Turn): void
   recent(n: number): Turn[]
+  profile(): string
+  recordEvent(kind: LedgerKind, key: string): void
+  recentTopics(n: number): string[]
+  recentSongs(n: number): string[]
 }
 
 // A search hit the brain judges (spec 03-01 §2.2): enough signal to reject junk
@@ -167,4 +182,8 @@ export interface Harness {
 export interface Brain {
   nextTalks(ctx: ContextPack, count: number): Promise<TalkBeat[]>
   respond(userText: string, ctx: ContextPack): Promise<string>
+  // Fold the transcript's durable facts into the profile text and return the
+  // update (spec 05 §2.4). A pure text fold, no tools; the Compactor drives it
+  // off the live loop. The stub returns `profile` unchanged (offline no-op).
+  compactProfile(profile: string, transcript: readonly Turn[]): Promise<string>
 }
