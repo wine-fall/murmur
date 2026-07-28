@@ -14,8 +14,10 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - `make logs` — tail those diagnostics (run in a 2nd terminal).
 - `make preflight` — startup checks only, no run.
 - `STUB=1 make dev` — full offline: canned brain, silent voice, no music.
-- `uv run pytest` — the fast (model-free) unit suite.
-- `pre-commit run --all-files` — the gates (source-language + pyright).
+- `npm test` — the fast (model-free) vitest suite; `npm run typecheck` /
+  `npm run lint` — the static gates.
+- `pre-commit run --all-files` — all gates (source-language + tsc + oxlint +
+  path-governance).
 
 ## Map / routing
 
@@ -48,10 +50,11 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
   gitignored `.env*` (remote-voice creds); `make install` / `make dev` auto-sync
   them from the main worktree via `make sync-env` (copy-if-absent). They never
   carry over on their own.
-- **Never gate a commit/push on a piped command's exit code** (`pytest | tail`
+- **Never gate a commit/push on a piped command's exit code** (`npm test | tail`
   reports `tail`'s exit) — run the gating command bare and check its real code.
-- `git commit` needs the project venv on PATH (`PATH="$PWD/.venv/bin:$PATH"`)
-  because the pre-commit hooks are `language: system`.
+- `git commit` runs `language: system` pre-commit hooks — `node`/`npx` and
+  `python3` must be on PATH (`make install` provisions the `pre-commit` runner
+  itself via `uv tool install`).
 - The **ponytail** plugin is enabled on purpose (minimal-code ladder): before
   writing new code, climb it — needed at all? already in the codebase? stdlib?
   one line?

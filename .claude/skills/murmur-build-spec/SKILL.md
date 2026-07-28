@@ -48,9 +48,9 @@ When a sub-spec change contradicts or outgrows a master decision, update `specs/
 
 ## Testing (mandatory — see specs/DESIGN.md §11 for the full convention)
 
-- **Test-first for logic.** Failing unit test → implementation → green. Framework: `pytest`.
+- **Test-first for logic.** Failing unit test → implementation → green. Framework: `vitest` (`npm test`).
 - **Fakes for seams.** Every provider/seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a fake, so the core is always unit-testable without real audio/LLM/network.
-- **Three layers:** unit (fast, every change) · integration (tagged, **manual on-demand**, e.g. `pytest -m integration`) · human acceptance (sensory criteria → produce a **checklist for the user to run**).
+- **Three layers:** unit (fast, every change) · real-boundary (**manual on-demand** — `murmur-smoke` scratch scripts against the real SDK/binaries/audio) · human acceptance (sensory criteria → produce a **checklist for the user to run**).
 - **Don't run the heavy real models inside a build's tests.** Real model/voice *capability* eval (Qwen3-TTS, real LLMs — e.g. the voice blind A/B) is the dedicated **eval track** (DESIGN §10.3), not part of normal per-spec verification.
 - **Prefer Ollama** for any test/eval that needs an actual local LLM; reserve real Claude (`claude-agent-sdk`) for production + a gated, on-demand live smoke.
 - **See it real at the SDK / integration boundary.** When a requirement's correctness lives where fakes can't reach — real `claude-agent-sdk` behavior (`run_task`/`run_guide`), real `yt-dlp`, audio, the interactive guide — use `murmur-smoke` to run a throwaway `scratch/` script, then fold the finding into a unit or `integration`-tagged test. Fakes-green ≠ works there — this project shipped unit-green code broken at that seam (MCP result shape; `can_use_tool` streaming mode).

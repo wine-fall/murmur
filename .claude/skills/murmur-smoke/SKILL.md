@@ -21,19 +21,19 @@ This does **not** replace unit tests. It is the companion for the real / integra
 
 ## Where scripts live
 
-`scratch/` at the repo root — **gitignored, never committed**. Durable across sessions, rerunnable. One script per thing you probe; delete freely. Seed examples already there: `scratch/smoke_music.py` (find + pull) and `scratch/guide_fix.py` (guide harness).
+`scratch/` at the repo root — **gitignored, never committed**. Durable across sessions, rerunnable. One script per thing you probe; delete freely. Seed examples already there: `scratch/ts_smoke_music.ts` (find + pull) and `scratch/smoke_guide.ts` (guide harness).
 
 ## The flow
 
 1. **Name the ONE thing to observe** ("does `run_guide` get the model to call `submit_pick`?"). One question per script.
-2. **Write the smallest runnable script** in `scratch/`: import murmur, build the *real* component, print the observable output. No abstraction.
+2. **Write the smallest runnable script** in `scratch/`: import from `src/`, build the *real* component, print the observable output. No abstraction.
 3. **Run it** (see run notes) and read the output.
-4. **Add signal + iterate**: `MURMUR_HARNESS_DEBUG=1` dumps the harness's SDK messages (tool calls, tool results, text); add prints; rerun.
+4. **Add signal + iterate**: print the harness's SDK messages (tool calls, tool results, text) from the script; add prints; rerun.
 5. **Fold the finding into a test** — the script is throwaway; the *artifact* is a deterministic unit test (or an `integration`-tagged test) that locks the behavior/bug.
 
 ## Run notes (murmur-specific)
 
-- **venv**: `.venv/bin/python scratch/x.py` (or `source .venv/bin/activate`, then `python …`).
+- **Run**: `node scratch/x.ts` — Node ≥24 runs TS directly (imports from `src/` use explicit `.ts` extensions).
 - **Real Claude**: needs `claude` logged in (subscription OAuth, no API key). Harness runs Haiku (find-music) / Opus (guide).
 - **Real yt-dlp / ffmpeg**: unbound external binaries (master §10.1) — `brew install ffmpeg yt-dlp`; both must be on PATH; needs network.
 - **Corporate MITM proxy** (e.g. Cloudflare Gateway): yt-dlp fails TLS verify (`CERTIFICATE_VERIFY_FAILED`) because it uses `certifi`, not the system CA bundle — **not a murmur bug** (it's what the guide harness fixes). For a smoke, run off that network or point `certifi` at the corp CA.
