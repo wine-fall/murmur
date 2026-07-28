@@ -13,7 +13,7 @@ import { join } from 'node:path'
 import type { BedSource } from './contracts.ts'
 import { cacheRoot } from './paths.ts'
 
-export const DEFAULT_MANIFEST = new URL('../../assets/bed_sources.txt', import.meta.url).pathname
+export const DEFAULT_MANIFEST = new URL('../assets/bed_sources.txt', import.meta.url).pathname
 
 export function defaultBedCacheDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(cacheRoot(env), 'bed')

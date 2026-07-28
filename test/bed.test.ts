@@ -4,7 +4,15 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { CachedBedSource, cacheKey, pullBed, readManifest } from '../src/bed.ts'
+import { existsSync } from 'node:fs'
+
+import { CachedBedSource, DEFAULT_MANIFEST, cacheKey, pullBed, readManifest } from '../src/bed.ts'
+
+// The manifest constant is anchored relative to the module file; a tree move
+// that breaks the anchor must fail here, not at the first real run.
+it('DEFAULT_MANIFEST points at the committed manifest', () => {
+  expect(existsSync(DEFAULT_MANIFEST)).toBe(true)
+})
 
 let dir: string
 
