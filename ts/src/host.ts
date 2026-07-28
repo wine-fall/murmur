@@ -15,6 +15,10 @@ export interface Host {
   start(): void
   peekLine(): Promise<string>
   takeLine(): string | undefined
+  // Resolves once stdin has ended (no more input will EVER come). The Director
+  // ignores it (the radio plays on); the guide races its consuming reads
+  // against it so a non-interactive run declines instead of blocking forever.
+  eof?(): Promise<void>
   onRadioSegment(text: string): void
   onUserLine(text: string): void
   info(message: string): void
@@ -52,18 +56,27 @@ export class LineQueue {
 export class CliHost implements Host {
   private queue = new LineQueue()
   private started = false
+  private markEof!: () => void
+  private eofSeen: Promise<void>
 
   private input: NodeJS.ReadableStream
 
   constructor(input: NodeJS.ReadableStream = process.stdin) {
     this.input = input
+    this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
   }
 
   start(): void {
     if (this.started) return
     this.started = true
     // On EOF readline just stops emitting lines; the radio plays on.
-    createInterface({ input: this.input }).on('line', (line) => this.queue.push(line))
+    createInterface({ input: this.input })
+      .on('line', (line) => this.queue.push(line))
+      .on('close', () => this.markEof())
+  }
+
+  eof(): Promise<void> {
+    return this.eofSeen
   }
 
   peekLine(): Promise<string> {

@@ -22,29 +22,45 @@ const GUIDE_MAX_TURNS = 30
 const YES = new Set(['y', 'yes'])
 const END = new Set(['', '/done', '/quit', 'q'])
 
-async function nextLine(host: Host): Promise<string> {
-  await host.peekLine()
-  return host.takeLine() ?? ''
+// A serialized, consuming line read for the guide's asks. Two things the
+// Director's raw peek/take race primitive gets wrong here (codex-review
+// regressions): one typed line wakes EVERY concurrent waiter (concurrent
+// permission asks would share an answer and drop the rest), and a closed
+// stdin pends forever (a non-interactive run would wedge startup). So reads
+// queue one behind the other, and EOF resolves '' — which every consumer
+// already treats as decline/skip/end.
+export type ReadLine = () => Promise<string>
+
+export function lineReader(host: Host): ReadLine {
+  const eof: Promise<string> = host.eof?.().then(() => '') ?? new Promise<string>(() => {})
+  let chain: Promise<unknown> = Promise.resolve()
+  return () => {
+    const read = chain.then(() =>
+      Promise.race([host.peekLine().then(() => host.takeLine() ?? ''), eof]),
+    )
+    chain = read
+    return read
+  }
 }
 
 // Ask the user via the CLI Host before each tool the guide wants to run, and
 // return the SDK's allow/deny result. Anything but an explicit yes denies.
-export function cliPermission(host: Host): CanUseTool {
+export function cliPermission(host: Host, read: ReadLine): CanUseTool {
   return async (toolName, input) => {
     const detail = typeof input.command === 'string' ? input.command : JSON.stringify(input)
     host.info(`setup assistant wants to run [${toolName}]: ${detail}`)
     host.info('allow? [y/N]')
-    if (YES.has((await nextLine(host)).trim().toLowerCase())) return { behavior: 'allow' }
+    if (YES.has((await read()).trim().toLowerCase())) return { behavior: 'allow' }
     return { behavior: 'deny', message: 'user declined' }
   }
 }
 
 // Read the user's next natural-language reply from the CLI Host. An empty
 // line or /done|/quit|q ends the conversation (returns null).
-export function cliConversation(host: Host): () => Promise<string | null> {
+export function cliConversation(host: Host, read: ReadLine): () => Promise<string | null> {
   return async () => {
     host.info('your reply (natural language; empty or /done to finish):')
-    const line = (await nextLine(host)).trim()
+    const line = (await read()).trim()
     return END.has(line.toLowerCase()) ? null : line
   }
 }
@@ -72,9 +88,10 @@ export async function runMusicSetup(
   // The offer and the guide both read the keyboard; make sure the reader is
   // up (idempotent — the Director starts it too, spec 03-02 §2.4).
   host.start()
+  const read = lineReader(host)
   host.info(`music dependencies aren't working here: ${result.reason}`)
   host.info("type 'y' to let the setup assistant look into it (anything else skips):")
-  if (!YES.has((await nextLine(host)).trim().toLowerCase())) {
+  if (!YES.has((await read()).trim().toLowerCase())) {
     host.info('skipped music setup.')
     return false
   }
@@ -84,9 +101,9 @@ export async function runMusicSetup(
     prompt: buildFixMusicPrompt({ ytdlp, ffmpeg, reason: result.reason }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
-    canUseTool: cliPermission(host),
+    canUseTool: cliPermission(host, read),
     onText: (text) => host.info(text),
-    nextUserInput: cliConversation(host),
+    nextUserInput: cliConversation(host, read),
   })
 
   const recheck = await check({ ytdlp, ffmpeg })
