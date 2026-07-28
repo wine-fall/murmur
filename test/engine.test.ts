@@ -242,19 +242,37 @@ describe('background bed (spec 03-04)', () => {
     const decode: Decode = (source, signal) => streams[source]!(source, signal)
     const seconds = 4
     const context = new OfflineAudioContext(2, seconds * RATE, RATE)
-    const engine = new AudioEngine({ context, decode, rampS: 0.2, bedGain: 0.5, bedXfadeS: 0.2 })
-    await engine.startBed({ tracks: () => ['bed://a'] })
-    await settle() // bed fully scheduled before the render can outrun it
-    // song starts mid-render (t=1): mutate under suspend, then resume
-    let handle: MusicHandle | null = null
-    const suspended = context.suspend(1.0).then(async () => {
-      handle = await engine.playMusic(MUSIC)
-      await handle.waitStarted(1)
-      await settle()
-      await context.resume()
+    // suspend()/startRendering() race inside node-web-audio-api: both are napi
+    // async fns spawned as independent tokio tasks, so on a loaded runner the
+    // render task can be polled first, take() the renderer, and suspend rejects
+    // InvalidStateError (offline.rs; reproduced in ~1k iterations under CPU
+    // load). The engine anchors every move on ctx.currentTime, so instead of
+    // mutating mid-render, hand it a clock shifted forward between calls: the
+    // song "arrives" at t=1 with the whole graph scheduled before rendering.
+    // (AudioParam.value still reads at real t=0, so the bed's out-fade renders
+    // as a step at 1.0 instead of a ramp — no asserted window straddles it.)
+    let clockShiftS = 0
+    const shifted = new Proxy(context, {
+      get(target, prop) {
+        if (prop === 'currentTime') return target.currentTime + clockShiftS
+        const value = Reflect.get(target, prop)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
     })
+    const engine = new AudioEngine({
+      context: shifted,
+      decode,
+      rampS: 0.2,
+      bedGain: 0.5,
+      bedXfadeS: 0.2,
+    })
+    await engine.startBed({ tracks: () => ['bed://a'] })
+    await settle() // bed fully scheduled at t=0
+    clockShiftS = 1 // song starts mid-timeline (t=1)
+    const handle = await engine.playMusic(MUSIC)
+    expect(await handle.waitStarted(1)).toBe(true)
+    await settle() // song chunks + the eof-anchored bed return all scheduled
     const rendered = await context.startRendering()
-    await suspended
     // bed alone before the song
     expect(level(rendered, 0.5, 0.95)).toBeCloseTo(0.2, 1)
     // song at full, bed crossfaded out
