@@ -40,3 +40,12 @@ jobs:
       - run: npm run lint
 
       - run: npm test
+
+      # Boot smoke: proves the entry point actually starts (argv parsing, app
+      # assembly, engine construction) — tests import modules but never boot.
+      # The runner is headless, so point ALSA's default device at the null sink
+      # or AudioContext dies with cpal DeviceUnavailable.
+      - name: Boot smoke
+        run: |
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > ~/.asoundrc
+          timeout 120 node src/main.ts --brain stub --voice stub --no-music --no-bed --max-segments 1
