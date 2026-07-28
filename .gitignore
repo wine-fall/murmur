@@ -1,21 +1,11 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-.eggs/
-build/
-dist/
-.venv/
-venv/
-
-# Node (ts/ — issue #54 migration)
+# Node
 node_modules/
+
+# Python (the dev scripts under scripts/ still run on system python3)
+__pycache__/
 
 # Tooling / OS
 .DS_Store
-.mypy_cache/
-.ruff_cache/
-.pytest_cache/
 
 # Throwaway smoke/probe scripts (murmur-smoke skill) — never committed
 scratch/

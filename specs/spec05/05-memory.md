@@ -9,7 +9,7 @@
 > **Owed (real-run pass):** the on-demand two-run "run 2 sees run 1's tail +
 > compaction produces a plausible profile" smoke (§5.10), and profile/topic
 > quality by feel (eval track).
-> **TS port (issue #54 Phase 4, 2026-07-28):** ported to `ts/` in full —
+> **TS port (issue #54 Phase 4, 2026-07-28):** ported to TS in full —
 > `memory.ts` (both stores; zod at the file-read boundary, same on-disk layout
 > incl. snake_case `meta.json` so the Python memory dir carries over at
 > cutover), `compaction.ts` (single-flight Compactor), `scene.ts` (the §2.2

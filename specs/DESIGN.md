@@ -27,7 +27,7 @@ murmur's design is captured as **one master spec + several sub-specs**.
 **Conventions**
 - **AI-friendly first**: every spec's primary reader is a **coding agent, not a human**. Write for unambiguous machine consumption — explicit contracts (interfaces, I/O, types, paths, exact symbol/command names), a single canonical source of truth per fact, explicit scope **and non-goals**, and verifiable acceptance criteria. Keep rationale only where it constrains an implementation decision; drop motivational prose.
 - English for all spec documents; Chinese for live discussion.
-- **All prompt text is centralized** under `src/murmur/prompts/` and written in **English** (v1). The radio's *output* language is set inside the prompt — e.g. the persona seed instructs Chinese speech — so English prompt scaffolding still yields a Chinese-speaking radio. No prompt strings scattered through application modules.
+- **All prompt text is centralized** under `src/prompts.ts` (+ file assets in `src/prompts/`) and written in **English** (v1). The radio's *output* language is set inside the prompt — e.g. the persona seed instructs Chinese speech — so English prompt scaffolding still yields a Chinese-speaking radio. No prompt strings scattered through application modules.
 - **No Chinese (CJK) anywhere in source** — comments, string literals, and docstrings alike (v1). The radio speaks Chinese only at runtime, produced by the model from the persona prompt; it is never a hardcoded string. Additionally, **comments are English-only**. Enforced by `scripts/check_source_language.py` (wired via pre-commit; stdlib-only).
 - Master spec stays high-altitude; sub-specs may go deeper but remain design-level, not code.
 - This master lives at `specs/DESIGN.md`. Each sub-spec gets its own directory `specs/specNN/` (ordered by build sequence), holding that part's doc(s) — e.g. `specs/spec01/01-core-loop.md`, `specs/spec02/02-voice-provider.md`. A multi-part spec keeps its sub-parts together in one directory (e.g. `specs/spec03/03-01-brain-harness.md` + `specs/spec03/03-02-ducking.md`).
@@ -94,19 +94,31 @@ Each item records the **why**, to avoid re-litigating later.
   - **Bounded surface + off the live loop.** "Complete" means complete *within the tool/permission surface murmur's harness defines* — never an unrestricted shell on the user's machine. Any heavy, multi-step agentic task runs as a **background job off the live radio loop** (the stream never goes silent while the agent works); its results feed Memory/persona.
   - The tool/skill **harness seam is introduced in spec 03-01** (music search & recommendation is its first capability); later specs (05/06/07) hang more capabilities on the same seam. Fast, latency-critical calls like `next_talk` stay tool-less **by choice** — a harness *configuration*, not a separate "crippled" brain.
 
-### 3.3 Language / runtime: all Python
-- Orchestrator + TTS sidecar are **both Python**.
+### 3.3 Language / runtime: TypeScript on Node
+- The engine is **TypeScript on Node (≥24, native type-stripping)**, on
+  `@anthropic-ai/claude-agent-sdk` (issue #54; the original Python
+  implementation served as the rewrite's behavior oracle and is deleted).
 - *Rationale (weighed, not a default)*:
-  - **The gravity of the TTS ecosystem is the hard constraint** — the candidate TTS models (Qwen3-TTS/MLX, CosyVoice2, Chatterbox, OpenAudio) **all live in the Python/PyTorch/MLX ecosystem**; local neural TTS is essentially absent in TS/Rust/Go.
-  - The Claude Agent SDK has **first-class support on both** Python and TS, so it does not force the choice.
-  - An async always-on loop + concurrent input reading is well within Python's reach.
-  - **Key insight (refined once spec 02 was built)**: TTS *must* be Python, but the **orchestrator language is genuinely free** — because TTS runs as a separate sidecar process regardless (see 3.5: warm model-load + crash isolation), reachable over a **language-neutral IPC**. spec 02 in fact built that boundary (a JSON-lines-over-stdio sidecar), so all-Python does **not** save the IPC layer — that exists either way. What all-Python actually saves is the **language boundary**: one toolchain/venv, and the core + sidecar share the protocol and request types as plain imports. For a solo, local, fast-iterating MVP that is the optimal trade — but it is a **convenience, not a necessity**: the core could be another language driving the same Python sidecar over the same protocol. (Each TTS backend also keeps its own heavy, often-conflicting deps — see 3.5 — so Python unifies *nothing* across backends; isolation, not a shared runtime, is the pattern. The process boundary is what makes that safe, regardless of language.)
+  - **The brain harness is the heart of the product**, and the TS Agent SDK is
+    its first-class surface; every capability (talk, music discovery, the
+    repair guide, compaction) hangs off that seam.
+  - **The old hard constraint dissolved**: local neural TTS (all
+    Python/PyTorch/MLX) forced Python while it was in scope. Local TTS is
+    **deferred** (v1 voice is a hosted endpoint over HTTP — spec 02 §3.6), so
+    the orchestrator language is genuinely free.
+  - Audio mixing is a Web Audio graph on `node-web-audio-api` (gain-envelope
+    automation as the mixer; `OfflineAudioContext` renders as the deterministic
+    unit layer) — no numpy needed.
+  - If local TTS returns, it runs as a **sidecar process over language-neutral
+    IPC** (the boundary spec 02 originally built), so it never re-forces the
+    engine language.
 
 ### 3.4 Input: keyboard only; no ASR this round
 - v1 user input is via **keyboard**.
 - *Rationale*: ASR (Whisper et al.) is a mature, solved problem and not this project's value-add; defer it to focus on the genuinely hard part — making the AI *sound human*.
 
 ### 3.5 Output / TTS: hot-swappable, human-ness is the soul
+- *Status (issue #54)*: **local TTS is deferred** — the running v1 voice is the hosted fish-speech endpoint (spec 02 §3.6). The local-model design below (candidate pool, warm sidecar) is kept as the deferred plan, not current code.
 - **`VoiceProvider` abstraction**: TTS is a hot-swappable backend, not hard-coded. Each model is its own adapter, switchable by one config line; you can even **mount different models per scenario** (a fast one for live replies, a warm/rich one for proactive broadcasts).
 - **Candidate pool** (decide the primary after a blind A/B): Qwen3-TTS, CosyVoice2, Chatterbox Multilingual V3, OpenAudio S1-mini. *(spec 02 wires the MLX-runnable experiment shortlist — **Spark** [primary], Qwen3-TTS, Chatterbox, Dia, and VoxCPM2 — as local experiment-phase voices per §3.7.)*
 - **TTS runs as an always-on warm sidecar process.** *Rationale*: models load slowly (seconds, several GB), so keep them warm rather than loading on every utterance; crash isolation — a TTS crash must not take down the radio brain; cross-process is also the cleanest seam for hot-swapping.
@@ -117,11 +129,11 @@ Each item records the **why**, to avoid re-litigating later.
   - **The human-ness / warmth of the voice is the soul of this product.** The primary model is ultimately decided by ear, via blind listening.
 - *Paid cloud backlog (for a future quality upgrade)*: most emotional — Hume Octave; best Chinese — Doubao/Volcengine, MiniMax; cheapest — OpenAI gpt-4o-mini-tts; lowest latency — Cartesia; ceiling but pricey — ElevenLabs; plus Fish Audio cloud.
 
-### 3.6 Interaction form: an always-on Python async engine; plain CLI host in-process, TUI out-of-process
-- **The core loop (specs 01/02/03, L0→L1)** is one always-on Python process (e.g. `murmur`), launched in a terminal; one coroutine drives "speaking up," another reads keyboard input, both feed into the brain. With the **plain CLI host**, proactive broadcasts and your typing share the same terminal, **in-process** — no split. The plain host stays in-process (it is also the headless / test path).
+### 3.6 Interaction form: an always-on async engine; plain CLI host in-process, TUI out-of-process
+- **The core loop (specs 01/02/03, L0→L1)** is one always-on Node process (`murmur`), launched in a terminal; one loop drives "speaking up," a readline reader owns keyboard input, both feed into the brain. With the **plain CLI host**, proactive broadcasts and your typing share the same terminal, **in-process** — no split. The plain host stays in-process (it is also the headless / test path).
 - *Rationale*: CLI is the lightest, fastest path to an MVP, with no GUI overhead. **There is no GUI, no menu-bar, and no web surface — not in v1, and not planned.** The only richer front-end murmur ever gets is a **TUI** (terminal UI).
-- **Amended (2026-07, TUI direction) — the TUI front-end is a *separate process*, not in-place.** This **supersedes** the earlier "the TUI upgrades the in-terminal host surface *in place*, no new process, no IPC." Decision: the richer front-end is a **standalone TUI process** that attaches to a **headless murmur engine** over a **language-neutral IPC** — the same *class* of boundary the TTS sidecar already uses (§3.3). The engine stays Python; **only the plain host is in-process**. This is still a terminal UI — **never a GUI/menu-bar/web**.
-  - **Decided (spec 10)**: the TUI front-end is **Go / Charm (Bubble Tea)** — so the engine↔front-end boundary is now genuinely cross-language (Python engine ↔ Go TUI), which the IPC must respect. **Still open (spec 10)**: the **IPC protocol + Host-seam mapping**. "Two processes over IPC" is locked.
+- **Amended (2026-07, TUI direction) — the TUI front-end is a *separate process*, not in-place.** This **supersedes** the earlier "the TUI upgrades the in-terminal host surface *in place*, no new process, no IPC." Decision: the richer front-end is a **standalone TUI process** that attaches to a **headless murmur engine** over a **language-neutral IPC** — the same *class* of boundary a TTS sidecar would use (§3.3). The engine stays in its language; **only the plain host is in-process**. This is still a terminal UI — **never a GUI/menu-bar/web**.
+  - **Decided (spec 10)**: the TUI front-end is **Go / Charm (Bubble Tea)** — so the engine↔front-end boundary is genuinely cross-language (TS engine ↔ Go TUI), which the IPC must respect. **Still open (spec 10)**: the **IPC protocol + Host-seam mapping**. "Two processes over IPC" is locked.
   - **Consequence to reconcile**: a separate always-on engine + an attach/detach TUI **subsumes much of the deferred daemon/detach model** (§10.1, "the radio keeps broadcasting after the terminal closes; a client re-attaches"). spec 10 must reconcile the two rather than treat them as independent.
   - See the TUI sub-spec (§10, `specs/spec10/10-tui.md`).
 
@@ -135,7 +147,7 @@ Each item records the **why**, to avoid re-litigating later.
 ## 4. Architecture & layers
 
 ```
-┌─────────────────────────── murmur (single Python asyncio process) ──────────────────────┐
+┌─────────────────────────── murmur (single Node process) ────────────────────────────────┐
 │                                                                                          │
 │   you type ─► CLI Host ─────────┐                          ┌──► VoiceProvider (TTS)      │
 │            (render + read keys) │                          │     warm sidecar · pluggable │
@@ -161,7 +173,7 @@ Each item records the **why**, to avoid re-litigating later.
 | **CLI Host** | Render "now playing" + read keyboard input | proactive + typing share the terminal |
 | **Program Director** | The soul: continuously decide "what plays next" (autonomous talk / music / time-anchor), modulate talk density by activity + time-of-day; manage "turn to you / slide back" | mostly local policy — not every decision calls Claude |
 | **Brain** | Claude SDK session: ① generate talk-segment scripts / pick topics ② respond when you type. Persona + memory injected | see token economy |
-| **VoiceProvider** | text → speech, hot-swappable TTS, warm sidecar, splittable fast/rich by scenario | candidate pool in 3.5 |
+| **VoiceProvider** | text → speech, hot-swappable TTS (v1 = hosted endpoint), splittable fast/rich by scenario | candidate pool in 3.5 |
 | **MusicProvider** | topic/query → audio stream, hot-swappable | v1 = yt-dlp |
 | **AudioPlayer** | sole audio authority: sequence TTS + music, duck/stop on interrupt | only one thing "on air" at a time |
 | **Memory** | who you are, topics discussed, segments/songs played (anti-repeat), conversation log; **the persona living asset also lives here** | see §6 |
@@ -247,7 +259,7 @@ Core: pillars 2 (batch) + 5 (activity-gating) + 4 (caching) turn "always on the 
 ## 8. Scope
 
 ### In v1 (WHAT)
-- Claude brain (subscription auth) · always-on Python CLI (keyboard in / voice out)
+- Claude brain (subscription auth) · always-on CLI (keyboard in / voice out)
 - Continuous radio stream (autonomous talk + music + time anchors) · hybrid proactive/passive (model C)
 - Hot-swappable TTS (human-ness first) · yt-dlp music (YouTube+Bilibili)
 - A persona that grows (onboarding seed + learn-as-you-go)
@@ -343,8 +355,8 @@ Tests are **mandatory**. The approach is layered by what is actually testable.
 Every seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a **fake** implementation. The core loop, the Director's policy, and all pure logic are tested against fakes — no real audio, LLM, or network. (Spec 01's stub `VoiceProvider` doubles as the fake.) This is the payoff of the interface-first design (§10.1).
 
 ### 11.2 Three layers
-1. **Unit — fast, every change, test-first (TDD).** Pure logic + the loop driven by fakes. New logic is written **test-first**: failing test → implementation → green. Framework: `pytest`.
-2. **Integration — tagged, manual on-demand.** Real TTS sidecar synth, etc. Slow/heavy — **not** in the fast loop; run deliberately (e.g. `pytest -m integration`). Not run on every change.
+1. **Unit — fast, every change, test-first (TDD).** Pure logic + the loop driven by fakes. New logic is written **test-first**: failing test → implementation → green. Framework: `vitest` (`npm test`).
+2. **Real-boundary — manual on-demand.** Real TTS synth, real `yt-dlp`, real SDK behavior, audio. Slow/heavy — **not** in the fast loop; run deliberately as throwaway `scratch/` smokes (the `murmur-smoke` flow). Not run on every change.
 3. **Human acceptance — sensory, the user runs.** "Sounds human," "feels like radio," "type-and-reply flows" — the milestone §9.3 criteria. The agent produces a **checklist**; the user runs it and confirms. The agent cannot self-verify these (it can't hear the voice or judge warmth).
 
 ### 11.3 Real-model eval is its own part
@@ -356,8 +368,8 @@ When a test or eval needs an **actual LLM** (not a canned fake) — exercising p
 ---
 
 ## Appendix: key-decision quick reference (to avoid re-litigating)
-- **Why Python**: TTS ecosystem is all Python; a solo MVP saves a language boundary.
-- **Why TTS is a sidecar**: slow load, keep it warm, crash isolation, clean hot-swap.
+- **Why TypeScript**: the brain harness is the product's heart and the TS Agent SDK is its first-class surface; deferring local TTS (the one hard Python constraint) freed the choice (issue #54).
+- **Why a local TTS would be a sidecar**: slow load, keep it warm, crash isolation, clean hot-swap (deferred with local TTS).
 - **Why personal use matters**: it unlocks the most emotional, non-commercially-licensed TTS.
 - **Why yt-dlp for v1 music**: the only "no login, no membership, no app" start that also covers Chinese (Bilibili); Spotify is gated by Premium, NetEase by unofficial-API + login.
 - **Why single loop + look-ahead**: a radio can't have dead air; this is the minimum-cost prevention.

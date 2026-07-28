@@ -1,9 +1,9 @@
 name: CI
 
-# Build the package and run the fast (model-free) test suite on every PR to
-# main. The suite runs against fakes/stubs — no real TTS model, LLM, or network
-# (specs/DESIGN.md §11.1), so it runs on plain Linux runners. Integration tests
-# (pytest -m integration) are excluded by default (pyproject addopts).
+# Typecheck, lint, and run the fast (model-free) unit suite on every PR to
+# main. The suite runs against fakes/stubs — no real TTS, LLM, or network
+# (specs/DESIGN.md §11.1), so it runs on plain Linux runners. The source-
+# language gate runs here too, so a single --no-verify commit can't bypass it.
 
 on:
   pull_request:
@@ -19,68 +19,24 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build-and-test:
+  test:
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        # Bound the supported range: floor (requires-python >=3.10) and current.
-        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v5
 
-      - name: Set up uv (+ Python ${{ matrix.python-version }})
-        uses: astral-sh/setup-uv@v8.3.0
-        with:
-          python-version: ${{ matrix.python-version }}
-          enable-cache: true
-
-      # --locked: fail if uv.lock is out of date with pyproject rather than
-      # silently re-resolving — CI runs exactly the committed environment.
-      # dev extra only: tts-mlx is Apple-Silicon-only (mlx), absent on Linux.
-      - name: Install (locked dev env)
-        run: uv sync --locked --extra dev
-
-      - name: Build package
-        run: uv build
-
-      - name: Test
-        run: uv run pytest
-
-  # Enforce the pre-commit gates (source-language + pyright) on CI too, so a
-  # single --no-verify commit can't bypass them. Runs on macOS with tts-mlx: the
-  # Apple-only mlx/mlx-audio packages MUST be installed for pyright to type-check
-  # voice/mlx_backend.py under strict (absent, its symbols degrade to Unknown and
-  # strict fails). macOS + tts-mlx mirrors a dev's Mac exactly, so local pre-commit
-  # and this gate see the same environment. (The test job stays on Linux/dev — it
-  # never imports mlx_backend at collection, so it needs neither macOS nor tts-mlx.)
-  gates:
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v8.3.0
-        with:
-          python-version: "3.13"
-          enable-cache: true
-      - run: uv sync --locked --extra dev --extra tts-mlx
-      - run: uv run pre-commit run --all-files
-
-  # TS migration (issue #54): typecheck + lint + unit suite for the ts/ tree.
-  # Runs alongside the Python jobs until the Phase 5 cutover swaps the
-  # required checks; the existing Python jobs above are untouched.
-  ts:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ts
-    steps:
-      - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: ts/package-lock.json
+          cache-dependency-path: package-lock.json
+
       - run: npm ci
+
+      - name: Source language gate
+        run: git ls-files '*.ts' '*.md' '*.yml' '*.yaml' '*.toml' '*.py' | xargs python3 scripts/check_source_language.py
+
       - run: npm run typecheck
+
       - run: npm run lint
+
       - run: npm test

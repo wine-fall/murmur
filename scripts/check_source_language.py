@@ -17,8 +17,8 @@ Two checks:
 Usage:
     python scripts/check_source_language.py [FILE ...]
 
-With no arguments, scans src/ and scripts/. Exits non-zero on any violation, so
-it works as a pre-commit hook and in CI. Standard library only.
+With no arguments, scans src/, test/, and scripts/. Exits non-zero on any
+violation, so it works as a pre-commit hook and in CI. Standard library only.
 """
 
 from __future__ import annotations
@@ -95,13 +95,19 @@ def check_file(path: Path) -> list[str]:
 def _collect(argv: list[str]) -> list[Path]:
     if argv:
         return [Path(a) for a in argv]
-    roots = [Path("src"), Path("scripts"), Path("tests")]
-    return [p for root in roots if root.exists() for p in root.rglob("*.py")]
+    roots = [Path("src"), Path("test"), Path("scripts")]
+    return [
+        p
+        for root in roots
+        if root.exists()
+        for pattern in ("*.ts", "*.py")
+        for p in root.rglob(pattern)
+    ]
 
 
 def main(argv: list[str]) -> int:
-    # Explicit args (e.g. from pre-commit) may include non-Python files; those
-    # get the no-CJK check. With no args, scan the Python sources under src/scripts.
+    # Explicit args (e.g. from pre-commit) may include any file type; all get
+    # the no-CJK check. With no args, scan the sources under src/test/scripts.
     paths = [p for p in _collect(argv) if p.exists()]
     errors: list[str] = []
     for p in paths:

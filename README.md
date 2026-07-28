@@ -18,14 +18,14 @@ Three things together define its character; none is optional:
 
 ## Architecture
 
-A single Python `asyncio` process. One coroutine drives "speaking up," another reads the keyboard; both feed the brain.
+A single Node.js (TypeScript) process. One loop drives "speaking up," a readline reader owns the keyboard; both feed the brain.
 
 | Component | Responsibility |
 |---|---|
 | **CLI Host** | render "now playing" + read keyboard input (proactive + typing share the terminal) |
 | **Program Director** | the soul: continuously decide what plays next (talk / music / time-anchor); modulate pacing; manage "turn to you / slide back" |
-| **Brain** | Claude session (via `claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
-| **VoiceProvider** | text → speech; hot-swappable TTS running as a warm sidecar process |
+| **Brain** | Claude session (via `@anthropic-ai/claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
+| **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted fish-speech endpoint) |
 | **MusicProvider** | topic/query → audio stream; hot-swappable (v1 = yt-dlp, covering YouTube + Bilibili) |
 | **AudioEngine** | sole audio authority: one output stream mixing music + voice, gain-envelope **ducking** (talk rides over the song; an interjection ducks it, never stops it) |
 | **Memory** | who you are, topics discussed, songs played (anti-repeat), conversation log — the persona living asset lives here too |
@@ -34,11 +34,10 @@ A single Python `asyncio` process. One coroutine drives "speaking up," another r
 
 ### Key decisions (and why)
 
-- **All Python** — the local-TTS ecosystem is entirely Python/PyTorch/MLX; a solo MVP saves a language boundary. (The TTS sidecar talks JSON-lines over stdio, so the boundary is language-neutral either way.)
+- **TypeScript on the Claude Agent SDK** — the brain harness is the heart of the product, and `@anthropic-ai/claude-agent-sdk` is the first-class surface for it (the Python implementation served as the behavior oracle for the rewrite — GitHub issue #54). The mixer is a Web Audio graph on `node-web-audio-api`; local TTS models are deferred, so no Python/MLX runtime is needed.
 - **Brain = Claude, subscription auth** — reuses your local Claude Code OAuth credentials; no `ANTHROPIC_API_KEY` needed. Every model sits behind a seam (`Brain`, `VoiceProvider`, `MusicProvider`) so swaps are adapter/config changes.
-- **TTS is a warm sidecar** — models load slowly (seconds, several GB); keep them warm, isolate crashes, and get a clean hot-swap seam.
 - **Keyboard in, voice out** — no ASR this round; ASR is solved and not the value-add. The hard part is making the AI *sound human*, and that's the focus.
-- **Two-phase model strategy** — experiment now with the best local/open models (license-agnostic, private); adopt paid/properly-licensed models at distribution.
+- **Two-phase model strategy** — experiment now with the best available models (private, personal use); adopt paid/properly-licensed models at distribution.
 
 See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 
@@ -47,7 +46,7 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 Building, in ordered sub-specs under [`specs/`](specs/). Each step runs and adds something audible.
 
 - **✅ Spec 01 — `core-loop`** (implemented & verified): the L0 spine — CLI Host + Director + Brain + static persona + typed talk-back + session history + the basic player (superseded by 03-02's engine).
-- **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): warm TTS sidecar + MLX adapters (Spark primary / Qwen3 / Chatterbox / Dia, plus the post-L0 VoxCPM2 candidate). **L0 is now audible.**
+- **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): the hosted fish-speech voice (`MURMUR_TTS_*` endpoint config, sentence pacing, seed-pinned timbre); local TTS backends are deferred. **L0 is now audible.**
 - **✅ Spec 03 — `brain-harness` + `ducking` + `guide-harness`** (code-implemented; by-ear acceptance is the open gate): Claude-driven music discovery, the mixing AudioEngine with ducking, cadence scheduling, startup checks + the yt-dlp repair guide. **L1 is code-complete.**
 
 Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecycle (06), proactive + pacing (07), token economy (08), Claude Code ingestion (09), TUI (10).
@@ -56,32 +55,29 @@ Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecy
 
 ## Requirements
 
-- Python ≥ 3.10
+- Node.js ≥ 24
 - A local **Claude Code** subscription login (for the real brain) — or run `--brain stub` fully offline
-- For a real voice: **Apple Silicon Mac** (the MLX TTS backends)
+- For a real voice: a hosted TTS endpoint (fish-speech; set `MURMUR_TTS_URL` — see `make dev-fishaudio`)
 
 ## Install & run
 
-Managed with [uv](https://docs.astral.sh/uv/) (`pip install -e .` still works if you prefer pip).
-
 ```bash
 # core (runs model-free: stub voice, stub or real brain)
-uv sync
+npm install
 
 # run the loop
-uv run murmur
+node src/main.ts
 
 # fully offline / no network (canned brain + silent stub voice)
-uv run murmur --brain stub --voice stub
+node src/main.ts --brain stub --voice stub
 
-# a real voice (Apple Silicon only)
-uv sync --extra tts-mlx
-uv run murmur --voice spark
+# a real voice (hosted TTS endpoint from the environment / .env)
+node src/main.ts --voice hosted
 ```
 
 **Music** needs two external binaries — `ffmpeg` (decode) and `yt-dlp` (source) — which are deliberately *not* Python dependencies: the startup check detects a missing/broken one and the setup assistant offers to fix it (`murmur --setup-music` runs the same repair on demand). To provision by hand: `brew install ffmpeg yt-dlp`. Without them the radio runs talk-only; `--no-music` skips music entirely.
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,spark,qwen3,chatterbox,dia,voxcpm2}`, `--no-music`, `--cadence {every_n,random,brain}`. Stop cleanly with `Ctrl-C`.
+Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`. Stop cleanly with `Ctrl-C`.
 
 ## Development
 
@@ -92,24 +88,25 @@ make dev      # sync deps, preflight (prompts to fix any blocker), launch the ap
 make logs     # in another terminal: tail diagnostics + memory while it runs
 ```
 
-`make dev` runs the real brain + music with a real voice (`VOICE=spark`); pass
-`VOICE=stub` for a silent voice, or `STUB=1 make dev` for a fully offline session
-(canned brain, no music — needs no network/model/binaries). It streams
-diagnostics — harness steps and the failures the UI keeps terse, with full
-tracebacks — to `.dev/dev.log`; `make logs` (`scripts/devwatch.py`) tails that and
-folds in a periodic memory-tree line. `make help` lists every target.
+`make dev` runs the real brain + music with the hosted voice (`VOICE=hosted`,
+endpoint loaded from the gitignored `.env` — `make dev-fishaudio` selects the
+fish.audio config); pass `VOICE=stub` for a silent voice, or `STUB=1 make dev`
+for a fully offline session (canned brain, no music — needs no
+network/binaries). The program timeline mirrors to `.dev/dev.log`; `make logs`
+(`scripts/devwatch.py`) tails that and folds in a periodic memory-tree line.
+`make help` lists every target.
 
 Under the hood:
 
 ```bash
-uv sync --all-extras
-uv run pre-commit install
-uv run pytest                 # fast unit layer (fakes; no network/models)
-uv run pytest -m integration  # heavy: real TTS/ffmpeg/audio, run deliberately
-brew install ffmpeg yt-dlp    # binaries the integration layer + real runs need
+npm install
+npm test                      # fast unit layer (vitest; fakes, no network)
+npm run typecheck             # tsc over src/ + scripts/
+npm run lint                  # oxlint
+brew install ffmpeg yt-dlp    # binaries real runs need (music)
 ```
 
-Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; integration tests are tagged and run on demand; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
+Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; real-boundary checks run on demand as throwaway `scratch/` smokes; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
 
 Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check_source_language.py` via pre-commit.
 

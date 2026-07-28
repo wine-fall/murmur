@@ -1,0 +1,131 @@
+// CLI Host (spec 01 §3.1): render program text and own keyboard input.
+//
+// Input is a peek/take queue rather than a consuming promise: the Director
+// races "next typed line" against on-air audio, and a race the audio wins must
+// NOT swallow the pending line. peekLine() resolves when a line is available
+// without consuming it; the winner of the race calls takeLine() explicitly.
+//
+// EOF on stdin means "no more input will come" — NOT quit. The radio keeps
+// broadcasting whether or not anyone types; only /quit or Ctrl-C stops it
+// (spec 01 §3.6).
+
+import { appendFileSync } from 'node:fs'
+import { createInterface } from 'node:readline'
+
+export interface Host {
+  start(): void
+  peekLine(): Promise<string>
+  takeLine(): string | undefined
+  // Resolves once stdin has ended (no more input will EVER come). The Director
+  // ignores it (the radio plays on); the guide races its consuming reads
+  // against it so a non-interactive run declines instead of blocking forever.
+  eof?(): Promise<void>
+  onRadioSegment(text: string): void
+  onUserLine(text: string): void
+  info(message: string): void
+}
+
+export class LineQueue {
+  private lines: string[] = []
+  // The single shared wait-for-a-line promise. Memoized so that every race
+  // loser holds the SAME pending promise — an always-on idle run must not
+  // accumulate one abandoned waiter per segment/gap race (peek offers no
+  // cancellation, so unbounded per-caller waiters would leak).
+  private waiting: { promise: Promise<string>; resolve: (line: string) => void } | null = null
+
+  push(line: string): void {
+    this.lines.push(line)
+    this.waiting?.resolve(this.lines[0]!)
+    this.waiting = null
+  }
+
+  peek(): Promise<string> {
+    if (this.lines.length > 0) return Promise.resolve(this.lines[0]!)
+    if (this.waiting === null) {
+      let resolve!: (line: string) => void
+      const promise = new Promise<string>((r) => (resolve = r))
+      this.waiting = { promise, resolve }
+    }
+    return this.waiting.promise
+  }
+
+  take(): string | undefined {
+    return this.lines.shift()
+  }
+}
+
+export class CliHost implements Host {
+  private queue = new LineQueue()
+  private started = false
+  private markEof!: () => void
+  private eofSeen: Promise<void>
+
+  private input: NodeJS.ReadableStream
+  private devLog: string | undefined
+
+  constructor(
+    input: NodeJS.ReadableStream = process.stdin,
+    opts: { devLog?: string | undefined } = { devLog: process.env.MURMUR_DEV_LOG },
+  ) {
+    this.input = input
+    this.devLog = opts.devLog
+    this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
+  }
+
+  // Mirror each program line into the dev log (`make logs` tails it in a
+  // second terminal) in the "HH:MM:SS LEVEL name: msg" shape devwatch parses.
+  // Best-effort: a dev-log write failure must never take the radio down.
+  private mirror(name: string, message: string): void {
+    if (this.devLog === undefined || this.devLog === '') return
+    const stamp = new Date().toTimeString().slice(0, 8)
+    try {
+      appendFileSync(this.devLog, `${stamp} INFO ${name}: ${message}\n`)
+    } catch {
+      // e.g. the .dev dir vanished mid-run
+    }
+  }
+
+  start(): void {
+    if (this.started) return
+    this.started = true
+    // On EOF readline just stops emitting lines; the radio plays on.
+    createInterface({ input: this.input })
+      .on('line', (line) => this.queue.push(line))
+      .on('close', () => this.markEof())
+  }
+
+  eof(): Promise<void> {
+    return this.eofSeen
+  }
+
+  peekLine(): Promise<string> {
+    return this.queue.peek()
+  }
+
+  takeLine(): string | undefined {
+    return this.queue.take()
+  }
+
+  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
+    console.log('┌─ murmur ─────────────────────────────────────────────────────')
+    console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}`)
+    console.log(`│ persona: ${personaFirstLine}`)
+    console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
+    console.log('└──────────────────────────────────────────────────────────────')
+  }
+
+  onRadioSegment(text: string): void {
+    console.log(`\n🎙  ${text}`)
+    this.mirror('radio', text)
+  }
+
+  onUserLine(text: string): void {
+    console.log(`\n⌨   ${text}`)
+    this.mirror('user', text)
+  }
+
+  info(message: string): void {
+    console.log(`·  ${message}`)
+    this.mirror('host', message)
+  }
+}
