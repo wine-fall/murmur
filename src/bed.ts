@@ -9,11 +9,14 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import type { BedSource } from './contracts.ts'
 import { cacheRoot } from './paths.ts'
 
-export const DEFAULT_MANIFEST = new URL('../assets/bed_sources.txt', import.meta.url).pathname
+// fileURLToPath, not URL.pathname: pathname keeps %-escapes (a checkout path
+// with a space would silently read as an empty manifest).
+export const DEFAULT_MANIFEST = fileURLToPath(new URL('../assets/bed_sources.txt', import.meta.url))
 
 export function defaultBedCacheDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(cacheRoot(env), 'bed')

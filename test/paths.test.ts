@@ -14,4 +14,13 @@ describe('paths', () => {
     expect(dataRoot({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/data')
     expect(dataRoot({ MURMUR_HOME: '  ' }).endsWith('/.murmur/data')).toBe(true)
   })
+
+  it('expands a leading ~ in MURMUR_HOME (a quoted .env value arrives unexpanded)', () => {
+    const home = homeRoot({ MURMUR_HOME: '~/mh' })
+    expect(home.startsWith('/')).toBe(true)
+    expect(home.endsWith('/mh')).toBe(true)
+    expect(home.includes('~')).toBe(false)
+    // A bare ~ is the home dir itself.
+    expect(homeRoot({ MURMUR_HOME: '~' }).includes('~')).toBe(false)
+  })
 })
