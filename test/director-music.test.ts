@@ -38,7 +38,6 @@ function build(overrides: Partial<DirectorDeps> = {}) {
     host,
     gapSeconds: 0,
     recentWindow: 6,
-    talkBatch: 2,
     music: { source, cadence: new EveryNCadence(1), engine: player },
     ...overrides,
   }
@@ -135,6 +134,62 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
   })
 })
 
+describe('talk look-ahead survives music (spec 04 §3.3)', () => {
+  it('a beat buffered before a song airs after it — no cold regen at the boundary', async () => {
+    const { director, voice, player, host, source } = build()
+    source.picks = [pickOf('https://stream/r1')]
+    const run = director.run(3) // talk, music, talk
+    await until(() => player.handles.length === 1, 'song on air')
+    // The buffered beat's clip is ALREADY synthesized while the song plays —
+    // the music->talk boundary has no synth wait, not just no Brain wait.
+    expect(voice.synthesized).toContain('talk two')
+    player.handles[0]!.end()
+    await run
+    // talk two was buffered before the song and airs warm after it; a cold
+    // regeneration at the music->talk boundary would air a later-batch beat.
+    expect(host.radio).toEqual(['talk one', 'talk two'])
+  })
+
+  it('depth 2: each post-song talk airs a warm buffered beat across two songs', async () => {
+    const { director, voice, player, host, source } = build()
+    source.picks = [pickOf('https://stream/r1'), pickOf('https://stream/r2')]
+    const run = director.run(5) // talk, music, talk, music, talk
+    await until(() => player.handles.length === 1, 'first song')
+    expect(voice.synthesized).toContain('talk two') // prebuilt before song 1
+    player.handles[0]!.end()
+    await until(() => player.handles.length === 2, 'second song')
+    expect(voice.synthesized).toContain('talk three') // topped up between songs
+    player.handles[1]!.end()
+    await run
+    // The gap-free numbering proves both post-song talks came from the buffer.
+    expect(host.radio).toEqual(['talk one', 'talk two', 'talk three'])
+  })
+
+  it('an empty buffer refills DURING the song and the boundary airs the prebuilt clip', async () => {
+    const { deps, brain, voice, player, host, source } = build()
+    // The first segment is music: the buffer is empty and the refill fires at
+    // the song's start — its Brain call + synths overlap the song, and the
+    // music->talk boundary airs the prebuilt clip with zero cold generation.
+    const script: ('talk' | 'music')[] = ['music']
+    const director = new Director({
+      ...deps,
+      music: { ...deps.music!, cadence: { nextKind: async () => script.shift() ?? 'talk' } },
+    })
+    brain.batches = [['talk one', 'talk two']]
+    source.picks = [pickOf('https://stream/r1')]
+    const run = director.run(2) // music, talk
+    await until(() => player.handles.length === 1, 'song on air (no talk aired yet)')
+    // The refill completes while the song plays: both beats are synthesized
+    // behind it, and no talk has aired.
+    await until(() => voice.synthesized.includes('talk one'), 'beat prebuilt during the song')
+    expect(host.radio).toEqual([])
+    expect(brain.nextTalksCalls).toBe(1) // the music-start refill only
+    player.handles[0]!.end()
+    await run
+    expect(host.radio).toEqual(['talk one']) // aired warm, no boundary Brain call
+  })
+})
+
 describe('confirm real audio before committing (the announced-but-silent guard)', () => {
   it('a stream that never starts is dropped for a fresh pick', async () => {
     const { director, player, host, source } = build()
@@ -170,7 +225,7 @@ describe('interjections during a song (duck, never stop)', () => {
     await until(() => player.handles.length === 1, 'song on air')
     host.type('hello there')
     await until(() => brain.respondCalls.length === 1, 'reply composed')
-    await until(() => player.played.some((c) => c.source === '/fake/3.wav'), 'reply aired over the song')
+    await until(() => host.radio.includes('re:hello there'), 'reply aired over the song')
     expect(player.handles[0]!.stopped).toBe(false)
     player.handles[0]!.end()
     await run

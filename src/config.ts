@@ -31,9 +31,8 @@ export const ConfigSchema = z.object({
   // that also bounds the talk rate so testing does not drain the subscription.
   gapSeconds: z.coerce.number().min(0).default(2),
   // Size of the recent-turns window handed to the Brain per call (master §6).
+  // (The talk look-ahead depth is a Director module constant — spec 04 §3.3.)
   recentWindow: z.coerce.number().int().positive().default(12),
-  // Beats per batched next_talks call (spec 04 §3.2 / token-economy pillar 2).
-  talkBatch: z.coerce.number().int().positive().default(2),
   // The decode binary behind the engine (spec 03-02 §4; replaces the retired
   // spec-01 playerCmd/--player — the engine has no external player).
   ffmpegCmd: z.string().default('ffmpeg'),

@@ -1,6 +1,13 @@
 # spec/04 · no-dead-air — look-ahead / pre-generation buffer
 
-> **Status**: In progress. **Pulled forward** ahead of the 05–09 order to attack
+> **TS port (2026-07-28)**: slices 1 **and 2** are now implemented in TS —
+> slice 1 (music-pick prefetch + the no-block rule) shipped with the Phase 3
+> engine; slice 2 (the depth-2 talk look-ahead, **including "survives music"**)
+> landed on the TS Director. See §3.3 for the TS realization notes (promise
+> semantics, the retired `talkBatch` knob, the dev-log seam). §3.4 (scene) was
+> ported in Phase 4.
+>
+> **Status**: Built (TS) except where §6 notes open tuning. **Pulled forward** ahead of the 05–09 order to attack
 > first-cold-start latency (the `make dev` → first-music / first-reply wait). It
 > lands in slices:
 >   - **slice 1 (this build)**: **music-pick prefetch** — overlap the multi-second
@@ -156,6 +163,39 @@ refill: the buffered beats were generated before the user turn, so they are stal
 (spec 01 §3.3 rule) — dropped, and the next segment regenerates fresh. The buffer
 and any in-flight refill are also settled on shutdown. `N` is a module constant,
 not a config knob — deepen only if measurement shows a remaining gap (§6).
+
+### 3.3 Talk look-ahead — TS realization (2026-07-28)
+
+The TS Director implements §3.2 with the same behavior contract; the deltas are
+mechanical, driven by JS promise semantics and the TS codebase's seams:
+
+- **Buffer shape**: `talkAhead: { beat, clip }[]` in `director.ts`, where
+  `clip` is the beat's **already-running** synth promise (`synthesizeOrSkip`,
+  total — resolves `null` after bounded retries). Consuming a beat awaits a
+  usually-settled promise; it never starts work. Depth is the module constant
+  `TALK_LOOKAHEAD = 2` — the Python-era `talk_batch` config knob was retired
+  (the spec says module constant, not a knob; the refill batch size is the
+  shortfall).
+- **No task cancellation in JS** — the Python design cancels the in-flight
+  refill on a steer; promises cannot be cancelled. The TS Director instead
+  bumps an **epoch counter** on discard: a refill checks the epoch after its
+  Brain call and drops its own result if a steer intervened. The orphaned call
+  runs to completion in the background (same posture as the discarded
+  interjection prepare).
+- **Shutdown**: nothing is settled on exit — an in-flight refill (one
+  `nextTalks` task + up to `TALK_LOOKAHEAD` synths) is dropped, the same
+  bounded leak as the music pick-prefetch (STATUS "no cancellable-task seam");
+  the SDK subprocess self-terminates on EPIPE after `main.ts`'s
+  `process.exit`. An AbortSignal through `Harness.runTask` remains the noted
+  want.
+- **Dev-log seam**: refill stages (`talk.refill need/got`, `talk.buffer
+  warm/cold`, retry lines) go through a new dev-log-only `Host.debug` channel
+  (mirrored into `.dev/dev.log`, never printed over the program) — the
+  deterministic evidence for the real-SDK smoke and `make logs`.
+- **Observed on the real SDK** (smoke, 2026-07-28): first cold batch ~24 s;
+  refill fired with the queued beat in context, resolved mid-song (~10 s into a
+  25 s song, `depth=2`); music→talk boundary aired the prebuilt clip with zero
+  Brain/synth wait.
 
 ### 3.4 Time-of-day scene (context enrichment)
 Adjacent to the latency work above; it rides in this spec (see the header note).

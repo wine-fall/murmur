@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-28 (Phase 5 — TS cutover)_
+_Last updated: 2026-07-28 (spec 04 talk look-ahead landed)_
 
 - **The implementation is TypeScript.** The Python → TS migration (issue #54)
   is complete: Phases 0–5 merged (PRs #56–#60 + the Phase 5 cutover PR). The
@@ -27,14 +27,17 @@ _Last updated: 2026-07-28 (Phase 5 — TS cutover)_
   `02-voice-provider` (hosted voice); L1 = adds `03-01-brain-harness` +
   `03-02-ducking` + `03-03` guided install + the `03-04` bed + spec 05 memory.
   Unit gate green (vitest); real-SDK smokes passed per phase.
-- **Next build target: spec 04 remainder — the talk look-ahead (depth-2
-  buffer), not yet ported.** Cost today: after a song ends, the next talk
-  generates cold (Brain + synth wait); the music boundary itself never blocks
-  (single-slot pick-prefetch shipped with the Phase 3 engine). Port §3.3
-  "look-ahead survives music" onto the TS Director.
+- **spec 04 is now fully ported: the depth-2 talk look-ahead (§3.2, incl.
+  "survives music") landed on the TS Director** (2026-07-28). Buffered beats
+  carry their synth promise; the refill is single-flight, coherent (queued
+  beats ride the context), fires after each aired beat and at music start; a
+  steer discards via an epoch guard (promises cannot be cancelled — see spec 04
+  §3.3). Real-SDK smoke: refill resolved mid-song; the music→talk boundary
+  aired a prebuilt clip with zero Brain/synth wait (first cold batch was ~24 s
+  — the latency now hidden). The `talkBatch` config knob is retired.
 - **Open: end-to-end latency measurement.** The motivating ~76s first-music
   wait has not been re-measured on a real TS run. Owed: a `make dev`
-  before/after once the look-ahead lands.
+  before/after now that the look-ahead has landed.
 - **Open: by-ear / sensory acceptance over the TS build (user-run).** The
   L0/L1 "sounds human, feels like radio" pass: TS voice quality, duck /
   crossfade smoothness, bed levels (`_BED_GAIN`-equivalent knobs), the

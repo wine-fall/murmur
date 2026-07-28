@@ -168,7 +168,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     host,
     gapSeconds: config.gapSeconds,
     recentWindow: config.recentWindow,
-    talkBatch: config.talkBatch,
     ...(music !== undefined && { music }),
     ...(compactor !== undefined && { compactor }),
   })
