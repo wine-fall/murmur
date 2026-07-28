@@ -32,7 +32,11 @@ function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
   return { guide, requests }
 }
 
-const askOptions = { signal: new AbortController().signal }
+const askOptions = {
+  signal: new AbortController().signal,
+  toolUseID: 'tool-use-1',
+  requestId: 'request-1',
+}
 
 describe('lineReader (codex-review regressions)', () => {
   it('EOF resolves reads as empty (= decline), so a non-interactive run never blocks', async () => {
