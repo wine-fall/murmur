@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Live memory watch for a murmur process tree (stdlib-only).
 
-murmur's memory lives in THREE processes — the main asyncio loop, the warm TTS
-sidecar (the multi-GB model), and the per-track ffmpeg decoder — so watching
-one pid tells you little. This samples `ps` for the tree structure, `top` for
-each process's real size, finds the murmur tree (or the tree under --pid), and
-prints one line per tick: total size, session peak, and a per-process breakdown.
+murmur's memory spans a process tree — the main node loop plus its per-track
+ffmpeg decoders — so watching one pid tells you little. This samples `ps` for
+the tree structure, `top` for each process's real size, finds the murmur tree
+(or the tree under --pid), and prints one line per tick: total size, session
+peak, and a per-process breakdown.
 
 Usage:
     python scripts/memwatch.py                # auto-find the murmur tree
@@ -15,8 +15,8 @@ Usage:
 
 Each process's size is its phys_footprint (macOS `top`'s MEM column — the same
 number Activity Monitor shows), which counts the Metal/GPU/compressed pages
-that `ps` RSS silently misses (an MLX model resident-reads far larger than its
-RSS). Off macOS, or if `top` is unavailable, it falls back to `ps` RSS.
+that `ps` RSS silently misses. Off macOS, or if `top` is unavailable, it falls
+back to `ps` RSS.
 
 Note: summing across processes still over-counts pages shared between them
 (framework, forked) — read totals as an upper bound and watch the TREND.
@@ -149,11 +149,11 @@ def _runs_program(command: str, needle: str) -> bool:
     if not tokens:
         return False
     # A shell running `-c <script>` is not the program even when the script
-    # names it: e.g. `make dev`'s `/bin/sh -c '... memwatch & uv run murmur'`
-    # backgrounds the recorder AND launches murmur from one shell, so its
-    # command line carries a bare `murmur` token. Matching it would root the
-    # tree at the wrapper and pull the recorder itself into the measured tree.
-    # Skip it; the real murmur procs it spawns (uv/python) match on their own.
+    # names it: `make dev`'s recipe shell backgrounds the recorder AND launches
+    # murmur, so its command line can carry a bare `murmur` token. Matching it
+    # would root the tree at the wrapper and pull the recorder itself into the
+    # measured tree. Skip it; the app process (whose title is `murmur`) matches
+    # on its own.
     if os.path.basename(tokens[0]) in _SHELLS and "-c" in tokens:
         return False
     for i, token in enumerate(tokens):
@@ -193,10 +193,6 @@ def subtree(procs: list[Proc], *, root_pid: int) -> list[Proc]:
 
 def label(proc: Proc) -> str:
     executable = os.path.basename(proc.command.split(None, 1)[0])
-    if executable in ("uv", "uvx"):
-        return "launcher"  # the `uv run murmur` shell, not murmur itself
-    if "voice.sidecar" in proc.command:
-        return "sidecar"
     if executable.endswith("ffmpeg"):
         return "ffmpeg"
     if "murmur" in proc.command:

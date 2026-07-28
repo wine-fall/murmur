@@ -9,6 +9,7 @@
 // broadcasting whether or not anyone types; only /quit or Ctrl-C stops it
 // (spec 01 §3.6).
 
+import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 export interface Host {
@@ -60,10 +61,28 @@ export class CliHost implements Host {
   private eofSeen: Promise<void>
 
   private input: NodeJS.ReadableStream
+  private devLog: string | undefined
 
-  constructor(input: NodeJS.ReadableStream = process.stdin) {
+  constructor(
+    input: NodeJS.ReadableStream = process.stdin,
+    opts: { devLog?: string | undefined } = { devLog: process.env.MURMUR_DEV_LOG },
+  ) {
     this.input = input
+    this.devLog = opts.devLog
     this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
+  }
+
+  // Mirror each program line into the dev log (`make logs` tails it in a
+  // second terminal) in the "HH:MM:SS LEVEL name: msg" shape devwatch parses.
+  // Best-effort: a dev-log write failure must never take the radio down.
+  private mirror(name: string, message: string): void {
+    if (this.devLog === undefined || this.devLog === '') return
+    const stamp = new Date().toTimeString().slice(0, 8)
+    try {
+      appendFileSync(this.devLog, `${stamp} INFO ${name}: ${message}\n`)
+    } catch {
+      // e.g. the .dev dir vanished mid-run
+    }
   }
 
   start(): void {
@@ -88,7 +107,7 @@ export class CliHost implements Host {
   }
 
   banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
-    console.log('┌─ murmur · ts (issue #54 phase 3) ────────────────────────────')
+    console.log('┌─ murmur ─────────────────────────────────────────────────────')
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
@@ -97,13 +116,16 @@ export class CliHost implements Host {
 
   onRadioSegment(text: string): void {
     console.log(`\n🎙  ${text}`)
+    this.mirror('radio', text)
   }
 
   onUserLine(text: string): void {
     console.log(`\n⌨   ${text}`)
+    this.mirror('user', text)
   }
 
   info(message: string): void {
     console.log(`·  ${message}`)
+    this.mirror('host', message)
   }
 }

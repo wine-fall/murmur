@@ -9,3 +9,28 @@ repos:
         language: system
         # no-CJK applies to code and docs alike.
         types_or: [ts, markdown, yaml, toml, python]
+      - id: typecheck
+        name: tsc (static type-check)
+        # Enforces the contract seams (contracts.ts): an impl whose signatures
+        # drift from a contract fails here. Checks the whole project (tsconfig).
+        entry: npx tsc --noEmit
+        language: system
+        pass_filenames: false
+        types: [ts]
+      - id: lint
+        name: oxlint
+        entry: npx oxlint src test scripts
+        language: system
+        pass_filenames: false
+        types: [ts]
+      - id: path-governance
+        name: Path governance (user paths only via src/paths.ts)
+        # Fails a homedir() outside src/paths.ts — the single resolver for
+        # murmur's ~/.murmur storage (spec 05 §2.3).
+        entry: >-
+          bash -c 'hits=$(grep -rn homedir src --include="*.ts" | grep -v "^src/paths.ts:");
+          [ -z "$hits" ] || { echo "$hits";
+          echo "resolve user paths via src/paths.ts (spec 05 §2.3)"; exit 1; }'
+        language: system
+        pass_filenames: false
+        types: [ts]

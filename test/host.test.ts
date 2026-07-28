@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 
 import { describe, expect, it } from 'vitest'
@@ -65,5 +68,30 @@ describe('CliHost', () => {
     host.start()
     input.end()
     await host.eof() // resolves; a live stdin would keep this pending forever
+  })
+
+  it('mirrors program lines into the dev log in devwatch format', async () => {
+    // `make logs` tails this file in a second terminal; each line must carry
+    // the "HH:MM:SS LEVEL name:" prefix devwatch's level filter parses.
+    const dir = await mkdtemp(join(tmpdir(), 'murmur-devlog-'))
+    const devLog = join(dir, 'dev.log')
+    try {
+      const host = new CliHost(new PassThrough(), { devLog })
+      host.info('checking music')
+      host.onRadioSegment('hello there')
+      host.onUserLine('hi back')
+      const lines = (await readFile(devLog, 'utf8')).trimEnd().split('\n')
+      expect(lines).toHaveLength(3)
+      expect(lines[0]).toMatch(/^\d{2}:\d{2}:\d{2} INFO host: checking music$/)
+      expect(lines[1]).toMatch(/^\d{2}:\d{2}:\d{2} INFO radio: hello there$/)
+      expect(lines[2]).toMatch(/^\d{2}:\d{2}:\d{2} INFO user: hi back$/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('writes no dev log when the knob is unset', () => {
+    const host = new CliHost(new PassThrough())
+    host.info('quiet') // must not throw or create files
   })
 })

@@ -4,6 +4,10 @@
 import { parseCli } from './config.ts'
 import { runApp, runMusicSetupCli } from './app.ts'
 
+// Name the process so `ps` shows "murmur" — memwatch/devwatch root their
+// process-tree sampling on that name.
+process.title = 'murmur'
+
 const { config, maxSegments, setupMusic } = parseCli(process.argv.slice(2))
 if (setupMusic) await runMusicSetupCli(config)
 else await runApp(config, maxSegments)
