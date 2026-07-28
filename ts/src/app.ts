@@ -23,7 +23,8 @@ import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona } from './persona.ts'
-import { musicCheck, runStartupChecks } from './startup.ts'
+import { musicSetupCheck, runMusicSetup } from './guide.ts'
+import { runStartupChecks } from './startup.ts'
 import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
@@ -88,6 +89,22 @@ function buildMusic(config: Config, harness: Harness, engine: AudioEngine): Musi
   return { source, cadence, engine }
 }
 
+// The explicit setup entry (spec 03-03): `murmur --setup-music` runs the
+// preflight + guide directly, no broadcast. Returns whether music is usable.
+export async function runMusicSetupCli(config: Config): Promise<boolean> {
+  const host = new CliHost()
+  if (config.brain !== 'claude') {
+    host.info('the setup guide needs the real brain: run again without --brain stub.')
+    return false
+  }
+  const ok = await runMusicSetup(host, new ClaudeBrain(config.model), {
+    ytdlp: config.ytdlpCmd,
+    ffmpeg: config.ffmpegCmd,
+  })
+  host.info(ok ? 'music is ready.' : 'music is not available yet.')
+  return ok
+}
+
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
   const host = new CliHost()
   // A real (claude) run persists memory + homes the persona in the memory dir;
@@ -114,12 +131,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     log: (m) => host.info(m),
   })
 
-  // Startup checks (spec 03-02 §2.4): a failed/declined music check degrades
-  // the session to talk-only; --no-music skips it entirely.
+  // Startup checks (spec 03-02 §2.4): a failed preflight OFFERS the repair
+  // guide (spec 03-03's auto-trigger); a failed/declined check degrades the
+  // session to talk-only; --no-music skips it entirely.
   let musicOk = false
   if (config.musicEnabled && claude !== null) {
     const results = await runStartupChecks(
-      [musicCheck({ ytdlpCmd: config.ytdlpCmd, ffmpegCmd: config.ffmpegCmd })],
+      [musicSetupCheck(claude, { ytdlp: config.ytdlpCmd, ffmpeg: config.ffmpegCmd })],
       host,
     )
     musicOk = results.music === true

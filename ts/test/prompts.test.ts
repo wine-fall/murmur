@@ -3,11 +3,13 @@ import { describe, expect, it } from 'vitest'
 import type { ContextPack } from '../src/contracts.ts'
 import {
   buildCompactionPrompt,
+  buildFixMusicPrompt,
   buildMusicSituation,
   buildNextTalkPrompt,
   buildNextTalksPrompt,
   buildRespondPrompt,
   FIND_MUSIC_INSTRUCTION,
+  GUIDE_PERSONA,
   PROFILE_CHAR_CAP,
 } from '../src/prompts.ts'
 
@@ -116,6 +118,41 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
   it('the respond prompt carries the profile block too', () => {
     const p = buildRespondPrompt('hey', { persona: 'p', recent: [], profile: 'night owl' })
     expect(p).toContain('(What you know about the listener)\nnight owl')
+  })
+})
+
+describe('guide prompts (spec 03-03)', () => {
+  it('the persona shapes behavior: investigate, explain plainly, confirm before change', () => {
+    expect(GUIDE_PERSONA).toContain('setup assistant')
+    expect(GUIDE_PERSONA).toContain('Investigate first')
+    expect(GUIDE_PERSONA).toContain('confirm')
+    expect(GUIDE_PERSONA).toContain('smallest safe change')
+    expect(GUIDE_PERSONA).toContain('never disable certificate verification')
+  })
+
+  it('the fix-music task names both binaries and asks to verify both', () => {
+    const p = buildFixMusicPrompt({ ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg' })
+    expect(p).toContain('`yt-dlp`')
+    expect(p).toContain('`ffmpeg`')
+    expect(p).toContain('Verify BOTH')
+  })
+
+  it('carries the preflight finding as evidence only when there is one', () => {
+    const found = buildFixMusicPrompt({
+      ytdlp: 'yt-dlp',
+      ffmpeg: 'ffmpeg',
+      reason: 'yt-dlp: binary not found',
+    })
+    expect(found).toContain('automated check')
+    expect(found).toContain('yt-dlp: binary not found')
+    const clean = buildFixMusicPrompt({ ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg' })
+    expect(clean).not.toContain('automated check')
+  })
+
+  it('does not prescribe the remedy: diagnosis is the task', () => {
+    // The agent figures out WHY (spec 03-03 §1 non-goal: no prescribed fix).
+    const p = buildFixMusicPrompt({ ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg' })
+    expect(p).toContain('figure out WHY')
   })
 })
 

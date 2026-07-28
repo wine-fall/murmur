@@ -58,4 +58,12 @@ describe('CliHost', () => {
     await new Promise((r) => setTimeout(r, 10))
     expect(host.takeLine()).toBeUndefined()
   })
+
+  it('signals EOF once the input ends (the guide declines instead of blocking)', async () => {
+    const input = new PassThrough()
+    const host = new CliHost(input)
+    host.start()
+    input.end()
+    await host.eof() // resolves; a live stdin would keep this pending forever
+  })
 })

@@ -14,9 +14,11 @@ import {
   query,
   type McpSdkServerConfigWithInstance,
   type Options,
+  type SDKMessage,
+  type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Brain, ContextPack, Harness, TalkBeat, Task, Turn } from './contracts.ts'
+import type { Brain, ContextPack, GuideCapable, GuideRequest, Harness, TalkBeat, Task, Turn } from './contracts.ts'
 import {
   buildCompactionPrompt,
   buildNextTalkPrompt,
@@ -104,7 +106,98 @@ export function agenticOptions(
   }
 }
 
-export class ClaudeBrain implements Brain, Harness {
+// Built-in Claude Code tools the guide harness may use to diagnose + repair
+// the environment. A curated set (no network fetch tools) — the bounded
+// surface a setup/repair task needs, in contrast to the tool-less find-music
+// task (per-task tool surface, spec 03-03 §3).
+export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const
+
+// Options for the guide harness (spec 03-03): same isolation as the other
+// harnesses (no user settings/skills/MCP), but the curated BUILT-IN tools are
+// enabled. The surface is bounded via `tools` — NOT `allowedTools`, which in
+// this SDK auto-approves (executes without asking) and would defeat the
+// per-action confirm the guide exists to keep. Factored out so the isolation
+// and never-auto-approve invariants are unit-testable without a network call.
+export function guideOptions(req: GuideRequest): Options {
+  return {
+    systemPrompt: req.systemPrompt,
+    model: req.model,
+    settingSources: [],
+    strictMcpConfig: true,
+    tools: [...GUIDE_BUILTINS],
+    mcpServers: {},
+    skills: [],
+    permissionMode: req.permissionMode ?? 'default',
+    ...(req.canUseTool !== undefined && { canUseTool: req.canUseTool }),
+    maxTurns: req.maxTurns,
+    extraArgs: { 'disable-slash-commands': null },
+  }
+}
+
+type QueryFn = (params: {
+  prompt: string | AsyncIterable<SDKUserMessage>
+  options?: Options
+}) => AsyncIterable<SDKMessage>
+
+const userMessage = (text: string): SDKUserMessage => ({
+  type: 'user',
+  message: { role: 'user', content: text },
+  parent_tool_use_id: null,
+})
+
+// The guide conversation loop (spec 03-03 §2), factored over an injectable
+// query so the deterministic machinery is unit-testable against a fake SDK.
+// Always streaming input: the multi-turn reply loop needs it, and the
+// permission callback only works in that mode (the seam that bit the Python
+// build as a unit-green regression).
+export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Promise<string> {
+  // Turn-end coordination between the two async flows: the message loop fires
+  // when a turn's result arrives; the input stream then pulls the user's reply.
+  const waiters: (() => void)[] = []
+  let fired = 0
+  const turnEnded = {
+    fire(): void {
+      const waiter = waiters.shift()
+      if (waiter !== undefined) waiter()
+      else fired++
+    },
+    wait(): Promise<void> {
+      if (fired > 0) {
+        fired--
+        return Promise.resolve()
+      }
+      return new Promise((resolve) => waiters.push(resolve))
+    },
+  }
+
+  async function* input(): AsyncGenerator<SDKUserMessage> {
+    yield userMessage(req.prompt)
+    if (req.nextUserInput === undefined) return // single-shot: end after one turn
+    while (true) {
+      await turnEnded.wait()
+      const reply = await req.nextUserInput()
+      if (reply === null) return // user done -> the SDK closes the session
+      yield userMessage(reply)
+    }
+  }
+
+  const parts: string[] = []
+  for await (const message of queryFn({ prompt: input(), options: guideOptions(req) })) {
+    if (message.type === 'assistant') {
+      for (const block of message.message.content) {
+        if (block.type === 'text' && block.text) {
+          parts.push(block.text)
+          req.onText?.(block.text) // stream out as it arrives
+        }
+      }
+    } else if (message.type === 'result') {
+      turnEnded.fire()
+    }
+  }
+  return parts.join('\n').trim()
+}
+
+export class ClaudeBrain implements Brain, Harness, GuideCapable {
   private model: string
 
   constructor(model: string) {
@@ -146,6 +239,13 @@ export class ClaudeBrain implements Brain, Harness {
 
   async respond(userText: string, ctx: ContextPack): Promise<string> {
     return this.generate(ctx.persona, buildRespondPrompt(userText, ctx))
+  }
+
+  // The setup/repair capability (spec 03-03): the native Claude Code agent
+  // with built-in tools, per-action permission asks, and the multi-turn
+  // user-reply loop — a different harness from runTask.
+  async runGuide(req: GuideRequest): Promise<string> {
+    return runGuideSession(query, req)
   }
 
   // A plain tool-less generation under a neutral system framing — bookkeeping,

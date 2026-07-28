@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-28_
+_Last updated: 2026-07-28 (Phase 4.5)_
 
 - **Migration in progress: Python → TypeScript (issue #54).** The TS
   implementation grows in top-level `ts/` beside the Python `src/` (the
@@ -95,9 +95,29 @@ _Last updated: 2026-07-28_
     the §5.10 two-run real-SDK smoke passed (run 2 carried run 1's tail;
     forced compaction wrote a plausible Chinese profile; topic tags arrived on
     real beats).
-  - **Next: Phase 4.5** — the guide harness (spec 03-03) in TS: `run_guide`
-    on the native agent with built-in tools + per-action confirm, plus the
-    music preflight it repairs.
+  - **Phase 4.5 (done 2026-07-28):** the guide harness (spec 03-03) in TS.
+    `GuideCapable.runGuide(GuideRequest)` (`contracts.ts`/`brain.ts`) — the
+    native Claude Code agent with the curated built-ins
+    (Bash/Read/Write/Edit/Glob/Grep), `permissionMode: 'default'`, streamed
+    text, and the multi-turn user-reply loop; a separate seam from
+    `Harness.runTask`. Two TS-SDK seam facts pinned by unit + smoke: the
+    surface is bounded via `tools` (NOT `allowedTools`, which auto-approves in
+    the TS SDK), and `runGuide` always uses streaming input (the permission
+    callback + reply loop both need it — the seam that regressed Python).
+    Deterministic preflight probes (`preflightYtdlp`/`preflightFfmpeg`/
+    `preflightMusic`, reason names each broken binary) in `startup.ts`;
+    `guide.ts` wires the CLI (per-action y/N on the Director's stdin, reply
+    loop, `runMusicSetup` offer→repair→recheck) and `musicSetupCheck` replaces
+    Phase 3's message-only music check (the 03-03 auto-trigger). Explicit
+    entry: `--setup-music`. Real-SDK smoke: streamed text, multi-turn reply
+    reached the agent, a mutating command fired the ask and deny blocked it;
+    the SDK's safe-command classifier runs read-only commands without an ask
+    (consent semantics stay SDK-owned). **Owed: the interactive repair
+    acceptance (real terminal, broken binary) is a user-run checklist.**
+  - **Next: Phase 5 — cutover.** Delete the Python implementation, promote
+    `ts/` -> `src/`, swap branch-protection required checks to the TS CI job,
+    retool Makefile / pre-commit / source-language hook / dev scripts / the
+    murmur skills, update this STATUS to the TS reality.
 - **Milestone: L0 + L1 — code-complete (Python).** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the
   `03-03` guided install). The code and unit gate are done and green.

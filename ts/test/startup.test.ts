@@ -1,7 +1,27 @@
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import type { Host } from '../src/host.ts'
-import { musicCheck, runStartupChecks, type StartupCheck } from '../src/startup.ts'
+import {
+  preflightFfmpeg,
+  preflightMusic,
+  preflightYtdlp,
+  runStartupChecks,
+  type StartupCheck,
+} from '../src/startup.ts'
+
+// Stand-in binaries (spec 03-03 §5 testing): tiny executable scripts standing
+// in for yt-dlp/ffmpeg, so the probes are exercised for real — spawn, exit
+// code, stdout/stderr — with no network and no LLM.
+function standIn(body: string, { executable = true } = {}): string {
+  const dir = mkdtempSync(join(tmpdir(), 'murmur-preflight-'))
+  const path = join(dir, 'bin.sh')
+  writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: executable ? 0o755 : 0o644 })
+  return path
+}
 
 function fakeHost(): { host: Host; infos: string[] } {
   const infos: string[] = []
@@ -45,41 +65,66 @@ describe('runStartupChecks', () => {
   })
 })
 
-describe('musicCheck', () => {
-  it('passes when both binaries answer', async () => {
-    const check = musicCheck({ ytdlpCmd: 'yt-dlp', ffmpegCmd: 'ffmpeg', probe: async () => true })
-    const { host, infos } = fakeHost()
-    expect(await check.run(host)).toBe(true)
-    expect(infos).toEqual([])
+describe('preflight probes (spec 03-03 §2 — deterministic, no LLM)', () => {
+  it('yt-dlp: ok needs exit 0 AND output (a fetch probe with nothing fetched is broken)', async () => {
+    expect((await preflightYtdlp(standIn('echo "{}"'))).ok).toBe(true)
+    const silent = await preflightYtdlp(standIn('exit 0'))
+    expect(silent.ok).toBe(false)
+    expect(silent.reason).toContain('no output')
   })
 
-  it('probes yt-dlp with a real trivial search requiring output, not just --version', async () => {
-    // An installed-but-broken yt-dlp (rotted extractor, proxy failure) still
-    // answers --version; the preflight must exercise a fetch (spec 03-03 §2).
-    const probed: { cmd: string; args: string[]; requireStdout: boolean }[] = []
-    const check = musicCheck({
-      ytdlpCmd: 'yt-dlp',
-      ffmpegCmd: 'ffmpeg',
-      probe: async (cmd, args, requireStdout) => {
-        probed.push({ cmd, args, requireStdout })
-        return true
-      },
-    })
-    const { host } = fakeHost()
-    await check.run(host)
-    const ytdlp = probed.find((p) => p.cmd === 'yt-dlp')!
-    expect(ytdlp.args.join(' ')).toContain('ytsearch1:')
-    expect(ytdlp.requireStdout).toBe(true)
+  it('ffmpeg: -version needs only exit 0', async () => {
+    expect((await preflightFfmpeg(standIn('exit 0'))).ok).toBe(true)
+    const broken = await preflightFfmpeg(standIn('echo "bad build" >&2; exit 1'))
+    expect(broken.ok).toBe(false)
+    expect(broken.reason).toContain('bad build')
   })
 
-  it('fails plainly, naming the missing binary (session degrades to talk-only)', async () => {
-    const check = musicCheck({
-      ytdlpCmd: 'yt-dlp',
-      ffmpegCmd: 'ffmpeg',
-      probe: async (cmd) => cmd !== 'yt-dlp',
-    })
-    const { host, infos } = fakeHost()
-    expect(await check.run(host)).toBe(false)
-    expect(infos.join('\n')).toContain('yt-dlp')
+  it('a missing binary is named, not thrown', async () => {
+    const r = await preflightYtdlp('/nonexistent/yt-dlp')
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('not found')
+    expect(r.reason).toContain('/nonexistent/yt-dlp')
+  })
+
+  it('a non-executable binary is classified, not thrown', async () => {
+    const r = await preflightFfmpeg(standIn('exit 0', { executable: false }))
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('not executable')
+  })
+
+  it('a long stderr is capped', async () => {
+    const r = await preflightFfmpeg(standIn('head -c 2000 /dev/zero | tr "\\0" "x" >&2; exit 1'))
+    expect(r.ok).toBe(false)
+    expect(r.reason.length).toBeLessThanOrEqual(500)
+  })
+
+  it('aggregate: ok iff BOTH ok, and the reason names each broken piece', async () => {
+    const ok = standIn('echo out')
+    const bad = standIn('echo "boom" >&2; exit 1')
+    expect((await preflightMusic({ ytdlp: ok, ffmpeg: ok })).ok).toBe(true)
+    const oneBad = await preflightMusic({ ytdlp: bad, ffmpeg: ok })
+    expect(oneBad.ok).toBe(false)
+    expect(oneBad.reason).toContain('yt-dlp: boom')
+    expect(oneBad.reason).not.toContain('ffmpeg:')
+    const bothBad = await preflightMusic({ ytdlp: bad, ffmpeg: bad })
+    expect(bothBad.reason).toContain('yt-dlp: boom')
+    expect(bothBad.reason).toContain('ffmpeg: boom')
+  })
+})
+
+describe('the yt-dlp probe is a real fetch, not a --version vanity check', () => {
+  it('passes a trivial flat search (an installed-but-broken yt-dlp must fail here)', async () => {
+    // The stand-in records its argv so the probe's actual command is pinned
+    // (spec 03-03 §2: a rotted extractor or proxy failure still answers
+    // --version; only a fetch proves life).
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-preflight-'))
+    const argsFile = join(dir, 'args.txt')
+    const bin = join(dir, 'bin.sh')
+    writeFileSync(bin, `#!/bin/sh\necho "$@" > ${argsFile}\necho ok\n`, { mode: 0o755 })
+    expect((await preflightYtdlp(bin)).ok).toBe(true)
+    const args = readFileSync(argsFile, 'utf8')
+    expect(args).toContain('ytsearch1:')
+    expect(args).toContain('--dump-json')
   })
 })
