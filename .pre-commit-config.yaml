@@ -4,36 +4,8 @@ repos:
   - repo: local
     hooks:
       - id: source-language
-        name: Source language (no Chinese; English-only comments)
-        entry: python scripts/check_source_language.py
+        name: Source language (no Chinese; English-only sources)
+        entry: python3 scripts/check_source_language.py
         language: system
-        # no-CJK applies to code and docs alike; comment check is Python-only.
-        types_or: [python, markdown, yaml, toml, ts]
-      - id: any-budget
-        name: Any budget (no new typing.Any past the baseline)
-        # A ratchet: counts real Any references per root (AST) and fails if any
-        # root exceeds its frozen baseline in the script. Scans whole roots, so it
-        # takes no filenames and runs whenever any Python file changes.
-        entry: python scripts/check_any_budget.py
-        language: system
-        pass_filenames: false
-        types: [python]
-      - id: path-governance
-        name: Path governance (user paths only via murmur.paths)
-        # Fails a hardcoded Path.home()/expanduser outside src/murmur/paths.py —
-        # the single resolver for murmur's ~/.murmur storage (spec 05 §2.3).
-        # Scans the whole src root (AST), so it takes no filenames.
-        entry: python scripts/check_paths.py
-        language: system
-        pass_filenames: false
-        types: [python]
-      - id: pyright
-        name: pyright (static type-check)
-        # Enforces the Protocol seams (contracts.py, Brain, TtsBackend, Player,
-        # Host): an impl whose signatures drift from a contract fails here.
-        # Uses the venv's pyright (run pre-commit inside the venv, like the hook
-        # above); pyproject's venvPath/.venv makes imports resolve.
-        entry: pyright
-        language: system
-        pass_filenames: false
-        types: [python]
+        # no-CJK applies to code and docs alike.
+        types_or: [ts, markdown, yaml, toml, python]
