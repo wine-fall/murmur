@@ -58,6 +58,13 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - The **ponytail** plugin is enabled on purpose (minimal-code ladder): before
   writing new code, climb it — needed at all? already in the codebase? stdlib?
   one line?
+- **Types: `any` is banned; `unknown` is a last resort.** Exhaust precise
+  types / generics / discriminated unions / `z.infer` first. `unknown` is
+  legitimate only at a trust boundary and must be narrowed (zod parse) at the
+  point of entry — never passed downstream. `any` needs an
+  `oxlint-disable-next-line no-explicit-any` + a one-line reason, only where
+  an SDK boundary is genuinely unsolvable (`src/contracts.ts` `TaskTool` is
+  the one example). oxlint enforces the rule (`.oxlintrc.json`).
 - **Comments state current intent, not edit-history** — no "used to / renamed
   from / now X, was Y" or date/commit stamps; delete a stale comment when you
   move its code. This is AI-rot's most common vector.
