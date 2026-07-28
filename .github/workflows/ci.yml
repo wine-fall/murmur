@@ -40,3 +40,8 @@ jobs:
       - run: npm run lint
 
       - run: npm test
+
+      # Boot smoke: proves the entry point actually starts (argv parsing, app
+      # assembly, engine construction) — tests import modules but never boot.
+      - name: Boot smoke
+        run: timeout 120 node src/main.ts --brain stub --voice stub --no-music --no-bed --max-segments 1
