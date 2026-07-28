@@ -165,6 +165,24 @@ describe('talk look-ahead survives music (spec 04 §3.3)', () => {
     expect(host.radio).toEqual(['talk one', 'talk two', 'talk three'])
   })
 
+  it('a talkback during a song refills the discarded buffer while the song plays', async () => {
+    const { director, voice, player, host, source } = build()
+    source.picks = [pickOf('https://stream/r1')]
+    const run = director.run(3) // talk, music (interjected), talk
+    await until(() => player.handles.length === 1, 'song on air')
+    host.type('hello')
+    await until(() => host.radio.includes('re:hello'), 'reply aired over the song')
+    // The steer discarded the pre-song buffer; the post-reply refill uses the
+    // remaining song airtime, so fresh beats are prebuilt before the song ends.
+    await until(() => voice.synthesized.includes('talk five'), 'fresh beat prebuilt mid-song')
+    player.handles[0]!.end()
+    await run
+    // The post-song talk airs the fresh refilled beat warm — never the stale
+    // pre-steer buffer, and not a cold boundary regeneration.
+    expect(host.radio.at(-1)).toBe('talk five')
+    expect(host.radio).not.toContain('talk two')
+  })
+
   it('an empty buffer refills DURING the song and the boundary airs the prebuilt clip', async () => {
     const { deps, brain, voice, player, host, source } = build()
     // The first segment is music: the buffer is empty and the refill fires at

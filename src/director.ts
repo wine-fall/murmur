@@ -444,6 +444,10 @@ export class Director {
         await current?.promise
         this.deps.host.onRadioSegment(composed.reply)
         this.deps.memory.record({ role: 'radio', text: composed.reply })
+        // The steer just discarded the look-ahead: refill NOW, with the fresh
+        // user turn + reply in context, so the regen overlaps the reply (and
+        // any still-playing song) instead of going cold at the next boundary.
+        this.prefetchTalk()
         current = onAir(this.deps.player.play(composed.clip))
       }
     } finally {

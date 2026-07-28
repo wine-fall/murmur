@@ -141,9 +141,12 @@ ready, including across intervening music.
   `_prefetch_music`). When the buffer is **below `N`**, one batched
   `next_talks(need)` for the shortfall, its beats synthesized **in parallel** (each
   an independent synth task), appended (capped at `N`). Fired after a consumed beat
-  is recorded **and at the start of a music segment**, so the buffer stays full and
-  the refill's Brain+synth overlap whatever is on air (the post-song talk airs
-  warm). **Coherence:** the refill passes the queued-but-unaired beats into the
+  is recorded, **at the start of a music segment**, and **after a talkback reply
+  airs** (the steer just discarded the buffer — refilling immediately, with the
+  fresh user turn + reply in context, lets the regen overlap the reply and any
+  still-playing song instead of going cold at the next boundary), so the buffer
+  stays full and the refill's Brain+synth overlap whatever is on air (the
+  post-song talk airs warm). **Coherence:** the refill passes the queued-but-unaired beats into the
   context as prior `radio` turns — the buffered text lives in the Director, so the
   stateless Brain is told what is *already queued*, not only what has aired and
   been recorded, and continues the monologue instead of duplicating it.
@@ -192,6 +195,9 @@ mechanical, driven by JS promise semantics and the TS codebase's seams:
   warm/cold`, retry lines) go through a new dev-log-only `Host.debug` channel
   (mirrored into `.dev/dev.log`, never printed over the program) — the
   deterministic evidence for the real-SDK smoke and `make logs`.
+- **Post-steer refill** (closing-review finding, applied): the talkback path
+  refills right after the reply is recorded — an interjection during a song
+  no longer wastes the remaining song airtime on an empty buffer.
 - **Observed on the real SDK** (smoke, 2026-07-28): first cold batch ~24 s;
   refill fired with the queued beat in context, resolved mid-song (~10 s into a
   25 s song, `depth=2`); music→talk boundary aired the prebuilt clip with zero
