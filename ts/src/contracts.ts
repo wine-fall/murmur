@@ -8,7 +8,7 @@
 //   MemoryStore   -> in-process here; persistent three-tier in Phase 4 (spec 05)
 //   Brain         -> stub + claude-agent-sdk implementations in brain.ts
 
-import type { SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
+import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
 
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
@@ -174,6 +174,32 @@ export interface Harness {
   // Runs the bounded loop; returns the value a tool finished with, or null if
   // the turn budget ran out first.
   runTask<T>(task: Task<T>): Promise<T | null>
+}
+
+// --- the guide harness (spec 03-03 §2) ------------------------------------ //
+//
+// A DIFFERENT harness from runTask: the native Claude Code agent with its
+// built-in system tools (Bash/Read/...) enabled and the SDK's own per-action
+// permission flow on — interactive setup/repair, not a murmur-owned tool loop.
+// The SDK drives ask/execute; murmur only routes its prompts to the user.
+export type GuideRequest = {
+  readonly systemPrompt: string // behavior-shaping persona (investigate → explain → ask → fix)
+  readonly prompt: string // the high-level task; never prescribes the remedy
+  readonly model: string
+  readonly maxTurns: number
+  readonly permissionMode?: PermissionMode // shipped default: 'default' (per-action confirm)
+  readonly canUseTool?: CanUseTool // routes each pre-action ask to the user
+  readonly onText?: (text: string) => void // the agent's text, streamed as it arrives
+  // The user's next natural-language reply after each agent turn; null ends
+  // the conversation. Absent = single-shot (one agent turn).
+  readonly nextUserInput?: () => Promise<string | null>
+}
+
+// The setup/repair capability, separate from Harness (find-music has no
+// built-in tools) — interface segregation: each consumer depends on the one
+// capability it needs. Returns the final plain-language explanation.
+export interface GuideCapable {
+  runGuide(req: GuideRequest): Promise<string>
 }
 
 // Two-method Brain contract (spec 01 §3.2). Talk generation is batched from

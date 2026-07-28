@@ -1,7 +1,12 @@
+import { readdirSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+import type { SDKAssistantMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { agenticOptions, isolatedOptions, StubBrain } from '../src/brain.ts'
-import type { ContextPack } from '../src/contracts.ts'
+import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain.ts'
+import type { ContextPack, GuideRequest } from '../src/contracts.ts'
 import { cleanBeats, emitTalkBeatsTool } from '../src/talk-tools.ts'
 
 const ctx: ContextPack = { persona: 'p', recent: [] }
@@ -52,6 +57,108 @@ describe('agenticOptions', () => {
     expect(o.mcpServers).toHaveProperty('murmur')
     expect(o.maxTurns).toBe(2)
     expect(o.skills).toEqual([])
+  })
+})
+
+// --- guide harness (spec 03-03) ------------------------------------------- //
+
+const guideReq = (over: Partial<GuideRequest> = {}): GuideRequest => ({
+  systemPrompt: 'guide persona',
+  prompt: 'fix it',
+  model: 'model-x',
+  maxTurns: 30,
+  ...over,
+})
+
+describe('guideOptions (spec 03-03 §5.1)', () => {
+  it('keeps the isolation but ENABLES the curated built-ins', () => {
+    const o = guideOptions(guideReq())
+    expect(o.settingSources).toEqual([])
+    expect(o.strictMcpConfig).toBe(true)
+    expect(o.mcpServers).toEqual({})
+    expect(o.skills).toEqual([])
+    expect(o.tools).toEqual([...GUIDE_BUILTINS])
+    expect(GUIDE_BUILTINS).toContain('Bash')
+    expect(o.maxTurns).toBe(30)
+    expect(o.extraArgs).toHaveProperty('disable-slash-commands')
+  })
+
+  it('never auto-approves: allowedTools stays unset, permission flow gates each action', () => {
+    // In this SDK `allowedTools` EXECUTES WITHOUT ASKING — the opposite of the
+    // per-action confirm the guide is for. The surface is bounded via `tools`.
+    const o = guideOptions(guideReq())
+    expect(o.allowedTools).toBeUndefined()
+    expect(o.permissionMode).toBe('default')
+  })
+
+  it('threads permissionMode and canUseTool through', () => {
+    const canUseTool = async () => ({ behavior: 'allow' as const })
+    const o = guideOptions(guideReq({ permissionMode: 'plan', canUseTool }))
+    expect(o.permissionMode).toBe('plan')
+    expect(o.canUseTool).toBe(canUseTool)
+  })
+})
+
+// The multi-turn conversation loop over a fake SDK query: text is surfaced as
+// it arrives, each turn end pulls the user's next reply, null ends the session.
+// (The real-SDK seam — streaming input + canUseTool — is smoke-tested.)
+describe('runGuideSession', () => {
+  const assistant = (text: string): SDKAssistantMessage =>
+    ({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) as SDKAssistantMessage
+  const result = (): SDKResultMessage => ({ type: 'result', subtype: 'success' }) as SDKResultMessage
+
+  // A fake query: for each user message received, plays back one scripted turn
+  // (assistant texts, then the turn's result).
+  function fakeQuery(turns: string[][], received: string[]) {
+    return ({ prompt }: { prompt: string | AsyncIterable<SDKUserMessage> }) => {
+      async function* stream() {
+        if (typeof prompt === 'string') throw new Error('guide must use streaming input')
+        let i = 0
+        for await (const message of prompt) {
+          received.push(String(message.message.content))
+          for (const text of turns[i] ?? []) yield assistant(text)
+          yield result()
+          i++
+        }
+      }
+      return stream()
+    }
+  }
+
+  it('single-shot without nextUserInput: one turn, text streamed and returned', async () => {
+    const received: string[] = []
+    const streamed: string[] = []
+    const final = await runGuideSession(
+      fakeQuery([['diagnosed.', 'fixed.']], received),
+      guideReq({ onText: (t) => void streamed.push(t) }),
+    )
+    expect(received).toEqual(['fix it'])
+    expect(streamed).toEqual(['diagnosed.', 'fixed.'])
+    expect(final).toBe('diagnosed.\nfixed.')
+  })
+
+  it('multi-turn: each turn end pulls the next reply; null ends the conversation', async () => {
+    const received: string[] = []
+    const replies = ['do the quick fix', null]
+    const final = await runGuideSession(
+      fakeQuery([['options: A or B?'], ['done.']], received),
+      guideReq({ nextUserInput: async () => replies.shift() ?? null }),
+    )
+    expect(received).toEqual(['fix it', 'do the quick fix'])
+    expect(final).toBe('options: A or B?\ndone.')
+  })
+})
+
+describe('the shipped path never bypasses permissions (spec 03-03 §5.4)', () => {
+  it('grep-guard: bypassPermissions appears nowhere in src/', () => {
+    const srcDir = fileURLToPath(new URL('../src', import.meta.url))
+    const files = readdirSync(srcDir, { recursive: true, withFileTypes: true })
+      .filter((e) => e.isFile() && e.name.endsWith('.ts'))
+      .map((e) => join(e.parentPath, e.name))
+    expect(files.length).toBeGreaterThan(10)
+    for (const file of files) {
+      expect(readFileSync(file, 'utf8')).not.toContain('bypassPermissions')
+    }
   })
 })
 

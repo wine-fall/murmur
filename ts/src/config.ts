@@ -75,6 +75,8 @@ export type Config = z.infer<typeof ConfigSchema>
 export type CliInvocation = {
   config: Config
   maxSegments: number | undefined
+  // Run the music setup guide directly and exit (spec 03-03's explicit entry).
+  setupMusic: boolean
 }
 
 // A misconfigured number in a .env must not abort Config construction (and with
@@ -123,6 +125,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'tts-reference': { type: 'string' },
       'no-music': { type: 'boolean' },
       'no-bed': { type: 'boolean' },
+      'setup-music': { type: 'boolean' },
       cadence: { type: 'string' },
       'max-segments': { type: 'string' },
     },
@@ -146,5 +149,5 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     values['max-segments'] === undefined
       ? undefined
       : z.coerce.number().int().positive().parse(values['max-segments'])
-  return { config, maxSegments }
+  return { config, maxSegments, setupMusic: values['setup-music'] === true }
 }

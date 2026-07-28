@@ -1,8 +1,8 @@
 // Startup checks (spec 03-02 §2.4): an extensible preflight phase the app runs
-// before broadcasting. The only check shipped here is the music-dependency
-// preflight; a failed check degrades the session (talk-only), never aborts the
-// radio. The interactive repair guide (03-03's run_guide) is the Phase 4.5
-// harness — until then a failure tells the user plainly what is missing.
+// before broadcasting. A failed check degrades the session (talk-only), never
+// aborts the radio. This module holds the framework plus the deterministic
+// music preflight probes (spec 03-03 §2); the interactive repair check that
+// consumes them lives in guide.ts (musicSetupCheck).
 
 import { execFile } from 'node:child_process'
 
@@ -26,43 +26,70 @@ export async function runStartupChecks(
   return results
 }
 
+// --- the deterministic music preflight (spec 03-03 §2) -------------------- //
+//
+// Cheap local probes, no LLM (master §7 pillar 1): one per unbound binary,
+// aggregated by preflightMusic. `reason` — naming each broken binary — is what
+// seeds the guide agent's diagnosis (missing entirely, a proxy CA, ...).
+
+export type PreflightResult = { ok: boolean; reason: string }
+
+const REASON_MAX = 500
+
 // requireStdout: exit 0 alone is not proof of life for a fetch probe — the
 // trivial search must actually produce output (spec 03-03 §2).
-export type BinaryProbe = (cmd: string, args: string[], requireStdout: boolean) => Promise<boolean>
-
-const execProbe: BinaryProbe = (cmd, args, requireStdout) =>
-  new Promise((resolve) => {
-    execFile(cmd, args, { timeout: 30_000 }, (err, stdout) =>
-      resolve(err === null && (!requireStdout || stdout.trim() !== '')),
-    )
-  })
-
-export type MusicCheckOptions = {
-  ytdlpCmd: string
-  ffmpegCmd: string
-  probe?: BinaryProbe
-}
-
-// The music-dependency preflight (spec 03-02 §2.4, wrapping 03-03's
-// deterministic half): both acquisition binaries must actually work. yt-dlp is
-// probed with a trivial flat search (network — an installed-but-broken binary,
-// e.g. a rotted extractor or a proxy failure, must degrade to talk-only here,
-// not at the first pick); ffmpeg with -version (local).
-export function musicCheck({ ytdlpCmd, ffmpegCmd, probe = execProbe }: MusicCheckOptions): StartupCheck {
-  return {
-    name: 'music',
-    async run(host) {
-      const missing: string[] = []
-      if (!(await probe(ytdlpCmd, ['--dump-json', '--flat-playlist', 'ytsearch1:test'], true))) {
-        missing.push(ytdlpCmd)
+function probeBinary(
+  name: string,
+  binary: string,
+  args: string[],
+  requireStdout: boolean,
+): Promise<PreflightResult> {
+  return new Promise((resolve) => {
+    execFile(binary, args, { timeout: 30_000 }, (err, stdout, stderr) => {
+      if (err === null) {
+        if (requireStdout && stdout.trim() === '') {
+          return resolve({ ok: false, reason: `${name} exited 0 with no output` })
+        }
+        return resolve({ ok: true, reason: '' })
       }
-      if (!(await probe(ffmpegCmd, ['-version'], false))) missing.push(ffmpegCmd)
-      if (missing.length === 0) return true
-      host.info(
-        `music is unavailable: ${missing.join(' and ')} not working. ` +
-          'The radio runs talk-only; install the missing tool(s) to enable music.',
-      )
-      return false
-    },
-  }
+      const code = (err as NodeJS.ErrnoException).code
+      if (code === 'ENOENT' || code === 'ENOTDIR') {
+        return resolve({ ok: false, reason: `${name} binary not found: '${binary}'` })
+      }
+      if (code === 'EACCES') {
+        return resolve({ ok: false, reason: `${name} not executable: '${binary}'` })
+      }
+      const reason = stderr.trim() || `${name} exited ${String(code)}`
+      resolve({ ok: false, reason: reason.slice(0, REASON_MAX) })
+    })
+  })
 }
+
+// Probe whether yt-dlp can actually fetch (a trivial flat search — network).
+export function preflightYtdlp(binary = 'yt-dlp'): Promise<PreflightResult> {
+  return probeBinary('yt-dlp', binary, ['--dump-json', '--flat-playlist', 'ytsearch1:test'], true)
+}
+
+// Probe whether ffmpeg is a working build (-version; local, no network).
+export function preflightFfmpeg(binary = 'ffmpeg'): Promise<PreflightResult> {
+  return probeBinary('ffmpeg', binary, ['-version'], false)
+}
+
+// Aggregate: music is usable iff BOTH binaries are. The combined reason
+// prefixes each broken binary's name so the guide (and the user) see exactly
+// which pieces need fixing.
+export async function preflightMusic(opts: {
+  ytdlp?: string
+  ffmpeg?: string
+}): Promise<PreflightResult> {
+  const [yt, ff] = await Promise.all([
+    preflightYtdlp(opts.ytdlp ?? 'yt-dlp'),
+    preflightFfmpeg(opts.ffmpeg ?? 'ffmpeg'),
+  ])
+  const reasons: string[] = []
+  if (!yt.ok) reasons.push(`yt-dlp: ${yt.reason}`)
+  if (!ff.ok) reasons.push(`ffmpeg: ${ff.reason}`)
+  if (reasons.length === 0) return { ok: true, reason: '' }
+  return { ok: false, reason: reasons.join(' | ') }
+}
+

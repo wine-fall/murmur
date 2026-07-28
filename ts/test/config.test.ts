@@ -7,6 +7,11 @@ import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 const NO_ENV = {}
 
 describe('parseCli', () => {
+  it('parses the explicit --setup-music entry (spec 03-03)', () => {
+    expect(parseCli([], NO_ENV).setupMusic).toBe(false)
+    expect(parseCli(['--setup-music'], NO_ENV).setupMusic).toBe(true)
+  })
+
   it('applies defaults with no flags', () => {
     const { config, maxSegments } = parseCli([], NO_ENV)
     expect(config.brain).toBe('claude')

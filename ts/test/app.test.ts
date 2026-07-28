@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildMemory, buildVoice, resolvePersonaPath } from '../src/app.ts'
+import { buildMemory, buildVoice, resolvePersonaPath, runMusicSetupCli } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { HostedVoice } from '../src/hosted-voice.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
@@ -22,6 +22,11 @@ describe('app wiring', () => {
 
   it('refuses the hosted voice with no endpoint configured, naming the knob', () => {
     expect(() => buildVoice(config(['--voice', 'hosted']))).toThrow(/MURMUR_TTS_URL/)
+  })
+
+  it('--setup-music needs the real brain: a stub run refuses instead of hanging', async () => {
+    // The guide IS the real Claude Code agent; there is no stub of it.
+    expect(await runMusicSetupCli(config(['--brain', 'stub']))).toBe(false)
   })
 })
 
