@@ -149,7 +149,3 @@ export class ClaudeBrain implements Brain, Harness {
     return text
   }
 }
-
-export function buildBrain(name: 'claude' | 'stub', model: string): Brain {
-  return name === 'stub' ? new StubBrain() : new ClaudeBrain(model)
-}

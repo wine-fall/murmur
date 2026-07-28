@@ -50,6 +50,35 @@ export interface Player {
   stop(): Promise<void>
 }
 
+// The duck seam (spec 03-02 §2.2): one intent, two prospective mechanisms. The
+// engine's MixedHandle drives mixer gain automation; a future ControlledHandle
+// would issue volume commands to a black-box player. duck/unduck are sync gain
+// intents — `at` (context-time seconds) lets a caller schedule the unduck
+// declaratively at a known clip end instead of waiting to fire it.
+export interface MusicHandle {
+  duck(): void
+  unduck(at?: number): void
+  stop(): Promise<void>
+  // Resolves at natural end or stop — never rejects; a died stream also ends.
+  wait(): Promise<void>
+  // True once the source has produced real scheduled audio; false on timeout or
+  // a stream that dies first (the "announced but silent" guard, spec 03-02).
+  waitStarted(timeoutS: number): Promise<boolean>
+}
+
+// The mixing engine surface the Director consumes (spec 03-02 §2.1): the spec-01
+// Player seam (voice channel; play() auto-ducks live music) plus music playback
+// behind a handle.
+export interface MixingPlayer extends Player {
+  playMusic(clip: AudioClip): Promise<MusicHandle>
+}
+
+// Local cached bed tracks, in play order (spec 03-04 §2.2). Empty = no bed.
+// Resolving/pulling happened at loading time — never on the audio path.
+export interface BedSource {
+  tracks(): string[]
+}
+
 export interface MemoryStore {
   record(turn: Turn): void
   recent(n: number): Turn[]

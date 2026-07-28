@@ -2,7 +2,9 @@
   "name": "murmur",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
@@ -11,6 +13,7 @@
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.220",
+    "node-web-audio-api": "^2.1.0",
     "zod": "^4.4.3"
   },
   "devDependencies": {

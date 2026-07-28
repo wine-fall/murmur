@@ -1,7 +1,7 @@
 # spec/03-02 · ducking — a source-agnostic mixing audio engine
 
 > **Status**: **Code-implemented; human (sensory) acceptance pending.** Unit suite green (mixer math, engine behavior on fakes, cadence modes, Director music branch, startup checks); integration tests (real ffmpeg decode, real sounddevice) pass locally; real-seam smoke verified (real yt-dlp stream through the engine with an audible duck + clean teardown; real Haiku pick task returns title/artist/announce). Remaining: the by-ear checklist (§5.1/§5.3 sensory half — smoothness/"sounds like radio") and envelope tuning if the ear disagrees with the defaults.
-> **TS port (issue #54 Phase 2, 2026-07-27)**: only **§2.3 cadence** is ported so far (`every_n` / `random` / `brain` with its hard local fallback, in `ts/src/cadence.ts`), plus the §1 #9 music-context assembly helper. The engine (§2.1/§2.2/§3.1), the Director's music branch (§3.5), the announce path (§1 #6), and the startup checks (§2.4) land with the Phase 3 Web Audio engine — deliberately, so no interim music playback is built and thrown away (the settled §6 "interim `ffplay` player is moot" applies to the port too).
+> **TS port (issue #54 Phase 3, 2026-07-27)**: the engine (§2.1/§2.2), the Director's music branch (§3.5), the announce path (§1 #6), the startup-check seam (§2.4, deterministic preflight only — the interactive guide offer waits for Phase 4.5's `run_guide` harness), and the 03-04 bed are now implemented in TS (`ts/src/engine.ts`, `ffmpeg.ts`, `startup.ts`, `bed.ts`, the `director.ts` music branch). Phase 2 had already ported §2.3 cadence and the §1 #9 context assembly. The TS engine is **not** the §3.1 numpy callback mixer — see §3.1-TS below for the Web Audio realization and the settled streaming decision. A minimal single-slot music **pick-prefetch** (spec 04 slice 1) ships with the branch so the boundary never blocks on `nextTrack` (~2 min observed cold); spec 04's talk look-ahead is NOT ported yet.
 > **Part**: Replace the spec-01 afplay-based `AudioPlayer` with a **mixing audio engine** that plays music and voice **simultaneously** and **ducks** the music under the voice. See master [`../DESIGN.md`](../DESIGN.md) §4 (AudioPlayer = sole audio authority, duck/stop), §3.5 (voice is the soul), §10 (build order).
 > **Milestone**: L1 (radio feel) — the second half, after [`03-01-brain-harness.md`](03-01-brain-harness.md). 03-01 makes the radio **find and play real songs** (sequentially); this spec makes talk play **over ducked music** and makes a typed interjection **duck** the song instead of hard-stopping it — the last piece of the radio feel.
 > **Conventions**: English; written for a coding agent. Design-level. No CJK in source (master §0).
@@ -116,6 +116,37 @@ App start runs the registered checks in order before broadcasting. The only chec
   - **Voice buffer** is fed by reading the spec-02 TTS clip (a local wav); short, so it can be loaded/queued quickly (resampled to the mix format if needed).
 - **`music_gain`** is driven by an envelope with target 1.0 normally and the **duck target** (~0.3) while a voice clip is active, smoothed as a per-block ramp (~300 ms) so transitions are not abrupt.
 - **Sole authority + cancellation** (master §4, spec 01 §3.5): the engine is the only sound source; `stop()` terminates the music ffmpeg and drains buffers; cancelling `play()` (shutdown/Ctrl-C) tears down cleanly with no orphaned ffmpeg/stream (mirrors spec 01's two cancellation paths).
+
+### 3.1-TS Signal path (TypeScript engine, issue #54 Phase 3)
+
+The TS engine realizes the same contracts as Web Audio **graph orchestration**
+on `node-web-audio-api` (the Phase 0 binding decision) instead of an owned
+sample loop: per-source `AudioBufferSourceNode`s + per-channel `GainNode`s, with
+every gain move (duck, unduck, bed crossfade) expressed as `AudioParam`
+automation. Notes, all settled during the Phase 3 build:
+
+- **Streaming strategy — decided: chunk-scheduled buffer segments,** not an
+  `AudioWorklet`. The ffmpeg decode stream (`ffmpeg -i <src> -f f32le -ar 48000
+  -ac 2 -`) is reframed into ~1 s `AudioBuffer` segments scheduled back-to-back
+  at sample-accurate context times, keeping only a bounded scheduling lead
+  (~8 s) ahead of playback — an hour-long source holds ~8 s of PCM in memory,
+  never a ~1.4 GB whole-file buffer. Measured offline: chunk-scheduled output
+  differs from a single-buffer render by ~1e-11 max sample error (gapless).
+  An `AudioWorklet` fed from a ring buffer would add a worklet module + thread
+  hop + hand-rolled buffering for no additional capability at this scale; it
+  remains the fallback if chunk scheduling ever proves insufficient.
+- **Underrun**: a chunk arriving behind playback is re-anchored slightly ahead
+  of `currentTime` — a silent gap, not a crash (same §3.3 posture).
+- **Deterministic automation**: gain intents are anchored to context time the
+  moment their trigger is known — `play(voice)` schedules the unduck at the
+  clip's known end; the bed's post-song return is anchored at the song's
+  end-of-stream time as soon as the decode finishes scheduling. This makes an
+  `OfflineAudioContext` render of the same engine calls the unit-test layer
+  (RMS-window assertions on duck/crossfade), with no device and no realtime
+  races.
+- **Decoder failure is loud**: an abnormal ffmpeg exit raises out of the decode
+  stream (surfaced via the engine log + `waitStarted(false)`), never
+  masquerading as a clean end — the "announced but silent" 403 lesson.
 
 ### 3.2 Ducking behavior
 - **Talk over music:** Director calls `play(voice)` while a `MusicHandle` is live → engine ducks, plays the voice, unducks. The transition uses the ramp, not a hard step.
