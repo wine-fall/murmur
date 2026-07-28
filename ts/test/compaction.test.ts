@@ -27,7 +27,10 @@ class FakeCompactionStore implements CompactionStore {
     }
   }
 
+  failApply = false
+
   applyCompaction(newProfile: string, throughTs: number): void {
+    if (this.failApply) throw new Error('disk full')
     this.applied.push({ profile: newProfile, throughTs })
     this.profile = newProfile
     this.backlog = this.backlog.filter((b) => b.ts > throughTs)
@@ -114,6 +117,18 @@ describe('Compactor', () => {
     await compactor.drain()
     expect(store.applied).toEqual([])
     expect(store.backlog.length).toBe(3)
+    expect(logs.some((l) => l.includes('compaction failed'))).toBe(true)
+  })
+
+  it('a store-apply failure (disk full) degrades like a brain failure, never rejects', async () => {
+    const { store, brain, logs, compactor } = setup()
+    store.failApply = true
+    for (const [i, t] of ['a', 'b', 'c'].entries()) store.push(t, i + 1)
+    compactor.maybeSchedule() // unawaited background fold, like the Director's poke
+    await until(() => brain.folding, 'fold started')
+    brain.finish()
+    await compactor.drain() // must not throw
+    expect(store.applied).toEqual([])
     expect(logs.some((l) => l.includes('compaction failed'))).toBe(true)
   })
 

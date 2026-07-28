@@ -72,18 +72,18 @@ export class Compactor {
     return true
   }
 
+  // Total (never rejects): the fold runs unawaited in the background, so any
+  // escape here — Brain failure OR a filesystem error in apply — would be an
+  // unhandled rejection that takes the radio down instead of degrading.
   private async run(): Promise<void> {
     const { profile, turns, throughTs } = this.store.compactionSlice()
     if (turns.length === 0) return
-    let updated: string
     try {
-      updated = await this.brain.compactProfile(profile, turns)
+      const updated = await this.brain.compactProfile(profile, turns)
+      this.store.applyCompaction(updated, throughTs)
+      this.log(`memory: compacted ${turns.length} turns into a ${updated.length}-char profile`)
     } catch (err) {
-      // Never let compaction crash or block the radio.
       this.log(`memory: compaction failed; keeping profile + watermark (${String(err)})`)
-      return
     }
-    this.store.applyCompaction(updated, throughTs)
-    this.log(`memory: compacted ${turns.length} turns into a ${updated.length}-char profile`)
   }
 }
