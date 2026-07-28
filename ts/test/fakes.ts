@@ -19,6 +19,7 @@ import type {
   TrackCandidate,
   TrackPick,
   TrackSource,
+  Turn,
 } from '../src/contracts.ts'
 import type { Host } from '../src/host.ts'
 import { LineQueue } from '../src/host.ts'
@@ -79,18 +80,21 @@ export class FakeMusicProvider implements MusicProvider {
 
 export class FakeBrain implements Brain {
   // Each nextTalks call shifts one batch; empty list -> throws (failure mode).
-  batches: string[][] = []
+  // A string entry is a bare beat; a TalkBeat entry can carry a topic tag.
+  batches: (string | TalkBeat)[][] = []
   nextTalksCalls = 0
+  talkContexts: ContextPack[] = []
   respondCalls: string[] = []
   respondContexts: ContextPack[] = []
   respondDelayMs = 0
   failRespond = false
 
-  async nextTalks(_ctx: ContextPack, _count: number): Promise<TalkBeat[]> {
+  async nextTalks(ctx: ContextPack, _count: number): Promise<TalkBeat[]> {
     this.nextTalksCalls++
+    this.talkContexts.push(ctx)
     const batch = this.batches.shift()
     if (batch === undefined) throw new Error('no more batches')
-    return batch.map((text) => ({ text }))
+    return batch.map((beat) => (typeof beat === 'string' ? { text: beat } : beat))
   }
 
   async respond(userText: string, ctx: ContextPack): Promise<string> {
@@ -99,6 +103,10 @@ export class FakeBrain implements Brain {
     this.respondContexts.push(ctx)
     if (this.failRespond) throw new Error('brain down')
     return `re:${userText}`
+  }
+
+  async compactProfile(profile: string, transcript: readonly Turn[]): Promise<string> {
+    return `${profile}+${transcript.length}`
   }
 }
 

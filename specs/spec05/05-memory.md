@@ -9,6 +9,15 @@
 > **Owed (real-run pass):** the on-demand two-run "run 2 sees run 1's tail +
 > compaction produces a plausible profile" smoke (§5.10), and profile/topic
 > quality by feel (eval track).
+> **TS port (issue #54 Phase 4, 2026-07-28):** ported to `ts/` in full —
+> `memory.ts` (both stores; zod at the file-read boundary, same on-disk layout
+> incl. snake_case `meta.json` so the Python memory dir carries over at
+> cutover), `compaction.ts` (single-flight Compactor), `scene.ts` (the §2.2
+> ratified scene contract), pack fields as optional `ContextPack` members,
+> prompt blocks in `prompts.ts`, persona homing + stub isolation in `app.ts`.
+> The §5.10 two-run smoke ran through the real SDK: run 2 carried run 1's tail
+> and a forced compaction produced a plausible Chinese profile with topic tags
+> arriving on real beats.
 > **Part**: The persistent Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6):
 > three tiers — ① **Profile** (long-term: who you are, prefs, the persona living
 > asset) · ② **History** (conversation log, recent window) · ③ **Ledger**

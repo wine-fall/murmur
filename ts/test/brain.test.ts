@@ -15,6 +15,12 @@ describe('StubBrain', () => {
     const reply = await brain.respond('hi', ctx)
     expect(reply).toContain('hi')
   })
+
+  it('compactProfile is a no-op (offline chatter never rewrites the profile)', async () => {
+    const brain = new StubBrain()
+    const updated = await brain.compactProfile('who you are', [{ role: 'radio', text: 'x' }])
+    expect(updated).toBe('who you are')
+  })
 })
 
 // The isolation invariant (spec 01 §3.2): the radio must not be influenced by

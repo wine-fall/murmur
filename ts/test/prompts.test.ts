@@ -2,11 +2,13 @@ import { describe, expect, it } from 'vitest'
 
 import type { ContextPack } from '../src/contracts.ts'
 import {
+  buildCompactionPrompt,
   buildMusicSituation,
   buildNextTalkPrompt,
   buildNextTalksPrompt,
   buildRespondPrompt,
   FIND_MUSIC_INSTRUCTION,
+  PROFILE_CHAR_CAP,
 } from '../src/prompts.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
@@ -70,5 +72,68 @@ describe('music prompts', () => {
     const s = buildMusicSituation([], ['Song A -- Label'])
     expect(s).toContain('do not repeat')
     expect(s).toContain('- Song A -- Label')
+  })
+})
+
+describe('memory + scene rendering (spec 05 §3.5)', () => {
+  it('renders the profile as a stable block ahead of the transcript', () => {
+    const p = buildNextTalkPrompt({
+      persona: 'p',
+      recent: [{ role: 'radio', text: 'hello' }],
+      profile: 'likes jazz',
+    })
+    expect(p).toContain('(What you know about the listener)\nlikes jazz')
+    expect(p.indexOf('likes jazz')).toBeLessThan(p.indexOf('The program so far'))
+  })
+
+  it('renders the covered-topics do-not-repeat line', () => {
+    const p = buildNextTalksPrompt(
+      { persona: 'p', recent: [], coveredTopics: ['rain', 'coffee'] },
+      2,
+    )
+    expect(p).toContain('rain, coffee')
+    expect(p).toContain("don't repeat")
+  })
+
+  it('renders a scene cue for a known bucket', () => {
+    const p = buildNextTalkPrompt({ persona: 'p', recent: [], scene: 'late-night' })
+    expect(p).toContain('late at night')
+  })
+
+  it('empty profile/topics and an unknown scene render nothing', () => {
+    const p = buildNextTalkPrompt({
+      persona: 'p',
+      recent: [],
+      profile: '  ',
+      coveredTopics: [],
+      scene: 'lunar',
+    })
+    expect(p).not.toContain('What you know about the listener')
+    expect(p).not.toContain("don't repeat")
+    expect(p).not.toContain('lunar')
+  })
+
+  it('the respond prompt carries the profile block too', () => {
+    const p = buildRespondPrompt('hey', { persona: 'p', recent: [], profile: 'night owl' })
+    expect(p).toContain('(What you know about the listener)\nnight owl')
+  })
+})
+
+describe('compaction prompt', () => {
+  it('carries the profile, the transcript, and the size cap', () => {
+    const p = buildCompactionPrompt('knows jazz', [
+      { role: 'radio', text: 'evening' },
+      { role: 'user', text: 'long day' },
+    ])
+    expect(p).toContain('(Current profile)\nknows jazz')
+    expect(p).toContain('radio: evening')
+    expect(p).toContain('user: long day')
+    expect(p).toContain(String(PROFILE_CHAR_CAP))
+  })
+
+  it('placeholders an empty profile and empty transcript', () => {
+    const p = buildCompactionPrompt('  ', [])
+    expect(p).toContain('(no profile yet)')
+    expect(p).toContain('(nothing)')
   })
 })

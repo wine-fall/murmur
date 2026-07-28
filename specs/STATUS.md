@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
 - **Migration in progress: Python → TypeScript (issue #54).** The TS
   implementation grows in top-level `ts/` beside the Python `src/` (the
@@ -76,7 +76,28 @@ _Last updated: 2026-07-27_
     Director drops the reference and the orphaned subprocess self-terminates
     on EPIPE after process exit (bounded leak, accepted for now; Python could
     cancel because asyncio tasks are cancellable, TS promises are not).
-  - **Next: Phase 4** — memory + compaction (spec 05) in TS.
+  - **Phase 4 (done 2026-07-28):** memory + compaction (spec 05) in TS.
+    `ts/src/paths.ts` gained `dataRoot()`; `ts/src/memory.ts` carries both
+    stores — the extended `InProcessMemoryStore` and the file-backed
+    `PersistentMemoryStore` (three tiers under `dataRoot()/memory`, zod-parsed
+    on read, same on-disk layout as Python incl. snake_case `meta.json`, so
+    the existing memory dir carries over at cutover). `ts/src/compaction.ts`
+    is the single-flight Compactor over the store's compaction surface +
+    `Brain.compactProfile` (neutral system framing, cheap tier via
+    `compactModel`), poked by the Director per boundary, flushed on shutdown.
+    `ts/src/scene.ts` ports the spec-04 §3.4 scene seam (ratified by 05 §2.2);
+    `ContextPack` gained optional `scene`/`profile`/`coveredTopics`; the talk +
+    respond prompts render the profile block, the cross-day don't-repeat line,
+    and the scene cue. The Director ledgers per-beat topics and aired songs
+    (replacing the session-local avoid-list) and reads the music avoid-list
+    from the store. App wiring: persona homed into the memory dir (copy-once),
+    stub runs stay fully in-process (stub isolation). 181 vitest tests green;
+    the §5.10 two-run real-SDK smoke passed (run 2 carried run 1's tail;
+    forced compaction wrote a plausible Chinese profile; topic tags arrived on
+    real beats).
+  - **Next: Phase 4.5** — the guide harness (spec 03-03) in TS: `run_guide`
+    on the native agent with built-in tools + per-action confirm, plus the
+    music preflight it repairs.
 - **Milestone: L0 + L1 — code-complete (Python).** L0 = specs `01-core-loop` +
   `02-voice-provider`; L1 = adds `03-01-brain-harness` + `03-02-ducking` (+ the
   `03-03` guided install). The code and unit gate are done and green.

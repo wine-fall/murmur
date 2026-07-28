@@ -6,10 +6,12 @@
 // is never hardcoded; the CLI overrides all of them except the API key, which
 // stays env-only — a secret does not belong on the command line.
 
+import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
+import { dataRoot } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
@@ -59,6 +61,13 @@ export const ConfigSchema = z.object({
   // The always-on background bed (spec 03-04); --no-bed or an empty cache
   // degrades to talk-with-silence.
   bedEnabled: z.boolean().default(true),
+
+  // --- memory (spec 05) --------------------------------------------------- //
+  // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
+  // home, relocatable via MURMUR_HOME.
+  memoryDir: z.string().default(() => join(dataRoot(), 'memory')),
+  // Cheap tier for the background profile compaction (master §7 pillar 3).
+  compactModel: z.string().default('claude-haiku-4-5-20251001'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
@@ -120,6 +129,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   })
   const config = ConfigSchema.parse({
     ...ttsFromEnv(env),
+    memoryDir: join(dataRoot(env), 'memory'),
     ...(values.brain !== undefined && { brain: values.brain }),
     ...(values.voice !== undefined && { voice: values.voice }),
     ...(values.model !== undefined && { model: values.model }),

@@ -23,6 +23,37 @@ const OUTPUT_RULES =
   'spoken, one small beat of radio (a few sentences, not a monologue). No ' +
   'prefixes, speaker labels, quotation marks, or stage directions.'
 
+// Per-scene mood cue threaded into the self-initiated talk prompts (spec 04
+// §3.4). A scene with no entry here (or undefined) simply gets no cue, so an
+// unknown bucket degrades silently.
+const SCENE_GUIDANCE: Record<string, string> = {
+  morning: "It's morning where they are — meet it with a gentle, just-waking warmth.",
+  afternoon: "It's the afternoon — an easy, unhurried mid-day company.",
+  evening: "It's the evening — the day winding down, warm and settling.",
+  'late-night': "It's late at night — keep it hushed and intimate, the small-hours mood.",
+}
+
+function sceneLine(ctx: ContextPack): string {
+  const cue = SCENE_GUIDANCE[ctx.scene ?? '']
+  return cue === undefined ? '' : `\n${cue}`
+}
+
+// The tier-① listener profile as a leading stable block (spec 05 §3.5): it
+// precedes the volatile transcript so persona + profile form the cache-friendly
+// stable prefix (master §7 pillar 4). Empty -> nothing (degrade silently).
+function profileBlock(ctx: ContextPack): string {
+  const profile = ctx.profile?.trim()
+  return profile ? `(What you know about the listener)\n${profile}\n\n` : ''
+}
+
+// A single volatile "recently covered — don't repeat" cue from the tier-③
+// ledger (spec 05 §3.5). Ledger-backed and cross-day, so it holds even when the
+// transcript is empty (the issue-#44 cold-open case). Empty -> nothing.
+function coveredLine(ctx: ContextPack): string {
+  if (ctx.coveredTopics === undefined || ctx.coveredTopics.length === 0) return ''
+  return `\n(Recently covered — don't repeat these: ${ctx.coveredTopics.join(', ')})`
+}
+
 // Render recent turns as a transcript. The host's own prior lines are "You";
 // the listener's lines are "Listener".
 function renderTranscript(ctx: ContextPack, dropTrailingUser?: string): string {
@@ -43,7 +74,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${head}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -55,7 +86,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${head}\n` +
+    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
@@ -115,12 +146,48 @@ Call choose_segment exactly once with your decision.`
 
 export const CADENCE_STATE_HEADER = 'Current program state:\n'
 
-// Prompt for an in-persona reply to a typed user line.
+// --- compaction (spec 05 §3.6) -------------------------------------------- //
+
+// Hard cap on the profile the model returns — keeps the pack's stable prefix
+// small (master §7 pillar 4). By-feel tunable (spec 05 §6).
+export const PROFILE_CHAR_CAP = 1500
+
+// A neutral system framing (not the persona) keeps the fold as bookkeeping,
+// not the host speaking.
+export const COMPACTION_SYSTEM_PROMPT =
+  'You maintain a concise long-term profile of a radio listener.'
+
+const COMPACTION_INSTRUCTION = `You maintain a long-term listener profile for a personal companion radio. Fold
+the durable facts from the recent transcript into the existing profile.
+
+Keep: identity, stable preferences, recurring topics and interests, standing
+context worth remembering across sessions. Drop: ephemera, one-off small talk,
+anything transient. Merge — do not simply append; rewrite the profile so it
+stays coherent and non-repetitive.
+
+Return ONLY the updated profile text, in the listener's own language, under
+${PROFILE_CHAR_CAP} characters. No preamble, headings, or commentary.
+`
+
+// The compaction turn: current profile + the recent transcript to fold.
+export function buildCompactionPrompt(profile: string, transcript: readonly Turn[]): string {
+  const current = profile.trim() || '(no profile yet)'
+  const lines = transcript.map((t) => `${t.role}: ${t.text}`).join('\n') || '(nothing)'
+  return (
+    `${COMPACTION_INSTRUCTION}\n` +
+    `(Current profile)\n${current}\n\n` +
+    `(Recent transcript to fold in)\n${lines}`
+  )
+}
+
+// Prompt for an in-persona reply to a typed user line. Carries the profile
+// block too (spec 05 §3.5): a direct reply is exactly where cross-session
+// listener facts should shape what the host says back.
 export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   const transcript = renderTranscript(ctx, userText)
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
   return (
-    `${head}The listener just said to you: "${userText}"\n` +
+    `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n` +
     `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
   )
 }

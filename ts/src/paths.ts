@@ -10,6 +10,11 @@ export function homeRoot(env: NodeJS.ProcessEnv = process.env): string {
   return override ? override : join(homedir(), '.murmur')
 }
 
+// Irreplaceable user state (spec 05 memory/, incl. the persona). Back it up.
+export function dataRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'data')
+}
+
 // Rebuildable caches (the music bed). Safe to delete — costs a re-pull.
 export function cacheRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'cache')

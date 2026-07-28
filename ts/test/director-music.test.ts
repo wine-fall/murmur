@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { EveryNCadence } from '../src/cadence.ts'
 import { Director, type DirectorDeps } from '../src/director.ts'
+import { InProcessMemoryStore } from '../src/memory.ts'
 import {
   FakeBrain,
   FakeHost,
@@ -27,15 +28,7 @@ function build(overrides: Partial<DirectorDeps> = {}) {
   const player = new FakeMixingPlayer()
   const host = new FakeHost()
   const source = new FakeTrackSource()
-  const memory = {
-    turns: [] as { role: 'radio' | 'user'; text: string }[],
-    record(turn: { role: 'radio' | 'user'; text: string }) {
-      this.turns.push(turn)
-    },
-    recent(n: number) {
-      return this.turns.slice(-n)
-    },
-  }
+  const memory = new InProcessMemoryStore()
   const deps: DirectorDeps = {
     persona: 'persona',
     brain,
@@ -60,7 +53,10 @@ describe('music scheduling (cadence at the boundary)', () => {
     await until(() => player.handles.length === 1, 'song on air')
     // the announce is an on-air voice clip riding the engine's auto-duck
     await until(() => player.played.length >= 2, 'announce aired')
-    expect(memory.turns.some((t) => t.text === 'up next')).toBe(true)
+    expect(memory.recent(99).some((t) => t.text === 'up next')).toBe(true)
+    // The aired song is ledgered at air time (spec 05 §3.5) — the cross-day
+    // avoid-list, not a session-local list.
+    expect(memory.recentSongs(10)).toEqual(['Song — Artist'])
     expect(host.infos.some((m) => m.includes('Song') && m.includes('Artist'))).toBe(true)
     player.handles[0]!.end() // natural end -> segment over
     await run
@@ -108,6 +104,18 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     player.handles[0]!.end()
     await run
     expect(source.calls).toBe(1) // single-slot: one prefetch, consumed at the boundary
+  })
+
+  it('a song ledgered in an earlier session reaches the first pick context', async () => {
+    const memory = new InProcessMemoryStore()
+    memory.recordEvent('song', 'Old Favorite — X')
+    const { director, player, source } = build({ memory })
+    source.picks = [pickOf('https://stream/a', { title: 'Fresh', artist: 'B' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    expect(source.contexts[0]!.situation).toContain('Old Favorite — X')
   })
 
   it('the avoid-list carries songs already played this session', async () => {

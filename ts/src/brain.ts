@@ -16,8 +16,14 @@ import {
   type Options,
 } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Brain, ContextPack, Harness, TalkBeat, Task } from './contracts.ts'
-import { buildNextTalkPrompt, buildNextTalksPrompt, buildRespondPrompt } from './prompts.ts'
+import type { Brain, ContextPack, Harness, TalkBeat, Task, Turn } from './contracts.ts'
+import {
+  buildCompactionPrompt,
+  buildNextTalkPrompt,
+  buildNextTalksPrompt,
+  buildRespondPrompt,
+  COMPACTION_SYSTEM_PROMPT,
+} from './prompts.ts'
 import { emitTalkBeatsTool } from './talk-tools.ts'
 
 // Canned English fake output so the loop looks realistic with no network. The
@@ -46,6 +52,12 @@ export class StubBrain implements Brain {
 
   async respond(userText: string, _ctx: ContextPack): Promise<string> {
     return `Mm -- you said "${userText}". I heard you. Let's follow that thread a little.`
+  }
+
+  async compactProfile(profile: string, _transcript: readonly Turn[]): Promise<string> {
+    // Offline: leave the profile unchanged so a stub run's canned chatter never
+    // rewrites it (spec 05 §2.4 — compaction is a no-op on the stub).
+    return profile
   }
 }
 
@@ -134,6 +146,12 @@ export class ClaudeBrain implements Brain, Harness {
 
   async respond(userText: string, ctx: ContextPack): Promise<string> {
     return this.generate(ctx.persona, buildRespondPrompt(userText, ctx))
+  }
+
+  // A plain tool-less generation under a neutral system framing — bookkeeping,
+  // not the host speaking. The Compactor runs this off the live loop.
+  async compactProfile(profile: string, transcript: readonly Turn[]): Promise<string> {
+    return this.generate(COMPACTION_SYSTEM_PROMPT, buildCompactionPrompt(profile, transcript))
   }
 
   private async generate(persona: string, prompt: string): Promise<string> {
