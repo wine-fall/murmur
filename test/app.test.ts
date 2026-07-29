@@ -4,8 +4,10 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import { IdleSensor } from '../src/activity.ts'
 import {
   buildMemory,
+  buildPacing,
   buildVoice,
   resolvePersonaPath,
   runBootstrapProfileCli,
@@ -15,6 +17,7 @@ import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
 import { HostedVoice } from '../src/hosted-voice.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
+import { LedgerScheduler } from '../src/scheduler.ts'
 import { StubVoice } from '../src/voice.ts'
 
 const config = (argv: string[], env: NodeJS.ProcessEnv = {}) => parseCli(argv, env).config
@@ -34,6 +37,30 @@ describe('app wiring', () => {
   it('--setup-music needs the real brain: a stub run refuses instead of hanging', async () => {
     // The guide IS the real Claude Code agent; there is no stub of it.
     expect(await runMusicSetupCli(config(['--brain', 'stub']))).toBe(false)
+  })
+})
+
+// spec 07 §3.7/§5.15: the three switches, and what "all off" has to mean.
+describe('pacing wiring', () => {
+  const memory = new InProcessMemoryStore()
+
+  it('wires the sensor and both features by default, anchors over the ledger', () => {
+    const pacing = buildPacing(config([]), memory)!
+    expect(pacing.sensor).toBeInstanceOf(IdleSensor)
+    expect(pacing.scheduler).toBeInstanceOf(LedgerScheduler)
+    expect(pacing).toMatchObject({ invites: true, gating: true })
+  })
+
+  it('drops each feature on its flag while keeping the sensor', () => {
+    expect(buildPacing(config(['--no-anchors']), memory)!.scheduler).toBeUndefined()
+    expect(buildPacing(config(['--no-invites']), memory)!.invites).toBe(false)
+    expect(buildPacing(config(['--no-gating']), memory)!.gating).toBe(false)
+  })
+
+  it('all three off drops the block entirely — pre-spec-07 prompts AND timing', () => {
+    // Not merely "no anchors": with the block gone the Director adds no
+    // activity cue to the pack and never stretches the gap.
+    expect(buildPacing(config(['--no-anchors', '--no-invites', '--no-gating']), memory)).toBeUndefined()
   })
 })
 

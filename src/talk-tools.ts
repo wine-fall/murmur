@@ -13,6 +13,10 @@ import type { TalkBeat } from './contracts.ts'
 const beatSchema = z.object({
   text: z.string().describe('the spoken beat, a few sentences'),
   topic: z.string().optional().describe('optional 2-5 word key for anti-repeat'),
+  invite: z
+    .boolean()
+    .optional()
+    .describe('true only if this beat ends by turning to the listener and asking them something'),
 })
 
 const beatsShape = {
@@ -27,7 +31,7 @@ export function cleanBeats(raw: z.infer<typeof beatSchema>[], count: number): Ta
     const text = b.text.trim()
     if (!text) continue
     const topic = b.topic?.trim()
-    beats.push(topic ? { text, topic } : { text })
+    beats.push({ text, ...(topic && { topic }), ...(b.invite === true && { invite: true }) })
     if (beats.length >= count) break
   }
   return beats
@@ -40,6 +44,8 @@ export function emitTalkBeatsTool(count: number, capture: (beats: TalkBeat[]) =>
       'an object with `text` (a few sentences of clean spoken text: no markup, ' +
       'speaker labels, quotation marks, or stage directions) and an optional ' +
       '`topic` (a 2-5 word key naming what the beat is about, for anti-repeat). ' +
+      'Set `invite: true` on the ONE beat that ends by turning to the listener ' +
+      'and asking them something — only when the instructions asked for it. ' +
       'Calling this ends the task.',
     beatsShape,
     async (args) => {

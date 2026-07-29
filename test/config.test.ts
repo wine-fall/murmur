@@ -141,6 +141,28 @@ describe('music flags', () => {
   })
 })
 
+// spec 07 §3.7: everything proactive is switchable off, back to pre-spec-07.
+describe('pacing flags', () => {
+  it('defaults all three on', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect([config.anchorsEnabled, config.invitesEnabled, config.gatingEnabled]).toEqual([
+      true,
+      true,
+      true,
+    ])
+  })
+
+  it('--no-anchors / --no-invites / --no-gating turn them off independently', () => {
+    expect(parseCli(['--no-anchors'], NO_ENV).config).toMatchObject({
+      anchorsEnabled: false,
+      invitesEnabled: true,
+      gatingEnabled: true,
+    })
+    expect(parseCli(['--no-invites'], NO_ENV).config.invitesEnabled).toBe(false)
+    expect(parseCli(['--no-gating'], NO_ENV).config.gatingEnabled).toBe(false)
+  })
+})
+
 // spec 05 §2.3: memory lives under dataRoot()/memory, relocatable with
 // MURMUR_HOME; compaction runs on the cheap tier.
 describe('memory config', () => {

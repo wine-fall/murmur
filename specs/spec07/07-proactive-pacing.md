@@ -1,6 +1,13 @@
 # spec/07 · proactive-and-pacing — turning to you, time anchors, activity pacing
 
-> **Status**: **Design. Not yet implemented.**
+> **Status**: **Built (mechanism-level) 2026-07-29.** All four deliverables land
+> (`src/activity.ts`, `src/scheduler.ts`, `PacingCadence`, and the Director's
+> boundary / anchor / invite handling); the unit suite is green. The real
+> `ioreg` probe and the real Claude brain were smoke-tested through the SDK: the
+> model marks exactly one beat `invite: true`, and the slide-back neither
+> repeats the question nor remarks on the silence. **§5.16 (the sensory pass) is
+> open** — user-run. Two realization notes are marked **[built]** below (§2.2,
+> §3.1).
 > **Part**: The companion character of the program: the model-C **"turn to you /
 > slide back"** degree (master [`../DESIGN.md`](../DESIGN.md) §2.2), **time
 > anchors** via the Scheduler (§2.1 ⏰), **activity-aware pacing** via the
@@ -111,6 +118,21 @@ Prompt rendering appends a short cue (`src/prompts.ts`), and the cue is written
 so the host **adjusts its manner, never narrates the surveillance** — no "you
 seem to be away"; more like "the room is quiet, keep it low and unhurried". A
 `null`/unmapped value appends nothing.
+
+**[built]** The anchor / invite / slide-back wordings of §3.4-§3.5 need the same
+carrier, so the pack gained **one** further optional field beside it:
+
+```ts
+readonly cue?: string   // 'anchor:morning' | 'invite' | 'slide-back'
+```
+
+It is a plain `string` for the same reason `scene` is: `prompts.ts` maps it
+through a lookup table (`CUE_GUIDANCE`, beside `SCENE_GUIDANCE`), so an unknown
+value renders nothing and an older/newer build degrades to an ordinary beat.
+Local policy sets it; the model writes the words. One field rather than three
+booleans because the three intents are mutually exclusive per call by
+construction — an anchor is its own single-beat call, and the invite interval
+guarantees an invite and its slide-back never collide.
 
 ### 2.3 `Scheduler` — time anchors
 
@@ -234,9 +256,15 @@ beat — the policy degrades to "no invite this round", never to a broken segmen
 
 ### 3.1 Sensing presence (local, coarse, cheap)
 
-- Every typed line already flows through the Host into the Director; the Host
-  stamps `sensor.noteInput(new Date())` as it queues the line. That alone gives
-  a usable signal with zero new dependencies.
+- Every typed line already flows through the Host into the Director, which
+  stamps `sensor.noteInput(new Date())` as it takes the line. That alone gives a
+  usable signal with zero new dependencies. **[built]** The stamp lives in the
+  Director's `takeSteer()` rather than in the Host: all three `takeLine()` call
+  sites (the gap, the on-air race, the compose-merge) already funnel through one
+  place there, so the Host needs no new dependency and every typed line —
+  including a merged one — is stamped exactly once. The same funnel re-reads the
+  sensor immediately, which is what makes §3.3's "resume" work at the moment the
+  listener types instead of one boundary later.
 - The optional OS idle probe runs **at segment boundaries** (a few times a
   minute at most), with a short timeout, and its result is cached until the next
   boundary. No polling loop, no timer, nothing on the audio path.

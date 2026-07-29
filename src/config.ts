@@ -61,6 +61,13 @@ export const ConfigSchema = z.object({
   // degrades to talk-with-silence.
   bedEnabled: z.boolean().default(true),
 
+  // --- proactive & pacing (spec 07 §3.7) ---------------------------------- //
+  // On/off as config; the behavioral shape (thresholds, windows, intervals)
+  // stays as module constants. All three off = pre-spec-07 behavior.
+  anchorsEnabled: z.boolean().default(true),
+  invitesEnabled: z.boolean().default(true),
+  gatingEnabled: z.boolean().default(true),
+
   // --- memory (spec 05) --------------------------------------------------- //
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
   // home, relocatable via MURMUR_HOME.
@@ -127,6 +134,9 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'tts-reference': { type: 'string' },
       'no-music': { type: 'boolean' },
       'no-bed': { type: 'boolean' },
+      'no-anchors': { type: 'boolean' },
+      'no-invites': { type: 'boolean' },
+      'no-gating': { type: 'boolean' },
       'setup-music': { type: 'boolean' },
       'bootstrap-profile': { type: 'boolean' },
       cadence: { type: 'string' },
@@ -146,6 +156,9 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values['tts-reference'] !== undefined && { ttsReferenceId: values['tts-reference'] }),
     ...(values['no-music'] === true && { musicEnabled: false }),
     ...(values['no-bed'] === true && { bedEnabled: false }),
+    ...(values['no-anchors'] === true && { anchorsEnabled: false }),
+    ...(values['no-invites'] === true && { invitesEnabled: false }),
+    ...(values['no-gating'] === true && { gatingEnabled: false }),
     ...(values.cadence !== undefined && { cadenceMode: values.cadence }),
   })
   const maxSegments =

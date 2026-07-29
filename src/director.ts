@@ -15,6 +15,7 @@
 
 import { setTimeout as sleep } from 'node:timers/promises'
 
+import { currentActivity, type Activity, type ActivitySensor } from './activity.ts'
 import type { CadencePolicy } from './cadence.ts'
 import type {
   AudioClip,
@@ -34,6 +35,7 @@ import type {
 import type { Host } from './host.ts'
 import { buildMusicSituation } from './prompts.ts'
 import { currentScene } from './scene.ts'
+import type { AnchorId, Scheduler } from './scheduler.ts'
 
 const QUIT_COMMAND = '/quit'
 
@@ -55,6 +57,15 @@ const AVOID_DEPTH = 8
 // A module constant, not a config knob — deepen only if measurement shows a
 // remaining gap (spec 04 §6).
 const TALK_LOOKAHEAD = 2
+
+// spec 07 §3.7: behavioral shape as module constants, tunable by ear in one
+// place. How much longer the gap runs in an empty room; how many segments must
+// air between invites; how long an aired invite stays outstanding (segments OR
+// wall-clock, whichever comes first — a song can outlast two segments).
+const AWAY_GAP_FACTOR = 3
+const INVITE_EVERY_N = 4
+const INVITE_WINDOW_SEGMENTS = 2
+const INVITE_WINDOW_MS = 90_000
 
 export type Steer = { intent: 'quit' } | { intent: 'talkback'; text: string }
 
@@ -83,6 +94,17 @@ export type MusicWiring = {
   engine: MixingPlayer
 }
 
+// Proactive-and-pacing wiring (spec 07), optional as a block: without it the
+// Director behaves exactly as it did before spec 07 — no presence signal in the
+// pack, no anchors, no invites, no gating.
+export type PacingWiring = {
+  sensor: ActivitySensor
+  // Absent = --no-anchors.
+  scheduler?: Scheduler
+  invites?: boolean // default true; false = --no-invites
+  gating?: boolean // default true; false = --no-gating
+}
+
 export type DirectorDeps = {
   persona: string
   brain: Brain
@@ -93,6 +115,7 @@ export type DirectorDeps = {
   gapSeconds: number
   recentWindow: number
   music?: MusicWiring
+  pacing?: PacingWiring
   // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
@@ -115,6 +138,17 @@ export class Director {
   private talkFill: Pending<void> | null = null
   private talkEpoch = 0
   private talksSinceMusic = 0
+  // spec 07: the boundary's clock and presence reading, taken once per segment
+  // (§3.2) and refreshed when a typed line proves the listener is back.
+  private now = new Date()
+  private activity: Activity | undefined
+  // The invite state machine in full (§3.5): one counter, one flag, one
+  // deadline — there is deliberately nothing more, because a retry path is what
+  // would make the radio needy.
+  private segmentsSinceInvite = 0
+  private segmentsSinceUserLine = 1
+  private awaitingReply: { deadlineMs: number; segments: number } | null = null
+  private slideBackDue = false
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
   private pendingPick: Pending<TrackPick | null> | null = null
@@ -135,7 +169,14 @@ export class Director {
     this.deps.host.start()
     let produced = 0
     while (!this.quit && (maxSegments === undefined || produced < maxSegments)) {
-      if ((await this.wantsMusic()) && (await this.musicSegment())) {
+      this.beginBoundary()
+      const anchor = this.deps.pacing?.scheduler?.due(this.now) ?? null
+      // An anchor is checked BEFORE cadence, so it always wins the boundary it
+      // is due at (spec 07 §2.3).
+      if (anchor !== null) {
+        await this.anchorSegment(anchor)
+        this.talksSinceMusic++
+      } else if ((await this.wantsMusic()) && (await this.musicSegment())) {
         this.talksSinceMusic = 0
       } else {
         await this.talkSegment()
@@ -148,6 +189,126 @@ export class Director {
     }
   }
 
+  // --- presence, anchors, invites (spec 07) -------------------------------- //
+
+  // Once per boundary: read the clock and the presence signal, age the invite
+  // window, and turn an expired one into a slide-back.
+  private beginBoundary(): void {
+    this.now = new Date()
+    this.readActivity()
+    this.segmentsSinceInvite++
+    this.segmentsSinceUserLine++
+    const outstanding = this.awaitingReply
+    if (outstanding === null) return
+    outstanding.segments--
+    if (outstanding.segments > 0 && this.now.getTime() < outstanding.deadlineMs) return
+    // Nobody answered: drop the question and slide back into the program. There
+    // is no retry path — the interval counter runs from the invite that AIRED.
+    this.awaitingReply = null
+    this.slideBackDue = true
+    this.deps.host.debug?.('invite: window expired; sliding back')
+  }
+
+  // The sensor read, honoring MURMUR_ACTIVITY (by-ear). Also taken right after
+  // a typed line, so a listener who just came back is engaged immediately
+  // rather than at the next boundary (§3.3 resume).
+  private readActivity(): void {
+    const sensor = this.deps.pacing?.sensor
+    this.activity = sensor === undefined ? undefined : currentActivity(sensor, this.now)
+  }
+
+  // Talk generation pauses in an empty room (§3.3) — the two most expensive
+  // things the radio does, spent on nobody. Anchors are exempt (they ARE the
+  // welcome-back moment) and buffered beats are kept, never discarded.
+  private gated(): boolean {
+    const pacing = this.deps.pacing
+    return pacing !== undefined && (pacing.gating ?? true) && this.activity === 'away'
+  }
+
+  // Whether the NEXT batch may be asked to turn to the listener — all local,
+  // 0 tokens (§3.6). Re-evaluated at request time, not at air time.
+  private inviteEligible(): boolean {
+    const pacing = this.deps.pacing
+    if (pacing === undefined || pacing.invites === false) return false
+    return (
+      this.activity !== 'away' &&
+      this.awaitingReply === null &&
+      this.segmentsSinceInvite >= INVITE_EVERY_N &&
+      // They just typed — they are already engaged, so asking is redundant.
+      this.segmentsSinceUserLine >= 1
+    )
+  }
+
+  // The one place local policy picks a cue for an ordinary talk batch. The
+  // slide-back is one-shot: asked for once, then gone.
+  private talkCue(): string | undefined {
+    if (this.slideBackDue) {
+      this.slideBackDue = false
+      return 'slide-back'
+    }
+    if (!this.inviteEligible()) return undefined
+    // The interval restarts at REQUEST time, not at air time: an invited beat
+    // sits in the look-ahead for a boundary or two before it airs, and a refill
+    // in between must not queue a second one behind it (back-to-back questions
+    // are exactly the pressure §3.5 exists to prevent). A model that ignores
+    // the field simply costs this round's ask — the next comes at the normal
+    // interval, never sooner.
+    this.segmentsSinceInvite = 0
+    return 'invite'
+  }
+
+  private openInviteWindow(): void {
+    this.segmentsSinceInvite = 0
+    this.awaitingReply = {
+      deadlineMs: this.now.getTime() + INVITE_WINDOW_MS,
+      segments: INVITE_WINDOW_SEGMENTS,
+    }
+    this.deps.host.debug?.('invite: aired; awaiting a reply')
+  }
+
+  // Every typed line funnels through here: it stamps the presence sensor, and
+  // it clears any outstanding invite — the listener took the floor, so an
+  // answered invite is just ordinary talkback and no slide-back is owed (§3.9).
+  private takeSteer(): Steer {
+    const line = this.deps.host.takeLine()!
+    this.now = new Date()
+    this.deps.pacing?.sensor.noteInput(this.now)
+    this.readActivity()
+    this.segmentsSinceUserLine = 0
+    this.awaitingReply = null
+    return steerFromLine(line)
+  }
+
+  // One anchor beat, inserted AHEAD of the look-ahead buffer: the buffered beat
+  // airs at the following boundary, nothing is discarded or regenerated
+  // (§3.4/§3.9). Ledgered at air time, so a degraded generation leaves the
+  // anchor due at the next boundary instead of silently consuming the day's
+  // occurrence.
+  private async anchorSegment(id: AnchorId): Promise<void> {
+    const [beat] = await this.generateTalks(1, [], `anchor:${id}`)
+    if (beat === undefined) return
+    const clip = await this.synthesizeOrSkip(beat.text)
+    if (clip === null) return
+    this.airBeat(beat)
+    this.deps.pacing!.scheduler!.markFired(id, this.now)
+    this.deps.host.debug?.(`anchor ${id} aired`)
+    // Same two primings the ordinary talk path does, so an anchor does not leave
+    // the next boundary cold: the music pick resolves around this beat's mood,
+    // and the look-ahead (untouched by the anchor) is topped back up.
+    this.prefetchMusic(beat.text)
+    this.prefetchTalk()
+    await this.runVoice(onAir(this.deps.player.play(clip)))
+  }
+
+  // Printed + recorded at air time, so an interjection's reply sees this
+  // segment in context. The topic tag (when the model provided one) feeds the
+  // cross-day anti-repeat ledger (spec 05 §3.9).
+  private airBeat(beat: TalkBeat): void {
+    this.deps.host.onRadioSegment(beat.text)
+    this.deps.memory.record({ role: 'radio', text: beat.text })
+    if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
+  }
+
   // The real clock lives here; currentScene applies a MURMUR_SCENE override
   // (by-ear) over the pure, unit-tested bucketing. Profile + recent topics come
   // from the persistent store (spec 05 §3.5): profile is the stable-prefix
@@ -157,7 +318,7 @@ export class Director {
   // them instead of regenerating the same beat — the buffered text lives here
   // in the Director, so the stateless Brain is told what is already scheduled,
   // not only what has aired and been recorded.
-  private context(queued: readonly string[] = []): ContextPack {
+  private context(queued: readonly string[] = [], cue?: string): ContextPack {
     const recent = this.deps.memory.recent(this.deps.recentWindow)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
     return {
@@ -166,18 +327,18 @@ export class Director {
       scene: currentScene(new Date()),
       profile: this.deps.memory.profile(),
       coveredTopics: this.deps.memory.recentTopics(this.deps.recentWindow),
+      ...(this.activity !== undefined && { activity: this.activity }),
+      ...(cue !== undefined && { cue }),
     }
   }
 
   private async talkSegment(): Promise<void> {
     const aired = await this.nextTalkClip()
     if (aired === null) return // generation/synthesis degraded; the loop keeps broadcasting
-    // Printed + recorded at air time, so an interjection's reply sees this
-    // segment in context. The topic tag (when the model provided one) feeds the
-    // cross-day anti-repeat ledger (spec 05 §3.9).
-    this.deps.host.onRadioSegment(aired.beat.text)
-    this.deps.memory.record({ role: 'radio', text: aired.beat.text })
-    if (aired.beat.topic !== undefined) this.deps.memory.recordEvent('topic', aired.beat.topic)
+    this.airBeat(aired.beat)
+    // The beat the model marked as turning to the listener (spec 07 §2.6):
+    // hold the reply window open from the moment it airs.
+    if (aired.beat.invite === true) this.openInviteWindow()
     // Refill AFTER recording, so the top-up's context already carries this
     // just-aired beat and its Brain+synth overlap the playback below.
     this.prefetchTalk()
@@ -190,6 +351,15 @@ export class Director {
   // in-flight refill is awaited over a cold call so the two never
   // double-generate; a refill that degraded to nothing falls through cold.
   private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip } | null> {
+    // Nobody around: yield the whole boundary to music/bed (spec 07 §3.2 —
+    // "music/bed only"). Checked BEFORE the buffer is touched, so pre-synthesized
+    // beats are kept for the moment the listener returns rather than spent on an
+    // empty room — which is what happens in a talk-only session (--no-music, or
+    // a failed music preflight) where nothing else would gate this branch.
+    if (this.gated()) {
+      this.deps.host.debug?.('talk.gated: nobody around; yielding to music/bed')
+      return null
+    }
     if (this.talkAhead.length === 0 && this.talkFill !== null && !this.talkFill.done()) {
       await this.talkFill.promise
     }
@@ -203,7 +373,7 @@ export class Director {
       return clip === null ? null : { beat: primed.beat, clip }
     }
     this.deps.host.debug?.('talk.buffer cold; batching inline')
-    const beats = await this.generateTalks(TALK_LOOKAHEAD)
+    const beats = await this.generateTalks(TALK_LOOKAHEAD, [], this.talkCue())
     const first = beats.shift()
     if (first === undefined) return null
     this.prefetchMusic(first.text)
@@ -220,6 +390,7 @@ export class Director {
   // a consumed beat is recorded and at a music segment's start, so the buffer
   // stays full and the refill's work overlaps whatever is on air.
   private prefetchTalk(): void {
+    if (this.gated()) return // no batch, no parallel synthesis, no spend (§3.3)
     if (this.talkAhead.length >= TALK_LOOKAHEAD) return
     if (this.talkFill !== null && !this.talkFill.done()) return
     this.talkFill = pending(this.fillTalk())
@@ -235,7 +406,7 @@ export class Director {
     const epoch = this.talkEpoch
     const queued = this.talkAhead.map((b) => b.beat.text)
     this.deps.host.debug?.(`talk.refill need=${need} queued=${queued.length}`)
-    const beats = await this.generateTalks(need, queued)
+    const beats = await this.generateTalks(need, queued, this.talkCue())
     // A steer discarded the buffer while the batch was in flight: its beats
     // predate the user's turn — drop them.
     if (epoch !== this.talkEpoch) return
@@ -262,7 +433,12 @@ export class Director {
     if (music === undefined) return false
     const recent = this.deps.memory.recent(this.deps.recentWindow)
     const situation = recent.map((t) => `- ${t.role}: ${t.text}`).join('\n')
-    return (await music.cadence.nextKind({ talksSinceMusic: this.talksSinceMusic, situation })) === 'music'
+    const kind = await music.cadence.nextKind({
+      talksSinceMusic: this.talksSinceMusic,
+      situation,
+      ...(this.activity !== undefined && { activity: this.activity }),
+    })
+    return kind === 'music'
   }
 
   private musicContext(): MusicContext {
@@ -354,10 +530,14 @@ export class Director {
   // Batched generation with bounded retry; [] on ultimate failure (degrade —
   // lose the batch this round, never the radio). Serves both the cold path and
   // the background refill (spec 04 §3.3).
-  private async generateTalks(count: number, queued: readonly string[] = []): Promise<TalkBeat[]> {
+  private async generateTalks(
+    count: number,
+    queued: readonly string[] = [],
+    cue?: string,
+  ): Promise<TalkBeat[]> {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        return await this.deps.brain.nextTalks(this.context(queued), count)
+        return await this.deps.brain.nextTalks(this.context(queued, cue), count)
       } catch (err) {
         if (attempt < ATTEMPTS) {
           this.deps.host.debug?.(`talk.next_talks failed (attempt ${attempt}/${ATTEMPTS}); retrying`)
@@ -386,7 +566,10 @@ export class Director {
   // gap is not resumed afterward (the program moves to the next segment).
   private async gap(): Promise<void> {
     const ac = new AbortController()
-    const slept = sleep(this.deps.gapSeconds * 1000, undefined, { signal: ac.signal }).then(
+    // Longer gaps in an empty room (spec 07 §3.2) — the stream keeps playing,
+    // it just stops crowding a room nobody is in.
+    const factor = this.activity === 'away' ? AWAY_GAP_FACTOR : 1
+    const slept = sleep(this.deps.gapSeconds * factor * 1000, undefined, { signal: ac.signal }).then(
       () => true,
       () => false,
     )
@@ -394,8 +577,7 @@ export class Director {
     const finished = await Promise.race([slept, line])
     if (finished) return
     ac.abort()
-    const steer = steerFromLine(this.deps.host.takeLine()!)
-    await this.runVoice(null, undefined, steer)
+    await this.runVoice(null, undefined, this.takeSteer())
   }
 
   // The single steer-arbitration loop (spec 01 §3.3 + 03-02 §3.5): races the
@@ -429,7 +611,7 @@ export class Director {
             current = null // intro/reply finished; keep racing the song
             continue
           }
-          steer = steerFromLine(this.deps.host.takeLine()!)
+          steer = this.takeSteer()
         }
         if (steer.intent === 'quit') {
           this.quit = true
@@ -480,7 +662,7 @@ export class Director {
       ])
       if (winner.kind === 'ready') return winner.r
       prep.catch(() => {}) // discarded in-flight prepare (cannot cancel a promise)
-      const merged = steerFromLine(this.deps.host.takeLine()!)
+      const merged = this.takeSteer()
       if (merged.intent === 'quit') {
         this.quit = true
         return null

@@ -16,6 +16,7 @@ export class InProcessMemoryStore implements MemoryStore {
   private profileText = ''
   private topics: string[] = []
   private songs: string[] = []
+  private anchors: string[] = []
 
   private maxlen: number
 
@@ -38,7 +39,7 @@ export class InProcessMemoryStore implements MemoryStore {
   }
 
   recordEvent(kind: LedgerKind, key: string): void {
-    ;(kind === 'topic' ? this.topics : this.songs).push(key)
+    this.ledger(kind).push(key)
   }
 
   recentTopics(n: number): string[] {
@@ -47,6 +48,21 @@ export class InProcessMemoryStore implements MemoryStore {
 
   recentSongs(n: number): string[] {
     return n > 0 ? this.songs.slice(-n) : []
+  }
+
+  recentAnchors(n: number): string[] {
+    return n > 0 ? this.anchors.slice(-n) : []
+  }
+
+  private ledger(kind: LedgerKind): string[] {
+    switch (kind) {
+      case 'topic':
+        return this.topics
+      case 'song':
+        return this.songs
+      case 'anchor':
+        return this.anchors
+    }
   }
 }
 
@@ -115,6 +131,7 @@ export class PersistentMemoryStore implements MemoryStore {
   private turns: Turn[] = []
   private topics: string[] = []
   private songs: string[] = []
+  private anchors: string[] = []
   private profileText = ''
   private watermark = 0
   private lastTs = 0
@@ -164,6 +181,10 @@ export class PersistentMemoryStore implements MemoryStore {
 
   recentSongs(n: number): string[] {
     return n > 0 ? this.songs.slice(-n) : []
+  }
+
+  recentAnchors(n: number): string[] {
+    return n > 0 ? this.anchors.slice(-n) : []
   }
 
   // --- compaction surface (spec 05 §3.6 — driven by the Compactor) ---------- //
@@ -220,8 +241,16 @@ export class PersistentMemoryStore implements MemoryStore {
     if (this.turns.length > this.maxlen) this.turns.splice(0, this.turns.length - this.maxlen)
   }
 
+  // An unknown kind (a newer murmur's ledger) is skipped, not crashed on.
   private rememberEvent(kind: string, key: string): void {
-    const target = kind === 'topic' ? this.topics : kind === 'song' ? this.songs : null
+    const target =
+      kind === 'topic'
+        ? this.topics
+        : kind === 'song'
+          ? this.songs
+          : kind === 'anchor'
+            ? this.anchors
+            : null
     if (target === null) return
     target.push(key)
     if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)

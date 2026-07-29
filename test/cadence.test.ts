@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { BrainCadence, buildCadence, EveryNCadence, RandomCadence } from '../src/cadence.ts'
+import {
+  BrainCadence,
+  buildCadence,
+  EveryNCadence,
+  PacingCadence,
+  RandomCadence,
+  type CadencePolicy,
+  type CadenceState,
+  type SegmentKind,
+} from '../src/cadence.ts'
 
 import { callTool, FakeHarness } from './fakes.ts'
 
@@ -90,5 +99,41 @@ describe('buildCadence', () => {
 
   it('refuses brain mode with no harnessed brain behind it', () => {
     expect(() => buildCadence('brain', { everyN: 3 })).toThrow(/brain/i)
+  })
+})
+
+describe('PacingCadence — activity gating (spec 07 §2.5, acceptance 7)', () => {
+  // Records whether the wrapped policy was consulted at all: an away room must
+  // skip even the opt-in brain cadence, so gating saves that token too.
+  class SpyCadence implements CadencePolicy {
+    consulted = 0
+
+    async nextKind(_state: CadenceState): Promise<SegmentKind> {
+      this.consulted++
+      return 'talk'
+    }
+  }
+
+  it('short-circuits to music when away, without delegating', async () => {
+    const inner = new SpyCadence()
+    const cadence = new PacingCadence(inner)
+    expect(await cadence.nextKind({ talksSinceMusic: 0, activity: 'away' })).toBe('music')
+    expect(inner.consulted).toBe(0)
+  })
+
+  it('delegates in every other state, including an absent signal', async () => {
+    const inner = new SpyCadence()
+    const cadence = new PacingCadence(inner)
+    expect(await cadence.nextKind({ talksSinceMusic: 0, activity: 'engaged' })).toBe('talk')
+    expect(await cadence.nextKind({ talksSinceMusic: 0, activity: 'present' })).toBe('talk')
+    expect(await cadence.nextKind({ talksSinceMusic: 0 })).toBe('talk')
+    expect(inner.consulted).toBe(3)
+  })
+
+  it('composes with the brain cadence: away makes no brain call', async () => {
+    const harness = new FakeHarness()
+    const cadence = new PacingCadence(new BrainCadence({ brain: harness, model: 'm' }))
+    expect(await cadence.nextKind({ talksSinceMusic: 0, activity: 'away' })).toBe('music')
+    expect(harness.calls).toBe(0)
   })
 })

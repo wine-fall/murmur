@@ -9,16 +9,19 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
+import type { Activity } from './activity.ts'
 import type { Harness } from './contracts.ts'
 import { CADENCE_INSTRUCTION, CADENCE_STATE_HEADER } from './prompts.ts'
 
 export type SegmentKind = 'talk' | 'music'
 
-// Local signals a policy may consult; later specs extend it (pacing in 07, the
-// ledger in 05). `situation` is rendered text only BrainCadence reads.
+// Local signals a policy may consult. `situation` is rendered text only
+// BrainCadence reads; `activity` is the spec-07 presence signal PacingCadence
+// gates on.
 export type CadenceState = {
   readonly talksSinceMusic: number
   readonly situation?: string
+  readonly activity?: Activity
 }
 
 export interface CadencePolicy {
@@ -64,6 +67,24 @@ export class RandomCadence implements CadencePolicy {
     if (state.talksSinceMusic < this.minGap) return 'talk'
     if (state.talksSinceMusic >= this.maxGap) return 'music'
     return this.random() < this.p ? 'music' : 'talk'
+  }
+}
+
+// Presence policy composes with whatever cadence the user chose (spec 07 §2.5)
+// instead of replacing it: an away room gets music/bed, everything else is the
+// configured policy's call. The short-circuit lands BEFORE the delegation, so
+// an away room also skips the opt-in brain cadence — gating saves that token
+// too (§3.3).
+export class PacingCadence implements CadencePolicy {
+  private inner: CadencePolicy
+
+  constructor(inner: CadencePolicy) {
+    this.inner = inner
+  }
+
+  async nextKind(state: CadenceState): Promise<SegmentKind> {
+    if (state.activity === 'away') return 'music'
+    return this.inner.nextKind(state)
   }
 }
 

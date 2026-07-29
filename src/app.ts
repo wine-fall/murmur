@@ -7,13 +7,14 @@ import { join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
 
+import { IdleSensor, osIdleProbe } from './activity.ts'
 import { CachedBedSource, DEFAULT_MANIFEST, defaultBedCacheDir, pullBed, ytdlpDownload } from './bed.ts'
 import { ClaudeBrain, StubBrain } from './brain.ts'
-import { buildCadence } from './cadence.ts'
+import { buildCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
 import type { Config } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
-import { Director, type MusicWiring } from './director.ts'
+import { Director, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
@@ -24,6 +25,7 @@ import { MusicProgrammer } from './music-programmer.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona } from './persona.ts'
 import { musicSetupCheck, runMusicSetup } from './guide.ts'
+import { LedgerScheduler } from './scheduler.ts'
 import { runStartupChecks } from './startup.ts'
 import { StubVoice } from './voice.ts'
 
@@ -76,12 +78,31 @@ function buildMusic(config: Config, harness: Harness, engine: AudioEngine): Musi
     model: config.musicModel,
     probe: (s) => probeStream(s, config.ffmpegCmd),
   })
-  const cadence = buildCadence(config.cadenceMode, {
+  const configured = buildCadence(config.cadenceMode, {
     everyN: config.musicEveryN,
     brain: harness,
     model: config.musicModel,
   })
+  // Gating composes with the chosen cadence rather than replacing it (spec 07
+  // §2.5): an empty room gets music/bed, everything else is the user's policy.
+  const cadence = config.gatingEnabled ? new PacingCadence(configured) : configured
   return { source, cadence, engine }
+}
+
+// Presence wiring (spec 07). The sensor is what puts the activity cue in the
+// pack and stretches the away gap, so it rides along whenever ANY of the three
+// features is on — but with all three off, the block is dropped entirely and
+// the Director is exactly its pre-spec-07 self (§5.15: not merely no anchors,
+// but unchanged prompts and unchanged timing).
+export function buildPacing(config: Config, memory: MemoryStore): PacingWiring | undefined {
+  if (!config.anchorsEnabled && !config.invitesEnabled && !config.gatingEnabled) return undefined
+  const probe = osIdleProbe()
+  return {
+    sensor: new IdleSensor({ ...(probe !== undefined && { probe }) }),
+    ...(config.anchorsEnabled && { scheduler: new LedgerScheduler(memory) }),
+    invites: config.invitesEnabled,
+    gating: config.gatingEnabled,
+  }
 }
 
 // The explicit re-entry for a listener who declined the bootstrap on their
@@ -191,6 +212,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   }
 
   const music = musicOk && claude !== null ? buildMusic(config, claude, engine) : undefined
+  const pacing = buildPacing(config, memory)
 
   const director = new Director({
     persona,
@@ -201,6 +223,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     host,
     gapSeconds: config.gapSeconds,
     recentWindow: config.recentWindow,
+    ...(pacing !== undefined && { pacing }),
     ...(music !== undefined && { music }),
     ...(compactor !== undefined && { compactor }),
   })

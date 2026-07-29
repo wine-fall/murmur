@@ -38,6 +38,45 @@ function sceneLine(ctx: ContextPack): string {
   return cue === undefined ? '' : `\n${cue}`
 }
 
+// Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
+// narrates the sensing — the listener is kept company, not observed. An absent
+// or unmapped value renders nothing.
+export const ACTIVITY_GUIDANCE: Record<string, string> = {
+  engaged: "They're right here with you — you can be warm and responsive, talking with someone, not at them.",
+  present: "They're around but quiet — companionable, unhurried, nothing that demands an answer.",
+  away: 'The room is quiet — keep it low and unhurried, the way you would with someone half-asleep in the next room.',
+}
+
+// Per-call intents the Director asks the prompt to carry (spec 07 §3.4/§3.5).
+// Local policy decides WHETHER; the model writes WHAT. An unknown key renders
+// nothing, so a cue this build does not know degrades to an ordinary beat.
+export const CUE_GUIDANCE: Record<string, string> = {
+  'anchor:morning':
+    'This beat opens their day: a good-morning, in your own voice, that meets ' +
+    'them where the morning actually is — not a greeting formula.',
+  'anchor:midday':
+    'This beat lands in the middle of their day: a short check-in over the ' +
+    'hump, the kind you offer someone mid-shift.',
+  'anchor:night':
+    'This beat closes the day: a good-night that lets it settle, quiet and ' +
+    'unhurried, asking nothing of them.',
+  invite:
+    'End ONE of these beats by turning to the listener — something small and ' +
+    'genuinely curious that grows out of what you were just saying, and mark ' +
+    'that beat with `invite: true`. Ask because you want to know, not because ' +
+    'you need an answer: no pressing, no "are you there", nothing needy.',
+  'slide-back':
+    'You turned to them a little while ago and nobody answered. Move on ' +
+    'gracefully: pick the program back up, do not repeat the question, and do ' +
+    'not remark on the silence.',
+}
+
+function pacingLines(ctx: ContextPack): string {
+  const activity = ACTIVITY_GUIDANCE[ctx.activity ?? '']
+  const cue = CUE_GUIDANCE[ctx.cue ?? '']
+  return `${activity === undefined ? '' : `\n${activity}`}${cue === undefined ? '' : `\n${cue}`}`
+}
+
 // The tier-① listener profile as a leading stable block (spec 05 §3.5): it
 // precedes the volatile transcript so persona + profile form the cache-friendly
 // stable prefix (master §7 pillar 4). Empty -> nothing (degrade silently).
@@ -74,7 +113,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -86,7 +125,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}\n` +
+    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
