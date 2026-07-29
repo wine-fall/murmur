@@ -3,7 +3,34 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-28 (spec 04 talk look-ahead landed)_
+_Last updated: 2026-07-29 (spec restructure: 06 rescoped, 07 extended, 08/09 retired)_
+
+- **Spec restructure (2026-07-29, docs only — no code changed).** Decisions
+  taken with the user and now recorded in the specs:
+  - **The persona does NOT auto-evolve** (master §2.3, amended). It is a
+    stable, **user-editable** asset seeded once on first run; the **profile**
+    tier is what grows (spec 05 compaction, extended by spec 06 slice C).
+    Rationale: LLM rewrite loops mean-revert and have no user-visible
+    checkpoint — a host's charm is a stable character.
+  - **spec 06 rescoped** `persona-lifecycle` → **`first-run & relationship`**
+    ([`spec06/06-first-run.md`](spec06/06-first-run.md)): slice A first-run
+    onboarding → persona seed on disk; slice B optional, consented Claude-Code
+    history → **profile** bootstrap (absorbed from spec 09); slice C a
+    "relationship & style" section in the compaction prompt. Depends on 05
+    only; no new machinery loop.
+  - **spec 07 extended** ([`spec07/07-proactive-pacing.md`](spec07/07-proactive-pacing.md)):
+    turn-to-you degree + time anchors + ActivitySensor (keyboard/OS idle) **+
+    activity-gated generation**, absorbed from the dissolved 08.
+  - **spec 08 `token-economy` dissolved** — batch landed (04), caching is
+    SDK-level, tiering is a config knob, gating → 07, budget → backlog. Master
+    §7 stays the rationale home and now carries a per-pillar status column.
+  - **spec 09 `claude-code-ingestion` retired** as a standalone spec — profile
+    bootstrap → 06 slice B; persona inference cut; CC-derived activity signals
+    cut (local idle is cheaper and more accurate). The §10 row is kept, marked
+    retired, so the reasons are not re-litigated.
+- **Next build targets: spec 07, then spec 06** (both are Design-status specs,
+  written for a coding agent and ready to build test-first). **spec 10 (TUI)
+  stays parallel** — off the critical path, buildable any time.
 
 - **The implementation is TypeScript.** The Python → TS migration (issue #54)
   is complete: Phases 0–5 merged (PRs #56–#60 + the Phase 5 cutover PR). The
@@ -45,4 +72,5 @@ _Last updated: 2026-07-28 (spec 04 talk look-ahead landed)_
 - **Open: interactive guide acceptance (03-03 §5.3, user-run).** The repair
   flow in a real terminal against a genuinely broken binary — checklist handed
   over at Phase 4.5.
-- Later specs (06–09) are expected to change as we learn — not frozen.
+- Specs 06/07/10 are expected to keep changing as we learn — not frozen. (08 and
+  09 no longer exist as specs; see the restructure note above.)

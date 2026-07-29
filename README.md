@@ -2,7 +2,7 @@
 
 **A fully-local companion radio — "a radio that broadcasts for an audience of one," with Claude as its brain.**
 
-murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It's *mostly broadcasting*, but occasionally turns to you and asks something — if you don't engage, it gracefully slides back into the program. It has a **persona that grows**: seeded up front, then it learns you as it keeps you company. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
+murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It's *mostly broadcasting*, but occasionally turns to you and asks something — if you don't engage, it gracefully slides back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **local + proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
@@ -14,7 +14,7 @@ Three things together define its character; none is optional:
 
 - **🎙️ A continuous radio stream** — not "you ask, I answer," but a program stream that never goes silent. It *spontaneously* picks topics and talks, alternates talk with music, and hits time anchors (morning / midday / night) on schedule.
 - **🔀 Hybrid proactive/passive** — mostly broadcasting (no reply required; it's that voice in the background), occasionally turning to you. Engage and you chat; stay quiet and it flows on.
-- **🌱 A persona that grows** — a single evolving living asset, not a fixed constant or preset channels. It seeds from a few questions, then keeps rewriting itself to fit you better.
+- **🌱 A host that stays, a rapport that grows** — one host, not a rack of preset channels. Its character comes from a few questions on the first run and then holds still; it's a plain text file you can open and rewrite whenever you like, and nothing changes it behind your back. What does change is the part that should: what it knows about you, and how the two of you get on.
 
 ## Architecture
 
@@ -28,7 +28,7 @@ A single Node.js (TypeScript) process. One loop drives "speaking up," a readline
 | **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted fish-speech endpoint) |
 | **MusicProvider** | topic/query → audio stream; hot-swappable (v1 = yt-dlp, covering YouTube + Bilibili) |
 | **AudioEngine** | sole audio authority: one output stream mixing music + voice, gain-envelope **ducking** (talk rides over the song; an interjection ducks it, never stops it) |
-| **Memory** | who you are, topics discussed, songs played (anti-repeat), conversation log — the persona living asset lives here too |
+| **Memory** | who you are, topics discussed, songs played (anti-repeat), conversation log — and the host's own character file, written once at setup and yours to edit after that |
 
 **No dead air**: while the current segment plays, the Director prepares the next one's audio ahead of time so it joins seamlessly.
 
@@ -49,7 +49,7 @@ Building, in ordered sub-specs under [`specs/`](specs/). Each step runs and adds
 - **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): the hosted fish-speech voice (`MURMUR_TTS_*` endpoint config, sentence pacing, seed-pinned timbre); local TTS backends are deferred. **L0 is now audible.**
 - **✅ Spec 03 — `brain-harness` + `ducking` + `guide-harness`** (code-implemented; by-ear acceptance is the open gate): Claude-driven music discovery, the mixing AudioEngine with ducking, cadence scheduling, startup checks + the yt-dlp repair guide. **L1 is code-complete.**
 
-Later specs: no-dead-air look-ahead (04), persistent memory (05), persona lifecycle (06), proactive + pacing (07), token economy (08), Claude Code ingestion (09), TUI (10).
+Also landed since: the no-dead-air look-ahead (04) and persistent memory across sessions (05). Still ahead: proactive + pacing — turning to you, time anchors, going quiet when you're away (07); first run & rapport — the setup questions, an optional read of your Claude Code history to get to know you sooner, and the memory of how you two get on (06); the TUI (10). Two former specs are gone: the token economy is now folded into the specs that own the behavior, and Claude Code ingestion lives inside first-run setup.
 
 > **The L0 loop is talk-only.** The irreducible magic is "autonomous voice + you can talk back"; music is the immediate next step (L1).
 
