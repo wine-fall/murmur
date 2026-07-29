@@ -10,6 +10,8 @@
 
 import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
 
+import type { Activity } from './activity.ts'
+
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
   readonly source: string
@@ -22,16 +24,22 @@ export type Turn = {
 }
 
 // One self-initiated talk beat from the batched call (spec 04 §3.2). `topic`
-// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4).
+// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4);
+// `invite` marks the beat that ends by turning to the listener (spec 07 §2.6) —
+// a model that ignores it just produces a normal beat.
 export type TalkBeat = {
   readonly text: string
   readonly topic?: string
+  readonly invite?: boolean
 }
 
 // The compact context handed to the Brain per call (master §6). Beyond the
 // spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
 // spec 05 §2.2); `profile` and `coveredTopics` are the tier-①/③ memory reads
 // (spec 05 §3.5 — coveredTopics is cross-day, the issue-#44 anti-repeat).
+// `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
+// and `cue` the per-call intent the Director asks the prompt to carry (an
+// anchor, an invite, a slide-back — spec 07 §3.4/§3.5).
 // All optional: absent renders nothing, so spec-01 call sites stay valid.
 export type ContextPack = {
   readonly persona: string
@@ -39,6 +47,8 @@ export type ContextPack = {
   readonly scene?: string
   readonly profile?: string
   readonly coveredTopics?: readonly string[]
+  readonly activity?: Activity
+  readonly cue?: string
 }
 
 export interface VoiceProvider {
@@ -85,11 +95,14 @@ export interface BedSource {
   tracks(): string[]
 }
 
-export type LedgerKind = 'topic' | 'song'
+// 'anchor' keys one aired time anchor (spec 07 §2.4), so a restart inside the
+// window does not re-fire it.
+export type LedgerKind = 'topic' | 'song' | 'anchor'
 
 // The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
 // profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
-// recentSongs span sessions and days on the persistent store (issue #44).
+// recentSongs / recentAnchors span sessions and days on the persistent store
+// (issue #44; spec 07 §2.4).
 export interface MemoryStore {
   record(turn: Turn): void
   recent(n: number): Turn[]
@@ -97,6 +110,7 @@ export interface MemoryStore {
   recordEvent(kind: LedgerKind, key: string): void
   recentTopics(n: number): string[]
   recentSongs(n: number): string[]
+  recentAnchors(n: number): string[]
 }
 
 // A search hit the brain judges (spec 03-01 §2.2): enough signal to reject junk

@@ -77,7 +77,7 @@ node src/main.ts --voice hosted
 
 **Music** needs two external binaries — `ffmpeg` (decode) and `yt-dlp` (source) — which are deliberately *not* Python dependencies: the startup check detects a missing/broken one and the setup assistant offers to fix it (`murmur --setup-music` runs the same repair on demand). To provision by hand: `brew install ffmpeg yt-dlp`. Without them the radio runs talk-only; `--no-music` skips music entirely.
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`. Stop cleanly with `Ctrl-C`.
+Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats), `--no-invites` (it never turns to you and asks), and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
 
 ## Development
 

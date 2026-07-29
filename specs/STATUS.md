@@ -35,8 +35,22 @@ _Last updated: 2026-07-29 (spec restructure: 06 rescoped, 07 extended, 08/09 ret
   compaction prompt now maintains a second "relationship & style" section
   (slice C). Unit gate green, and slices A/B were smoke-tested through the real
   SDK. **Owed**: the first-run pass in a real terminal (criterion 12, user-run).
-- **Next build target: spec 07.** **spec 10 (TUI) stays parallel** — off the
-  critical path, buildable any time.
+- **spec 07 (proactive & pacing) is built at the mechanism level** (2026-07-29):
+  `ActivitySensor`/`IdleSensor` (idle time only, optional macOS `ioreg` probe,
+  degrades to murmur's own input recency), time anchors on the tier-③ ledger
+  (`anchorDay` keys an occurrence by the date its window OPENED, so the
+  22:00-01:00 night window cannot double-fire across midnight),
+  `PacingCadence` + away gating (zero `nextTalks`/`synthesize` in an empty room;
+  the look-ahead buffer is kept, not discarded), and the invite / slide-back
+  window (one counter, one flag, one deadline — deliberately no retry path).
+  All three switchable off (`--no-anchors` / `--no-invites` / `--no-gating`).
+  **Owed: the §5.16 sensory pass (user-run)** — do the anchors land at the right
+  moments, does the invite read as inviting rather than needy, does walking away
+  make it go quiet without feeling dead? Every constant in the spec is a by-ear
+  guess and the first real day is expected to move several.
+- **Next build target: spec 10 (TUI)** — with 06 and 07 both built, it is what
+  is left on the board. The two by-ear passes 06 and 07 each owe (first-run in a
+  real terminal; a real day of pacing) are the user's to run and gate nothing.
 
 - **The implementation is TypeScript.** The Python → TS migration (issue #54)
   is complete: Phases 0–5 merged (PRs #56–#60 + the Phase 5 cutover PR). The

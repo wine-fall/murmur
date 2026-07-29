@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ContextPack } from '../src/contracts.ts'
 import {
+  ACTIVITY_GUIDANCE,
   buildCompactionPrompt,
   buildFixMusicPrompt,
   buildMusicSituation,
@@ -10,6 +11,7 @@ import {
   buildRespondPrompt,
   buildSeedPersonaPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
+  CUE_GUIDANCE,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
   PERSONA_CHAR_CAP,
@@ -254,5 +256,59 @@ describe('profile bootstrap prompt (spec 06 slice B)', () => {
   it('excludes secrets and surveillance-shaped detail', () => {
     expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/secret|credential/i)
     expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/surveillance/i)
+  })
+})
+
+// --- spec 07 ---------------------------------------------------------------- //
+
+describe('pacing cues (spec 07 §2.2/§3.4/§3.5)', () => {
+  const pack = (over: Partial<ContextPack>): ContextPack => ({ persona: 'p', recent: [], ...over })
+
+  it('renders an activity cue that adjusts manner without narrating the sensing', () => {
+    const quiet = buildNextTalksPrompt(pack({ activity: 'away' }), 2)
+    expect(quiet).toContain(ACTIVITY_GUIDANCE.away)
+    expect(quiet.toLowerCase()).not.toContain('idle')
+    expect(quiet.toLowerCase()).not.toContain('seem to be away')
+    expect(buildNextTalksPrompt(pack({ activity: 'engaged' }), 2)).toContain(
+      ACTIVITY_GUIDANCE.engaged,
+    )
+  })
+
+  it('renders nothing for an absent or unknown activity', () => {
+    const bare = buildNextTalksPrompt(pack({}), 2)
+    for (const cue of Object.values(ACTIVITY_GUIDANCE)) expect(bare).not.toContain(cue)
+    // An unmapped value degrades silently, like an unknown scene.
+    const odd = buildNextTalksPrompt(pack({ activity: 'asleep' as never }), 2)
+    expect(odd).toBe(bare)
+  })
+
+  it('renders the per-anchor cue', () => {
+    for (const id of ['morning', 'midday', 'night'] as const) {
+      const p = buildNextTalksPrompt(pack({ cue: `anchor:${id}` }), 1)
+      expect(p).toContain(CUE_GUIDANCE[`anchor:${id}`])
+    }
+    // Each anchor speaks differently.
+    expect(CUE_GUIDANCE['anchor:morning']).not.toBe(CUE_GUIDANCE['anchor:night'])
+  })
+
+  it('the invite cue asks for the mark and forbids pressing', () => {
+    const p = buildNextTalksPrompt(pack({ cue: 'invite' }), 2)
+    expect(p).toContain('invite')
+    expect(p).toContain(CUE_GUIDANCE.invite)
+  })
+
+  it('the slide-back cue moves on without repeating or commenting on silence', () => {
+    const p = buildNextTalksPrompt(pack({ cue: 'slide-back' }), 2)
+    expect(p).toContain(CUE_GUIDANCE['slide-back'])
+  })
+
+  it('an unknown cue renders nothing', () => {
+    expect(buildNextTalksPrompt(pack({ cue: 'nonsense' }), 2)).toBe(buildNextTalksPrompt(pack({}), 2))
+  })
+
+  it('cues reach the single-beat fallback prompt too', () => {
+    expect(buildNextTalkPrompt(pack({ cue: 'anchor:night', activity: 'present' }))).toContain(
+      CUE_GUIDANCE['anchor:night'],
+    )
   })
 })
