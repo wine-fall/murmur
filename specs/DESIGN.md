@@ -43,7 +43,7 @@ A **fully-local companion radio** — "a radio that broadcasts for an audience o
 
 > **Product framing**: murmur is an **open-source, non-commercial product** distributed to users. "Audience of one" is the *experience* — each user runs their own private, fully-local radio — **not** a personal one-off; the earlier "personal use" framing is retired. Model choices follow a **two-phase strategy** (§3.7): experiment with good local/open models now, adopt paid/licensed models at distribution.
 
-It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **mostly broadcasting, but occasionally turns to me and asks something** (if I don't engage, it gracefully slides back into the program). It has a **persona that grows** — seeded by a few questions up front, then it learns me as it keeps me company and fits me better over time. I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
+It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **mostly broadcasting, but occasionally turns to me and asks something** (if I don't engage, it gracefully slides back into the program). It has a **persona seeded by a few questions up front** and it **keeps learning me** as it keeps me company, so it fits me better over time. (Amended 2026-07-29, §2.3: the *host's character* stays stable — what grows is what it knows about me and how we get on.) I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 **Differentiation**: existing tools are either "voice-control Claude Code to write code" or message-driven assistants. **Nobody occupies the "local + proactive + emotional companionship + voice radio" combination.** That gap is murmur.
 
@@ -73,6 +73,13 @@ The persona is **not a hard-coded constant — it is an evolving, living asset**
 - **A single evolving persona**, not "preset channels you switch between." (Multi-channel / multi-mode is out of v1.)
 
 > **Important layering distinction**: "what personality / tone the host has" is a **detail** — it lives in the System Prompt, maintained in natural language. The **only high-level matter** about persona is the fact that *it is alive and self-customizing* — and that is already decided.
+
+> **Amended (2026-07-29, persona direction) — the persona does NOT auto-evolve; what grows is the *profile*.** This **supersedes** the "continuous evolution → gradually rewrites the persona" bullet and the persona half of the "permissioned data bootstrap" bullet above (both kept for history). Decision:
+> - **The persona file is a stable, user-editable asset.** It is seeded once (first run, spec 06 slice A) and afterwards written only by the user, in an editor. Nothing in murmur machine-rewrites it; spec 01's static persona load is unchanged, and spec 05 §3.2 keeps `persona.md` as its writable home (a home for the *user's* edits, not for a rewrite loop).
+> - **"It grows with you" is delivered by the profile tier** (memory tier ①, §6). Spec 05's periodic compaction *already* implements the observe→rewrite loop over the **listener picture**; spec 06 slice C extends that same prompt with a "relationship & style" section. No second evolution machine is built.
+> - *Rationale*: LLM rewrite loops mean-revert. Dozens of compactions would blur a distinctive host into a generic assistant voice, and there is **no user-visible checkpoint** in an automatic loop that would catch the drift before it is the character. A radio host's charm is a **stable character**; what adapts is the *content* it talks about and the *relationship* it has with the listener.
+> - **Optional future path (not v1)**: a **user-invoked** persona edit — the brain proposes a diff, the user approves it (the guide-style consent posture of spec 03-03) — never silent drift.
+> - **Consequence**: the permissioned Claude-Code bootstrap produces a **profile**, not a persona (spec 06 slice B); persona *inference* from CC history is cut, and spec 09 is retired (§10).
 
 ---
 
@@ -176,8 +183,8 @@ Each item records the **why**, to avoid re-litigating later.
 | **VoiceProvider** | text → speech, hot-swappable TTS (v1 = hosted endpoint), splittable fast/rich by scenario | candidate pool in 3.5 |
 | **MusicProvider** | topic/query → audio stream, hot-swappable | v1 = yt-dlp |
 | **AudioPlayer** | sole audio authority: sequence TTS + music, duck/stop on interrupt | only one thing "on air" at a time |
-| **Memory** | who you are, topics discussed, segments/songs played (anti-repeat), conversation log; **the persona living asset also lives here** | see §6 |
-| **ActivitySensor** | observe your active hours (keyboard / Claude Code usage / clock…) → feed the Director's pacing | shares the Claude Code data source with persona bootstrap |
+| **Memory** | who you are, topics discussed, segments/songs played (anti-repeat), conversation log; **the persona file also lives here** (its writable home; user-edited, §2.3 amended) | see §6 |
+| **ActivitySensor** | observe whether you are around (v1: **keyboard idle time**, plus the clock) → feed the Director's pacing and gate generation | spec 07; local signal only — mining Claude Code logs for activity was considered and cut (§10 row 09) |
 | **Scheduler** | time anchors (morning/night) → inject "moment" segments | |
 
 > **Structure vs content**: the architecture layer only cares about "what *structural* kinds of segment exist" (talk vs music vs time-anchor — different machinery). "What topics it talks about, in what tone" is content — maintained via System Prompt / natural language, **not architecture**.
@@ -207,7 +214,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 
 | Tier | Stores | How it's used |
 |---|---|---|
-| **① Profile (long-term)** | who you are, preferences, recent context, favorite topics, **the persona (living asset)** | injected every prompt; the core of "it gets me"; persona evolution = updating this tier |
+| **① Profile (long-term)** | who you are, preferences, recent context, favorite topics, **the persona file** (its writable home; §2.3 amended — user-edited, never machine-rewritten) | injected every prompt; the core of "it gets me". **The profile is the tier that evolves** (compaction, spec 05 §3.6; relationship & style section, spec 06 slice C) |
 | **② History (mid-term)** | conversation log (your input + what it broadcast), recent window | take the last N for continuity |
 | **③ Ledger (anti-repeat)** | topics covered, songs played, broadcast times | checked at segment selection for de-dup and callbacks |
 
@@ -226,7 +233,7 @@ delete it**:
 
 | Under `~/.murmur/` | Holds | If deleted |
 |---|---|---|
-| `data/` | the Memory tiers (§6), incl. the evolving persona | **irreplaceable** — loses user state; this is the thing to back up |
+| `data/` | the Memory tiers (§6), incl. the user's persona file | **irreplaceable** — loses user state; this is the thing to back up |
 | `cache/` | the background-music `bed/` | **rebuildable** — costs a re-pull |
 
 - **`paths.py` is the single module allowed to resolve these locations** — no
@@ -242,17 +249,19 @@ delete it**:
 ## 7. Token economy (the radio talks nonstop; without care it burns the subscription)
 
 Three pillars + helpers:
-| # | Strategy | Saves where | v1? |
-|---|---|---|---|
-| 1 | **Don't call Claude for everything** | "talk vs music," "which anchor" are the Director's local policy, 0 tokens *(default; spec 03-02's opt-in `brain` cadence mode is the one sanctioned exception — the user explicitly trades a cheap one-shot call per segment boundary for feel)* | ✅ |
-| 2 | **Batch generation (most important)** | one call generates the next N segments' scripts (a monologue split into beats), doled out between songs → one call covers minutes of radio | ✅ |
-| 3 | **Tiered models** | Haiku for idle filler, Opus only when you genuinely engage | ✅ |
-| 4 | **Cache the stable prefix** | `persona + profile` goes through prompt caching → near-free on repeated calls; send only history deltas | ✅ |
-| 5 | **Activity-gated generation** | when you're away → go quiet (more music / pause talk generation), don't burn tokens on an empty room | ✅ |
-| 6 | **Local templated filler** | time announcements, "up next, from…", fixed greetings → local templates, no LLM | ✅ |
-| 7 | **Budget + graceful degradation** | near the cap, fall back to "music + templates" | △ later |
+| # | Strategy | Saves where | v1? | Status / home (2026-07-29) |
+|---|---|---|---|---|
+| 1 | **Don't call Claude for everything** | "talk vs music," "which anchor" are the Director's local policy, 0 tokens *(default; spec 03-02's opt-in `brain` cadence mode is the one sanctioned exception — the user explicitly trades a cheap one-shot call per segment boundary for feel)* | ✅ | **Landed** — the `CadencePolicy` seam (spec 03-02 §2.3); `every_n` / `random` are pure local policy |
+| 2 | **Batch generation (most important)** | one call generates the next N segments' scripts (a monologue split into beats), doled out between songs → one call covers minutes of radio | ✅ | **Landed** — spec 04 §3.2/§3.3 talk look-ahead (batching pulled forward as the latency vehicle) |
+| 3 | **Tiered models** | Haiku for idle filler, Opus only when you genuinely engage | ✅ | **A config knob, not a spec** — `musicModel` / `compactModel` already select the cheap tier; widening it is a config change |
+| 4 | **Cache the stable prefix** | `persona + profile` goes through prompt caching → near-free on repeated calls; send only history deltas | ✅ | **SDK-level, essentially free** — the pack ordering is already cache-friendly (spec 05 §3.5); remaining work is config/verification, not a build |
+| 5 | **Activity-gated generation** | when you're away → go quiet (more music / pause talk generation), don't burn tokens on an empty room | ✅ | **Moved into spec 07** — it is a pacing policy, and it needs 07's ActivitySensor to have a signal at all |
+| 6 | **Local templated filler** | time announcements, "up next, from…", fixed greetings → local templates, no LLM | ✅ | **Unowned / partly moot** — the DJ "up next" line is written by the pick task itself at zero extra calls (spec 03-02 §1); time-anchor copy is spec 07's to decide (template vs brain) |
+| 7 | **Budget + graceful degradation** | near the cap, fall back to "music + templates" | △ later | **Deferred (backlog)** — no spec owns it; open it only if real usage shows the subscription burning |
 
 Core: pillars 2 (batch) + 5 (activity-gating) + 4 (caching) turn "always on the air" from "always burning" into "generate once, play slowly, rest when nobody's listening."
+
+> **Amended (2026-07-29) — spec 08 `token-economy` is dissolved; §7 stays the rationale home.** The economy never needed a spec of its own: each pillar is either already landed, a config knob, or a policy that belongs to the spec that owns the behavior. Dispositions are the status column above (batch → landed in 04; caching → SDK-level; tiering → config; activity-gating → spec 07; budget/degradation → backlog). See §10 for the build-order row.
 
 ---
 
@@ -262,11 +271,11 @@ Core: pillars 2 (batch) + 5 (activity-gating) + 4 (caching) turn "always on the 
 - Claude brain (subscription auth) · always-on CLI (keyboard in / voice out)
 - Continuous radio stream (autonomous talk + music + time anchors) · hybrid proactive/passive (model C)
 - Hot-swappable TTS (human-ness first) · yt-dlp music (YouTube+Bilibili)
-- A persona that grows (onboarding seed + learn-as-you-go)
+- A persona seeded on first run (stable, user-editable) + a listener profile that grows (§2.3 amended)
 - Memory three tiers + token-economy three pillars
 
 ### Committed to v1 but split into later sub-specs / steps
-- **Permissioned ingestion of Claude Code data** → bootstrap persona & sense activity (its own sub-spec)
+- **Permissioned ingestion of Claude Code data** → bootstrap the **profile** (spec 06 slice B; *not* a standalone spec any more — persona inference and CC-derived activity signals are cut, §10 row 09)
 - Concrete activity-pacing mechanism · the "degree" of proactive/passive · blind A/B to pick the primary TTS (→ eval track, §10.3) · semantic memory recall
 
 ### Explicitly not in v1
@@ -290,11 +299,11 @@ The **minimal playable loop** is the smallest end-to-end slice that delivers the
 ### 9.2 L0 decisions (chosen for fastest path to a working loop)
 | Aspect | L0 choice | Rationale |
 |---|---|---|
-| Persona | hand-written **static** System Prompt seed | onboarding Q&A + evolution is its own sub-spec; L0 does not touch it |
+| Persona | hand-written **static** System Prompt seed | first-run onboarding Q&A is its own sub-spec (06); L0 does not touch it |
 | Voice | wire **Qwen3-TTS first** (from the candidate pool) | it is the only **real-time-on-Mac** option, so the loop feels live; the `VoiceProvider` seam stays open for hot-swapping the rest |
 | Memory | **session-only** in-process history (coherence within one run) | cross-session persistence deferred to sub-spec 05 |
 | Dead air | **accept small gaps**, no look-ahead | look-ahead is polish (sub-spec 04); get the loop running first |
-| Token economy | minimal: **one segment per call + natural pause between segments + manual stop** | full economy (batch/cache/tier/gate) deferred to sub-spec 08; but because it talks nonstop, L0 still needs a cadence + an easy stop so testing does not drain the subscription |
+| Token economy | minimal: **one segment per call + natural pause between segments + manual stop** | the fuller economy is deferred past L0 (batch landed in 04; the rest per the §7 status column, spec 08 dissolved); but because it talks nonstop, L0 still needs a cadence + an easy stop so testing does not drain the subscription |
 | Process | **foreground single process**, closing the terminal stops it | the daemon/detach option is a non-blocking later side-spec (see §10) |
 
 ### 9.3 L0 acceptance criteria (feature level — "done")
@@ -304,7 +313,7 @@ The **minimal playable loop** is the smallest end-to-end slice that delivers the
 4. The user can **stop it cleanly**.
 
 ### 9.4 Explicitly deferred out of L0
-Music (→ L1 / specs 03-01 & 03-02), no-dead-air look-ahead (04), persistent memory (05), onboarding + persona evolution (06), proactive "turn to you" + time anchors + activity pacing (07), full token economy (08), Claude Code ingestion (09).
+Music (→ L1 / specs 03-01 & 03-02), no-dead-air look-ahead (04), persistent memory (05), first-run onboarding + relationship (06), proactive "turn to you" + time anchors + activity pacing + activity-gated generation (07). *(The former 08 token-economy and 09 CC-ingestion specs are dissolved/retired — §7 and §10.)*
 
 ---
 
@@ -321,10 +330,10 @@ v1 ships as **a sequence of sub-specs**, ordered so that **every step runs and a
 | **03-03 ✅** | `guide-harness` | A second capability on the harness (03-01): shape the **native Claude Code agent** (built-in tools, step-by-step `default` confirmation — never `bypassPermissions`) to diagnose and, with user consent, **fix why the music dependency (yt-dlp) isn't working in the user's environment** (e.g. a corporate proxy's untrusted CA). Deterministic preflight triggers it; confirmations flow through the CLI Host (no TUI). Makes 03's music **actually usable** on constrained machines. | **L1** (music works everywhere) | 01, 03-01 |
 | **04 🔨** | `no-dead-air` | 1-segment look-ahead / pre-generation buffer to remove inter-segment gaps. **Pulled forward** (ahead of order) for first-cold-start latency: slice 1 = music-pick prefetch; slice 2 = batched talk look-ahead (borrows 08's batch pillar as the vehicle). | polish | 01,02,03-01,03-02 |
 | **05** | `memory` | Persistent three tiers (profile/history/ledger) + context-pack assembly + periodic compaction. | cross-session "gets me" | 01 |
-| **06** | `persona-lifecycle` | Onboarding seed Q&A + persona evolution loop (observe → rewrite). | living persona | 05 |
-| **07** | `proactive-and-pacing` | Model-C "turn to you / slide back" degree + time anchors (Scheduler) + activity-aware pacing (ActivitySensor). | companion character | 01,05 |
-| **08** | `token-economy` | Batch generation + prompt caching + tiered models + activity-gating + budget/graceful degradation. | don't burn the quota | 01,05,07 |
-| **09** | `claude-code-ingestion` | Permissioned ingestion of Claude Code data → bootstrap persona (feeds 06) + activity signals (feeds 07). | accelerator | 06,07 |
+| **06** *(rescoped 2026-07-29)* | `first-run & relationship` ([`specs/spec06/06-first-run.md`](spec06/06-first-run.md)) | Three slices, no new machinery loops: **A** first-run onboarding (no persona file → the host asks ~3 seed questions → the brain writes the persona seed to disk); **B** optional, explicitly-consented one-shot Claude-Code-history **profile** bootstrap on the 03-01 harness seam (absorbed from the retired 09); **C** a "relationship & style" section maintained by the existing spec-05 compaction prompt. **Was** `persona-lifecycle` (onboarding + persona evolution loop) — the evolution loop is **cut** per §2.3 (amended): the persona is stable and user-editable; the profile is what grows. | first run + relationship | 05 |
+| **07** | `proactive-and-pacing` ([`specs/spec07/07-proactive-pacing.md`](spec07/07-proactive-pacing.md)) | Model-C "turn to you / slide back" degree + time anchors (Scheduler) + activity-aware pacing (ActivitySensor, keyboard-idle) + **activity-gated generation** (absorbed 2026-07-29 from the dissolved 08 pillar 5 — it is a pacing policy, §7). | companion character | 01,05 |
+| **~~08~~** | ~~`token-economy`~~ — **dissolved 2026-07-29, no longer a spec** | Per-pillar disposition (§7 status column): batch generation → **landed** (spec 04); prompt caching → **SDK-level**, config/verification only; tiered models → **a config knob** (`musicModel`/`compactModel`); activity-gated generation → **spec 07**; budget + graceful degradation → **deferred backlog**. §7 remains the rationale home. | — | — |
+| **~~09~~** | ~~`claude-code-ingestion`~~ — **retired 2026-07-29 as a standalone spec** (row kept: it records why, so it is not re-litigated) | CC → **profile** bootstrap moved into **spec 06 slice B**. CC → **persona** inference **cut** (the persona is user-seeded and stable, §2.3 amended). CC → **activity signals** for 07 **cut**: local keyboard-idle time is cheaper and more accurate than mining CC logs. | — | — |
 | **10** | `tui` | Front-end refinement: replace the CLI Host's plain print/stdin with a real **TUI** (live now-playing/status region + scrolling program log + a stable input line). The **single richer front-end murmur ever gets** — there is no GUI/menu-bar/web. | front-end polish (off the L0→L1 critical path) | 01 |
 
 ### 10.1 Decomposition principles
@@ -373,6 +382,6 @@ When a test or eval needs an **actual LLM** (not a canned fake) — exercising p
 - **Why personal use matters**: it unlocks the most emotional, non-commercially-licensed TTS.
 - **Why yt-dlp for v1 music**: the only "no login, no membership, no app" start that also covers Chinese (Bilibili); Spotify is gated by Premium, NetEase by unofficial-API + login.
 - **Why single loop + look-ahead**: a radio can't have dead air; this is the minimum-cost prevention.
-- **Why persona lives in Memory**: the persona is an evolving living asset, not a constant.
+- **Why persona lives in Memory**: it needs a **writable, user-owned home** next to the profile (seeded on first run, then edited by the user) — not because murmur rewrites it. Auto-evolution was considered and rejected (§2.3, amended 2026-07-29): rewrite loops mean-revert, so the *profile* grows and the character stays.
 - **Structure vs content**: a segment's *kind* is architecture; what a segment *talks about* is a System Prompt detail.
 - **No API server / no DB in v1**: single process, one consumer (your terminal), local-file persistence; add a server/DB only when a second front-end or query-heavy state appears.

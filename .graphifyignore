@@ -1,0 +1,19 @@
+# What graphify must not turn into graph nodes.
+#
+# Writing this file replaces graphify's implicit gitignore-derived skipping, so
+# the previously-implicit entries are repeated here explicitly. Keep it in sync
+# with .gitignore when a new local-artifact directory appears.
+
+# Local tool state, not a fact about this project: the impeccable hook cache is
+# a per-machine record of which files were edited when, and it still carries
+# pre-cutover `ts/src/...` paths that no longer exist.
+.impeccable/
+
+# Throwaway smoke/probe scripts and handoff drafts (murmur-smoke) — never committed.
+scratch/
+
+# Local dev-session artifacts and the graph's own output.
+.dev/
+graphify-out/
+node_modules/
+.github/hooks/

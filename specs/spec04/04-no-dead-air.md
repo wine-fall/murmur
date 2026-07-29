@@ -53,8 +53,11 @@ first song / first reply sooner — without multi-process complexity (master §4
 
 ### Out of scope
 - **Full token economy** (prompt caching, tiered models, activity-gating,
-  budget/degradation) — spec 08. Slice 2 borrows only 08's *batch-generate-N*
-  as a latency vehicle, not the economy.
+  budget/degradation) — not this spec. Slice 2 borrows only the
+  *batch-generate-N* pillar as a latency vehicle, not the economy. *(Amended
+  2026-07-29: spec 08 is dissolved — activity-gating moved to spec 07, the rest
+  is config/SDK/backlog; master §7 status column. This spec's batch pillar is
+  the one that landed.)*
 - Buffering across restarts; semantic recall.
 - **Activity-aware pacing** (spec 07) and the richer profile/ledger context
   (spec 05). The time-of-day scene (§3.4) is only the *clock* slice of that

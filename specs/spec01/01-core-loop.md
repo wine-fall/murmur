@@ -25,7 +25,7 @@ A single long-running Python `asyncio` process that:
 - TTS model integration — `VoiceProvider` is **declared here, implemented in [`02`](../spec02/02-voice-provider.md)**. L0 imports the spec-02 adapter; this spec does not contain TTS code.
 - Music — `MusicProvider` is declared but **not instantiated or called** in L0 (spec 03-01).
 - Persistent memory — L0 uses an **in-process** `MemoryStore`; persistence is spec 05.
-- No-dead-air look-ahead (spec 04), onboarding/persona evolution (06), proactive "turn to you" / time anchors / activity pacing (07), full token economy (08), ASR, GUI.
+- No-dead-air look-ahead (spec 04), first-run onboarding & relationship (06), proactive "turn to you" / time anchors / activity pacing / activity-gated generation (07), ASR, GUI.
 - Daemon/detach (radio surviving terminal close) — explicitly a later optional side-spec, not here.
 
 ---
@@ -120,7 +120,7 @@ class Brain:
     """Respond in-persona to a typed user line, then the program resumes."""
 ```
 - Persona is injected as the **System Prompt**; `ctx.recent` is sent as prior turns. The API is stateless — the core resends the compact context each call (master §6).
-- Model `claude-opus-4-8` for L0. Tiered models (cheap filler on `claude-haiku-4-5`) are deferred to spec 08.
+- Model `claude-opus-4-8` for L0. Tiered models (cheap filler on `claude-haiku-4-5`) are deferred. *(Amended 2026-07-29: spec 08 is dissolved — tiering is a config knob, master §7 status column; `musicModel`/`compactModel` already use the cheap tier.)*
 - **Resolved (step 2)**: uses the SDK's one-shot `query(prompt=..., options=ClaudeAgentOptions(...))` — explicitly *stateless* per the SDK, so it matches "resend the compact context each call." Per call: `system_prompt = ctx.persona` (a custom string, which replaces the `claude_code` preset); `model = claude-opus-4-8`; `max_turns=1`. **Full isolation from the user's local Claude Code environment** (the radio must not be influenced by their `CLAUDE.md`, plugins/skills, MCP servers, hooks, or subagents): `setting_sources=[]` (no user/project/local settings — verified to strip the user's plugins, MCP, and hooks), `allowed_tools=[]` + `tools=[]` (no tools loaded or invokable), `skills=[]` + `extra_args={"disable-slash-commands": None}` (no skills/commands), `mcp_servers={}`. Subscription OAuth is preserved (`apiKeySource = none`). Verified against the SDK init payload. (Residual: built-in agent *type* definitions still appear in metadata but are inert — with no tools there is no Task tool to launch them.) Reply text is collected from `AssistantMessage` `TextBlock`s. Subscription-OAuth is inherited automatically from the local Claude Code login (no API key) by the SDK shelling out to the `claude` CLI. (The spec fixes only the two-method contract + the auth/model facts from master §3.2; the above is the resolved mechanism, kept here to keep spec and code aligned.)
 - **Prompt text is centralized** in `src/prompts.ts` (English; DESIGN §0): the `nextTalks` / `respond` instruction templates + transcript rendering, with the static persona seed as `src/prompts/persona-seed.md`. `brain.ts` holds only Brain mechanics and imports the builders. `Config.personaPath` defaults to the bundled seed.
 
@@ -172,7 +172,7 @@ air, so priority never costs dead air.
 ### 3.4 Pacing & token restraint (L0 minimum, master §9.2)
 - **One Brain call per talk segment** as the L0 minimum. **Superseded for latency by [`spec 04`](../spec04/04-no-dead-air.md)**, which pulls forward a pre-generation buffer: music-pick prefetch (slice 1) and batched talk look-ahead (slice 2, spec 08's batch pillar as the vehicle). The L0 minimum below still holds as the fallback path; 04 is the polish layered on top.
 - A configurable **inter-segment gap** so output is a paced program, not a firehose. Default ~2.0s — a by-ear value tuned to feel continuous without running the segments together; live-overridable via `--gap`.
-- These two bound the talk rate so testing doesn't drain the subscription. Full economy (cache/tier/gate) is spec 08.
+- These two bound the talk rate so testing doesn't drain the subscription. The fuller economy is not one spec: batching landed in 04, activity-gating is spec 07, caching/tiering are SDK-and-config matters (master §7 status column; spec 08 dissolved 2026-07-29).
 
 ### 3.5 Audio playback (L0)
 - `audio_player` plays a complete local audio file (the `AudioClip.source`) by handing it to an external audio player subprocess; `stop()` terminates that subprocess. (Concrete player binary — e.g. `afplay`/`ffplay`/`mpv` — is an implementation choice; macOS-native is fine for L0.) **Resolved (step 3)**: default `afplay`, configurable via `config.player_cmd` / `--player`. **Superseded (spec 03-02)**: the mixing `AudioEngine` replaced this player in the app; `player_cmd`/`--player` were retired (`ffmpeg_cmd` is the engine's only external binary). **Retired (2026-07 dedup pass)**: the unwired `AudioPlayer` reference impl was deleted (git history keeps it); the `Player` Protocol it declared moved to `contracts.py` with the other spec-01 seams.

@@ -73,12 +73,17 @@
 - **Semantic / vector recall — deferred to v1.5** (master §6). The row format
   (§3.3) keeps `ts` + `session` + full text so embeddings can be added later
   without a data migration; no recall machinery ships here.
-- **Persona evolution + onboarding Q&A** — spec 06. This spec only gives the
-  persona its persistent, writable home; nothing here rewrites it.
+- **First-run onboarding (the persona seed)** — spec 06. This spec only gives
+  the persona its persistent, writable home; nothing here writes it after the
+  seed copy. *(Amended 2026-07-29, master §2.3: persona **evolution** is cut
+  entirely — the persona is user-edited, and the profile this spec compacts is
+  the tier that grows.)*
 - **The `activity` pack field, ActivitySensor, time anchors, pacing** — spec 07
   (see §2.2 for the exact 05/07 boundary).
-- **Prompt caching / tiered models / budget** — spec 08. This spec only keeps
-  the pack ordering cache-friendly (§3.5) so 08 lands without reshuffling.
+- **Prompt caching / tiered models / budget** — not this spec. This spec only
+  keeps the pack ordering cache-friendly (§3.5). *(Amended 2026-07-29: spec 08
+  is dissolved — caching is SDK-level, tiering a config knob, budget a backlog
+  item; master §7 status column.)*
 - **Multi-instance concurrency.** One murmur process per `memory_dir` is an
   assumption, not enforced (no lockfile). Documented; revisit if it ever bites.
 - **History rotation / GC.** Append-only JSONL at radio scale (short text
@@ -264,8 +269,10 @@ in the same directory).
   persona lives in Memory", master appendix). On first run, the configured
   seed (`Config.persona_path`) is **copied once** to `<memory_dir>/persona.md`;
   thereafter the app loads persona from the memory dir. That gives spec 06 its
-  writable evolution target with no further plumbing. This spec never writes
-  `persona.md` after the seed copy.
+  first-run write target — and the **user** a file they can edit — with no
+  further plumbing. This spec never writes `persona.md` after the seed copy, and
+  per master §2.3 (amended 2026-07-29) neither does anything else: spec 06 slice
+  A replaces the seed copy on a first run, and after that the file is the user's.
 
 ### 3.3 Tier ② — History rows
 
@@ -294,7 +301,7 @@ migration (structure reserved, master §6).
   Director state.
 - **Prompt rendering** (`prompts/talk.py`): the profile renders as a stable
   block adjacent to the persona (the **stable prefix** — persona + profile —
-  so spec 08's prompt caching lands on this ordering, master §7 pillar 4);
+  so prompt caching lands on this ordering, master §7 pillar 4);
   `covered_topics` renders as one volatile "recently covered — don't repeat"
   line near the transcript. Because it is ledger-backed and cross-day, it
   holds even when the transcript window is empty or stale (a long-idle cold
@@ -362,9 +369,13 @@ the Director already holds `title`/`artist` on the pick.
   seam this ratifies verbatim (§2.2).
 - **Spec 03-01 / 04** — `emit_talk_beats` schema (topic tag, §3.9) and the
   music-pick prompt (anti-repeat, §3.5).
-- Consumed by: **spec 06** (persona evolution writes `persona.md`; profile
-  machinery), **spec 07** (ledger timestamps for anchors/pacing; adds
-  `activity`), **spec 08** (stable-prefix caching).
+- Consumed by: **spec 06** (first-run persona seed writes `persona.md`; the
+  profile write-through for the CC bootstrap; the compaction prompt gains a
+  relationship section), **spec 07** (the ledger for anchor fire-history — it
+  extends `LedgerKind` with `'anchor'` and adds `recentAnchors`; adds the
+  reserved `activity` pack field). *(Prompt caching was spec 08's; spec 08 is
+  dissolved — the pack ordering below is now simply cache-friendly by
+  construction, master §7 pillar 4.)*
 
 ---
 

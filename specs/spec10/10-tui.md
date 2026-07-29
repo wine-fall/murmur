@@ -99,7 +99,7 @@ Whether the TUI becomes the **default** front-end or stays opt-in (`front_end="t
 - **IPC protocol + `Host`-seam mapping**: transport (unix socket / stdio JSON-lines, per the TTS-sidecar precedent §3.3) + message schema + how `Host` calls map to wire messages. Note the cross-language boundary is now real (Python engine ↔ Go TUI), so the protocol must be language-neutral.
 - **Daemon/detach reconciliation (master §10.1)**: the two-process split subsumes the daemon substrate — decide how much detach/reattach UX, if any, v1 exposes.
 - **Default**: does the TUI become the default front-end once stable, or stay opt-in with `plain` as default?
-- **Status detail**: how much to surface (just state, or also recent-topic / token-usage hints once spec 08 exists)?
+- **Status detail**: how much to surface (just state, or also recent-topic hints — and, if anyone ever builds usage tracking, token hints; note spec 08 was dissolved 2026-07-29, so no spec owns that today)?
 - **Persona/voice attribution in the log**: show a speaker label/color per segment, or keep it minimal?
 - **Diagnostics are NOT this front-end's concern**: the "program log" here is *user content* (radio segments + your lines), a distinct channel from the **dev diagnostics log** (`murmur.logging_setup.DevLog` → the `MURMUR_DEV_LOG` file, viewed by `make logs`). That diagnostics facade is UI-agnostic and stays as-is under a TUI — swapping the front-end does not touch it. If a debug/diagnostics pane is ever wanted, the Go TUI **tails the same dev-log file** (the language-neutral sink); no second log class is written.
 
