@@ -5,10 +5,10 @@ repos:
     hooks:
       - id: source-language
         name: Source language (no Chinese; English-only sources)
-        entry: python3 scripts/check_source_language.py
+        entry: node scripts/check-source-language.ts
         language: system
         # no-CJK applies to code and docs alike.
-        types_or: [ts, markdown, yaml, toml, python]
+        types_or: [ts, markdown, yaml, toml]
       - id: typecheck
         name: tsc (static type-check)
         # Enforces the contract seams (contracts.ts): an impl whose signatures
@@ -19,7 +19,7 @@ repos:
         types: [ts]
       - id: lint
         name: oxlint
-        entry: npx oxlint src test scripts
+        entry: npx oxlint src test scripts .github/scripts
         language: system
         pass_filenames: false
         types: [ts]

@@ -93,7 +93,7 @@ endpoint loaded from the gitignored `.env` — `make dev-fishaudio` selects the
 fish.audio config); pass `VOICE=stub` for a silent voice, or `STUB=1 make dev`
 for a fully offline session (canned brain, no music — needs no
 network/binaries). The program timeline mirrors to `.dev/dev.log`; `make logs`
-(`scripts/devwatch.py`) tails that and folds in a periodic memory-tree line.
+(`scripts/devwatch.ts`) tails that and folds in a periodic memory-tree line.
 `make help` lists every target.
 
 Under the hood:
@@ -101,14 +101,14 @@ Under the hood:
 ```bash
 npm install
 npm test                      # fast unit layer (vitest; fakes, no network)
-npm run typecheck             # tsc over src/ + scripts/
+npm run typecheck             # tsc over src/, test/ + the tooling scripts
 npm run lint                  # oxlint
 brew install ffmpeg yt-dlp    # binaries real runs need (music)
 ```
 
 Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; real-boundary checks run on demand as throwaway `scratch/` smokes; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
 
-Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check_source_language.py` via pre-commit.
+Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check-source-language.ts` via pre-commit.
 
 ## License
 

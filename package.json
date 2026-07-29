@@ -8,7 +8,7 @@
   "scripts": {
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
-    "lint": "oxlint src test scripts",
+    "lint": "oxlint src test scripts .github/scripts",
     "test": "vitest run"
   },
   "dependencies": {
