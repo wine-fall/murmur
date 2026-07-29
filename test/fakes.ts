@@ -23,6 +23,7 @@ import type {
   Turn,
 } from '../src/contracts.ts'
 import type { Host } from '../src/host.ts'
+import type { ProgramState } from '../src/ipc.ts'
 import { LineQueue } from '../src/host.ts'
 
 // Stands in for the model driving an agentic task: `play` is handed the task's
@@ -254,6 +255,8 @@ export class FakeHost implements Host {
   user: string[] = []
   infos: string[] = []
   debugs: string[] = []
+  states: ProgramState[] = []
+  banners: { personaFirstLine: string; brain: string; voice: string }[] = []
 
   start(): void {}
 
@@ -293,6 +296,14 @@ export class FakeHost implements Host {
 
   debug(message: string): void {
     this.debugs.push(message)
+  }
+
+  onState(state: ProgramState): void {
+    this.states.push(state)
+  }
+
+  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
+    this.banners.push({ personaFirstLine, ...opts })
   }
 }
 

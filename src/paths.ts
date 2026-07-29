@@ -35,3 +35,14 @@ export function dataRoot(env: NodeJS.ProcessEnv = process.env): string {
 export function cacheRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'cache')
 }
+
+// Runtime state of a live process — nothing here outlives a run. The TUI's unix
+// socket (spec 10 §2.3) is the only tenant; names stay short because the OS caps
+// a socket path at ~104 bytes.
+export function runRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'run')
+}
+
+export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(runRoot(env), 'tui.sock')
+}

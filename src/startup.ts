@@ -75,6 +75,12 @@ export function preflightFfmpeg(binary = 'ffmpeg'): Promise<PreflightResult> {
   return probeBinary('ffmpeg', binary, ['-version'], false)
 }
 
+// Probe the runtime the TUI client needs (spec 10 §2.2). Local, no network;
+// requiring stdout keeps a stub `bun` on PATH from passing for nothing.
+export function preflightBun(binary = 'bun'): Promise<PreflightResult> {
+  return probeBinary('bun', binary, ['--version'], true)
+}
+
 // Aggregate: music is usable iff BOTH binaries are. The combined reason
 // prefixes each broken binary's name so the guide (and the user) see exactly
 // which pieces need fixing.

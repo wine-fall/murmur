@@ -17,6 +17,7 @@ function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; i
     onRadioSegment: () => {},
     onUserLine: () => {},
     info: (m) => void infos.push(m),
+    banner: () => {},
   }
   return { host, infos }
 }

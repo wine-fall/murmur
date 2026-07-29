@@ -14,6 +14,8 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - `make logs` — tail those diagnostics (run in a 2nd terminal).
 - `make preflight` — startup checks only, no run.
 - `STUB=1 make dev` — full offline: canned brain, silent voice, no music.
+- `TUI=1 make dev` — run the spec-10 front-end (OpenTUI client under Bun)
+  instead of plain stdout; needs `bun` on PATH.
 - `npm test` — the fast (model-free) vitest suite; `npm run typecheck` /
   `npm run lint` — the static gates.
 - `pre-commit run --all-files` — all gates (source-language + tsc + oxlint +

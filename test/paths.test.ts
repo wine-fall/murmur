@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot } from '../src/paths.ts'
+import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot, tuiSocketPath } from '../src/paths.ts'
 
 describe('paths', () => {
   it('defaults to ~/.murmur with data/ and cache/ beneath', () => {
@@ -38,5 +38,19 @@ describe('claudeCodeRoot', () => {
     const root = claudeCodeRoot({ CLAUDE_CONFIG_DIR: '~/alt-claude' })
     expect(root.includes('~')).toBe(false)
     expect(root.endsWith('/alt-claude')).toBe(true)
+  })
+})
+
+// spec 10 §2.3: the wire's socket is resolved by the one path authority too.
+describe('the TUI socket', () => {
+  it('lives under the murmur home in run/, and moves with MURMUR_HOME', () => {
+    expect(tuiSocketPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/run/tui.sock')
+    expect(tuiSocketPath({}).endsWith('/.murmur/run/tui.sock')).toBe(true)
+  })
+
+  it('stays inside the unix socket path length limit', () => {
+    // macOS caps sun_path at 104 bytes; a socket that cannot bind is a
+    // front-end that never starts.
+    expect(tuiSocketPath({}).length).toBeLessThan(100)
   })
 })

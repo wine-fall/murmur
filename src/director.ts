@@ -33,6 +33,7 @@ import type {
   VoiceProvider,
 } from './contracts.ts'
 import type { Host } from './host.ts'
+import type { ProgramState } from './ipc.ts'
 import { buildMusicSituation } from './prompts.ts'
 import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
@@ -142,6 +143,8 @@ export class Director {
   // (§3.2) and refreshed when a typed line proves the listener is back.
   private now = new Date()
   private activity: Activity | undefined
+  // The segment the front-end is currently showing (spec 10 §2.1).
+  private segment: { kind: ProgramState['kind']; nowPlaying?: string } = { kind: 'gap' }
   // The invite state machine in full (§3.5): one counter, one flag, one
   // deadline — there is deliberately nothing more, because a retry path is what
   // would make the radio needy.
@@ -264,6 +267,7 @@ export class Director {
       segments: INVITE_WINDOW_SEGMENTS,
     }
     this.deps.host.debug?.('invite: aired; awaiting a reply')
+    this.restate()
   }
 
   // Every typed line funnels through here: it stamps the presence sensor, and
@@ -276,6 +280,7 @@ export class Director {
     this.readActivity()
     this.segmentsSinceUserLine = 0
     this.awaitingReply = null
+    this.restate()
     return steerFromLine(line)
   }
 
@@ -307,6 +312,27 @@ export class Director {
     this.deps.host.onRadioSegment(beat.text)
     this.deps.memory.record({ role: 'radio', text: beat.text })
     if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
+    this.emitState('talk')
+  }
+
+  // What the program is doing, for a front-end with a status region (spec 10
+  // §2.1). Pushed at the boundaries that already exist — no timer, no polling,
+  // and nothing here changes what the radio does.
+  private emitState(kind: ProgramState['kind'], nowPlaying?: string): void {
+    this.segment = { kind, ...(nowPlaying !== undefined && { nowPlaying }) }
+    this.restate()
+  }
+
+  // Re-announce the CURRENT segment because something around it moved (an
+  // invite opened, a typed line closed one). Deliberately not emitState('talk'):
+  // a reply during a song is ducked over it, so the track has to stay named.
+  private restate(): void {
+    this.deps.host.onState?.({
+      ...this.segment,
+      awaitingReply: this.awaitingReply !== null,
+      scene: currentScene(this.now),
+      ...(this.activity !== undefined && { activity: this.activity }),
+    })
   }
 
   // The real clock lives here; currentScene applies a MURMUR_SCENE override
@@ -504,6 +530,7 @@ export class Director {
         }
         const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
         this.deps.host.info(`now playing: ${label}`)
+        this.emitState('music', label)
         // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
         // only — not a dropped candidate. Feeds the music avoid-list.
         this.deps.memory.recordEvent('song', label)
@@ -565,6 +592,7 @@ export class Director {
   // Inter-segment pause, steerable: a line during the gap gets its reply; the
   // gap is not resumed afterward (the program moves to the next segment).
   private async gap(): Promise<void> {
+    this.emitState('gap')
     const ac = new AbortController()
     // Longer gaps in an empty room (spec 07 §3.2) — the stream keeps playing,
     // it just stops crowding a room nobody is in.

@@ -8,6 +8,8 @@
 # Knobs:  VOICE=hosted|stub            (hosted TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
 #                                        no music — needs no network/binaries)
+#         TUI=1                        (spec 10 front-end: the OpenTUI client
+#                                        under Bun, instead of plain stdout)
 #         MURMUR_SCENE=morning|afternoon|evening|late-night
 #                                      (force the time-of-day scene for by-ear
 #                                       testing; unset = derive from the clock)
@@ -26,6 +28,11 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
+ifdef TUI
+  RUN_ARGS       += --tui
+  PREFLIGHT_ARGS += --tui
+endif
+
 .PHONY: help dev dev-fishaudio dev-opuslab logs preflight setup-music install sync-env
 
 help:
@@ -40,10 +47,15 @@ help:
 	@echo "  make preflight    check music/voice deps without launching"
 	@echo "  make setup-music  run the guided binary (yt-dlp/ffmpeg) repair"
 	@echo ""
-	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)"
+	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)   TUI=1 (spec 10 front-end)"
 
 install: sync-env
 	npm install
+	@# The TUI client (spec 10) is its own Bun package, deliberately outside
+	@# package.json. No bun, no TUI — and the plain front-end needs neither. A
+	@# bun that IS present and whose install fails is a real blocker: do not
+	@# swallow it, or `TUI=1 make dev` launches a client with no packages.
+	@if command -v bun >/dev/null 2>&1; then (cd tui && bun install --silent); fi
 	@# pre-commit is the gate runner (.pre-commit-config.yaml); installed as a
 	@# uv-managed global tool since the repo itself carries no Python packaging.
 	@command -v pre-commit >/dev/null 2>&1 || uv tool install --quiet pre-commit

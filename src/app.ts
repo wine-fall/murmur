@@ -18,15 +18,16 @@ import { Director, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
-import { CliHost } from './host.ts'
+import { CliHost, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
+import { IpcHost, spawnTuiClient } from './ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona } from './persona.ts'
 import { musicSetupCheck, runMusicSetup } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
-import { runStartupChecks } from './startup.ts'
+import { preflightBun, runStartupChecks } from './startup.ts'
 import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
@@ -44,6 +45,50 @@ export function buildMemory(config: Config, log: (message: string) => void = () 
 // and after that murmur never writes the file again.
 export function resolvePersonaPath(config: Config, persistent: boolean): string {
   return persistent ? join(config.memoryDir, 'persona.md') : config.personaPath
+}
+
+// The front-end seam (spec 10 §2.1): the core never constructs a concrete host.
+// `close` tears down whatever the choice brought with it — nothing at all for
+// the plain host, the socket and the client process for the TUI.
+export type HostBundle = { host: Host; close: () => Promise<void> }
+
+// Where the TUI client lives, resolved from the engine's own location so the
+// repo can sit anywhere. It is a sibling of src/, never imported by it.
+const TUI_ENTRY = join(import.meta.dirname, '..', 'tui', 'src', 'main.tsx')
+
+export async function buildHost(config: Config): Promise<HostBundle> {
+  const plain = (): HostBundle => ({ host: new CliHost(), close: () => Promise.resolve() })
+  if (config.frontEnd === 'plain') return plain()
+
+  // Bun absent = the TUI is not offered at all (spec 10 §5.10): a half-started
+  // front-end is worse than the plain one, and the radio still has to run.
+  const bun = await preflightBun(config.bunCmd)
+  if (!bun.ok) {
+    const bundle = plain()
+    bundle.host.info(`the tui front-end needs bun (${bun.reason}); staying on the plain one.`)
+    bundle.host.info('install it with: curl -fsSL https://bun.sh/install | bash')
+    return bundle
+  }
+
+  const host = new IpcHost({
+    socketPath: config.tuiSocket,
+    identity: { brain: config.brain, voice: config.voice },
+  })
+  await host.listen()
+  const client = spawnTuiClient({
+    bunCmd: config.bunCmd,
+    entry: TUI_ENTRY,
+    socketPath: config.tuiSocket,
+    onGone: (reason) => host.frontEndGone(reason),
+  })
+  return {
+    host,
+    close: async () => {
+      await host.close()
+      // The client exits on `bye`; this is the backstop against an orphan.
+      client.kill()
+    },
+  }
 }
 
 export function buildVoice(config: Config): VoiceProvider {
@@ -143,7 +188,9 @@ export async function runMusicSetupCli(config: Config): Promise<boolean> {
 }
 
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
-  const host = new CliHost()
+  // The front-end is chosen (and, for the TUI, spawned) FIRST: everything the
+  // startup checks and the first run ask has to reach whoever is watching.
+  const { host, close: closeFrontEnd } = await buildHost(config)
   // A real (claude) run persists memory + homes the persona in the memory dir;
   // a stub run stays fully in-process (spec 05 §3.2/§3.7).
   const persistent = config.brain === 'claude'
@@ -256,5 +303,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       // an fs failure on apply must not mask the shutdown
     }
     host.info('stopped cleanly.')
+    await closeFrontEnd()
   }
 }

@@ -3,7 +3,17 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-29 (spec 10 redesigned: OpenTUI/TS front-end, wire protocol defined)_
+_Last updated: 2026-07-29 (spec 10 slice 1 built: wire + IpcHost + client shell)_
+
+- **spec 10 slice 1 is built (2026-07-29).** The wire (`src/ipc.ts`: zod
+  schemas, ndjson framing, one source of truth for both processes), the
+  engine-side `IpcHost` bridge over a unix socket, the `frontEnd` config knob
+  (`--tui`, default still `plain`), the bun startup probe, and the OpenTUI/React
+  client shell under `tui/` (status strip, program log, input line). The
+  Director now emits `onState` at the boundaries it already had. **Owed and
+  blocking**: acceptance gate 1 — the Chinese-IME pass under Ghostty and iTerm2,
+  user-run. Nothing further (visualizer feed, pet substrate, warmth kit) is
+  built on the framework choice until it passes.
 
 - **spec 10 (TUI) redesigned (2026-07-29, docs only).** After a four-report
   research pass with **visual delight promoted to a first-tier requirement**

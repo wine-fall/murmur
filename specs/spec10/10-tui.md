@@ -1,6 +1,8 @@
 # spec/10 · tui — the terminal front-end with a soul
 
-> **Status**: Design. Not yet implemented.
+> **Status**: Slice 1 built (wire + `IpcHost` + client shell). Gate 1 (§5.1)
+> is owed: user-run, and it blocks everything after it. Slices 2 (visualizer
+> feed) and 3 (pet substrate + warmth kit) are unbuilt.
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin
 > with a real TUI. The **single richer front-end murmur ever gets**: there is
 > no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md)
@@ -99,8 +101,15 @@ export interface Host {
   }
   ```
 
-  `CliHost` may no-op it. The Director emits it at segment boundaries and on
-  invite-window transitions — no polling, no timers.
+  The Director emits it at segment boundaries and on invite-window
+  transitions — no polling, no timers.
+
+  **As built**: `onState?` is optional, mirroring the existing `debug?`/`eof?`
+  convention, so a host with no status region implements nothing (`CliHost`
+  does not). `banner` moved onto the interface, since the factory below returns
+  the seam rather than a concrete host. A re-emit on an invite opening or a
+  typed line reports the CURRENT segment, so a reply during a song keeps
+  `nowPlaying` on the strip (§5.3).
 - Front-end selection is config-driven (`frontEnd: 'plain' | 'tui'`, default
   `'plain'`), mirroring the provider knobs. The core never imports a concrete
   host; a `buildHost(name)` factory returns the seam.
@@ -170,6 +179,13 @@ TUI → Engine:
   broadcasting (the EOF-on-stdin precedent, spec 01 §3.6 — the radio plays
   on), and accepts a new `attach`. This single rule keeps the detach/reattach
   door open at zero extra cost.
+- **As built**, two consequences of that rule that the table alone does not
+  state: the engine keeps a **bounded replay backlog** (200 messages, no `viz`
+  frames) and hands it to whoever attaches, because the first-run and guide
+  questions (§3.2-B) are asked while the client is still booting and losing
+  them would strand the Q&A; and **disconnect resolves the host's `eof`**, so a
+  consuming reader declines instead of wedging — the same contract stdin EOF
+  already has.
 
 ---
 
@@ -413,6 +429,9 @@ TUI work is built on the framework choice.
    and the same line round-trips to the engine and back into the program log.
    **Failure = stop: escalate to the user with the Ratatui / Ink fallback
    trade-offs (§3.1) before writing more TUI code.**
+   Escape hatch to try first, wired for this gate:
+   `MURMUR_TUI_KITTY_KEYBOARD=0` disables the kitty keyboard protocol, which is
+   the mechanism behind the recorded regression.
 2. Launching with `frontEnd: 'tui'` shows the status region, program log,
    visualizer strip, and pet; radio segments appear as they air.
 3. Typing while the radio talks never clobbers the input line; submitting a

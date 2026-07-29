@@ -1,0 +1,58 @@
+// The TUI client process (spec 10 §2.2): TypeScript on OpenTUI, executed by
+// Bun, spawned by the engine. It owns the terminal and nothing else — every
+// semantic (commands, talkback, the Q&A flows) stays engine-side.
+//
+//   bun tui/src/main.tsx <socket-path>
+//
+// Env knob, for the §5.1 IME gate: MURMUR_TUI_KITTY_KEYBOARD=0 turns the kitty
+// keyboard protocol off, which is the one lever if system-IME composition
+// misbehaves under it (§3.1 risk 2). It has to be an all-false options object,
+// not null: core 0.4.5 reads `useKittyKeyboard ?? {}`, so null would silently
+// mean "the defaults", i.e. still on.
+
+import { createCliRenderer } from '@opentui/core'
+import { createRoot } from '@opentui/react'
+
+import type { EngineMessage } from '../../src/ipc.ts'
+import { App, type Subscribe } from './app.tsx'
+import { connectEngine } from './wire.ts'
+
+const socketPath = process.argv[2]
+if (socketPath === undefined) {
+  console.error('usage: bun tui/src/main.tsx <socket-path>')
+  process.exit(2)
+}
+
+// The socket attaches while OpenTUI is still starting, so the engine's replay
+// (§2.3 — the notices and questions asked before the client existed) lands
+// BEFORE React mounts and could subscribe. Hold it until someone is listening;
+// after that, straight through.
+const listeners = new Set<(message: EngineMessage) => void>()
+const pending: EngineMessage[] = []
+const subscribe: Subscribe = (listener) => {
+  listeners.add(listener)
+  const backlog = pending.splice(0)
+  for (const message of backlog) listener(message)
+  return () => void listeners.delete(listener)
+}
+
+const wire = connectEngine(socketPath, {
+  onMessage: (message) => {
+    if (listeners.size === 0) pending.push(message)
+    else for (const listener of listeners) listener(message)
+  },
+  onClose: (reason) => {
+    // No engine, nothing to show. Say why on the way out, on the plain
+    // terminal — the alternate screen is already gone by then.
+    console.error(`murmur: ${reason}`)
+    process.exit(1)
+  },
+})
+
+const renderer = await createCliRenderer({
+  exitOnCtrlC: false, // Ctrl-C is /quit (§3.4), not a client-only exit
+  ...(process.env.MURMUR_TUI_KITTY_KEYBOARD === '0' && {
+    useKittyKeyboard: { disambiguate: false, alternateKeys: false },
+  }),
+})
+createRoot(renderer).render(<App subscribe={subscribe} wire={wire} />)

@@ -285,3 +285,33 @@ describe('Director — quit', () => {
     expect(host.radio).toEqual(['a'])
   })
 })
+
+// spec 10 §2.1/§3.2-D: what the Director tells a front-end with a status
+// region. Pushed at boundaries, never polled — and no host is required to care.
+describe('Director — program state (spec 10)', () => {
+  it('announces each talk segment as it airs, with the scene', async () => {
+    const { brain, host, director } = setup()
+    brain.batches = [['a']]
+    await director.run(1)
+    const talk = host.states.filter((s) => s.kind === 'talk')
+    expect(talk).toHaveLength(1)
+    expect(talk[0]!.awaitingReply).toBe(false)
+    expect(SCENES).toContain(talk[0]!.scene)
+  })
+
+  it('marks the gap between segments so the strip does not claim to be talking', async () => {
+    const { brain, host, director } = setup()
+    brain.batches = [['a', 'b']]
+    await director.run(2)
+    expect(host.states.map((s) => s.kind)).toEqual(['talk', 'gap', 'talk'])
+  })
+
+  it('a host with no status region is untouched (onState is optional)', async () => {
+    const { brain, host, director } = setup()
+    // The pre-spec-10 shape: a Host that never implemented onState.
+    delete (host as Partial<FakeHost>).onState
+    brain.batches = [['a']]
+    await expect(director.run(1)).resolves.toBeUndefined()
+    expect(host.radio).toEqual(['a'])
+  })
+})

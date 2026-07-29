@@ -365,4 +365,26 @@ describe('turning to you, and sliding back (acceptance 12, 13, 14, 15)', () => {
     await run
     expect(cues(brain)).not.toContain('slide-back')
   })
+
+  // spec 10 §5.6: the badge/pose the front-end draws from the same window.
+  it('an open invite window is visible in the program state, and clears when answered', async () => {
+    const { brain, player, host, director } = build({ gapSeconds: 0 })
+    brain.batches = [
+      [{ text: 'what are you up to?', invite: true }],
+      ['bg'],
+      ['after'],
+      ['more'],
+    ]
+    player.auto = false
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'invite aired')
+    expect(host.states.at(-1)!.awaitingReply).toBe(true)
+    host.type('reading, mostly')
+    await until(() => host.states.at(-1)!.awaitingReply === false, 'window cleared')
+    player.finish()
+    await until(() => host.radio.length >= 3, 'program resumes')
+    host.type('/quit')
+    player.finish()
+    await run
+  })
 })

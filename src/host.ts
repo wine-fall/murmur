@@ -12,6 +12,8 @@
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
+import type { ProgramState } from './ipc.ts'
+
 export interface Host {
   start(): void
   peekLine(): Promise<string>
@@ -26,6 +28,26 @@ export interface Host {
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void
+  // What the program is doing right now (spec 10 §2.1): pushed at segment
+  // boundaries and invite transitions, never polled. Optional, like debug — a
+  // host with no status region has nothing to do with it.
+  onState?(state: ProgramState): void
+  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void
+}
+
+// Mirror a program line into the dev log (`make logs` tails it in a second
+// terminal) in the "HH:MM:SS LEVEL name: msg" shape devwatch parses.
+// Best-effort: a dev-log write failure must never take the radio down.
+export function devLogMirror(devLog: string | undefined): (name: string, message: string) => void {
+  if (devLog === undefined || devLog === '') return () => {}
+  return (name, message) => {
+    const stamp = new Date().toTimeString().slice(0, 8)
+    try {
+      appendFileSync(devLog, `${stamp} INFO ${name}: ${message}\n`)
+    } catch {
+      // e.g. the .dev dir vanished mid-run
+    }
+  }
 }
 
 export class LineQueue {
@@ -64,28 +86,15 @@ export class CliHost implements Host {
   private eofSeen: Promise<void>
 
   private input: NodeJS.ReadableStream
-  private devLog: string | undefined
+  private mirror: (name: string, message: string) => void
 
   constructor(
     input: NodeJS.ReadableStream = process.stdin,
     opts: { devLog?: string | undefined } = { devLog: process.env.MURMUR_DEV_LOG },
   ) {
     this.input = input
-    this.devLog = opts.devLog
+    this.mirror = devLogMirror(opts.devLog)
     this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
-  }
-
-  // Mirror each program line into the dev log (`make logs` tails it in a
-  // second terminal) in the "HH:MM:SS LEVEL name: msg" shape devwatch parses.
-  // Best-effort: a dev-log write failure must never take the radio down.
-  private mirror(name: string, message: string): void {
-    if (this.devLog === undefined || this.devLog === '') return
-    const stamp = new Date().toTimeString().slice(0, 8)
-    try {
-      appendFileSync(this.devLog, `${stamp} INFO ${name}: ${message}\n`)
-    } catch {
-      // e.g. the .dev dir vanished mid-run
-    }
   }
 
   start(): void {

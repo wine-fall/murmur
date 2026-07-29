@@ -9,10 +9,11 @@
 //   node scripts/dev-preflight.ts --voice hosted   # remote TTS wanted
 //   node scripts/dev-preflight.ts --voice stub     # silent voice
 //   node scripts/dev-preflight.ts --no-music       # skip the binary checks
+//   node scripts/dev-preflight.ts --tui            # the spec-10 front-end wanted
 
 import { parseArgs } from 'node:util'
 
-import { preflightFfmpeg, preflightYtdlp } from '../src/startup.ts'
+import { preflightBun, preflightFfmpeg, preflightYtdlp } from '../src/startup.ts'
 
 const OK = '\x1b[32m✓\x1b[0m'
 const NO = '\x1b[31m✗\x1b[0m'
@@ -22,6 +23,7 @@ const { values } = parseArgs({
   options: {
     voice: { type: 'string' },
     'no-music': { type: 'boolean' },
+    tui: { type: 'boolean' },
   },
 })
 const voice = values.voice ?? 'hosted'
@@ -45,6 +47,17 @@ if (values['no-music'] !== true) {
   if (broken.length > 0) {
     const joined = broken.join(' ')
     fixes.push(`music needs ${joined}. Fix with:  make setup-music   (or: brew install ${joined})`)
+  }
+}
+
+// spec 10 §2.2: bun is a provisioned binary. Without it the TUI is simply not
+// offered, so asking for it and not having it is a blocker worth naming here.
+if (values.tui === true) {
+  const bun = await preflightBun()
+  if (bun.ok) console.log(`  ${OK} bun (tui front-end)`)
+  else {
+    console.log(`  ${NO} bun: ${bun.reason}`)
+    fixes.push('the tui front-end needs bun:  curl -fsSL https://bun.sh/install | bash')
   }
 }
 

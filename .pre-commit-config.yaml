@@ -7,8 +7,8 @@ repos:
         name: Source language (no Chinese; English-only sources)
         entry: node scripts/check-source-language.ts
         language: system
-        # no-CJK applies to code and docs alike.
-        types_or: [ts, markdown, yaml, toml]
+        # no-CJK applies to code and docs alike (tsx = the spec-10 TUI client).
+        types_or: [ts, tsx, markdown, yaml, toml]
       - id: typecheck
         name: tsc (static type-check)
         # Enforces the contract seams (contracts.ts): an impl whose signatures
