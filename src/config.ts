@@ -76,6 +76,9 @@ export type CliInvocation = {
   maxSegments: number | undefined
   // Run the music setup guide directly and exit (spec 03-03's explicit entry).
   setupMusic: boolean
+  // Run the profile bootstrap standalone and exit (spec 06 §3.4's re-entry for
+  // a listener who declined it on the first run).
+  bootstrapProfile: boolean
 }
 
 // A misconfigured number in a .env must not abort Config construction (and with
@@ -125,6 +128,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'no-music': { type: 'boolean' },
       'no-bed': { type: 'boolean' },
       'setup-music': { type: 'boolean' },
+      'bootstrap-profile': { type: 'boolean' },
       cadence: { type: 'string' },
       'max-segments': { type: 'string' },
     },
@@ -148,5 +152,10 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     values['max-segments'] === undefined
       ? undefined
       : z.coerce.number().int().positive().parse(values['max-segments'])
-  return { config, maxSegments, setupMusic: values['setup-music'] === true }
+  return {
+    config,
+    maxSegments,
+    setupMusic: values['setup-music'] === true,
+    bootstrapProfile: values['bootstrap-profile'] === true,
+  }
 }

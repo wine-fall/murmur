@@ -202,7 +202,12 @@ export interface GuideCapable {
   runGuide(req: GuideRequest): Promise<string>
 }
 
-// Two-method Brain contract (spec 01 §3.2). Talk generation is batched from
+// One answer to one first-run onboarding question (spec 06 §2.2). The question
+// travels with the answer so the fold reads as a conversation, not three loose
+// strings.
+export type SeedAnswer = { readonly question: string; readonly answer: string }
+
+// The Brain contract (spec 01 §3.2). Talk generation is batched from
 // the start (spec 04 §3.2 shape): one call returns up to `count` beats, and a
 // brain that cannot batch returns a single-beat array.
 export interface Brain {
@@ -212,4 +217,8 @@ export interface Brain {
   // update (spec 05 §2.4). A pure text fold, no tools; the Compactor drives it
   // off the live loop. The stub returns `profile` unchanged (offline no-op).
   compactProfile(profile: string, transcript: readonly Turn[]): Promise<string>
+  // Turn the first-run onboarding answers into a persona seed: a complete
+  // standalone system prompt for the host, in the listener's own language
+  // (spec 06 §2.2). Tool-less text generation, same posture as compactProfile.
+  seedPersona(answers: readonly SeedAnswer[]): Promise<string>
 }

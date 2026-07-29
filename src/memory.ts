@@ -172,6 +172,17 @@ export class PersistentMemoryStore implements MemoryStore {
     return this.backlog.length >= this.compactEvery
   }
 
+  // --- profile write-through (spec 06 §2.4 — the slice-B bootstrap) --------- //
+
+  // Replace the profile outright. Impl-level, deliberately NOT on the
+  // MemoryStore contract: the Director never writes the profile. The watermark
+  // is untouched — a bootstrap consumes no backlog, so turns already recorded
+  // are still owed to the next fold.
+  writeProfile(text: string): void {
+    atomicWrite(this.profilePath, text)
+    this.profileText = text
+  }
+
   // Current profile + the un-compacted turns + the slice's last row timestamp.
   // The watermark travels with the slice: the fold races record(), so apply
   // advances exactly to throughTs — never "the latest row".

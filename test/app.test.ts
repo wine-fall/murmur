@@ -1,11 +1,18 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildMemory, buildVoice, resolvePersonaPath, runMusicSetupCli } from '../src/app.ts'
+import {
+  buildMemory,
+  buildVoice,
+  resolvePersonaPath,
+  runBootstrapProfileCli,
+  runMusicSetupCli,
+} from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
+import { isFirstRun } from '../src/first-run.ts'
 import { HostedVoice } from '../src/hosted-voice.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { StubVoice } from '../src/voice.ts'
@@ -44,7 +51,9 @@ describe('memory wiring', () => {
     expect(existsSync(join(dir, 'memory-stub'))).toBe(false)
   })
 
-  it('homes the persona in memoryDir on first persistent run, copy-once', () => {
+  it('homes the persona in memoryDir, and is pure: first run is what fills it', () => {
+    // spec 06 §2.1: the resolver no longer copies the bundled seed — the
+    // first-run flow decides what lands at the home (onboarding or the seed).
     const dir = tmp()
     const seed = join(dir, 'seed.md')
     writeFileSync(seed, 'seed persona')
@@ -52,13 +61,34 @@ describe('memory wiring', () => {
 
     const homed = resolvePersonaPath(c, true)
     expect(homed).toBe(join(dir, 'memory', 'persona.md'))
-    expect(readFileSync(homed, 'utf-8')).toBe('seed persona')
+    expect(existsSync(homed)).toBe(false)
+    expect(existsSync(join(dir, 'memory'))).toBe(false)
+    expect(isFirstRun(c.memoryDir)).toBe(true)
 
-    // Copy-once: a later run loads the (possibly evolved) homed copy untouched.
-    writeFileSync(homed, 'evolved persona')
-    expect(readFileSync(resolvePersonaPath(c, true), 'utf-8')).toBe('evolved persona')
-
-    // A stub run loads the seed directly — no memory-dir writes.
+    // A stub run loads the seed directly — no memory-dir writes (criterion 11).
     expect(resolvePersonaPath(c, false)).toBe(seed)
+  })
+
+  it('never rewrites an existing persona: a later run only reads it (criterion 5)', () => {
+    const dir = tmp()
+    const memoryDir = join(dir, 'memory')
+    mkdirSync(memoryDir, { recursive: true })
+    const home = join(memoryDir, 'persona.md')
+    writeFileSync(home, 'the persona I hand-edited')
+    const before = statSync(home).mtimeMs
+    const c = { ...config([]), personaPath: join(dir, 'seed.md'), memoryDir }
+
+    // The two seams runApp gates the whole first-run flow on.
+    expect(isFirstRun(memoryDir)).toBe(false)
+    expect(resolvePersonaPath(c, true)).toBe(home)
+
+    expect(readFileSync(home, 'utf-8')).toBe('the persona I hand-edited')
+    expect(statSync(home).mtimeMs).toBe(before)
+  })
+})
+
+describe('--bootstrap-profile (spec 06 §3.4 re-entry)', () => {
+  it('needs the real brain: a stub run refuses instead of pretending', async () => {
+    expect(await runBootstrapProfileCli(config(['--brain', 'stub']))).toBe(false)
   })
 })

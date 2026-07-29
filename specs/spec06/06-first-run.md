@@ -1,6 +1,18 @@
 # spec/06 · first-run & relationship — persona seeding, profile bootstrap, relationship memory
 
-> **Status**: **Design. Not yet implemented.**
+> **Status**: **Built 2026-07-29.** All three slices land with the unit suite
+> green; slices A and B were smoke-tested through the real SDK (a generated
+> persona and a two-section `profile.md` verified from the files, never the
+> model's report). Where the code refined this design: `FirstRunDeps` also
+> carries `model` (the good tier, §3.3) and an optional `ccRoot` (injectable
+> data root, defaulting to `paths.claudeCodeRoot()`); `ProfileWritable` lives in
+> `src/first-run.ts` beside its consumer, the way `CompactionStore` lives in
+> `compaction.ts`; slice B is offered only when onboarding actually produced a
+> persona, so a run that skipped every question is not asked a fourth question.
+> The by-feel constants (`PERSONA_CHAR_CAP`, `MAX_SESSIONS`, `MAX_READ_CHARS`,
+> `BOOTSTRAP_MAX_TURNS`) remain tunable (§6).
+> **Owed**: criterion 12's first-run pass in a real terminal (user-run), and the
+> eval-track judgment of whether a bootstrapped profile is *accurate*.
 > **Part**: What happens the **first time** murmur runs (there is no persona and
 > no profile yet), plus the one memory extension that makes the radio feel like
 > it knows *us*, not just *you*. Master [`../DESIGN.md`](../DESIGN.md) §2.3
@@ -151,8 +163,8 @@ Tools handed to the task (all murmur-owned, in-process, zod-validated args):
 
 | Tool | Purpose | Bound |
 |---|---|---|
-| `list_sessions()` | metadata only for the CC data root: project name, session id, last-modified, turn count, byte size | at most `MAX_SESSIONS` newest entries |
-| `read_session(id, maxChars?)` | the transcript text of one session id from `list_sessions` | `maxChars` capped at `MAX_READ_CHARS`; ids not produced by `list_sessions` are refused |
+| `list_sessions()` | metadata only for the CC data root: project name, session id, last-modified, byte size | at most `MAX_SESSIONS` newest entries; **stat-only** — no session file is opened (a turn count would mean reading every history in full, synchronously, in the live radio's process) |
+| `read_session(id, maxChars?)` | the transcript text of one session id from `list_sessions` — the **speaking turns only**, extracted from the JSONL; a file that yields none is refused rather than sent raw (its tool payloads and pasted buffers are exactly what the extraction drops) | `maxChars` capped at `MAX_READ_CHARS`; ids not produced by `list_sessions` are refused |
 | `read_instructions()` | the user's `~/.claude/CLAUDE.md`, if present | one file, capped |
 | `submit_profile(profile)` | **terminal** — finishes the task with the initial profile text | `PROFILE_CHAR_CAP` (spec 05, `src/prompts.ts`) |
 

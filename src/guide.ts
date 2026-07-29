@@ -22,6 +22,12 @@ const GUIDE_MAX_TURNS = 30
 const YES = new Set(['y', 'yes'])
 const END = new Set(['', '/done', '/quit', 'q'])
 
+// The one consent test murmur uses: anything but an explicit yes declines, so
+// EOF (which reads as '') always means no.
+export function isYes(line: string): boolean {
+  return YES.has(line.trim().toLowerCase())
+}
+
 // A serialized, consuming line read for the guide's asks. Two things the
 // Director's raw peek/take race primitive gets wrong here (codex-review
 // regressions): one typed line wakes EVERY concurrent waiter (concurrent
@@ -50,7 +56,7 @@ export function cliPermission(host: Host, read: ReadLine): CanUseTool {
     const detail = typeof input.command === 'string' ? input.command : JSON.stringify(input)
     host.info(`setup assistant wants to run [${toolName}]: ${detail}`)
     host.info('allow? [y/N]')
-    if (YES.has((await read()).trim().toLowerCase())) return { behavior: 'allow' }
+    if (isYes(await read())) return { behavior: 'allow' }
     return { behavior: 'deny', message: 'user declined' }
   }
 }
@@ -91,7 +97,7 @@ export async function runMusicSetup(
   const read = lineReader(host)
   host.info(`music dependencies aren't working here: ${result.reason}`)
   host.info("type 'y' to let the setup assistant look into it (anything else skips):")
-  if (!YES.has((await read()).trim().toLowerCase())) {
+  if (!isYes(await read())) {
     host.info('skipped music setup.')
     return false
   }
