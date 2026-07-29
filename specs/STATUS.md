@@ -3,7 +3,23 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-29 (spec restructure: 06 rescoped, 07 extended, 08/09 retired)_
+_Last updated: 2026-07-29 (spec 10 redesigned: OpenTUI/TS front-end, wire protocol defined)_
+
+- **spec 10 (TUI) redesigned (2026-07-29, docs only).** After a four-report
+  research pass with **visual delight promoted to a first-tier requirement**
+  (the TUI is the product's face — user-set bar), the front-end framework is
+  **re-decided: OpenTUI (TypeScript) under Bun**, superseding Go/Charm; "two
+  processes over IPC" stays locked, and the wire is now defined (unix-socket
+  ndjson, zod schemas shared in-repo, versioned handshake — spec 10 §2.3).
+  The spec also gained the shipped-feature interaction inventory (§3.2: the
+  four contextual meanings of a typed line, the guide/first-run Q&A mode, the
+  full display-state map), the engine-side FFT visualizer feed (§3.6), and
+  the warmth kit (§3.7: text-asset sprites, content-derived tinting, DJ
+  microcopy). **Build sequencing**: acceptance gate 1 (CJK/IME under the
+  OpenTUI input widget, user-run) is a hard week-1 gate with recorded
+  Ratatui/Ink fallbacks. spec 10 is now the next (and last) code spec on the
+  roadmap; the §6.1 creative session (art direction, the pet's identity) is
+  a separate user conversation before or during the build.
 
 - **Spec restructure (2026-07-29, docs only — no code changed).** Decisions
   taken with the user and now recorded in the specs:
