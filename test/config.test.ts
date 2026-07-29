@@ -155,3 +155,10 @@ describe('memory config', () => {
     expect(config.compactModel).toBe('claude-haiku-4-5-20251001')
   })
 })
+
+describe('spec 06 CLI entry', () => {
+  it('--bootstrap-profile is an explicit one-shot entry, off by default', () => {
+    expect(parseCli([], NO_ENV).bootstrapProfile).toBe(false)
+    expect(parseCli(['--bootstrap-profile'], NO_ENV).bootstrapProfile).toBe(true)
+  })
+})

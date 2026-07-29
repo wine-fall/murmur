@@ -13,6 +13,7 @@ import type {
   MusicHandle,
   MusicProvider,
   Player,
+  SeedAnswer,
   TalkBeat,
   Task,
   TaskTool,
@@ -92,6 +93,7 @@ export class FakeBrain implements Brain {
   respondContexts: ContextPack[] = []
   respondDelayMs = 0
   failRespond = false
+  seedAnswers: (readonly SeedAnswer[])[] = []
 
   async nextTalks(ctx: ContextPack, _count: number): Promise<TalkBeat[]> {
     this.nextTalksCalls++
@@ -116,6 +118,11 @@ export class FakeBrain implements Brain {
 
   async compactProfile(profile: string, transcript: readonly Turn[]): Promise<string> {
     return `${profile}+${transcript.length}`
+  }
+
+  async seedPersona(answers: readonly SeedAnswer[]): Promise<string> {
+    this.seedAnswers.push(answers)
+    return `persona from ${answers.length} answers`
   }
 }
 
@@ -241,6 +248,8 @@ export function pickOf(source: string, extras: Partial<TrackPick> = {}): TrackPi
 
 export class FakeHost implements Host {
   private queue = new LineQueue()
+  private markEof!: () => void
+  private eofSeen: Promise<void> = new Promise((resolve) => (this.markEof = resolve))
   radio: string[] = []
   user: string[] = []
   infos: string[] = []
@@ -250,6 +259,16 @@ export class FakeHost implements Host {
 
   type(line: string): void {
     this.queue.push(line)
+  }
+
+  // Close stdin (the non-interactive run): consuming readers resolve '' rather
+  // than pending forever.
+  endInput(): void {
+    this.markEof()
+  }
+
+  eof(): Promise<void> {
+    return this.eofSeen
   }
 
   peekLine(): Promise<string> {

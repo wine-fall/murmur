@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from 'node:url'
 
-import type { ContextPack, Turn } from './contracts.ts'
+import type { ContextPack, SeedAnswer, Turn } from './contracts.ts'
 
 // The bundled static persona seed (L0). Spec 06 will generate/evolve personas
 // at runtime; this is only the default.
@@ -207,16 +207,33 @@ export const PROFILE_CHAR_CAP = 1500
 export const COMPACTION_SYSTEM_PROMPT =
   'You maintain a concise long-term profile of a radio listener.'
 
+// The shape of the profile file, shared by the two writers of it: compaction
+// (spec 05 §3.6, extended by spec 06 slice C) and the one-shot bootstrap (spec
+// 06 slice B). Both produce the SAME two sections so the first compaction
+// merges into a bootstrapped profile instead of fighting it.
+const PROFILE_SHAPE = `The profile has exactly two labelled sections, in this order:
+
+(About the listener)
+Identity, stable preferences, recurring topics and interests, standing context
+worth remembering across sessions.
+
+(Relationship & style)
+What tone lands with this listener, how they talk back, running jokes, moments
+worth calling back to, subjects to handle lightly. This section is
+OBSERVATIONAL, not directive: it records what has actually worked, and it never
+states who the host is — the persona owns that.`
+
 const COMPACTION_INSTRUCTION = `You maintain a long-term listener profile for a personal companion radio. Fold
 the durable facts from the recent transcript into the existing profile.
 
-Keep: identity, stable preferences, recurring topics and interests, standing
-context worth remembering across sessions. Drop: ephemera, one-off small talk,
-anything transient. Merge — do not simply append; rewrite the profile so it
-stays coherent and non-repetitive.
+${PROFILE_SHAPE}
 
-Return ONLY the updated profile text, in the listener's own language, under
-${PROFILE_CHAR_CAP} characters. No preamble, headings, or commentary.
+Drop: ephemera, one-off small talk, anything transient. Merge — do not simply
+append; rewrite the profile so it stays coherent and non-repetitive.
+
+Return ONLY the updated profile text, both sections under their labels, in the
+listener's own language, under ${PROFILE_CHAR_CAP} characters total. No preamble
+or commentary.
 `
 
 // The compaction turn: current profile + the recent transcript to fold.
@@ -229,6 +246,103 @@ export function buildCompactionPrompt(profile: string, transcript: readonly Turn
     `(Recent transcript to fold in)\n${lines}`
   )
 }
+
+// --- first run (spec 06) --------------------------------------------------- //
+
+// Hard cap on the generated persona: it is the stable, cached prefix of every
+// later Brain call (master §7 pillar 4). By-feel tunable (spec 06 §6).
+export const PERSONA_CHAR_CAP = 1200
+
+// Below this a "persona" is degenerate — a refusal, an apology, one stray line.
+// Treated as a generation failure, so the bundled seed is used instead (§3.3).
+export const PERSONA_MIN_CHARS = 120
+
+// What each question must elicit is fixed by spec 06 §3.2; only the wording
+// lives here. Asked in this order, each answerable in one line.
+export const SEED_QUESTIONS = [
+  "Who's listening? What should I call you, and what do your days usually look " +
+    'like — work or study, and the hours you keep?',
+  'What do you want on the air? Company while you work, someone to think out ' +
+    'loud with, late-night talk, mostly music — whatever you picture.',
+  'How do you like to be talked to? Dry, warm, chatty, quiet — and which ' +
+    'language should I speak?',
+] as const
+
+export const FIRST_RUN_INTRO =
+  "This is murmur's first run, so it has no voice yet. Three short questions " +
+  'shape the host you will be listening to — answer in a line each, or press ' +
+  'Enter to skip any of them.'
+
+// Neutral framing (not a persona): this call writes a character, it does not
+// speak as one.
+export const SEED_PERSONA_SYSTEM_PROMPT =
+  'You write the character prompt for the host of a personal companion radio.'
+
+// Fold the onboarding answers into a complete standalone persona — the same
+// shape a hand-written seed has, so spec 01's loader cannot tell them apart.
+export function buildSeedPersonaPrompt(answers: readonly SeedAnswer[]): string {
+  const said = answers
+    .filter((a) => a.answer.trim() !== '')
+    .map((a) => `Q: ${a.question}\nA: ${a.answer.trim()}`)
+    .join('\n\n')
+  return `A new listener just answered a few questions about the radio host they want.
+Write that host's character as a complete, standalone system prompt, addressed
+to the host as "you".
+
+(What they said)
+${said}
+
+Rules:
+- Write the host's CHARACTER — who it is, how it speaks, how it keeps company.
+  It is not a summary of the answers and never mentions this questionnaire.
+- Write it in the language the listener asked to be spoken to in, and state
+  that language explicitly inside the persona.
+- Keep it time-neutral. The host is not a late-night host, a morning host, or
+  a host for any season — not even when the listener says what hours they keep.
+  Their hours are context about THEM; the host meets them at any hour, and the
+  moment is supplied per beat elsewhere.
+- Do not invent biography the answers do not support. Where they said nothing,
+  stay open rather than guessing.
+- Under ${PERSONA_CHAR_CAP} characters.
+
+Return ONLY the persona text. No preamble, no commentary, no code fences.
+`
+}
+
+// The slice-B offer (spec 06 §3.4). Stated plainly: what is read, what crosses
+// the already-sanctioned Claude hop, and that skipping costs nothing.
+export const BOOTSTRAP_OFFER = [
+  'One optional shortcut: murmur can read your local Claude Code history to ' +
+    'get a first sense of who you are, so it does not start from nothing.',
+  'The transcripts stay on this machine, but the excerpts it chooses to read ' +
+    'are sent to Claude as part of the analysis — the same hop every beat of ' +
+    'the program already uses. It runs once, in the background.',
+  'Skipping is completely fine: murmur just gets to know you as it goes. ' +
+    'Read your Claude Code history? [y/N]',
+] as const
+
+export const BOOTSTRAP_PROFILE_SYSTEM_PROMPT =
+  'You build a concise long-term profile of a radio listener from their own ' +
+  'working notes and transcripts.'
+
+export const BOOTSTRAP_PROFILE_INSTRUCTION = `Build the FIRST listener profile for a personal companion radio, from the
+listener's own Claude Code history on this machine.
+
+Use list_sessions to see what is there, read_session to read the ones that look
+most telling (the newest and the largest are usually the richest), and
+read_instructions for their global instructions file if it exists. Read a
+handful — enough for a picture, not an audit. Then call submit_profile once.
+
+${PROFILE_SHAPE}
+
+Record durable signal: the domains they work in, the tools and languages they
+use, how they phrase things, the problems that keep coming back, the hours they
+keep. EXCLUDE secrets, credentials, tokens, employer-confidential detail, and
+anything that reads as surveillance rather than acquaintance — this is a radio
+host getting acquainted, not a dossier.
+
+Write it in the listener's own language, under ${PROFILE_CHAR_CAP} characters
+total, and pass it to submit_profile as plain text.`
 
 // Prompt for an in-persona reply to a typed user line. Carries the profile
 // block too (spec 05 §3.5): a direct reply is exactly where cross-session

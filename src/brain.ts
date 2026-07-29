@@ -1,4 +1,4 @@
-// Brain implementations (spec 01 §3.2) behind the two-method contract.
+// Brain implementations (spec 01 §3.2) behind the Brain contract.
 //
 // StubBrain — canned, dependency-free text: the fake for the fast test layer
 // and offline runs. ClaudeBrain — the real Brain on
@@ -9,6 +9,8 @@
 // the model answers by calling emit_talk_beats, so the result arrives as
 // schema-validated args, never scraped free text.
 
+import { readFileSync } from 'node:fs'
+
 import {
   createSdkMcpServer,
   query,
@@ -18,13 +20,26 @@ import {
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Brain, ContextPack, GuideCapable, GuideRequest, Harness, TalkBeat, Task, Turn } from './contracts.ts'
+import type {
+  Brain,
+  ContextPack,
+  GuideCapable,
+  GuideRequest,
+  Harness,
+  SeedAnswer,
+  TalkBeat,
+  Task,
+  Turn,
+} from './contracts.ts'
 import {
   buildCompactionPrompt,
   buildNextTalkPrompt,
   buildNextTalksPrompt,
   buildRespondPrompt,
+  buildSeedPersonaPrompt,
   COMPACTION_SYSTEM_PROMPT,
+  DEFAULT_PERSONA_PATH,
+  SEED_PERSONA_SYSTEM_PROMPT,
 } from './prompts.ts'
 import { emitTalkBeatsTool } from './talk-tools.ts'
 
@@ -60,6 +75,12 @@ export class StubBrain implements Brain {
     // Offline: leave the profile unchanged so a stub run's canned chatter never
     // rewrites it (spec 05 §2.4 — compaction is a no-op on the stub).
     return profile
+  }
+
+  async seedPersona(_answers: readonly SeedAnswer[]): Promise<string> {
+    // Offline: hand back the bundled seed, so a stub onboarding is inert and
+    // still produces a loadable persona (spec 06 §2.2).
+    return readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim()
   }
 }
 
@@ -252,6 +273,13 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   // not the host speaking. The Compactor runs this off the live loop.
   async compactProfile(profile: string, transcript: readonly Turn[]): Promise<string> {
     return this.generate(COMPACTION_SYSTEM_PROMPT, buildCompactionPrompt(profile, transcript))
+  }
+
+  // One tool-less fold of the onboarding answers into a persona, on the good
+  // tier: it happens once per install and every later beat inherits it (spec
+  // 06 §3.3).
+  async seedPersona(answers: readonly SeedAnswer[]): Promise<string> {
+    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers))
   }
 
   private async generate(persona: string, prompt: string): Promise<string> {

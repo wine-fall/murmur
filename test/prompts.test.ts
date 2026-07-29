@@ -8,9 +8,13 @@ import {
   buildNextTalkPrompt,
   buildNextTalksPrompt,
   buildRespondPrompt,
+  buildSeedPersonaPrompt,
+  BOOTSTRAP_PROFILE_INSTRUCTION,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
+  PERSONA_CHAR_CAP,
   PROFILE_CHAR_CAP,
+  SEED_QUESTIONS,
 } from '../src/prompts.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
@@ -172,5 +176,83 @@ describe('compaction prompt', () => {
     const p = buildCompactionPrompt('  ', [])
     expect(p).toContain('(no profile yet)')
     expect(p).toContain('(nothing)')
+  })
+})
+
+// --- spec 06 ---------------------------------------------------------------- //
+
+describe('seed-persona prompt (spec 06 §2.2/§3.3)', () => {
+  const answers = [
+    { question: SEED_QUESTIONS[0], answer: 'call me Zach, I code late' },
+    { question: SEED_QUESTIONS[1], answer: 'company while I work' },
+    { question: SEED_QUESTIONS[2], answer: 'dry and quiet, speak Chinese' },
+  ]
+
+  it('asks exactly three questions covering who / what / how', () => {
+    expect(SEED_QUESTIONS).toHaveLength(3)
+    expect(SEED_QUESTIONS[0]).toMatch(/listening/i)
+    expect(SEED_QUESTIONS[1]).toMatch(/on the air/i)
+    expect(SEED_QUESTIONS[2]).toMatch(/language/i)
+  })
+
+  it('carries every answered question and its answer', () => {
+    const p = buildSeedPersonaPrompt(answers)
+    for (const a of answers) {
+      expect(p).toContain(a.question)
+      expect(p).toContain(a.answer)
+    }
+  })
+
+  it('demands a standalone persona, not a summary, and states the cap', () => {
+    const p = buildSeedPersonaPrompt(answers)
+    expect(p).toContain(String(PERSONA_CHAR_CAP))
+    expect(p).toMatch(/not a summary/i)
+    expect(p).toMatch(/do not invent/i)
+    // spec 04 §3.4 supplies the time-of-day cue per call, so the persona must
+    // not fix itself to one — a real smoke produced a "late-night host" purely
+    // because the listener said they keep late hours.
+    expect(p).toMatch(/time-neutral/i)
+    expect(p).toMatch(/not.*late-night host/i)
+    expect(p).toMatch(/hours they keep/i)
+  })
+
+  it('drops skipped questions rather than sending blanks', () => {
+    const p = buildSeedPersonaPrompt([
+      { question: 'Q1', answer: 'answered' },
+      { question: 'Q2', answer: '   ' },
+    ])
+    expect(p).toContain('Q1')
+    expect(p).not.toContain('Q2')
+  })
+})
+
+describe('compaction prompt keeps two sections (spec 06 slice C)', () => {
+  it('requests both the listener facts and the relationship section', () => {
+    const p = buildCompactionPrompt('x', [])
+    expect(p).toContain('(About the listener)')
+    expect(p).toContain('(Relationship & style)')
+  })
+
+  it('marks the relationship section observational, not directive', () => {
+    // The guardrail against persona evolution through the back door (§2.5).
+    const p = buildCompactionPrompt('x', [])
+    expect(p).toMatch(/observational/i)
+    expect(p).toMatch(/persona/i)
+  })
+})
+
+describe('profile bootstrap prompt (spec 06 slice B)', () => {
+  it('names its tools and the same two-section shape compaction maintains', () => {
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('list_sessions')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('read_session')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('read_instructions')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('submit_profile')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('(About the listener)')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('(Relationship & style)')
+  })
+
+  it('excludes secrets and surveillance-shaped detail', () => {
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/secret|credential/i)
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/surveillance/i)
   })
 })

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cacheRoot, dataRoot, homeRoot } from '../src/paths.ts'
+import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot } from '../src/paths.ts'
 
 describe('paths', () => {
   it('defaults to ~/.murmur with data/ and cache/ beneath', () => {
@@ -22,5 +22,21 @@ describe('paths', () => {
     expect(home.includes('~')).toBe(false)
     // A bare ~ is the home dir itself.
     expect(homeRoot({ MURMUR_HOME: '~' }).includes('~')).toBe(false)
+  })
+})
+
+// spec 06 §2.3: the Claude Code data root slice B reads, resolved in the one
+// module allowed to resolve user-level paths.
+describe('claudeCodeRoot', () => {
+  it('honours $CLAUDE_CONFIG_DIR, else ~/.claude', () => {
+    expect(claudeCodeRoot({ CLAUDE_CONFIG_DIR: '/tmp/cc' })).toBe('/tmp/cc')
+    expect(claudeCodeRoot({}).endsWith('/.claude')).toBe(true)
+    expect(claudeCodeRoot({ CLAUDE_CONFIG_DIR: '  ' }).endsWith('/.claude')).toBe(true)
+  })
+
+  it('expands a leading ~ the same way MURMUR_HOME does', () => {
+    const root = claudeCodeRoot({ CLAUDE_CONFIG_DIR: '~/alt-claude' })
+    expect(root.includes('~')).toBe(false)
+    expect(root.endsWith('/alt-claude')).toBe(true)
   })
 })

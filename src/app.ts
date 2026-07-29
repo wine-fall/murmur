@@ -3,7 +3,6 @@
 // process, shut down cleanly. The engine is the sole audio authority — the
 // interim subprocess player is gone.
 
-import { copyFileSync, existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
@@ -17,6 +16,7 @@ import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
 import { Director, type MusicWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeStream } from './ffmpeg.ts'
+import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
 import { CliHost } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
@@ -35,18 +35,13 @@ export function buildMemory(config: Config, log: (message: string) => void = () 
   return new InProcessMemoryStore()
 }
 
-// Where to load the persona from (spec 05 §3.2). On a persistent run the
-// persona is homed in the memory dir (the living asset's writable home for
-// spec 06): the seed is copied there once on first run, and loaded from there
-// thereafter. A stub run loads the seed directly (no memory-dir writes).
+// Where the persona lives for this run (spec 05 §3.2): homed in the memory dir
+// on a persistent run, the bundled seed directly on a stub run (no memory-dir
+// writes). Pure — what actually LANDS at that home is the first-run flow's call
+// (spec 06 §2.1: the onboarding seed, or the bundled seed when it is declined),
+// and after that murmur never writes the file again.
 export function resolvePersonaPath(config: Config, persistent: boolean): string {
-  if (!persistent) return config.personaPath
-  const home = join(config.memoryDir, 'persona.md')
-  if (!existsSync(home)) {
-    mkdirSync(config.memoryDir, { recursive: true })
-    copyFileSync(config.personaPath, home)
-  }
-  return home
+  return persistent ? join(config.memoryDir, 'persona.md') : config.personaPath
 }
 
 export function buildVoice(config: Config): VoiceProvider {
@@ -89,6 +84,27 @@ function buildMusic(config: Config, harness: Harness, engine: AudioEngine): Musi
   return { source, cadence, engine }
 }
 
+// The explicit re-entry for a listener who declined the bootstrap on their
+// first run (spec 06 §3.4): `murmur --bootstrap-profile` runs the same one-shot
+// task standalone, no broadcast. Returns whether a profile was written.
+export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
+  const host = new CliHost()
+  if (config.brain !== 'claude') {
+    host.info('the profile bootstrap needs the real brain: run again without --brain stub.')
+    return false
+  }
+  host.info('reading your Claude Code history to build a first listener profile...')
+  const memory = new PersistentMemoryStore({ dir: config.memoryDir, log: (m) => host.info(m) })
+  const ok = await runProfileBootstrap({
+    harness: new ClaudeBrain(config.model),
+    memory,
+    host,
+    model: config.model,
+  })
+  if (!ok) host.info('nothing was written (see the dev log for why).')
+  return ok
+}
+
 // The explicit setup entry (spec 03-03): `murmur --setup-music` runs the
 // preflight + guide directly, no broadcast. Returns whether music is usable.
 export async function runMusicSetupCli(config: Config): Promise<boolean> {
@@ -110,7 +126,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // A real (claude) run persists memory + homes the persona in the memory dir;
   // a stub run stays fully in-process (spec 05 §3.2/§3.7).
   const persistent = config.brain === 'claude'
-  const persona = loadPersona(resolvePersonaPath(config, persistent))
   const voice = buildVoice(config)
   // The harnessed brain drives music discovery; the stub has no harness, so a
   // stub session is talk-only by construction.
@@ -142,6 +157,24 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     )
     musicOk = results.music === true
   }
+
+  // First run (spec 06 §2.1): after the startup checks, before the banner and
+  // the first segment — the radio must not talk over the questions. Total: it
+  // always returns a loadable persona path, so the radio always boots.
+  let personaPath = resolvePersonaPath(config, persistent)
+  if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
+    personaPath = await runFirstRun({
+      host,
+      brain,
+      memory,
+      memoryDir: config.memoryDir,
+      fallbackSeedPath: config.personaPath,
+      model: config.model,
+      // No harness (a stub run) = slice B is never offered.
+      ...(claude !== null && { harness: claude }),
+    })
+  }
+  const persona = loadPersona(personaPath)
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the

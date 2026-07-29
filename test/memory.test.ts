@@ -166,3 +166,29 @@ describe('PersistentMemoryStore', () => {
     expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['during-fold'])
   })
 })
+
+// spec 06 §2.4: the profile write-through the bootstrap uses. Impl-level and
+// deliberately off the MemoryStore contract — the Director never writes it.
+describe('PersistentMemoryStore.writeProfile (spec 06 §2.4)', () => {
+  const tmp = () => mkdtempSync(join(tmpdir(), 'murmur-writeprofile-'))
+
+  it('writes the profile atomically and serves it back, surviving a reload', () => {
+    const dir = tmp()
+    const store = new PersistentMemoryStore({ dir })
+    expect(store.profile()).toBe('')
+    store.writeProfile('(About the listener)\nships TypeScript at night')
+    expect(store.profile()).toContain('ships TypeScript')
+    expect(readFileSync(join(dir, 'profile.md'), 'utf-8')).toContain('ships TypeScript')
+    expect(new PersistentMemoryStore({ dir }).profile()).toContain('ships TypeScript')
+  })
+
+  it('leaves the compaction watermark alone (it consumed no backlog)', () => {
+    const dir = tmp()
+    const store = new PersistentMemoryStore({ dir })
+    store.record({ role: 'user', text: 'hello' })
+    store.writeProfile('bootstrapped')
+    // The turn is still owed to compaction: a bootstrap is not a fold.
+    expect(store.compactionSlice().turns.map((t) => t.text)).toEqual(['hello'])
+    expect(store.compactionSlice().profile).toBe('bootstrapped')
+  })
+})
