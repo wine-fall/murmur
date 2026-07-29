@@ -99,7 +99,7 @@ dev: install
 	  echo "▶ logs: open another terminal in this repo and run:  make logs"; \
 	  echo "  (diagnostics -> $(DEV_LOG); memory -> $(MEM_LOG))"; \
 	  echo ""; \
-	  python3 scripts/memwatch.py --out $(MEM_LOG) >/dev/null 2>>$(MEM_LOG) & \
+	  node scripts/memwatch.ts --out $(MEM_LOG) >/dev/null 2>>$(MEM_LOG) & \
 	  MEMPID=$$!; \
 	  trap 'kill $$MEMPID 2>/dev/null || true' EXIT INT TERM; \
 	  MURMUR_DEV_LOG=$(DEV_LOG) node src/main.ts $(RUN_ARGS)
@@ -110,7 +110,7 @@ ifdef DEBUG
 endif
 
 logs:
-	@python3 scripts/devwatch.py --log $(DEV_LOG) --level $(LOG_LEVEL)
+	@node scripts/devwatch.ts --log $(DEV_LOG) --level $(LOG_LEVEL)
 
 setup-music:
 	node src/main.ts --setup-music

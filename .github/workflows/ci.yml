@@ -33,7 +33,7 @@ jobs:
       - run: npm ci
 
       - name: Source language gate
-        run: git ls-files '*.ts' '*.md' '*.yml' '*.yaml' '*.toml' '*.py' | xargs python3 scripts/check_source_language.py
+        run: git ls-files '*.ts' '*.md' '*.yml' '*.yaml' '*.toml' | xargs node scripts/check-source-language.ts
 
       - run: npm run typecheck
 

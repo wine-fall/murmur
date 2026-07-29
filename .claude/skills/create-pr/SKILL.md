@@ -7,7 +7,7 @@ description: Use when opening, pushing, or updating a GitHub pull request for th
 
 ## Core principle
 
-**The PR title/description gate runs `.github/scripts/check_pr.py`, and that script runs locally.** Run it locally with your intended title+body and require **exit 0 before you push** — never discover a format failure on CI. Everything below is the murmur-specific procedure around that pre-check.
+**The PR title/description gate runs `.github/scripts/check-pr.ts`, and that script runs locally.** Run it locally with your intended title+body and require **exit 0 before you push** — never discover a format failure on CI. Everything below is the murmur-specific procedure around that pre-check.
 
 This picks up where `murmur-ship` ends (a clean local commit). It pushes and opens the PR — `murmur-ship` itself never does.
 
@@ -24,7 +24,7 @@ This picks up where `murmur-ship` ends (a clean local commit). It pushes and ope
    ```bash
    PR_TITLE="feat(voice): add X [spec 02]" \
    PR_BODY="$(cat /path/to/body.md)" \
-   python3 .github/scripts/check_pr.py; echo "exit=$?"
+   node .github/scripts/check-pr.ts; echo "exit=$?"
    ```
    Non-zero → fix title/body and re-run. Do not push until it says `OK:`.
 
@@ -46,7 +46,7 @@ gh api repos/<owner>/<repo>/pulls/<N> -X PATCH -F body=@/path/to/body.md --jq '.
   | grep -oE 'specs/[[:alnum:]./_-]+\.md'   # confirm the spec path actually landed
 ```
 
-## What `check_pr.py` enforces (so you can satisfy it)
+## What `check-pr.ts` enforces (so you can satisfy it)
 
 | Rule | Requirement |
 |---|---|
@@ -64,6 +64,6 @@ gh api repos/<owner>/<repo>/pulls/<N> -X PATCH -F body=@/path/to/body.md --jq '.
 
 ## Red flags — STOP
 
-- About to `git push` / `gh pr create` without having seen `check_pr.py` print `OK:` locally.
+- About to `git push` / `gh pr create` without having seen `check-pr.ts` print `OK:` locally.
 - A product-behavior PR whose body has no on-disk `specs/*.md` path, or whose title has no `[spec NN]`.
 - Missing the `## AI coding brief` section.

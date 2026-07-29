@@ -20,8 +20,8 @@ Drive one murmur task from intent to a **delivered PR** through fixed gates, **i
    `codex review -c model="gpt-5.5" -c model_reasoning_effort="xhigh" --base origin/main`
    (pin the model; 10-min timeout). Auth / quota / timeout = a **mechanical skip**, not "no findings" — say so. Fall back to the `code-review` skill only when codex is unavailable. Triage the findings with technical rigor — do not blindly implement: verify each against the code, fix the genuine ones (then re-run `npm test`), dismiss false positives with a one-line reason. One round. Record the outcome for the PR body: `Peer review (codex …): N findings, M applied, K dismissed` — or `Peer review: skipped — <reason>`.
 7. **Lock against recurrence.** Any bug found (in build or review) → add the regression test that would have caught it, in the same change. Deterministic → unit test; stochastic → an eval detector or a noted eval gap.
-8. **Commit.** Group into logical commits via `smart-commit`. The org commit-message convention applies. Commit inside the worktree from step 2, never in the main checkout. Stage explicit paths — never `git add -A` / `git add .`; the pre-commit gates (source-language + tsc + oxlint + path-governance) run on commit and need `node`/`npx` + `python3` on PATH.
-9. **Deliver.** Invoke `create-pr` — it owns the local `check_pr.py` pre-check (exit 0 **before** pushing) → branch → push → open the PR. Then run the **Wait loop** below. Don't stop at "PR opened."
+8. **Commit.** Group into logical commits via `smart-commit`. The org commit-message convention applies. Commit inside the worktree from step 2, never in the main checkout. Stage explicit paths — never `git add -A` / `git add .`; the pre-commit gates (source-language + tsc + oxlint + path-governance) run on commit and need `node`/`npx` on PATH.
+9. **Deliver.** Invoke `create-pr` — it owns the local `check-pr.ts` pre-check (exit 0 **before** pushing) → branch → push → open the PR. Then run the **Wait loop** below. Don't stop at "PR opened."
 
 ## Wait loop (after the PR is open)
 
@@ -51,7 +51,7 @@ After the PR merges — whether you merged it or the user did — leave the loca
 - Skipping the closing review, or running it before the test gate is green.
 - Committing with the test gate red.
 - Opening the PR and walking away from CI instead of following the Wait loop to a terminal state.
-- Reacting to a CI title/description format failure that `check_pr.py` would have caught locally — run the pre-check first (see `create-pr`).
+- Reacting to a CI title/description format failure that `check-pr.ts` would have caught locally — run the pre-check first (see `create-pr`).
 - Asserting on Claude's exact output in a unit test — that belongs in the eval track.
 - Charging into a fix on an investigation-phrased ask without checkpointing.
 - Declaring "done" before a user-set acceptance bar is met.

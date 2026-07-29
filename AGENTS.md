@@ -52,9 +52,9 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
   carry over on their own.
 - **Never gate a commit/push on a piped command's exit code** (`npm test | tail`
   reports `tail`'s exit) — run the gating command bare and check its real code.
-- `git commit` runs `language: system` pre-commit hooks — `node`/`npx` and
-  `python3` must be on PATH (`make install` provisions the `pre-commit` runner
-  itself via `uv tool install`).
+- `git commit` runs `language: system` pre-commit hooks — `node`/`npx` must be
+  on PATH (`make install` provisions the `pre-commit` runner itself via
+  `uv tool install`).
 - The **ponytail** plugin is enabled on purpose (minimal-code ladder): before
   writing new code, climb it — needed at all? already in the codebase? stdlib?
   one line?
