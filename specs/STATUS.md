@@ -28,9 +28,15 @@ _Last updated: 2026-07-29 (spec restructure: 06 rescoped, 07 extended, 08/09 ret
     bootstrap → 06 slice B; persona inference cut; CC-derived activity signals
     cut (local idle is cheaper and more accurate). The §10 row is kept, marked
     retired, so the reasons are not re-litigated.
-- **Next build targets: spec 07, then spec 06** (both are Design-status specs,
-  written for a coding agent and ready to build test-first). **spec 10 (TUI)
-  stays parallel** — off the critical path, buildable any time.
+- **spec 06 is built (2026-07-29).** First-run onboarding seeds `persona.md`
+  (slice A); the optional, consented Claude-Code-history → profile bootstrap
+  runs on the spec-03-01 harness behind a realpath-scoped read-only tool set
+  (slice B, with `murmur --bootstrap-profile` as the later re-entry); the
+  compaction prompt now maintains a second "relationship & style" section
+  (slice C). Unit gate green, and slices A/B were smoke-tested through the real
+  SDK. **Owed**: the first-run pass in a real terminal (criterion 12, user-run).
+- **Next build target: spec 07.** **spec 10 (TUI) stays parallel** — off the
+  critical path, buildable any time.
 
 - **The implementation is TypeScript.** The Python → TS migration (issue #54)
   is complete: Phases 0–5 merged (PRs #56–#60 + the Phase 5 cutover PR). The
