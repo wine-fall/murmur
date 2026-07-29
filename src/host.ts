@@ -23,6 +23,9 @@ export interface Host {
   onRadioSegment(text: string): void
   onUserLine(text: string): void
   info(message: string): void
+  // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
+  // over the program. Optional so bare hosts stay valid.
+  debug?(message: string): void
 }
 
 export class LineQueue {
@@ -127,5 +130,9 @@ export class CliHost implements Host {
   info(message: string): void {
     console.log(`·  ${message}`)
     this.mirror('host', message)
+  }
+
+  debug(message: string): void {
+    this.mirror('director', message)
   }
 }

@@ -84,6 +84,10 @@ export class FakeBrain implements Brain {
   batches: (string | TalkBeat)[][] = []
   nextTalksCalls = 0
   talkContexts: ContextPack[] = []
+  // Scripted transient failures / latency for the look-ahead retry + refill-
+  // during-music tests (spec 04 §3.3).
+  nextTalksFailTimes = 0
+  nextTalksDelayMs = 0
   respondCalls: string[] = []
   respondContexts: ContextPack[] = []
   respondDelayMs = 0
@@ -92,6 +96,11 @@ export class FakeBrain implements Brain {
   async nextTalks(ctx: ContextPack, _count: number): Promise<TalkBeat[]> {
     this.nextTalksCalls++
     this.talkContexts.push(ctx)
+    if (this.nextTalksFailTimes > 0) {
+      this.nextTalksFailTimes--
+      throw new Error('brain down')
+    }
+    if (this.nextTalksDelayMs > 0) await sleep(this.nextTalksDelayMs)
     const batch = this.batches.shift()
     if (batch === undefined) throw new Error('no more batches')
     return batch.map((beat) => (typeof beat === 'string' ? { text: beat } : beat))
@@ -235,6 +244,7 @@ export class FakeHost implements Host {
   radio: string[] = []
   user: string[] = []
   infos: string[] = []
+  debugs: string[] = []
 
   start(): void {}
 
@@ -260,6 +270,10 @@ export class FakeHost implements Host {
 
   info(message: string): void {
     this.infos.push(message)
+  }
+
+  debug(message: string): void {
+    this.debugs.push(message)
   }
 }
 

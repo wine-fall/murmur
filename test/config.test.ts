@@ -18,7 +18,6 @@ describe('parseCli', () => {
     expect(config.voice).toBe('stub')
     expect(config.gapSeconds).toBe(2)
     expect(config.recentWindow).toBe(12)
-    expect(config.talkBatch).toBe(2)
     expect(config.personaPath).toBe(DEFAULT_PERSONA_PATH)
     expect(maxSegments).toBeUndefined()
   })

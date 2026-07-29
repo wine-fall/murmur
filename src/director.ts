@@ -28,6 +28,7 @@ import type {
   TalkBeat,
   TrackPick,
   TrackSource,
+  Turn,
   VoiceProvider,
 } from './contracts.ts'
 import type { Host } from './host.ts'
@@ -48,6 +49,12 @@ const MUSIC_START_ATTEMPTS = 2
 // Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
 // (spec 05 §3.5) — cross-session on the persistent store.
 const AVOID_DEPTH = 8
+
+// spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept
+// topped up so the next talk airs with no Brain/synth wait, even across music.
+// A module constant, not a config knob — deepen only if measurement shows a
+// remaining gap (spec 04 §6).
+const TALK_LOOKAHEAD = 2
 
 export type Steer = { intent: 'quit' } | { intent: 'talkback'; text: string }
 
@@ -85,7 +92,6 @@ export type DirectorDeps = {
   host: Host
   gapSeconds: number
   recentWindow: number
-  talkBatch: number
   music?: MusicWiring
   // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
@@ -93,11 +99,21 @@ export type DirectorDeps = {
   compactor?: { maybeSchedule(): boolean }
 }
 
+// A look-ahead entry: the beat with its synthesis already running (spec 04
+// §3.3) — consuming it awaits a usually-settled clip, never starts one.
+type BufferedBeat = { beat: TalkBeat; clip: Promise<AudioClip | null> }
+
 export class Director {
   private quit = false
-  // Beats already generated but not yet aired (the rest of the last batch).
-  // Discarded on a talkback steer — they predate the user's turn.
-  private beats: TalkBeat[] = []
+  // spec 04 §3.3: pre-synthesized look-ahead beats, kept topped up to
+  // TALK_LOOKAHEAD so the next talk airs warm — even across music. Discarded
+  // on a talkback steer (they predate the user's turn).
+  private talkAhead: BufferedBeat[] = []
+  // The single in-flight refill topping the buffer back up (mirrors the
+  // single-slot pendingPick). Promises cannot be cancelled, so a discarded
+  // refill keeps running and the epoch guard drops its stale result.
+  private talkFill: Pending<void> | null = null
+  private talkEpoch = 0
   private talksSinceMusic = 0
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
@@ -136,10 +152,17 @@ export class Director {
   // (by-ear) over the pure, unit-tested bucketing. Profile + recent topics come
   // from the persistent store (spec 05 §3.5): profile is the stable-prefix
   // block, coveredTopics the cross-day anti-repeat cue.
-  private context(): ContextPack {
+  // `queued` are look-ahead beats already generated but not yet aired (spec 04
+  // §3.3): appended as the host's own prior turns so a refill continues AFTER
+  // them instead of regenerating the same beat — the buffered text lives here
+  // in the Director, so the stateless Brain is told what is already scheduled,
+  // not only what has aired and been recorded.
+  private context(queued: readonly string[] = []): ContextPack {
+    const recent = this.deps.memory.recent(this.deps.recentWindow)
+    const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
     return {
       persona: this.deps.persona,
-      recent: this.deps.memory.recent(this.deps.recentWindow),
+      recent: queued.length === 0 ? recent : [...recent, ...turns],
       scene: currentScene(new Date()),
       profile: this.deps.memory.profile(),
       coveredTopics: this.deps.memory.recentTopics(this.deps.recentWindow),
@@ -147,22 +170,89 @@ export class Director {
   }
 
   private async talkSegment(): Promise<void> {
-    if (this.beats.length === 0) this.beats = await this.generateTalks()
-    const beat = this.beats.shift()
-    if (beat === undefined) return // generation degraded; the loop keeps broadcasting
-    // Prime the next music pick before synth: its find-and-pull latency overlaps
-    // this talk's synthesis + airtime. The beat text folds into the mood even
-    // though it is only recorded at air time.
-    this.prefetchMusic(beat.text)
-    const clip = await this.synthesizeOrSkip(beat.text)
-    if (clip === null) return
+    const aired = await this.nextTalkClip()
+    if (aired === null) return // generation/synthesis degraded; the loop keeps broadcasting
     // Printed + recorded at air time, so an interjection's reply sees this
     // segment in context. The topic tag (when the model provided one) feeds the
     // cross-day anti-repeat ledger (spec 05 §3.9).
-    this.deps.host.onRadioSegment(beat.text)
-    this.deps.memory.record({ role: 'radio', text: beat.text })
-    if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
-    await this.runVoice(onAir(this.deps.player.play(clip)))
+    this.deps.host.onRadioSegment(aired.beat.text)
+    this.deps.memory.record({ role: 'radio', text: aired.beat.text })
+    if (aired.beat.topic !== undefined) this.deps.memory.recordEvent('topic', aired.beat.topic)
+    // Refill AFTER recording, so the top-up's context already carries this
+    // just-aired beat and its Brain+synth overlap the playback below.
+    this.prefetchTalk()
+    await this.runVoice(onAir(this.deps.player.play(aired.clip)))
+  }
+
+  // The next beat + clip to air. From the look-ahead buffer when primed — its
+  // synth ran behind the prior audio, so the await is near-instant. Else cold:
+  // one batched nextTalks, air beat 1, buffer the rest (spec 04 §3.3). An
+  // in-flight refill is awaited over a cold call so the two never
+  // double-generate; a refill that degraded to nothing falls through cold.
+  private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip } | null> {
+    if (this.talkAhead.length === 0 && this.talkFill !== null && !this.talkFill.done()) {
+      await this.talkFill.promise
+    }
+    const primed = this.talkAhead.shift()
+    if (primed !== undefined) {
+      this.deps.host.debug?.(`talk.buffer warm depth=${this.talkAhead.length + 1}`)
+      // Prime the next music pick around the airing text (mood) — it needs no
+      // audio, so the find-and-pull overlaps this beat's airtime.
+      this.prefetchMusic(primed.beat.text)
+      const clip = await primed.clip
+      return clip === null ? null : { beat: primed.beat, clip }
+    }
+    this.deps.host.debug?.('talk.buffer cold; batching inline')
+    const beats = await this.generateTalks(TALK_LOOKAHEAD)
+    const first = beats.shift()
+    if (first === undefined) return null
+    this.prefetchMusic(first.text)
+    // Beat 1's synth first (it airs next), the look-ahead synths right behind
+    // it — all in flight together on a concurrent backend.
+    const firstClip = this.synthesizeOrSkip(first.text)
+    this.talkAhead = beats.map((beat) => ({ beat, clip: this.synthesizeOrSkip(beat.text) }))
+    const clip = await firstClip
+    return clip === null ? null : { beat: first, clip }
+  }
+
+  // spec 04 §3.3: keep the look-ahead topped up to TALK_LOOKAHEAD — fire-and-
+  // forget, at most one refill in flight (mirrors prefetchMusic). Fired after
+  // a consumed beat is recorded and at a music segment's start, so the buffer
+  // stays full and the refill's work overlaps whatever is on air.
+  private prefetchTalk(): void {
+    if (this.talkAhead.length >= TALK_LOOKAHEAD) return
+    if (this.talkFill !== null && !this.talkFill.done()) return
+    this.talkFill = pending(this.fillTalk())
+  }
+
+  // Background refill of the shortfall: one batched nextTalks whose context
+  // carries the queued beats (coherence), results synthesized in parallel and
+  // appended, capped at the depth. Total — a failed batch just leaves the
+  // buffer short and the next prefetchTalk retries.
+  private async fillTalk(): Promise<void> {
+    const need = TALK_LOOKAHEAD - this.talkAhead.length
+    if (need <= 0) return
+    const epoch = this.talkEpoch
+    const queued = this.talkAhead.map((b) => b.beat.text)
+    this.deps.host.debug?.(`talk.refill need=${need} queued=${queued.length}`)
+    const beats = await this.generateTalks(need, queued)
+    // A steer discarded the buffer while the batch was in flight: its beats
+    // predate the user's turn — drop them.
+    if (epoch !== this.talkEpoch) return
+    for (const beat of beats) {
+      if (this.talkAhead.length >= TALK_LOOKAHEAD) break
+      this.talkAhead.push({ beat, clip: this.synthesizeOrSkip(beat.text) })
+    }
+    this.deps.host.debug?.(`talk.refill got=${beats.length} depth=${this.talkAhead.length}`)
+  }
+
+  // Drop the buffered look-ahead and orphan any in-flight refill (spec 04
+  // §3.3): called when a talkback steer makes them stale. The refill cannot be
+  // cancelled — the epoch bump makes it discard its own result on arrival.
+  private discardTalkAhead(): void {
+    this.talkEpoch++
+    this.talkAhead = []
+    this.talkFill = null
   }
 
   // -- the music branch (spec 03-02 §3.5) ----------------------------------- //
@@ -212,6 +302,10 @@ export class Director {
     // re-attempt music at the next boundary while it keeps resolving.
     if (this.pendingPick !== null && !this.pendingPick.done()) return false
     try {
+      // A song is going on air: the talk look-ahead SURVIVES it and is topped
+      // up during it (spec 04 §3.3) — the song's whole duration overlaps the
+      // refill's Brain+synth, so the post-song talk airs warm.
+      this.prefetchTalk()
       for (let attempt = 0; attempt < MUSIC_START_ATTEMPTS && !this.quit; attempt++) {
         const pick = await this.takePick()
         if (pick === null) {
@@ -257,13 +351,18 @@ export class Director {
     }
   }
 
-  private async generateTalks(): Promise<TalkBeat[]> {
+  // Batched generation with bounded retry; [] on ultimate failure (degrade —
+  // lose the batch this round, never the radio). Serves both the cold path and
+  // the background refill (spec 04 §3.3).
+  private async generateTalks(count: number, queued: readonly string[] = []): Promise<TalkBeat[]> {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        return await this.deps.brain.nextTalks(this.context(), this.deps.talkBatch)
+        return await this.deps.brain.nextTalks(this.context(queued), count)
       } catch (err) {
-        if (attempt === ATTEMPTS) {
-          this.deps.host.info(`talk generation failed (${String(err)}); skipping this segment.`)
+        if (attempt < ATTEMPTS) {
+          this.deps.host.debug?.(`talk.next_talks failed (attempt ${attempt}/${ATTEMPTS}); retrying`)
+        } else {
+          this.deps.host.info(`talk generation failed (${String(err)}); the radio plays on.`)
         }
       }
     }
@@ -336,7 +435,7 @@ export class Director {
           this.quit = true
           return
         }
-        this.beats = [] // buffered beats predate this user turn -> stale
+        this.discardTalkAhead() // buffered look-ahead predates this user turn -> stale
         const composed = await this.compose(steer.text)
         steer = null
         if (this.quit) return // a merged-in line was /quit
@@ -345,6 +444,10 @@ export class Director {
         await current?.promise
         this.deps.host.onRadioSegment(composed.reply)
         this.deps.memory.record({ role: 'radio', text: composed.reply })
+        // The steer just discarded the look-ahead: refill NOW, with the fresh
+        // user turn + reply in context, so the regen overlaps the reply (and
+        // any still-playing song) instead of going cold at the next boundary.
+        this.prefetchTalk()
         current = onAir(this.deps.player.play(composed.clip))
       }
     } finally {

@@ -80,11 +80,15 @@ describe('CliHost', () => {
       host.info('checking music')
       host.onRadioSegment('hello there')
       host.onUserLine('hi back')
+      // debug is dev-log-only (spec 04 §3.3 refill diagnostics): mirrored under
+      // the director name, never printed to the console program.
+      host.debug('talk.refill need=1')
       const lines = (await readFile(devLog, 'utf8')).trimEnd().split('\n')
-      expect(lines).toHaveLength(3)
+      expect(lines).toHaveLength(4)
       expect(lines[0]).toMatch(/^\d{2}:\d{2}:\d{2} INFO host: checking music$/)
       expect(lines[1]).toMatch(/^\d{2}:\d{2}:\d{2} INFO radio: hello there$/)
       expect(lines[2]).toMatch(/^\d{2}:\d{2}:\d{2} INFO user: hi back$/)
+      expect(lines[3]).toMatch(/^\d{2}:\d{2}:\d{2} INFO director: talk\.refill need=1$/)
     } finally {
       await rm(dir, { recursive: true, force: true })
     }
