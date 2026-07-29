@@ -28,6 +28,14 @@ const INK = {
 
 type Entry = { id: number; kind: 'segment' | 'user' | 'info'; text: string }
 
+// Padded to one shared column: the two emoji do not render at the same width,
+// so a fixed count of spaces after each leaves the log ragged.
+const MARKER: Record<Entry['kind'], string> = {
+  segment: '\u{1F399} ',
+  user: '\u2328\uFE0F ',
+  info: '\u00B7  ',
+}
+
 type Identity = { persona: string; brain: string; voice: string }
 
 export type Subscribe = (listener: (message: EngineMessage) => void) => () => void
@@ -78,7 +86,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // The visualizer band lands with the engine's FFT feed (§3.6).
           break
         case 'bye':
-          process.exit(0)
+          // Shutdown is main.tsx's business: it owns the renderer, and the
+          // terminal has to be handed back before the process goes.
+          break
       }
     })
   }, [subscribe])
@@ -124,7 +134,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 entry.kind === 'segment' ? INK.radio : entry.kind === 'user' ? INK.user : INK.notice,
             }}
           >
-            {entry.kind === 'segment' ? '🎙  ' : entry.kind === 'user' ? '⌨   ' : '·  '}
+            {MARKER[entry.kind]}
             {entry.text}
           </text>
         ))}

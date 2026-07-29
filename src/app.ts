@@ -24,7 +24,7 @@ import { IpcHost, spawnTuiClient } from './ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { YtDlpMusicProvider } from './music.ts'
-import { loadPersona } from './persona.ts'
+import { loadPersona, personaLine } from './persona.ts'
 import { musicSetupCheck, runMusicSetup } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { preflightBun, runStartupChecks } from './startup.ts'
@@ -288,7 +288,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   process.on('SIGINT', onSigint)
 
   await voice.start()
-  host.banner(persona.split('\n')[0] ?? '(empty)', { brain: config.brain, voice: config.voice })
+  host.banner(personaLine(persona), { brain: config.brain, voice: config.voice })
   try {
     await director.run(maxSegments)
   } finally {
