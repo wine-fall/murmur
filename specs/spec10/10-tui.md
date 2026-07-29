@@ -1,8 +1,12 @@
 # spec/10 · tui — the terminal front-end with a soul
 
-> **Status**: Slice 1 built (wire + `IpcHost` + client shell). Gate 1 (§5.1)
-> is owed: user-run, and it blocks everything after it. Slices 2 (visualizer
-> feed) and 3 (pet substrate + warmth kit) are unbuilt.
+> **Status**: Slice 1 built (wire + `IpcHost` + client shell). **Gate 1 (§5.1)
+> passed by user judgment (2026-07-29)** under the real terminal: Chinese
+> types, commits, and round-trips. One thing was NOT separately confirmed and
+> is carried as a watch item, not a blocker: whether Enter pressed *during* an
+> uncommitted composition commits the candidate or submits the line (§5.1's
+> note below). Slices 2 (visualizer feed) and 3 (pet substrate + warmth kit)
+> are unbuilt, and are now unblocked.
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin
 > with a real TUI. The **single richer front-end murmur ever gets**: there is
 > no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md)
@@ -432,6 +436,16 @@ TUI work is built on the framework choice.
    Escape hatch to try first, wired for this gate:
    `MURMUR_TUI_KITTY_KEYBOARD=0` disables the kitty keyboard protocol, which is
    the mechanism behind the recorded regression.
+   **Result (2026-07-29): passed.** Chinese composes, commits, and round-trips
+   to the engine and back into the program log. Pinned deterministically
+   alongside it: CJK reaches the engine byte-identical (including mixed
+   scripts, CJK punctuation, and a character delivered one byte at a time),
+   and a half-typed CJK line survives eight interrupting segments.
+   **Open watch item**: during the pass, two lines lost text that had not been
+   committed by the input method when Enter was pressed — the ambiguity of
+   Enter (commit the candidate vs submit the line). The engine-side path was
+   cleared by the byte tests, so if this recurs it belongs to the input widget
+   and `MURMUR_TUI_KITTY_KEYBOARD=0` is the first lever.
 2. Launching with `frontEnd: 'tui'` shows the status region, program log,
    visualizer strip, and pet; radio segments appear as they air.
 3. Typing while the radio talks never clobbers the input line; submitting a
