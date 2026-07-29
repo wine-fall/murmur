@@ -260,3 +260,33 @@ describe('interjections during a song (duck, never stop)', () => {
     expect(player.handles[0]!.stopped).toBe(true)
   })
 })
+
+// spec 10 §3.2-D: what keeps "now playing" on the status strip for the whole
+// song, including while an interjection's reply airs over it.
+describe('program state during music (spec 10)', () => {
+  it('reports the track once real audio is confirmed', async () => {
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', artist: 'Artist' })]
+    const run = director.run(2)
+    await until(() => host.states.some((s) => s.kind === 'music'), 'music state')
+    const music = host.states.find((s) => s.kind === 'music')!
+    expect(music.nowPlaying).toBe('Song — Artist')
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('keeps now-playing while an interjection is answered over the ducked song', async () => {
+    // spec 10 §5.3: the reply must not make the strip forget what is playing —
+    // the song is still on air, it is only ducked.
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', artist: 'Artist' })]
+    const run = director.run(2)
+    await until(() => host.states.some((s) => s.kind === 'music'), 'music state')
+    host.type('this one is nice')
+    await until(() => host.radio.some((t) => t.startsWith('re:')), 'reply aired')
+    expect(host.states.at(-1)).toMatchObject({ kind: 'music', nowPlaying: 'Song — Artist' })
+    player.handles[0]!.end()
+    host.type('/quit')
+    await run
+  })
+})

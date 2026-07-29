@@ -184,3 +184,21 @@ describe('spec 06 CLI entry', () => {
     expect(parseCli(['--bootstrap-profile'], NO_ENV).bootstrapProfile).toBe(true)
   })
 })
+
+// spec 10 §2.2/§3.5: the front-end is a config knob and stays 'plain' until
+// the TUI earns the default by feel (§6).
+describe('front-end config', () => {
+  it('defaults to the plain host, with bun as the named binary', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect(config.frontEnd).toBe('plain')
+    expect(config.bunCmd).toBe('bun')
+  })
+
+  it('--tui selects the TUI front-end', () => {
+    expect(parseCli(['--tui'], NO_ENV).config.frontEnd).toBe('tui')
+  })
+
+  it('resolves the wire socket under the (relocatable) murmur home', () => {
+    expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.tuiSocket).toBe('/tmp/mh/run/tui.sock')
+  })
+})

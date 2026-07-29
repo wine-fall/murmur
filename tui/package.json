@@ -1,0 +1,16 @@
+{
+  "name": "murmur-tui",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@opentui/core": "0.4.5",
+    "@opentui/react": "0.4.5",
+    "react": "19.2.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/react": "19.2.2",
+    "typescript": "5.9.3"
+  }
+}

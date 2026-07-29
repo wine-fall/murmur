@@ -11,7 +11,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { dataRoot } from './paths.ts'
+import { dataRoot, tuiSocketPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
@@ -67,6 +67,16 @@ export const ConfigSchema = z.object({
   anchorsEnabled: z.boolean().default(true),
   invitesEnabled: z.boolean().default(true),
   gatingEnabled: z.boolean().default(true),
+
+  // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
+  // 'plain' is the default until the TUI passes the sensory gate by feel
+  // (spec 10 §6); 'tui' spawns the OpenTUI client and speaks over the socket.
+  frontEnd: z.enum(['plain', 'tui']).default('plain'),
+  // The runtime the TUI client runs under — a provisioned binary like
+  // yt-dlp/ffmpeg, never a dependency of the engine itself (spec 10 §2.2).
+  bunCmd: z.string().default('bun'),
+  // Where the two processes meet (spec 10 §2.3), resolved by paths.ts.
+  tuiSocket: z.string().default(() => tuiSocketPath()),
 
   // --- memory (spec 05) --------------------------------------------------- //
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
@@ -137,6 +147,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'no-anchors': { type: 'boolean' },
       'no-invites': { type: 'boolean' },
       'no-gating': { type: 'boolean' },
+      tui: { type: 'boolean' },
       'setup-music': { type: 'boolean' },
       'bootstrap-profile': { type: 'boolean' },
       cadence: { type: 'string' },
@@ -146,6 +157,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   const config = ConfigSchema.parse({
     ...ttsFromEnv(env),
     memoryDir: join(dataRoot(env), 'memory'),
+    tuiSocket: tuiSocketPath(env),
     ...(values.brain !== undefined && { brain: values.brain }),
     ...(values.voice !== undefined && { voice: values.voice }),
     ...(values.model !== undefined && { model: values.model }),
@@ -159,6 +171,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values['no-anchors'] === true && { anchorsEnabled: false }),
     ...(values['no-invites'] === true && { invitesEnabled: false }),
     ...(values['no-gating'] === true && { gatingEnabled: false }),
+    ...(values.tui === true && { frontEnd: 'tui' }),
     ...(values.cadence !== undefined && { cadenceMode: values.cadence }),
   })
   const maxSegments =

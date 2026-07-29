@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { IdleSensor } from '../src/activity.ts'
 import {
+  buildHost,
   buildMemory,
   buildPacing,
   buildVoice,
@@ -15,7 +16,9 @@ import {
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
+import { CliHost } from '../src/host.ts'
 import { HostedVoice } from '../src/hosted-voice.ts'
+import { IpcHost } from '../src/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { LedgerScheduler } from '../src/scheduler.ts'
 import { StubVoice } from '../src/voice.ts'
@@ -117,5 +120,68 @@ describe('memory wiring', () => {
 describe('--bootstrap-profile (spec 06 §3.4 re-entry)', () => {
   it('needs the real brain: a stub run refuses instead of pretending', async () => {
     expect(await runBootstrapProfileCli(config(['--brain', 'stub']))).toBe(false)
+  })
+})
+
+// spec 10 §2.2/§3.5/§5.10: the core never constructs a concrete host; the
+// factory returns the seam, and a missing Bun degrades instead of half-starting.
+describe('front-end wiring (spec 10)', () => {
+  // A stand-in bun: answers --version for the preflight, then plays the part
+  // of a client that sits there until it is torn down.
+  const stubBun = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-bun-'))
+    const path = join(dir, 'bun')
+    writeFileSync(path, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.3.14; else sleep 30; fi\n', {
+      mode: 0o755,
+    })
+    return path
+  }
+
+  it('defaults to the plain host, with nothing to tear down', async () => {
+    const bundle = await buildHost(config([]))
+    expect(bundle.host).toBeInstanceOf(CliHost)
+    await bundle.close()
+  })
+
+  it('binds the socket and hands back the IPC host when the TUI is asked for', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-front-'))
+    const socket = join(dir, 'tui.sock')
+    const bundle = await buildHost({
+      ...config(['--tui']),
+      tuiSocket: socket,
+      bunCmd: stubBun(),
+    })
+    expect(bundle.host).toBeInstanceOf(IpcHost)
+    expect(existsSync(socket)).toBe(true)
+    // Quitting leaves no socket file and no orphan client (criterion 8).
+    await bundle.close()
+    expect(existsSync(socket)).toBe(false)
+  })
+
+  it('a client that dies before attaching ends input instead of wedging the Q&A', async () => {
+    // Peer review (codex): with no socket ever opened, nothing would resolve
+    // eof, and a first-run question would wait on peekLine forever.
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-front-'))
+    const dead = join(dir, 'bun')
+    writeFileSync(dead, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.3.14; else exit 1; fi\n', {
+      mode: 0o755,
+    })
+    const bundle = await buildHost({
+      ...config(['--tui']),
+      tuiSocket: join(dir, 'tui.sock'),
+      bunCmd: dead,
+    })
+    await expect(bundle.host.eof!()).resolves.toBeUndefined()
+    await bundle.close()
+  })
+
+  it('degrades to the plain host, saying so, when Bun is absent', async () => {
+    const bundle = await buildHost({
+      ...config(['--tui']),
+      tuiSocket: join(mkdtempSync(join(tmpdir(), 'murmur-front-')), 'tui.sock'),
+      bunCmd: '/nope/bun',
+    })
+    expect(bundle.host).toBeInstanceOf(CliHost)
+    await bundle.close()
   })
 })

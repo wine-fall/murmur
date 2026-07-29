@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Host } from '../src/host.ts'
 import {
+  preflightBun,
   preflightFfmpeg,
   preflightMusic,
   preflightYtdlp,
@@ -32,6 +33,7 @@ function fakeHost(): { host: Host; infos: string[] } {
     onRadioSegment: () => {},
     onUserLine: () => {},
     info: (m) => void infos.push(m),
+    banner: () => {},
   }
   return { host, infos }
 }
@@ -126,5 +128,23 @@ describe('the yt-dlp probe is a real fetch, not a --version vanity check', () =>
     const args = readFileSync(argsFile, 'utf8')
     expect(args).toContain('ytsearch1:')
     expect(args).toContain('--dump-json')
+  })
+})
+
+// spec 10 §2.2: Bun is provisioned like yt-dlp/ffmpeg — probed here, and the
+// TUI front-end is simply not offered when the probe fails.
+describe('preflightBun', () => {
+  it('passes on a binary that reports a version', async () => {
+    expect(await preflightBun(standIn('echo 1.3.14'))).toEqual({ ok: true, reason: '' })
+  })
+
+  it('fails, naming the binary, when it is missing', async () => {
+    const result = await preflightBun('/nope/bun')
+    expect(result.ok).toBe(false)
+    expect(result.reason).toContain('/nope/bun')
+  })
+
+  it('fails on a binary that exits 0 saying nothing', async () => {
+    expect((await preflightBun(standIn('exit 0'))).ok).toBe(false)
   })
 })

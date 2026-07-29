@@ -1,0 +1,258 @@
+// The engine side of the TUI split (spec 10 §2.1/§2.3): a Host that speaks over
+// a unix socket instead of a terminal.
+//
+// It is deliberately a THIN bridge. Host calls serialize onto the wire; lines
+// arriving from the front-end feed the same LineQueue the CLI host uses, so the
+// Director's peek/take race and the guide's consuming reader keep working
+// untouched. No rendering decision lives here — that is the client's whole job.
+//
+// The radio outlives its face (§3.5): a front-end that dies takes nothing with
+// it, the engine keeps broadcasting into the void, and a fresh attach is
+// accepted at any time.
+
+import { spawn, type ChildProcess } from 'node:child_process'
+import { existsSync, mkdirSync } from 'node:fs'
+import { unlink } from 'node:fs/promises'
+import { createServer, type Server, type Socket } from 'node:net'
+import { dirname } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
+
+import { devLogMirror, LineQueue, type Host } from './host.ts'
+import {
+  decodeTuiMessage,
+  encode,
+  ndjson,
+  PROTOCOL,
+  type EngineMessage,
+  type ProgramState,
+} from './ipc.ts'
+
+// What a client that attaches mid-run is handed so it does not open on a blank
+// screen — and so the first-run/guide questions asked while it was still
+// booting are not lost (§3.2-B). Bounded: this is a courtesy backlog, not a
+// transcript (the program log's real home is memory, spec 05).
+const REPLAY_MAX = 200
+
+// How long shutdown waits for the client's socket to close before forcing it.
+// Quitting must never hang on a wedged front-end (§5.8: no orphans).
+const CLOSE_GRACE_MS = 300
+
+export type IpcHostOptions = {
+  socketPath: string
+  identity: { brain: string; voice: string }
+  devLog?: string | undefined
+}
+
+export class IpcHost implements Host {
+  private queue = new LineQueue()
+  private server: Server | null = null
+  private client: Socket | null = null
+  private sockets = new Set<Socket>()
+  private replay: EngineMessage[] = []
+  private persona = ''
+  private opts: IpcHostOptions
+  private mirror: (name: string, message: string) => void
+  private markEof!: () => void
+  private eofSeen: Promise<void>
+
+  constructor(opts: IpcHostOptions) {
+    this.opts = opts
+    this.mirror = devLogMirror(opts.devLog ?? process.env.MURMUR_DEV_LOG)
+    this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
+  }
+
+  // Bind the socket. Called before the engine starts talking, so nothing the
+  // startup checks or first run emit is spoken into a socket that is not there.
+  async listen(): Promise<void> {
+    const path = this.opts.socketPath
+    mkdirSync(dirname(path), { recursive: true })
+    // A crashed run leaves the socket file behind and bind would fail on it.
+    // ponytail: unconditional unlink — a second engine takes over the NAME
+    // only; an already-attached client keeps its connection to the first.
+    if (existsSync(path)) await unlink(path).catch(() => {})
+    const server = createServer((socket) => this.accept(socket))
+    await new Promise<void>((resolve, reject) => {
+      const onError = (err: Error) => reject(err)
+      server.once('error', onError)
+      server.listen(path, () => {
+        server.off('error', onError)
+        resolve()
+      })
+    })
+    server.on('error', (err) => this.mirror('tui', `socket error: ${String(err)}`))
+    this.server = server
+  }
+
+  private accept(socket: Socket): void {
+    this.sockets.add(socket)
+    socket.setEncoding('utf8')
+    let attached = false
+    const feed = ndjson((line) => {
+      const message = decodeTuiMessage(line)
+      if (message === null) {
+        this.mirror('tui', 'dropped an unreadable line from the front-end')
+        return
+      }
+      if (message.type === 'attach') {
+        if (message.protocol !== PROTOCOL) {
+          this.mirror('tui', `front-end speaks protocol ${message.protocol}; turning it away`)
+          socket.end(encode({ v: 1, type: 'bye' }))
+          return
+        }
+        attached = true
+        this.adopt(socket)
+        return
+      }
+      // Everything before a valid attach is noise from a peer we have not
+      // agreed a protocol with.
+      if (!attached) return
+      if (message.type === 'line') this.queue.push(message.text)
+      // vizSub is accepted and idle until the visualizer feed lands (§3.6).
+    })
+    socket.on('data', (chunk: string) => feed(chunk))
+    // A front-end that vanished mid-write is not an engine problem.
+    socket.on('error', () => {})
+    socket.on('close', () => {
+      this.sockets.delete(socket)
+      if (this.client !== socket) return
+      this.client = null
+      this.mirror('tui', 'front-end detached; the radio plays on')
+      // No more input will come from a front-end that is gone: a consuming
+      // reader (guide / first run) declines instead of wedging, exactly as it
+      // does on stdin EOF. A later attach re-opens input; eof is one-shot.
+      this.markEof()
+    })
+  }
+
+  private adopt(socket: Socket): void {
+    if (this.client !== null && this.client !== socket) this.client.end()
+    this.client = socket
+    this.write(socket, {
+      v: 1,
+      type: 'hello',
+      protocol: PROTOCOL,
+      persona: this.persona,
+      brain: this.opts.identity.brain,
+      voice: this.opts.identity.voice,
+    })
+    for (const message of this.replay) this.write(socket, message)
+  }
+
+  private write(socket: Socket, message: EngineMessage): void {
+    if (socket.destroyed) return
+    socket.write(encode(message))
+  }
+
+  private send(message: EngineMessage): void {
+    this.replay.push(message)
+    if (this.replay.length > REPLAY_MAX) this.replay.shift()
+    if (this.client !== null) this.write(this.client, message)
+  }
+
+  // --- Host ---------------------------------------------------------------- //
+
+  start(): void {}
+
+  eof(): Promise<void> {
+    return this.eofSeen
+  }
+
+  peekLine(): Promise<string> {
+    return this.queue.peek()
+  }
+
+  takeLine(): string | undefined {
+    return this.queue.take()
+  }
+
+  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
+    this.persona = personaFirstLine
+    this.opts.identity = opts
+    this.send({ v: 1, type: 'hello', protocol: PROTOCOL, persona: personaFirstLine, ...opts })
+  }
+
+  onRadioSegment(text: string): void {
+    this.send({ v: 1, type: 'segment', text })
+    this.mirror('radio', text)
+  }
+
+  onUserLine(text: string): void {
+    this.send({ v: 1, type: 'userLine', text })
+    this.mirror('user', text)
+  }
+
+  info(message: string): void {
+    this.send({ v: 1, type: 'info', text: message })
+    this.mirror('host', message)
+  }
+
+  onState(state: ProgramState): void {
+    this.send({ v: 1, type: 'state', state })
+  }
+
+  // Diagnostics never reach the TUI (§3.9): the dev log stays the one place
+  // they live, and the program log renders user content only.
+  debug(message: string): void {
+    this.mirror('director', message)
+  }
+
+  // The front-end process is gone — including the case where it died before it
+  // ever opened the socket (a bad entry, missing client packages). Nothing will
+  // type again, so a consuming reader (guide / first run) has to decline rather
+  // than wait forever on a listener who cannot answer.
+  frontEndGone(reason: string): void {
+    this.mirror('tui', reason)
+    this.markEof()
+  }
+
+  // --- shutdown ------------------------------------------------------------ //
+
+  async close(): Promise<void> {
+    const server = this.server
+    if (server === null) return
+    this.server = null
+    const open = [...this.sockets]
+    const closed = Promise.all(
+      open.map(
+        (socket) =>
+          new Promise<void>((resolve) => {
+            socket.once('close', () => resolve())
+            // Only the attached client is owed a goodbye; a half-open peer that
+            // never attached just gets the FIN.
+            if (socket === this.client) socket.end(encode({ v: 1, type: 'bye' }))
+            else socket.end()
+          }),
+      ),
+    )
+    this.client = null
+    await Promise.race([closed, sleep(CLOSE_GRACE_MS)])
+    for (const socket of open) socket.destroy()
+    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await unlink(this.opts.socketPath).catch(() => {})
+    this.markEof()
+  }
+}
+
+// Launch the front-end (spec 10 §2.2: Bun is a provisioned binary, not a stack
+// migration — nothing about it reaches the engine's own toolchain). The client
+// inherits stdio: it OWNS the terminal from here on.
+export function spawnTuiClient(opts: {
+  bunCmd: string
+  entry: string
+  socketPath: string
+  // Called once when the client is gone for any reason — a clean exit, a crash,
+  // or a spawn that never got off the ground.
+  onGone?: (reason: string) => void
+}): ChildProcess {
+  const child = spawn(opts.bunCmd, [opts.entry, opts.socketPath], { stdio: 'inherit' })
+  let reported = false
+  const gone = (reason: string): void => {
+    if (reported) return
+    reported = true
+    opts.onGone?.(reason)
+  }
+  // An unhandled 'error' would take the engine down with the face.
+  child.on('error', (err) => gone(`front-end failed to start: ${String(err)}`))
+  child.on('exit', (code) => gone(`front-end exited (code ${String(code)})`))
+  return child
+}
