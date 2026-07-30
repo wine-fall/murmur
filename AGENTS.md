@@ -16,8 +16,8 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - `STUB=1 make dev` — full offline: canned brain, silent voice, no music.
 - `TUI=1 make dev` — run the spec-10 front-end (OpenTUI client under Bun)
   instead of plain stdout; needs `bun` on PATH.
-- `npm test` — the fast (model-free) vitest suite; `npm run typecheck` /
-  `npm run lint` — the static gates.
+- `pnpm test` — the fast (model-free) vitest suite; `pnpm run typecheck` /
+  `pnpm run lint` — the static gates.
 - `pre-commit run --all-files` — all gates (source-language + tsc + oxlint +
   path-governance).
 
@@ -52,7 +52,7 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
   gitignored `.env*` (remote-voice creds); `make install` / `make dev` auto-sync
   them from the main worktree via `make sync-env` (copy-if-absent). They never
   carry over on their own.
-- **Never gate a commit/push on a piped command's exit code** (`npm test | tail`
+- **Never gate a commit/push on a piped command's exit code** (`pnpm test | tail`
   reports `tail`'s exit) — run the gating command bare and check its real code.
 - `git commit` runs `language: system` pre-commit hooks — `node`/`npx` must be
   on PATH (`make install` provisions the `pre-commit` runner itself via

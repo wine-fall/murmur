@@ -55,7 +55,7 @@ Also landed since: the no-dead-air look-ahead (04) and persistent memory across 
 
 ## Requirements
 
-- Node.js ≥ 24
+- Node.js ≥ 24 and **pnpm** (`corepack enable pnpm`, or `brew install pnpm`)
 - A local **Claude Code** subscription login (for the real brain) — or run `--brain stub` fully offline
 - For a real voice: a hosted TTS endpoint (fish-speech; set `MURMUR_TTS_URL` — see `make dev-fishaudio`)
 
@@ -63,7 +63,7 @@ Also landed since: the no-dead-air look-ahead (04) and persistent memory across 
 
 ```bash
 # core (runs model-free: stub voice, stub or real brain)
-npm install
+pnpm install
 
 # run the loop
 node src/main.ts
@@ -99,10 +99,10 @@ network/binaries). The program timeline mirrors to `.dev/dev.log`; `make logs`
 Under the hood:
 
 ```bash
-npm install
-npm test                      # fast unit layer (vitest; fakes, no network)
-npm run typecheck             # tsc over src/, test/ + the tooling scripts
-npm run lint                  # oxlint
+pnpm install
+pnpm test                      # fast unit layer (vitest; fakes, no network)
+pnpm run typecheck             # tsc over src/, test/ + the tooling scripts
+pnpm run lint                  # oxlint
 brew install ffmpeg yt-dlp    # binaries real runs need (music)
 ```
 

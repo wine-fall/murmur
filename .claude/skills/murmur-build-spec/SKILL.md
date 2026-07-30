@@ -48,7 +48,7 @@ When a sub-spec change contradicts or outgrows a master decision, update `specs/
 
 ## Testing (mandatory — see specs/DESIGN.md §11 for the full convention)
 
-- **Test-first for logic.** Failing unit test → implementation → green. Framework: `vitest` (`npm test`).
+- **Test-first for logic.** Failing unit test → implementation → green. Framework: `vitest` (`pnpm test`).
 - **Fakes for seams.** Every provider/seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a fake, so the core is always unit-testable without real audio/LLM/network.
 - **Three layers:** unit (fast, every change) · real-boundary (**manual on-demand** — `murmur-smoke` scratch scripts against the real SDK/binaries/audio) · human acceptance (sensory criteria → produce a **checklist for the user to run**).
 - **Don't run the heavy real models inside a build's tests.** Real model/voice *capability* eval (Qwen3-TTS, real LLMs — e.g. the voice blind A/B) is the dedicated **eval track** (DESIGN §10.3), not part of normal per-spec verification.

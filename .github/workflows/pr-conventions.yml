@@ -22,8 +22,8 @@ jobs:
       - uses: actions/checkout@v5
 
       # The script is TypeScript run straight off disk (node's type stripping),
-      # so it needs the same Node the repo targets — no npm install, it is
-      # dependency-free.
+      # so it needs the same Node the repo targets — no dependency install, it
+      # is dependency-free.
       - uses: actions/setup-node@v4
         with:
           node-version: 24

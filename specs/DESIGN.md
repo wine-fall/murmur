@@ -364,7 +364,7 @@ Tests are **mandatory**. The approach is layered by what is actually testable.
 Every seam (`VoiceProvider`, `MusicProvider`, `MemoryStore`, Brain) ships a **fake** implementation. The core loop, the Director's policy, and all pure logic are tested against fakes — no real audio, LLM, or network. (Spec 01's stub `VoiceProvider` doubles as the fake.) This is the payoff of the interface-first design (§10.1).
 
 ### 11.2 Three layers
-1. **Unit — fast, every change, test-first (TDD).** Pure logic + the loop driven by fakes. New logic is written **test-first**: failing test → implementation → green. Framework: `vitest` (`npm test`).
+1. **Unit — fast, every change, test-first (TDD).** Pure logic + the loop driven by fakes. New logic is written **test-first**: failing test → implementation → green. Framework: `vitest` (`pnpm test`).
 2. **Real-boundary — manual on-demand.** Real TTS synth, real `yt-dlp`, real SDK behavior, audio. Slow/heavy — **not** in the fast loop; run deliberately as throwaway `scratch/` smokes (the `murmur-smoke` flow). Not run on every change.
 3. **Human acceptance — sensory, the user runs.** "Sounds human," "feels like radio," "type-and-reply flows" — the milestone §9.3 criteria. The agent produces a **checklist**; the user runs it and confirms. The agent cannot self-verify these (it can't hear the voice or judge warmth).
 
