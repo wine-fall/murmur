@@ -32,7 +32,9 @@ export interface Host {
   // boundaries and invite transitions, never polled. Optional, like debug — a
   // host with no status region has nothing to do with it.
   onState?(state: ProgramState): void
-  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void
+  // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
+  // front-end that greets the absence. Absent = no history to go on.
+  banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
 }
 
 // Mirror a program line into the dev log (`make logs` tails it in a second

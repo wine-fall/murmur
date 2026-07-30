@@ -394,3 +394,35 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
     `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
   )
 }
+
+// --- status microcopy (spec 10 §3.7.4) ------------------------------------- //
+
+// What the front-end's status strip says the program is doing — in the DJ's own
+// words, never a loader's ("finding something for this hour…", not "loading").
+// A fixed local pool: the chrome is authored text, so it costs zero tokens
+// (master §7 pillar 6) and never waits on a model.
+//
+// It lives here, with every other line murmur speaks, rather than in the TUI:
+// the front-end renders the persona's voice, it does not write it. That is why
+// the picked line travels on the wire's `state` message.
+export const STATUS_MICROCOPY = {
+  awaiting: [
+    'turning to you — say anything',
+    'your turn, whenever you like',
+    'the mic is yours',
+  ],
+  talk: ['on the air', 'thinking out loud', 'just talking'],
+  music: ['letting this one play', 'sitting with this one', 'this one is for the hour'],
+  gap: ['letting it breathe', 'a beat of quiet', 'listening to the room'],
+} as const satisfies Record<string, readonly string[]>
+
+// An open invite is the one thing the strip must say out loud, whatever segment
+// is on air (§3.2-A) — a listener who missed the spoken turn-to-you can still
+// see it. `roll` is injectable so a test can pin the pick.
+export function statusMicrocopy(
+  state: { kind: 'talk' | 'music' | 'gap'; awaitingReply: boolean },
+  roll: () => number = Math.random,
+): string {
+  const pool = STATUS_MICROCOPY[state.awaitingReply ? 'awaiting' : state.kind]
+  return pool[Math.min(Math.floor(roll() * pool.length), pool.length - 1)]!
+}

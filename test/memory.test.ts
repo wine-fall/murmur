@@ -192,3 +192,33 @@ describe('PersistentMemoryStore.writeProfile (spec 06 §2.4)', () => {
     expect(store.compactionSlice().profile).toBe('bootstrapped')
   })
 })
+
+describe('PersistentMemoryStore.awaySeconds (spec 10 §3.7.3)', () => {
+  it('reports how long since the last session, not since this one started', () => {
+    const c = clock()
+    const path = dir()
+    const first = opened(path, c)
+    first.record({ role: 'radio', text: 'goodnight' })
+
+    c.advance(6 * 3600)
+    const second = opened(path, c)
+    expect(second.awaySeconds()).toBe(6 * 3600)
+    // Recording inside the session must not move the absence it opened with:
+    // "the pet acknowledges elapsed time" is a fact about the gap, once.
+    c.advance(120)
+    second.record({ role: 'radio', text: 'good morning' })
+    expect(second.awaySeconds()).toBe(6 * 3600)
+  })
+
+  it('has no absence to report on a memory dir with no history', () => {
+    expect(opened(dir(), clock()).awaySeconds()).toBeUndefined()
+  })
+
+  it('never reports a negative gap when the clock has moved backwards', () => {
+    const c = clock()
+    const path = dir()
+    opened(path, c).record({ role: 'radio', text: 'from the future' })
+    c.advance(-5000)
+    expect(opened(path, c).awaySeconds()).toBe(0)
+  })
+})

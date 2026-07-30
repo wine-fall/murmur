@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { IpcHost } from '../src/ipc-host.ts'
 import { PROTOCOL, decodeEngineMessage, encode, ndjson, type EngineMessage } from '../src/ipc.ts'
+import { STATUS_MICROCOPY } from '../src/prompts.ts'
 
 // A stand-in TUI: the fast layer proves the bridge, never a rendered frame.
 class FakeClient {
@@ -44,6 +45,10 @@ class FakeClient {
 
   line(text: string): void {
     this.send(encode({ v: 1, type: 'line', text }))
+  }
+
+  vizSub(on: boolean, fps?: number): void {
+    this.send(encode({ v: 1, type: 'vizSub', on, ...(fps !== undefined && { fps }) }))
   }
 
   close(): void {
@@ -191,6 +196,118 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     c.close()
     await c.settle()
     expect(ended).toBe(true)
+  })
+
+  // spec 10 §3.6: the visualizer subscription. The bridge only routes it — the
+  // FFT and the pacing are the engine's (src/viz.ts).
+  describe('the visualizer subscription', () => {
+    function subscriptions(): (readonly [boolean, number | undefined])[] {
+      const seen: (readonly [boolean, number | undefined])[] = []
+      host.setVizSubscriber((on, fps) => void seen.push([on, fps]))
+      return seen
+    }
+
+    it('hands an attached client subscription straight to the feed', async () => {
+      const seen = subscriptions()
+      const c = await client()
+      c.attach()
+      c.vizSub(true, 30)
+      c.vizSub(false)
+      await c.settle()
+      expect(seen).toEqual([
+        [true, 30],
+        [false, undefined],
+      ])
+    })
+
+    it('honors a subscription that arrived before the feed was wired up', async () => {
+      // The client is spawned in buildHost, before runApp has built the audio
+      // engine the feed taps — so it can subscribe while there is nobody to tell.
+      // It asks exactly once, on mount: dropping that leaves the strip dead for
+      // the whole session.
+      const c = await client()
+      c.attach()
+      c.vizSub(true, 30)
+      await c.settle()
+      const seen = subscriptions()
+      expect(seen).toEqual([[true, 30]])
+    })
+
+    it('ignores a subscription from a client that never attached', async () => {
+      const seen = subscriptions()
+      const c = await client()
+      c.vizSub(true, 30)
+      await c.settle()
+      expect(seen).toEqual([])
+    })
+
+    it('unsubscribes when the front-end goes away, so frames stop being computed', async () => {
+      const seen = subscriptions()
+      const c = await client()
+      c.attach()
+      c.vizSub(true)
+      await c.settle()
+      c.close()
+      await c.settle()
+      expect(seen.at(-1)).toEqual([false, undefined])
+    })
+
+    it('sends frames to the attached client', async () => {
+      const c = await client()
+      c.attach()
+      await c.settle()
+      host.sendViz([0, 0.5, 1])
+      await c.settle()
+      expect(c.received.at(-1)).toEqual({ v: 1, type: 'viz', bins: [0, 0.5, 1] })
+    })
+
+    it('never replays frames to a later attach — the backlog is program, not audio', async () => {
+      // §2.3: the replay exists so the Q&A questions survive a booting client.
+      // Stale spectrum frames would flood it and mean nothing by arrival.
+      host.info('a notice')
+      for (let i = 0; i < 50; i++) host.sendViz([i / 50])
+      const c = await client()
+      c.attach()
+      await c.settle()
+      expect(c.types()).toEqual(['hello', 'info'])
+    })
+
+    it('frames sent with nobody attached are simply dropped', async () => {
+      expect(() => host.sendViz([1])).not.toThrow()
+    })
+  })
+
+  // spec 10 §3.7: the warmth kit's two engine-side pieces — the DJ's words for
+  // the status strip, and how long the room was empty.
+  describe('the warmth kit', () => {
+    it('sends the DJ line for the strip alongside every state', async () => {
+      const c = await client()
+      c.attach()
+      await c.settle()
+      host.onState({ kind: 'music', nowPlaying: 'a song', awaitingReply: false })
+      await c.settle()
+      const state = c.received.at(-1)
+      expect(state).toMatchObject({ type: 'state' })
+      expect(state?.type === 'state' && state.microcopy).toBeTruthy()
+      expect(STATUS_MICROCOPY.music).toContain(state?.type === 'state' ? state.microcopy : '')
+    })
+
+    it('carries the absence in the handshake, to whoever attaches', async () => {
+      host.banner('a night host', { brain: 'stub', voice: 'stub', away: 21_600 })
+      const c = await client()
+      c.attach()
+      await c.settle()
+      // The greeting a late client gets must know the same absence as the first.
+      expect(c.received[0]).toMatchObject({ type: 'hello', persona: 'a night host', away: 21_600 })
+    })
+
+    it('says nothing about an absence there is no history for', async () => {
+      host.banner('a night host', { brain: 'stub', voice: 'stub' })
+      const c = await client()
+      c.attach()
+      await c.settle()
+      expect(c.received[0]).not.toHaveProperty('away')
+    })
   })
 
   it('says bye and leaves no socket file behind on close', async () => {

@@ -17,6 +17,8 @@ import {
   PERSONA_CHAR_CAP,
   PROFILE_CHAR_CAP,
   SEED_QUESTIONS,
+  STATUS_MICROCOPY,
+  statusMicrocopy,
 } from '../src/prompts.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
@@ -309,6 +311,39 @@ describe('pacing cues (spec 07 §2.2/§3.4/§3.5)', () => {
   it('cues reach the single-beat fallback prompt too', () => {
     expect(buildNextTalkPrompt(pack({ cue: 'anchor:night', activity: 'present' }))).toContain(
       CUE_GUIDANCE['anchor:night'],
+    )
+  })
+})
+
+describe('status microcopy (spec 10 §3.7.4)', () => {
+  it('speaks in the DJ voice for every program situation', () => {
+    for (const pool of Object.values(STATUS_MICROCOPY)) {
+      expect(pool.length).toBeGreaterThan(0)
+      // Chrome copy, not a loader: no dev-tool vocabulary anywhere in the pool.
+      for (const line of pool) expect(line).not.toMatch(/loading|error|status|buffer/i)
+    }
+  })
+
+  it('draws from the pool that matches what the program is doing', () => {
+    for (const kind of ['talk', 'music', 'gap'] as const) {
+      const line = statusMicrocopy({ kind, awaitingReply: false })
+      expect(STATUS_MICROCOPY[kind]).toContain(line)
+    }
+  })
+
+  it('an open invite wins over whatever segment is on air', () => {
+    // §3.2-A: awaiting a reply is the one thing the strip must say out loud,
+    // even mid-song.
+    const line = statusMicrocopy({ kind: 'music', awaitingReply: true })
+    expect(STATUS_MICROCOPY.awaiting).toContain(line)
+  })
+
+  it('costs no tokens — it is a fixed local pool, picked deterministically', () => {
+    expect(statusMicrocopy({ kind: 'gap', awaitingReply: false }, () => 0)).toBe(
+      STATUS_MICROCOPY.gap[0],
+    )
+    expect(statusMicrocopy({ kind: 'gap', awaitingReply: false }, () => 0.999)).toBe(
+      STATUS_MICROCOPY.gap.at(-1),
     )
   })
 })

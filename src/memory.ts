@@ -135,6 +135,9 @@ export class PersistentMemoryStore implements MemoryStore {
   private profileText = ''
   private watermark = 0
   private lastTs = 0
+  // The gap this session opened across, measured once at load and then frozen
+  // (spec 10 §3.7.3). undefined = no history on disk to measure from.
+  private away: number | undefined
   // Turns recorded past the watermark — the next compaction slice.
   private backlog: { ts: number; turn: Turn }[] = []
 
@@ -191,6 +194,17 @@ export class PersistentMemoryStore implements MemoryStore {
 
   compactionDue(): boolean {
     return this.backlog.length >= this.compactEvery
+  }
+
+  // --- absence (spec 10 §3.7.3 — the pet acknowledges elapsed time) --------- //
+
+  // Seconds between the newest row already on disk and the moment this session
+  // opened: the size of the GAP the listener came back across. Frozen, not live
+  // — the absence the pet greets is one fact about the return, and a number that
+  // crept upward all session would not be that fact.
+  // undefined = nothing on record: a first run has no absence to acknowledge.
+  awaySeconds(): number | undefined {
+    return this.away
   }
 
   // --- profile write-through (spec 06 §2.4 — the slice-B bootstrap) --------- //
@@ -315,6 +329,8 @@ export class PersistentMemoryStore implements MemoryStore {
       if (row.ts >= cutoff) this.remember(turn)
       if (row.ts > this.watermark) this.backlog.push({ ts: row.ts, turn })
     }
+
+    if (this.lastTs > 0) this.away = Math.max(0, Math.round(this.now() - this.lastTs))
 
     for (const row of this.readJsonl(this.ledgerPath, ledgerRowSchema)) {
       this.rememberEvent(row.kind, row.key)

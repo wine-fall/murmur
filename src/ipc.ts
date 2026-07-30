@@ -40,10 +40,21 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     persona: z.string(),
     brain: z.string(),
     voice: z.string(),
+    // Seconds since murmur last heard anything, so the pet can acknowledge the
+    // absence (spec 10 §3.7.3). Absent = no history to go on (a first run).
+    away: z.number().optional(),
   }),
   z.object({ v, type: z.literal('segment'), text: z.string() }),
   z.object({ v, type: z.literal('userLine'), text: z.string() }),
-  z.object({ v, type: z.literal('state'), state: ProgramStateSchema }),
+  // `microcopy` is the DJ's line for the status strip (§3.7.4), picked from the
+  // authored pool in prompts.ts. Beside the state rather than inside it: it is
+  // what the program SAYS it is doing, not part of what it is doing.
+  z.object({
+    v,
+    type: z.literal('state'),
+    state: ProgramStateSchema,
+    microcopy: z.string().optional(),
+  }),
   z.object({ v, type: z.literal('info'), text: z.string() }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   z.object({ v, type: z.literal('bye') }),
