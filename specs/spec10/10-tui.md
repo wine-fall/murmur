@@ -1,12 +1,14 @@
 # spec/10 · tui — the terminal front-end with a soul
 
-> **Status**: Slice 1 built (wire + `IpcHost` + client shell). **Gate 1 (§5.1)
-> passed by user judgment (2026-07-29)** under the real terminal: Chinese
-> types, commits, and round-trips. One thing was NOT separately confirmed and
-> is carried as a watch item, not a blocker: whether Enter pressed *during* an
-> uncommitted composition commits the candidate or submits the line (§5.1's
-> note below). Slices 2 (visualizer feed) and 3 (pet substrate + warmth kit)
-> are unbuilt, and are now unblocked.
+> **Status**: Slices 1-3 built. **Gate 1 (§5.1) passed by user judgment
+> (2026-07-29)** under the real terminal: Chinese types, commits, and
+> round-trips. One thing was NOT separately confirmed and is carried as a watch
+> item, not a blocker: whether Enter pressed *during* an uncommitted composition
+> commits the candidate or submits the line (§5.1's note below). Slice 2
+> (engine FFT tap + `viz` feed, §3.6) and slice 3 (pet substrate + warmth kit,
+> §3.7) landed 2026-07-30; what remains open is sensory, not mechanical — the
+> §5.11 human pass and the §6.1 art-direction session, which restyles the
+> substrate without reopening these contracts.
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin
 > with a real TUI. The **single richer front-end murmur ever gets**: there is
 > no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md)
@@ -178,10 +180,10 @@ Engine → TUI:
 
 | type | payload | carries |
 |---|---|---|
-| `hello` | `{ protocol: 1, persona, brain, voice }` | handshake; replaces `banner` |
+| `hello` | `{ protocol: 1, persona, brain, voice, away? }` | handshake; replaces `banner`. `away` = seconds since murmur last heard anything, for §3.7.3 |
 | `segment` | `{ text }` | `onRadioSegment` |
 | `userLine` | `{ text }` | `onUserLine` echo |
-| `state` | `ProgramState` | `onState`; drives status region + pet |
+| `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
 | `info` | `{ text }` | host info lines — including every guide/first-run prompt (§3.2-B) |
 | `viz` | `{ bins: number[] }` | one FFT frame (§3.6); highest-frequency message |
 | `bye` | `{}` | engine is shutting down |
@@ -367,7 +369,19 @@ only the client — one shutdown path.
   (default 24fps, TUI-negotiable). Headless runs pay nothing.
 - The TUI renders bars from bins — cava's recipe (eighth-block glyphs
   ▁▂▃▄▅▆▇█, per-bin attack/decay smoothing, vertical truecolor gradient, peak
-  hold). The DSP lives engine-side; the pretty lives client-side. During talk
+  hold).
+- **As built (2026-07-30)**: 28 bins, 24fps, `fftSize` 1024. The tap is ONE
+  `AnalyserNode` on a master bus the engine now owns, opened by the first
+  subscription and never before — so an unwatched run has no analyser in its
+  graph at all, which is how §5.5 is asserted (a spy on `createAnalyser`). Its
+  output is left unconnected: it observes the bus rather than sitting in it.
+  Bands take the loudest bin under them (a mean buries transients) and are
+  forced strictly increasing, because a naive geometric split hands several
+  low-end bands the same bin and those bars never move. `viz` frames deliberately
+  bypass the §2.3 replay backlog: stale spectrum would flood out the Q&A the
+  backlog exists to preserve, and mean nothing by the time it arrived. Peak hold
+  is not built — one row of eighths already carries 8 sub-steps per cell; revisit
+  with the §6.1 styling pass. The DSP lives engine-side; the pretty lives client-side. During talk
   the same strip can render the voice's envelope — the radio visibly
   *speaks*; on the bed it breathes low. (What ships in v1 is a §6.1 styling
   call; the feed contract is the same.)
@@ -394,6 +408,24 @@ provides them):
    radio-native): status microcopy is written in persona voice ("finding
    something for this hour…", not "loading"), sourced from a fixed local pool
    in `prompts.ts` — zero tokens (master §7 pillar 6).
+
+**As built (2026-07-30)**, four decisions this section left open:
+
+- The pool stays in `prompts.ts` and the picked line **travels on the wire**
+  (`state.microcopy`), because the client may import nothing from `src/` but
+  `ipc.ts` (§5.9, pinned by `test/front-end-isolation.test.ts`). The front-end
+  renders the persona's voice; it does not author it.
+- **Tinting is scene-derived** for v1 (the fallback this section allows): one
+  `Accent` per time-of-day scene, applied to the strip, the bar gradient, the
+  pet's body, and aired segments. Per-track palettes stay §6's open question;
+  swapping the source touches one function (`accentFor`).
+- **Sprite assets are indexed pixel grids**, not baked ANSI: one character per
+  pixel keying a palette resolved at render time. That is what lets the pet tint
+  with the hour and fade when it dozes without a second set of files. Two pixel
+  rows fold into one cell drawn as an upper-half block.
+- The idle loop runs on a **plain interval per pose**, not OpenTUI's timeline —
+  the rate (2-8fps) is the substance, and the timeline buys nothing at one
+  looping sprite. Revisit if the art direction wants keyframed transitions.
 
 ### 3.8 Terminal support & degradation
 
