@@ -9,6 +9,9 @@ __pycache__/
 
 # Throwaway smoke/probe scripts (murmur-smoke skill) — never committed
 scratch/
+
+# Linked build worktrees (murmur-ship step 2) — nested checkouts, never content
+.worktrees/
 .github/hooks/
 
 # graphify knowledge-graph artifacts — rebuilt locally by the post-commit hook
