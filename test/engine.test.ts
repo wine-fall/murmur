@@ -6,10 +6,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { OfflineAudioContext } from 'node-web-audio-api'
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { AudioClip, MusicHandle } from '../src/contracts.ts'
 import { AudioEngine, type Decode } from '../src/engine.ts'
+import { logBins, VIZ_BINS } from '../src/viz.ts'
 import { encodeWav } from '../src/wav.ts'
 
 const RATE = 48_000
@@ -331,5 +332,67 @@ describe('teardown', () => {
     await engine.aclose()
     await handle.wait()
     await played
+  })
+})
+
+// spec 10 §3.6 / §5.5: the visualizer's tap on the master bus. What the fast
+// layer can prove is the GATING and the graph shape — that an unwatched run has
+// no analyser at all, and that opening the tap neither doubles nor disturbs the
+// mix. That the bars actually move with music is a by-ear/smoke matter.
+describe('visualizer tap (spec 10 §3.6)', () => {
+  it('puts no analyser in the graph until something subscribes', async () => {
+    // A bed track has to outlast the crossfade: this context is never rendered,
+    // so its clock never moves, and a track shorter than BED_XFADE_S would leave
+    // runBed re-scheduling the next one at the same frozen instant forever.
+    const { context, engine } = build(2, dcChunks(0.4, 10))
+    const created = vi.spyOn(context, 'createAnalyser')
+    await engine.startBed({ tracks: () => ['bed://a'] })
+    const handle = await engine.playMusic(MUSIC)
+    await handle.waitStarted(1)
+    const played = engine.play(voiceClip)
+    await settle()
+    // A whole session's worth of audio, nobody watching: no analyser, no reads.
+    expect(created).not.toHaveBeenCalled()
+    await engine.aclose()
+    await played
+  })
+
+  it('opens exactly one tap however often the front-end re-subscribes', async () => {
+    const { context, engine } = build(1, dcChunks(0.4, 1))
+    const created = vi.spyOn(context, 'createAnalyser')
+    const first = engine.spectrum()
+    const second = engine.spectrum()
+    expect(created).toHaveBeenCalledTimes(1)
+    expect(first().length).toBe(second().length)
+    expect(first().length).toBeGreaterThanOrEqual(VIZ_BINS)
+    await engine.aclose()
+  })
+
+  it('reads a finite frame off a live graph', async () => {
+    const { context, engine } = build(1, dcChunks(0.4, 1))
+    const read = engine.spectrum()
+    const handle = await engine.playMusic(MUSIC)
+    await handle.waitStarted(1)
+    await settle()
+    await context.startRendering()
+    const frame = read()
+    // An offline render leaves -Infinity bins behind; logBins is what makes that
+    // safe, so all this pins is "a frame of the right shape came back".
+    expect(frame.length).toBeGreaterThan(0)
+    expect(logBins(frame)).toHaveLength(VIZ_BINS)
+    await engine.aclose()
+  })
+
+  it('the tap does not change what the mix renders', async () => {
+    // The bus is a real node now; a subscribed visualizer must not cost a dB.
+    const quiet = build(1, dcChunks(0, 0))
+    const watched = build(1, dcChunks(0, 0))
+    watched.engine.spectrum()
+    const played = [quiet.engine.play(voiceClip), watched.engine.play(voiceClip)]
+    await settle()
+    const [a, b] = await Promise.all([quiet.context.startRendering(), watched.context.startRendering()])
+    await Promise.all(played)
+    expect(level(b!, 0.1, 0.9)).toBeCloseTo(level(a!, 0.1, 0.9), 5)
+    await Promise.all([quiet.engine.aclose(), watched.engine.aclose()])
   })
 })

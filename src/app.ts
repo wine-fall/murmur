@@ -28,6 +28,7 @@ import { loadPersona, personaLine } from './persona.ts'
 import { musicSetupCheck, runMusicSetup } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { preflightBun, runStartupChecks } from './startup.ts'
+import { VizFeed } from './viz.ts'
 import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
@@ -89,6 +90,16 @@ export async function buildHost(config: Config): Promise<HostBundle> {
       client.kill()
     },
   }
+}
+
+// The visualizer feed (spec 10 §3.6): frames flow only while a front-end is
+// attached AND subscribed, and the analyser tap is opened by that first
+// subscription rather than here — a plain or unwatched run pays nothing
+// (§5.5/§5.9). A vanished front-end unsubscribes itself (src/ipc-host.ts).
+function attachVizFeed(host: IpcHost, engine: AudioEngine): VizFeed {
+  const feed = new VizFeed({ tap: () => engine.spectrum(), send: (bins) => host.sendViz(bins) })
+  host.setVizSubscriber((on, fps) => feed.set(on, fps))
+  return feed
 }
 
 export function buildVoice(config: Config): VoiceProvider {
@@ -214,6 +225,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     log: (m) => host.info(m),
   })
 
+  // Only the front-end that can draw a spectrum gets one wired up at all.
+  const viz = host instanceof IpcHost ? attachVizFeed(host, engine) : undefined
+
   // Startup checks (spec 03-02 §2.4): a failed preflight OFFERS the repair
   // guide (spec 03-03's auto-trigger); a failed/declined check degrades the
   // session to talk-only; --no-music skips it entirely.
@@ -288,11 +302,20 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   process.on('SIGINT', onSigint)
 
   await voice.start()
-  host.banner(personaLine(persona), { brain: config.brain, voice: config.voice })
+  // How long the room was empty (spec 10 §3.7.3), for a front-end that greets
+  // the absence. A stub run keeps no history, so it has none to report.
+  const away = memory instanceof PersistentMemoryStore ? memory.awaySeconds() : undefined
+  host.banner(personaLine(persona), {
+    brain: config.brain,
+    voice: config.voice,
+    ...(away !== undefined && { away }),
+  })
   try {
     await director.run(maxSegments)
   } finally {
     process.off('SIGINT', onSigint)
+    // Frames stop before the graph they read does.
+    viz?.stop()
     await engine.aclose()
     await voice.close()
     // Final compaction flush (spec 05 §3.6): fold any remaining backlog so a
