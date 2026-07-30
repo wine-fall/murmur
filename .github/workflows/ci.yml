@@ -54,3 +54,37 @@ jobs:
         run: |
           printf 'pcm.!default { type null }\nctl.!default { type null }\n' > ~/.asoundrc
           timeout 120 node src/main.ts --brain stub --voice stub --no-music --no-bed --max-segments 1
+
+  # The spec-10 TUI client is a separate Bun package on purpose (§2.2): it stays
+  # outside the root package manager's workspace, so the root job above never
+  # installs or checks it. Its own gate is tsc under Bun — the same static
+  # contract the engine has, run by the runtime that actually executes the
+  # client. No test job: what a terminal frame looks like is not unit-assertable
+  # (§3.9), and the client's pure logic is held by the root suite.
+  tui:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: oven-sh/setup-bun@v2
+
+      - run: bun install --frozen-lockfile
+        working-directory: tui
+
+      # BOTH trees, because the client's typecheck crosses the shared-schema
+      # boundary: tui/src imports src/ipc.ts (§2.3's one source of truth for the
+      # wire), and tsc resolves THAT file's own `zod` import by walking up from
+      # src/ — which reaches the root node_modules, never tui's. Without this the
+      # job passes only on a machine that happens to have installed the root.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: bun run typecheck
+        working-directory: tui
