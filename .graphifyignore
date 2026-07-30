@@ -12,6 +12,9 @@
 # Throwaway smoke/probe scripts and handoff drafts (murmur-smoke) — never committed.
 scratch/
 
+# Linked build worktrees — nested checkouts of this same repo.
+.worktrees/
+
 # Local dev-session artifacts and the graph's own output.
 .dev/
 graphify-out/
