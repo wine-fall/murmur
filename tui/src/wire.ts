@@ -35,7 +35,14 @@ export function connectEngine(socketPath: string, handlers: WireHandlers): Wire 
     // engine's additions must never take the face down.
     if (message !== null) handlers.onMessage(message)
   })
-  socket.on('connect', () => socket.write(encode({ v: 1, type: 'attach', protocol: PROTOCOL })))
+  // The handshake has to be the FIRST bytes on the wire: the engine drops
+  // everything that arrives before a valid attach (§2.3). Issued here, straight
+  // away, rather than from a 'connect' listener — a socket queues writes made
+  // while it is still connecting and flushes them in the order they were
+  // ISSUED, so a listener-deferred attach loses to any write the client makes
+  // in the meantime (the App's vizSub on mount), and the subscription is sent
+  // once and dropped forever.
+  socket.write(encode({ v: 1, type: 'attach', protocol: PROTOCOL }))
   socket.on('data', (chunk: string) => feed(chunk))
   socket.on('error', (err) => handlers.onClose(String(err)))
   socket.on('close', () => handlers.onClose('engine closed the connection'))
