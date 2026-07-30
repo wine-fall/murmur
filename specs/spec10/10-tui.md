@@ -146,6 +146,23 @@ export interface Host {
   half-installed state). Exit path: OpenTUI's Node FFI support is experimental
   today (Node ≥26.3 + flag); when it stabilizes, switching the TUI process
   back to Node is a launcher change, zero code.
+- **`tui/` stays outside the root package manager's workspace** — weighed and
+  declined when the root migrated from npm to pnpm. It keeps its own
+  `tui/package.json` + `tui/bun.lock`, installed by `bun install`. Reasons, in
+  order of weight: (1) a pnpm workspace shares one root lockfile, which pulls
+  `@opentui/core`, `@opentui/react`, and `react` into the root lockfile and the
+  root install — that directly violates §5.9's zero-cost `frontEnd: 'plain'`
+  and turns `test/front-end-isolation.test.ts` red; (2) Bun is the client's
+  *executor*, not merely its installer (the engine launches it as
+  `bun tui/src/main.tsx`), so making Bun consume pnpm's symlinked layout would
+  bet the front end's only dependency path on a risk that buys nothing;
+  (3) a separate lockfile keeps the §3.1 risk table's first row — pin 0.4.x,
+  upgrades are never drive-by — insulated from routine root-dependency churn.
+  The cost is real and is accepted, not explained away: `bun install` also
+  writes true copies (measured hardlink count 1), so `tui/node_modules` is
+  another 78 MB paid per worktree, and that saving is deliberately forgone. The
+  root's 415 MB was the bulk; 78 MB does not justify touching the front end's
+  only execution path.
 
 ### 2.3 The wire protocol
 

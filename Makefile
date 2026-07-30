@@ -50,7 +50,7 @@ help:
 	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)   TUI=1 (spec 10 front-end)"
 
 install: sync-env
-	npm install
+	pnpm install
 	@# The TUI client (spec 10) is its own Bun package, deliberately outside
 	@# package.json. No bun, no TUI — and the plain front-end needs neither. A
 	@# bun that IS present and whose install fails is a real blocker: do not

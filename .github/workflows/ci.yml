@@ -24,22 +24,27 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      # pnpm before setup-node: the cache: pnpm resolver needs the binary to
+      # already be on PATH. The version comes from packageManager in
+      # package.json, so it is declared in exactly one place.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-          cache: npm
-          cache-dependency-path: package-lock.json
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - run: npm ci
+      - run: pnpm install --frozen-lockfile
 
       - name: Source language gate
         run: git ls-files '*.ts' '*.md' '*.yml' '*.yaml' '*.toml' | xargs node scripts/check-source-language.ts
 
-      - run: npm run typecheck
+      - run: pnpm run typecheck
 
-      - run: npm run lint
+      - run: pnpm run lint
 
-      - run: npm test
+      - run: pnpm test
 
       # Boot smoke: proves the entry point actually starts (argv parsing, app
       # assembly, engine construction) — tests import modules but never boot.
