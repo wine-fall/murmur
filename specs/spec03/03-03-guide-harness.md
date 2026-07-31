@@ -36,8 +36,8 @@
 - **Prescribing the fix** in the prompt — the agent figures out the uncertain cause and proposes the remedy.
 - **`bypassPermissions`** in any shipped build — supervised dev only; the default is step-by-step confirmation.
 - **A CLI subcommand** (`murmur doctor`) — triggered through murmur's normal interaction; a subcommand is a later option.
-- **The TUI** (spec 10) — the plain CLI Host suffices for the confirm interaction.
-- Repairing anything beyond the music dependencies (yt-dlp + ffmpeg) for now (the shape generalizes, but only music ships here).
+- A TUI-specific confirm surface — the Host seam carries the interaction in both plain and TUI front-ends (spec 10 §3.2-B).
+- Repairing anything beyond the §7 onboarding surface (music binaries, bun, the voice endpoint); a general dependency doctor stays future work.
 
 ---
 
@@ -80,6 +80,77 @@
 ## 6. Open questions
 - **Settled — permission routing mechanism**: the SDK's `can_use_tool` callback backed by CLI Host print/stdin (`setup.py::_cli_permission`); no bespoke consent protocol.
 - **Settled — preflight scope**: the music dependencies as a set (yt-dlp + ffmpeg, one aggregated check). A general "dependency doctor" stays future work — the startup-checks seam (03-02 §2.4) is where new checks register.
-- **Relationship to the broadcast loop**: does setup block startup, or run as a background job while the radio idles/talks? (Master §3.2 boundary ②.) The auto-trigger lands with 03-02's music wiring — decide there.
+- **Settled — relationship to the broadcast loop** (§7.1): setup is a foreground conversation offered once per boot before broadcasting; declining degrades the session instead of blocking it.
 - **Persistence/safety of fixes**: e.g. appending a CA to certifi is semi-global — confirm each fix is the smallest safe change and reversible/explained.
-- **Trigger surface**: this spec triggers via normal interaction; whether to also offer an explicit `murmur doctor`-style entry is deferred.
+- **Settled — trigger surface** (§7.1): the boot-time offer plus explicit entries (`--setup-music`, and `--setup` for the full surface).
+
+---
+
+## 7. Slice — conversational onboarding (decided 2026-07-31; build pending)
+
+> Decision record (grilling session, 2026-07-31): **the app assumes the user
+> has Claude Code** — the brain SDK is the one dependency taken as given — so
+> every fixable gap is fixed by *talking to murmur*, not by shell
+> instructions. The radio always launches; missing pieces degrade the
+> session, never block it. A second brain backend (Codex SDK) is explicitly
+> out of scope here — tracked as its own issue.
+
+### 7.1 What changes
+
+1. **The shell preflight demotes to a reporter** (`scripts/dev-preflight.ts`):
+   it still prints per-dependency findings with fixes, but exits non-zero only
+   when `node` itself is unusable — the one gap that leaves nothing to
+   converse with. `make dev` therefore always reaches `src/main.ts`; the app
+   owns onboarding from there.
+2. **The guide's coverage grows** from the music binaries to the full
+   onboarding surface:
+   - `yt-dlp` + `ffmpeg` — as built (§1-§5);
+   - `bun` — the spec-10 front-end runtime (pays off spec 10 §5.10): the guide
+     offers the official installer with per-action consent and verifies with
+     `preflightBun`; until then the front-end has fallen back to plain
+     (spec 10 §6 default record);
+   - the **hosted-voice endpoint** — §7.2.
+3. **Trigger policy**: at startup — after first-run (spec 06) when both apply;
+   the two conversations stay separate and serial — the aggregated startup
+   checks (03-02 §2.4 seam) name the gaps and offer the guide **once per
+   boot**. Decline → the session starts degraded and a `setup.declined`
+   record lands on the tier-③ ledger (spec 05); later boots with the same
+   gaps print one info line instead of re-opening the conversation. The
+   explicit entries always work.
+4. **Degraded posture** (extends 03-02's talk-only rule): the radio always
+   launches. No music → talk-only; no voice endpoint → segments render
+   through the Host (plain or TUI) with the voice silent; the conversation
+   channel is alive in every degraded shape — which is exactly what makes
+   "talk to fix it" possible.
+
+### 7.2 Voice-endpoint onboarding (new guide task)
+
+- **Config home**: guide-written config lives under `$MURMUR_HOME` via
+  `src/paths.ts` (path governance applies): `voice.json`, zod-validated
+  (`{ ttsUrl, seed? }`). Environment variables keep precedence — `make dev`
+  still loads `.env`, and env beats file — so `.env` stays a dev-time
+  override the app itself never writes.
+- **Flow**: the guide explains where an endpoint comes from (a fish.audio
+  account → API key, or a self-hosted URL), the user pastes it, and the guide
+  **validates by synthesizing one real line** through the endpoint before
+  writing anything; a failed validation is explained and nothing is written.
+- **Tool surface**: this guide task gets ONE murmur-owned extra tool,
+  `write_voice_config` (zod input, realpath-scoped to that single config
+  path — the same trust-boundary posture as spec 06 slice B). The SDK
+  built-ins stay for diagnosis; the config write is ours so the path scope
+  is enforceable.
+
+### 7.3 Acceptance (continues §5)
+
+5. With no `.env` and no voice config, `make dev` launches, names the gap in
+   plain language, and the guide conversation ends with a validated
+   `$MURMUR_HOME` voice config and an audible line — the user never touches
+   a shell.
+6. With bun absent, the front-end falls back to plain and the guide can
+   install bun with per-action consent; after it, `--tui` works
+   (pays spec 10 §5.10).
+7. Declining the boot-time offer starts the degraded session and writes the
+   ledger record; the next boot with the same gaps prints one line and does
+   not re-open the conversation.
+8. A missing `node` still stops `make dev` at the shell — there is nothing
+   to converse with.

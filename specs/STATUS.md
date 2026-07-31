@@ -15,8 +15,9 @@ _Last updated: 2026-07-31 (latency re-measured; completed entries collapsed)_
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
 bed + spec 05 memory. Unit gate green (vitest); real-SDK smokes passed per
-phase. No spec is waiting to be built; what is left is under **Open** — the
-engineering items first (latency, the shutdown hang), then the by-ear passes.
+phase. One decided slice awaits its build (#88, conversational onboarding —
+spec 03-03 §7); everything else left is under **Open** — engineering items
+first, then the by-ear passes.
 
 Built, with the PR that landed it — read the spec for what it does, the PR for
 how it got there:
@@ -42,6 +43,8 @@ it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
 - **#76** (eng) Cut the first-music latency — the pick's agentic discovery is now the dominant term.
+- **#88** (eng) Conversational onboarding — the app fixes its own gaps by talking; spec 03-03 §7.
+- **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#78** (by-ear) Does it feel like a warm little radio? — spec 10 §5.11 plus the L0/L1 listening pass.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
