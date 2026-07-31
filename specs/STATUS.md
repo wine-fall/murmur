@@ -42,7 +42,6 @@ it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
 - **#76** (eng) Cut the first-music latency — the pick's agentic discovery is now the dominant term.
-- **#77** (eng) Ctrl-C does not finish shutdown within 30 s.
 - **#78** (by-ear) Does it feel like a warm little radio? — spec 10 §5.11 plus the L0/L1 listening pass.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
