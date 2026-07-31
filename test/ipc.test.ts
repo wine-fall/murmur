@@ -14,10 +14,12 @@ import {
 // pinned by round-tripping the whole set, not a sample.
 const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted' },
+  { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted', away: 21_600 },
   { v: 1, type: 'segment', text: 'still here, still awake.' },
   { v: 1, type: 'userLine', text: 'me too' },
   { v: 1, type: 'state', state: { kind: 'music', nowPlaying: 'a song', awaitingReply: false, scene: 'late-night', activity: 'engaged' } },
   { v: 1, type: 'state', state: { kind: 'gap', awaitingReply: true } },
+  { v: 1, type: 'state', state: { kind: 'talk', awaitingReply: false }, microcopy: 'on the air' },
   { v: 1, type: 'info', text: 'now playing: a song' },
   { v: 1, type: 'viz', bins: [0, 0.5, 1] },
   { v: 1, type: 'bye' },

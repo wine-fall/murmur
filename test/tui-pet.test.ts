@@ -1,0 +1,154 @@
+// The pixel pet's substrate (spec 10 §3.7.1): sprite assets, the pose the
+// program state selects, and the absence the pet greets (§3.7.3). Art direction
+// is deferred (§6.1) — what is pinned here is the machinery under it, so a later
+// creative session can replace every .pix file and nothing else.
+//
+// Pure client modules, held by the fast layer for the reason §3.9 gives: the
+// painted frame cannot be unit-asserted, but which glyph and which pose can.
+
+import { describe, expect, it } from 'vitest'
+
+import {
+  awayGreeting,
+  cells,
+  loadPoses,
+  parseFrames,
+  petPalette,
+  POSE_FPS,
+  poseFor,
+  type PoseName,
+} from '../tui/src/pet.ts'
+import { accentFor } from '../tui/src/palette.ts'
+
+const POSES = loadPoses()
+const PALETTE = petPalette(accentFor('evening'), 0)
+
+describe('the committed sprite assets', () => {
+  it('ships a frame set for every pose the state feed can ask for', () => {
+    const asked: PoseName[] = ['idle', 'talk', 'music', 'turn', 'doze', 'wake']
+    for (const pose of asked) expect(POSES[pose]!.length).toBeGreaterThan(0)
+  })
+
+  it('animates the idle loop and holds the reaction poses still', () => {
+    // §3.7.1: an idle loop at 2-8fps. A pose that reacts to state does not need
+    // frames to read as alive; the pose change IS the reaction.
+    expect(POSES.idle.length).toBeGreaterThan(1)
+    for (const [pose, fps] of Object.entries(POSE_FPS)) {
+      expect(fps, pose).toBeGreaterThanOrEqual(2)
+      expect(fps, pose).toBeLessThanOrEqual(8)
+    }
+  })
+
+  it('holds every frame of every pose to one size, so the band never jumps', () => {
+    const frames = Object.values(POSES).flat()
+    const sizes = new Set(frames.map((frame) => `${frame.length}x${frame[0]!.length}`))
+    expect(sizes.size).toBe(1)
+    // Half-block cells pair two pixel rows, so an odd row count would drop one.
+    expect(frames[0]!.length % 2).toBe(0)
+  })
+
+  it('uses only palette keys the renderer knows how to color', () => {
+    const known = new Set([...Object.keys(PALETTE), '.'])
+    for (const frame of Object.values(POSES).flat()) {
+      for (const glyph of frame.join('')) expect(known, `unknown key ${glyph}`).toContain(glyph)
+    }
+  })
+})
+
+describe('parseFrames', () => {
+  it('splits frames on a blank line', () => {
+    expect(parseFrames('ab\ncd\n\nef\ngh\n')).toEqual([
+      ['ab', 'cd'],
+      ['ef', 'gh'],
+    ])
+  })
+
+  it('pads a row an editor trimmed, rather than rendering a ragged sprite', () => {
+    // Trailing transparent pixels are trailing spaces' cousins: every tool in
+    // the chain wants to eat them.
+    expect(parseFrames('ab..\ncd')).toEqual([['ab..', 'cd..']])
+  })
+
+  it('ignores trailing blank lines instead of emitting an empty frame', () => {
+    expect(parseFrames('ab\n\n\n')).toEqual([['ab']])
+    expect(parseFrames('')).toEqual([])
+  })
+})
+
+describe('cells (the krabby half-block technique)', () => {
+  it('folds two pixel rows into one cell row: upper is ink, lower is ground', () => {
+    const grid = cells(['bo', 'oe'], PALETTE)
+    expect(grid).toHaveLength(1)
+    expect(grid[0]).toEqual([
+      { fg: PALETTE.b, bg: PALETTE.o },
+      { fg: PALETTE.o, bg: PALETTE.e },
+    ])
+  })
+
+  it('renders a transparent pixel as the room behind it', () => {
+    const grid = cells(['..', '..'], PALETTE)
+    expect(grid[0]![0]!.fg).toBe(grid[0]![0]!.bg)
+  })
+
+  it('gives a real sprite half as many cell rows as it has pixel rows', () => {
+    const frame = POSES.idle[0]!
+    const grid = cells(frame, PALETTE)
+    expect(grid).toHaveLength(frame.length / 2)
+    expect(grid[0]).toHaveLength(frame[0]!.length)
+  })
+
+  it('dims the whole palette for a sleeping pet without touching the assets', () => {
+    const awake = petPalette(accentFor('evening'), 0)
+    const asleep = petPalette(accentFor('evening'), 0.6)
+    expect(asleep.b).not.toBe(awake.b)
+  })
+
+  it('takes its body color from the accent, so the pet tints with the hour', () => {
+    expect(petPalette(accentFor('morning'), 0).b).not.toBe(petPalette(accentFor('late-night'), 0).b)
+  })
+})
+
+describe('poseFor (spec 10 §3.2-D: the display-state inventory)', () => {
+  it('turns to you when an invite is open, whatever is on air', () => {
+    expect(poseFor({ kind: 'music', nowPlaying: 'a song', awaitingReply: true })).toBe('turn')
+    expect(poseFor({ kind: 'gap', awaitingReply: true })).toBe('turn')
+  })
+
+  it('dozes when the room is empty — the pet explains the quiet', () => {
+    expect(poseFor({ kind: 'gap', awaitingReply: false, activity: 'away' })).toBe('doze')
+  })
+
+  it('follows the segment the rest of the time', () => {
+    expect(poseFor({ kind: 'talk', awaitingReply: false })).toBe('talk')
+    expect(poseFor({ kind: 'music', awaitingReply: false })).toBe('music')
+    expect(poseFor({ kind: 'gap', awaitingReply: false })).toBe('idle')
+    expect(poseFor({ kind: 'talk', awaitingReply: false, activity: 'engaged' })).toBe('talk')
+  })
+
+  it('idles before the engine has said anything', () => {
+    expect(poseFor(null)).toBe('idle')
+  })
+})
+
+describe('awayGreeting (spec 10 §3.7.3: alive across absence)', () => {
+  it('says nothing when there is no absence to acknowledge', () => {
+    expect(awayGreeting(undefined)).toBeNull()
+    expect(awayGreeting(0)).toBeNull()
+    // Stepping out for ten minutes is not an absence; greeting it would be noise.
+    expect(awayGreeting(600)).toBeNull()
+  })
+
+  it('names the gap in the unit a person would use', () => {
+    expect(awayGreeting(3 * 3600)).toMatch(/3 hours/)
+    expect(awayGreeting(3600 + 60)).toMatch(/an hour/)
+    expect(awayGreeting(3 * 86_400)).toMatch(/3 days/)
+    expect(awayGreeting(30 * 86_400)).toMatch(/a while/)
+  })
+
+  it('has no decay mechanics — a long absence is still a welcome', () => {
+    // tama96's lesson (§3.7.3): murmur is a companion, not a chore.
+    for (const seconds of [3600, 86_400, 400 * 86_400]) {
+      expect(awayGreeting(seconds)).not.toMatch(/died|hungry|neglect|sad/i)
+    }
+  })
+})

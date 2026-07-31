@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-29 (spec 10 slice 1 built and accepted; gate 1 passed)_
+_Last updated: 2026-07-30 (spec 10 slices 2-3 built: viz feed + pet/warmth kit)_
 
 - **spec 10 slice 1 is built (2026-07-29).** The wire (`src/ipc.ts`: zod
   schemas, ndjson framing, one source of truth for both processes), the
@@ -16,9 +16,33 @@ _Last updated: 2026-07-29 (spec 10 slice 1 built and accepted; gate 1 passed)_
   blocker: Enter pressed during an uncommitted composition may submit the line
   instead of committing the candidate (spec 10 §5.1) — the engine-side path is
   cleared by byte-level tests, so any recurrence is the input widget's.
-  **Next**: slice 2 (engine FFT tap + `viz` feed, §3.6), then slice 3 (pet
-  substrate + warmth kit, §3.7). The §6.1 art-direction session with the user
-  should happen before or during slice 3.
+  **Next**: the §5.11 sensory pass (user-run) and the §6.1 art-direction
+  session — see the slices 2-3 entry below.
+
+- **spec 10 slices 2-3 are built (2026-07-30).** Slice 2, the visualizer feed:
+  the audio engine gained a master bus and one `AnalyserNode` tap on it, opened
+  by the first `vizSub` and never before (an unwatched run has no analyser in
+  its graph — asserted with a spy, §5.5); 28 log-spaced bins at 24fps over the
+  wire, bypassing the replay backlog; the client renders cava-style eighth-block
+  bars under a vertical gradient. Verified end-to-end against a REAL
+  `AudioContext`, not fakes: a 440Hz tone produced 72 frames in 3s (exactly
+  24fps) peaking in the 422-469Hz band, and frames stopped dead on unsubscribe.
+  Slice 3, the pet + warmth kit: six committed sprite poses as indexed pixel
+  grids (half-block cells, palette resolved at render time), pose selected from
+  `ProgramState` (invite → turns to you, away → dozes, else the segment),
+  scene-derived accent tinting across strip/bars/pet/segments, DJ microcopy
+  picked engine-side from `prompts.ts` and carried on `state.microcopy`, and an
+  absence greeting from `hello.away` (frozen at boot, never a reproach).
+  Also: the CI `tui` job (bun tsc) that slice 1 owed.
+  **Two real races were found by peer review and fixed with regression tests**:
+  the client wrote its one-shot `vizSub` before `attach` reached the wire (a
+  socket flushes connect-queued writes in ISSUE order, so an attach deferred to
+  the `connect` event loses — the engine then dropped the subscription and the
+  strip stayed blank all session); and the engine dropped a subscription that
+  arrived before `runApp` had built the feed. **Owed: the §5.11 sensory pass
+  (user-run)** — does it feel like a warm little radio with a soul, or a
+  dashboard? And the §6.1 art-direction session, which restyles this substrate
+  without reopening its contracts.
 
 - **spec 10 (TUI) redesigned (2026-07-29, docs only).** After a four-report
   research pass with **visual delight promoted to a first-tier requirement**

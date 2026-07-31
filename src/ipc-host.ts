@@ -26,6 +26,7 @@ import {
   type EngineMessage,
   type ProgramState,
 } from './ipc.ts'
+import { statusMicrocopy } from './prompts.ts'
 
 // What a client that attaches mid-run is handed so it does not open on a blank
 // screen — and so the first-run/guide questions asked while it was still
@@ -50,7 +51,10 @@ export class IpcHost implements Host {
   private sockets = new Set<Socket>()
   private replay: EngineMessage[] = []
   private persona = ''
+  private away: number | undefined
   private opts: IpcHostOptions
+  private vizSubscriber: ((on: boolean, fps: number | undefined) => void) | null = null
+  private vizWanted: { on: boolean; fps: number | undefined } | null = null
   private mirror: (name: string, message: string) => void
   private markEof!: () => void
   private eofSeen: Promise<void>
@@ -107,7 +111,7 @@ export class IpcHost implements Host {
       // agreed a protocol with.
       if (!attached) return
       if (message.type === 'line') this.queue.push(message.text)
-      // vizSub is accepted and idle until the visualizer feed lands (§3.6).
+      if (message.type === 'vizSub') this.wantViz(message.on, message.fps)
     })
     socket.on('data', (chunk: string) => feed(chunk))
     // A front-end that vanished mid-write is not an engine problem.
@@ -117,6 +121,9 @@ export class IpcHost implements Host {
       if (this.client !== socket) return
       this.client = null
       this.mirror('tui', 'front-end detached; the radio plays on')
+      // A front-end that is gone is a front-end that is not watching: the
+      // visualizer stops computing frames without waiting to be told (§3.6).
+      this.wantViz(false, undefined)
       // No more input will come from a front-end that is gone: a consuming
       // reader (guide / first run) declines instead of wedging, exactly as it
       // does on stdin EOF. A later attach re-opens input; eof is one-shot.
@@ -127,15 +134,19 @@ export class IpcHost implements Host {
   private adopt(socket: Socket): void {
     if (this.client !== null && this.client !== socket) this.client.end()
     this.client = socket
-    this.write(socket, {
-      v: 1,
-      type: 'hello',
+    this.write(socket, { v: 1, type: 'hello', ...this.greeting() })
+    for (const message of this.replay) this.write(socket, message)
+  }
+
+  // The handshake payload, built in one place so a client that attaches late
+  // learns the same identity — and the same absence (§3.7.3) — as the first one.
+  private greeting(): Omit<Extract<EngineMessage, { type: 'hello' }>, 'v' | 'type'> {
+    return {
       protocol: PROTOCOL,
       persona: this.persona,
-      brain: this.opts.identity.brain,
-      voice: this.opts.identity.voice,
-    })
-    for (const message of this.replay) this.write(socket, message)
+      ...this.opts.identity,
+      ...(this.away !== undefined && { away: this.away }),
+    }
   }
 
   private write(socket: Socket, message: EngineMessage): void {
@@ -147,6 +158,31 @@ export class IpcHost implements Host {
     this.replay.push(message)
     if (this.replay.length > REPLAY_MAX) this.replay.shift()
     if (this.client !== null) this.write(this.client, message)
+  }
+
+  // Who to tell when a front-end subscribes to (or drops) the spectrum feed
+  // (§3.6). Set after construction because the audio engine the feed taps is
+  // built later than the host that carries its frames — and the client is
+  // spawned before that, so it can subscribe while this is still null.
+  setVizSubscriber(subscriber: (on: boolean, fps: number | undefined) => void): void {
+    this.vizSubscriber = subscriber
+    // Honor a subscription that beat the engine here. The client asks exactly
+    // once, on mount, so dropping it would leave the strip dead for the session.
+    if (this.vizWanted !== null) subscriber(this.vizWanted.on, this.vizWanted.fps)
+  }
+
+  // The latest thing an attached front-end asked for, remembered so it survives
+  // arriving before the feed exists.
+  private wantViz(on: boolean, fps: number | undefined): void {
+    this.vizWanted = { on, fps }
+    this.vizSubscriber?.(on, fps)
+  }
+
+  // One FFT frame. Deliberately NOT through send(): the replay backlog exists so
+  // a booting client still sees the questions it was asked (§2.3), and spectrum
+  // frames would both flood it out and be meaningless by the time they arrived.
+  sendViz(bins: number[]): void {
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'viz', bins })
   }
 
   // --- Host ---------------------------------------------------------------- //
@@ -165,10 +201,12 @@ export class IpcHost implements Host {
     return this.queue.take()
   }
 
-  banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
+  banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void {
+    const { away, ...identity } = opts
     this.persona = personaFirstLine
-    this.opts.identity = opts
-    this.send({ v: 1, type: 'hello', protocol: PROTOCOL, persona: personaFirstLine, ...opts })
+    this.opts.identity = identity
+    this.away = away
+    this.send({ v: 1, type: 'hello', ...this.greeting() })
   }
 
   onRadioSegment(text: string): void {
@@ -187,7 +225,8 @@ export class IpcHost implements Host {
   }
 
   onState(state: ProgramState): void {
-    this.send({ v: 1, type: 'state', state })
+    // The strip's words ride along with the state that earns them (§3.7.4).
+    this.send({ v: 1, type: 'state', state, microcopy: statusMicrocopy(state) })
   }
 
   // Diagnostics never reach the TUI (§3.9): the dev log stays the one place

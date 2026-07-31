@@ -2,6 +2,9 @@
   "name": "murmur-tui",
   "private": true,
   "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
   "dependencies": {
     "@opentui/core": "0.4.5",
     "@opentui/react": "0.4.5",

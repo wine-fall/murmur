@@ -35,6 +35,13 @@ const START_SAFETY_S = 0.05
 // Dead-sink margin: play() must never hang forever if the output stops pulling.
 const VOICE_TIMEOUT_MARGIN_S = 5
 
+// The visualizer tap (spec 10 §3.6). 1024 samples buys ~47Hz resolution at the
+// mix rate, which the log-spaced bands need at the bass end to look like music
+// rather than one fat bar. Modest analyser smoothing takes the jitter off a
+// 24fps read; the bars' own attack/decay is the client's (tui/src/bars.ts).
+const FFT_SIZE = 1024
+const VIZ_SMOOTHING = 0.5
+
 export type Decode = (source: string, signal: AbortSignal) => AsyncIterable<Float32Array>
 
 function sleepUnref(ms: number): Promise<void> {
@@ -237,6 +244,12 @@ export class AudioEngine implements MixingPlayer {
   private leadS: number
   private log: (message: string) => void
 
+  // Everything the engine plays lands on this one node instead of straight on
+  // the destination, so the visualizer has a single master bus to tap (spec 10
+  // §3.6). Unity gain, never automated: it changes nothing about the mix.
+  private bus: GainNode
+  private analyser: AnalyserNode | null = null
+
   private closed = false
   private voice: LiveVoice | null = null
   private music: MusicHandle | null = null // whatever duck() dispatches to (§2.2)
@@ -256,6 +269,35 @@ export class AudioEngine implements MixingPlayer {
     this.bedXfadeS = deps.bedXfadeS ?? BED_XFADE_S
     this.leadS = deps.leadS ?? LEAD_S
     this.log = deps.log ?? (() => {})
+    this.bus = this.ctx.createGain()
+    this.bus.connect(this.ctx.destination)
+  }
+
+  // -- the visualizer tap (spec 10 §3.6) ------------------------------------- //
+
+  // Open the tap and hand back a frame reader (magnitudes in dB, low frequency
+  // first). ONE AnalyserNode, created on the first subscription and never
+  // before: a run nobody is watching has no analyser in its graph at all, which
+  // is what §5.5's "costs the engine nothing when detached" means concretely.
+  //
+  // The analyser's OUTPUT stays unconnected — it observes the bus rather than
+  // sitting in it (verified against node-web-audio-api: a dangling-output tap
+  // still sees the mix), so the audio path is byte-identical either way.
+  spectrum(): () => Float32Array {
+    const node = (this.analyser ??= this.openTap())
+    const frame = new Float32Array(node.frequencyBinCount)
+    return () => {
+      node.getFloatFrequencyData(frame)
+      return frame
+    }
+  }
+
+  private openTap(): AnalyserNode {
+    const node = this.ctx.createAnalyser()
+    node.fftSize = FFT_SIZE
+    node.smoothingTimeConstant = VIZ_SMOOTHING
+    this.bus.connect(node)
+    return node
   }
 
   // -- Player seam (spec 01): the voice channel ----------------------------- //
@@ -280,7 +322,7 @@ export class AudioEngine implements MixingPlayer {
     const handle = this.music
     const src = this.ctx.createBufferSource()
     src.buffer = buf
-    src.connect(this.ctx.destination)
+    src.connect(this.bus)
     const t0 = this.ctx.currentTime
     handle?.duck()
     src.start(t0)
@@ -317,7 +359,7 @@ export class AudioEngine implements MixingPlayer {
     if (previous !== null) await previous.stop()
 
     const gain = this.ctx.createGain()
-    gain.connect(this.ctx.destination)
+    gain.connect(this.bus)
     const abort = new AbortController()
     const stream = scheduleStream(this.ctx, gain, this.decode(clip.source, abort.signal), {
       leadS: this.leadS,
@@ -385,7 +427,7 @@ export class AudioEngine implements MixingPlayer {
     if (tracks.length === 0) return // no cache -> no bed, radio still runs
     const master = this.ctx.createGain()
     master.gain.value = 0
-    master.connect(this.ctx.destination)
+    master.connect(this.bus)
     this.bedMaster = master
     this.bedAbort = new AbortController()
     ramp(master.gain, this.bedGain, this.ctx.currentTime, this.bedXfadeS)
@@ -457,6 +499,13 @@ export class AudioEngine implements MixingPlayer {
     this.mixed = null
     this.music = null
     if (music !== null) await music.stop()
+    // The engine opened the tap, so the engine takes it back out: the bus leaves
+    // the graph with nothing still hanging off it.
+    if (this.analyser !== null) {
+      this.bus.disconnect(this.analyser)
+      this.analyser = null
+    }
+    this.bus.disconnect()
     // Close a real device context; an OfflineAudioContext has no close().
     const ctx = this.ctx as Partial<AudioContext>
     if (typeof ctx.close === 'function') await ctx.close()
