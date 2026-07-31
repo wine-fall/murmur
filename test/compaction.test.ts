@@ -153,4 +153,30 @@ describe('Compactor', () => {
     await compactor.flush()
     expect(brain.calls.length).toBe(0)
   })
+
+  // Ctrl-C landed here: the shutdown flush launches a real compactProfile, and
+  // a measured run spent 53 s inside it while the user waited for the process
+  // to die. The budget makes "never blocks exit" true instead of aspirational.
+  it('flush gives up when the fold outlives its budget, and applies nothing', async () => {
+    const { store, brain, compactor } = setup()
+    for (const [i, text] of ['a', 'b'].entries()) store.push(text, i + 1)
+
+    await compactor.flush(20) // the brain is never released — it hangs forever
+
+    expect(store.applied).toEqual([])
+    expect(store.backlog).toHaveLength(2) // the turns survive for the next run
+    expect(brain.folding).toBe(true) // abandoned, not cancelled: promises cannot be
+  })
+
+  it('flush still completes a fold that finishes inside its budget', async () => {
+    const { store, brain, compactor } = setup()
+    store.push('a', 1)
+
+    const flushed = compactor.flush(5_000)
+    await until(() => brain.folding, 'fold started')
+    brain.finish()
+    await flushed
+
+    expect(store.applied.map((a) => a.throughTs)).toEqual([1])
+  })
 })

@@ -316,7 +316,11 @@ migration (structure reserved, master §6).
 - **Trigger**: after each `record()`, when the un-compacted backlog reaches
   `_COMPACT_EVERY_TURNS = 100` (module constant), the app schedules **one**
   background compaction task (single-flight, mirroring the Director's
-  `_pending_pick` pattern); a graceful shutdown also attempts a final one.
+  `_pending_pick` pattern); a graceful shutdown also attempts a final one,
+  **time-boxed**: a fold is a model call (53 s on a measured run), so the
+  attempt is abandoned after a few seconds rather than holding the process
+  open. Nothing is lost — the turns are on disk and the watermark only
+  advances on a successful apply, so the next run folds them again.
   Startup checks the backlog too (catches killed sessions) and, if due, runs
   it **in the background after the radio is on air** — compaction never blocks
   or delays a segment.

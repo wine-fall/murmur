@@ -129,6 +129,14 @@ type BufferedBeat = { beat: TalkBeat; clip: Promise<AudioClip | null> }
 
 export class Director {
   private quit = false
+  // A racer for the quit flag. `/quit` arrives as a typed line and so already
+  // wins runVoice's race; Ctrl-C arrives as a signal and had nothing to win
+  // with, which left shutdown waiting out the rest of the song (spec 01 §3.6:
+  // Ctrl-C stops playback). Resolving this wakes that wait immediately.
+  private wakeOnQuit!: () => void
+  private quitting = new Promise<'quit'>((resolve) => {
+    this.wakeOnQuit = () => resolve('quit')
+  })
   // spec 04 §3.3: pre-synthesized look-ahead beats, kept topped up to
   // TALK_LOOKAHEAD so the next talk airs warm — even across music. Discarded
   // on a talkback steer (they predate the user's turn).
@@ -166,6 +174,7 @@ export class Director {
   // the current await settles; a playing clip is cut in runVoice's exit path.
   requestQuit(): void {
     this.quit = true
+    this.wakeOnQuit()
   }
 
   async run(maxSegments?: number): Promise<void> {
@@ -632,7 +641,9 @@ export class Director {
           const winner = await Promise.race([
             audio,
             this.deps.host.peekLine().then(() => 'line' as const),
+            this.quitting,
           ])
+          if (winner === 'quit') return // the finally below cuts voice and song
           if (winner === 'song') return // the song ended -> segment over
           if (winner === 'voice') {
             if (song === undefined) return // clip ended -> segment over
