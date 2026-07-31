@@ -46,6 +46,8 @@ When a sub-spec change contradicts or outgrows a master decision, update `specs/
 
 `specs/STATUS.md` is project-state truth (current milestone, what's next), not a spec contract — but the same living-truth rule applies. You **read it at the start of every build**, so if it's stale when you read it, or this build advances the milestone / changes the next target / closes an open acceptance bar, **update it and re-date-stamp in the same change**. A stale STATUS misdirects the next session.
 
+**STATUS.md is a card, not a ledger — when updating, delete completed entries; history lives in git/PR bodies; measured facts go into the spec they verify.** Every session reads this file, so append-only growth is a tax on all of them. A finished entry collapses to at most one line naming the PR that landed it, or disappears; a long write-up of what a build did belongs in that build's PR body; numbers from a real run belong in the spec whose promise they verify, not here.
+
 ## Testing (mandatory — see specs/DESIGN.md §11 for the full convention)
 
 - **Test-first for logic.** Failing unit test → implementation → green. Framework: `vitest` (`pnpm test`).

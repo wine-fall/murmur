@@ -205,6 +205,31 @@ mechanical, driven by JS promise semantics and the TS codebase's seams:
   refill fired with the queued beat in context, resolved mid-song (~10 s into a
   25 s song, `depth=2`); music→talk boundary aired the prebuilt clip with zero
   Brain/synth wait.
+- **Measured end-to-end (2026-07-31)** — two real `make dev` runs, no `STUB`:
+  real brain, real `yt-dlp`, hosted voice, audio out. Conditions: macOS; an
+  isolated `MURMUR_HOME` (persona pre-seeded, bed cache warm);
+  `MURMUR_ACTIVITY=present`, so the spec-07 away-gate cannot short-circuit the
+  cadence; else default (`musicEveryN=2`, `gapSeconds=2`, `TALK_LOOKAHEAD=2`).
+  `t0` = `make dev` execs `node src/main.ts`; **cold** = empty memory, **hot** =
+  a second run nine minutes later carrying the first run's turns and songs.
+
+  |  | cold | hot |
+  |---|---|---|
+  | t0 → banner (startup checks, warm bed) | 4.2 s | 4.7 s |
+  | cold `nextTalks` + TTS batch | 24.5 s | 33.9 s |
+  | t0 → first audible word | 28.7 s | 38.6 s |
+  | t0 → first music | 136 s | 195 s |
+
+  **§3.3 holds**: all 13 buffered boundaries across both runs aired in the same
+  second as their `talk.buffer warm` marker (0 s residual Brain/synth wait),
+  both music→talk boundaries included. The only dead air left is the configured
+  2 s gap, and the ~24 s cold batch is paid once per session, never at a
+  boundary. **The first-music term moved to slice 1**: music is held by the
+  cadence to the 3rd boundary (t0+74 s / t0+101 s), then by the first pick still
+  resolving (~75-105 s cold / ~125-155 s hot), so 2 / 3 music boundaries yielded
+  to talk under the never-block-the-air rule and the song landed at boundary
+  5 / 6. A primed pick costs ~4 s of stream spin-up. Hot being slower than cold
+  says the variable is context growth, not process warmth.
 
 ### 3.4 Time-of-day scene (context enrichment)
 Adjacent to the latency work above; it rides in this spec (see the header note).
