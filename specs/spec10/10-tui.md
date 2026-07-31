@@ -518,9 +518,9 @@ TUI work is built on the framework choice.
    no orphan processes, no socket file left behind.
 9. `frontEnd: 'plain'` is byte-identical to today: no socket, no Bun probe,
    no analyser tap; the fast test suite runs with no TUI-related imports.
-10. With Bun absent, the startup check reports it and `tui` is not offered;
-    the guided install can provision it (spec 03-03 flow), after which `tui`
-    works.
+10. With Bun absent, the startup check reports it and the front-end falls
+    back to `plain` with one notice; the guided install can provision bun
+    (spec 03-03 §7), after which `tui` works.
 11. **Human acceptance (sensory, user-run — the real gate)**: does it feel
     like a warm little radio with a soul — pet alive, bars breathing,
     microcopy in voice — and not a dev-tool dashboard? The agent produces the
@@ -530,8 +530,11 @@ TUI work is built on the framework choice.
 
 ## 6. Open questions
 
-- **Default front-end**: `plain` stays default until the TUI passes §5.11 by
-  feel; flipping the default is a one-line config change decided by the user.
+- **Default front-end — decided (2026-07-31)**: the default is `tui`. With
+  bun absent the startup probe falls the front-end back to `plain` with one
+  in-program notice (and the guide can provision bun — spec 03-03 §7).
+  `--plain` / `TUI=0` are the explicit escape. The user chose to flip ahead
+  of the §5.11 sensory pass; that pass stays owed (#78).
 - **Reconciler**: React chosen (§3.1); if gate 1 or early build friction
   implicates React specifically, Solid is the drop-in alternative (opencode's
   production path).
