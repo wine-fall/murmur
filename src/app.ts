@@ -25,10 +25,11 @@ import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona, personaLine } from './persona.ts'
-import { musicSetupCheck, runMusicSetup } from './guide.ts'
+import { runSetup, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
-import { preflightBun, runStartupChecks } from './startup.ts'
+import { preflightBun } from './startup.ts'
 import { VizFeed } from './viz.ts'
+import { readVoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
 import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
@@ -62,12 +63,13 @@ export async function buildHost(config: Config): Promise<HostBundle> {
   if (config.frontEnd === 'plain') return plain()
 
   // Bun absent = the TUI is not offered at all (spec 10 §5.10): a half-started
-  // front-end is worse than the plain one, and the radio still has to run.
+  // front-end is worse than the plain one, and the radio still has to run. ONE
+  // notice, not a wall of shell instructions — the setup conversation that
+  // follows is where bun actually gets installed (spec 03-03 §7.1).
   const bun = await preflightBun(config.bunCmd)
   if (!bun.ok) {
     const bundle = plain()
-    bundle.host.info(`the tui front-end needs bun (${bun.reason}); staying on the plain one.`)
-    bundle.host.info('install it with: curl -fsSL https://bun.sh/install | bash')
+    bundle.host.info('the terminal interface needs bun; using the plain one for now.')
     return bundle
   }
 
@@ -102,15 +104,17 @@ function attachVizFeed(host: IpcHost, engine: AudioEngine): VizFeed {
   return feed
 }
 
-export function buildVoice(config: Config): VoiceProvider {
+export function buildVoice(config: Config, notify: (message: string) => void = () => {}): VoiceProvider {
   switch (config.voice) {
     case 'stub':
       return new StubVoice()
     case 'hosted':
-      // Fail here rather than on the first beat: an unconfigured endpoint is a
-      // setup mistake, and the message has to name the knob to fix.
+      // An unconfigured endpoint degrades the session, it does not end it
+      // (spec 03-03 §7.1 point 4): the lines still land through the Host, the
+      // voice is simply silent, and the setup conversation is what fixes it.
       if (config.ttsUrl === '') {
-        throw new Error('the hosted voice needs an endpoint: set MURMUR_TTS_URL or pass --tts-url')
+        notify('no voice endpoint yet — you will see the lines instead of hearing them.')
+        return new StubVoice()
       }
       return new HostedVoice({
         baseUrl: config.ttsUrl,
@@ -184,19 +188,50 @@ export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
   return ok
 }
 
-// The explicit setup entry (spec 03-03): `murmur --setup-music` runs the
-// preflight + guide directly, no broadcast. Returns whether music is usable.
-export async function runMusicSetupCli(config: Config): Promise<boolean> {
+// What the setup conversation is allowed to look at and repair this run
+// (spec 03-03 §7.1). `voiceUrl` is a thunk: the guide may write voice.json
+// mid-conversation, and the recheck has to read the world again.
+export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): SetupTargets {
+  return {
+    ytdlp: config.ytdlpCmd,
+    ffmpeg: config.ffmpegCmd,
+    bunCmd: config.bunCmd,
+    home: config.home,
+    wantsMusic: config.musicEnabled,
+    wantsBun: config.frontEnd === 'tui',
+    wantsVoice: config.voice === 'hosted',
+    // Env/flags keep precedence over the file, exactly as parseCli layered it.
+    voiceUrl: () => config.ttsUrl || (readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))?.ttsUrl ?? ''),
+    ...over,
+  }
+}
+
+// The explicit setup entries (spec 03-03 §7.1): `murmur --setup` walks the whole
+// onboarding surface and `murmur --setup-music` just the music binaries — each a
+// separate serial conversation, never woven into a first run. No broadcast.
+export async function runSetupCli(config: Config, { musicOnly = false } = {}): Promise<boolean> {
   const host = new CliHost()
   if (config.brain !== 'claude') {
     host.info('the setup guide needs the real brain: run again without --brain stub.')
     return false
   }
-  const ok = await runMusicSetup(host, new ClaudeBrain(config.model), {
-    ytdlp: config.ytdlpCmd,
-    ffmpeg: config.ffmpegCmd,
+  const targets = setupTargets(
+    config,
+    musicOnly ? { wantsMusic: true, wantsBun: false, wantsVoice: false } : {},
+  )
+  const outcome = await runSetup({
+    host,
+    guide: new ClaudeBrain(config.model),
+    targets,
+    explicit: true,
   })
-  host.info(ok ? 'music is ready.' : 'music is not available yet.')
+  // Complete means every piece this entry actually covered, bun included: with
+  // the TUI the default front-end, an unrepaired bun is a real gap, not a note.
+  const ok =
+    (!targets.wantsMusic || outcome.musicOk) &&
+    (!targets.wantsBun || outcome.bunOk) &&
+    (!targets.wantsVoice || outcome.voiceOk)
+  host.info(ok ? 'setup is complete.' : 'some pieces are still not set up.')
   return ok
 }
 
@@ -207,7 +242,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // A real (claude) run persists memory + homes the persona in the memory dir;
   // a stub run stays fully in-process (spec 05 §3.2/§3.7).
   const persistent = config.brain === 'claude'
-  const voice = buildVoice(config)
   // The harnessed brain drives music discovery; the stub has no harness, so a
   // stub session is talk-only by construction.
   const claude = config.brain === 'claude' ? new ClaudeBrain(config.model) : null
@@ -230,21 +264,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // Only the front-end that can draw a spectrum gets one wired up at all.
   const viz = host instanceof IpcHost ? attachVizFeed(host, engine) : undefined
 
-  // Startup checks (spec 03-02 §2.4): a failed preflight OFFERS the repair
-  // guide (spec 03-03's auto-trigger); a failed/declined check degrades the
-  // session to talk-only; --no-music skips it entirely.
-  let musicOk = false
-  if (config.musicEnabled && claude !== null) {
-    const results = await runStartupChecks(
-      [musicSetupCheck(claude, { ytdlp: config.ytdlpCmd, ffmpeg: config.ffmpegCmd })],
-      host,
-    )
-    musicOk = results.music === true
-  }
-
-  // First run (spec 06 §2.1): after the startup checks, before the banner and
-  // the first segment — the radio must not talk over the questions. Total: it
-  // always returns a loadable persona path, so the radio always boots.
+  // First run (spec 06 §2.1): before the banner and the first segment — the
+  // radio must not talk over the questions. Total: it always returns a loadable
+  // persona path, so the radio always boots.
   let personaPath = resolvePersonaPath(config, persistent)
   if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
     personaPath = await runFirstRun({
@@ -259,6 +281,28 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     })
   }
   const persona = loadPersona(personaPath)
+
+  // Conversational onboarding (spec 03-03 §7.1): AFTER the first run, and a
+  // separate serial conversation from it. The deterministic probes name what is
+  // missing and murmur offers — once per boot — to fix it by talking. A decline
+  // is remembered on the tier-3 ledger so later boots stay quiet. The radio
+  // launches either way; the gaps only decide how degraded it starts.
+  let musicOk = config.musicEnabled && claude !== null
+  if (claude !== null) {
+    const outcome = await runSetup({
+      host,
+      guide: claude,
+      targets: setupTargets(config),
+      ...(memory instanceof PersistentMemoryStore && { ledger: memory }),
+    })
+    musicOk = outcome.musicOk
+  }
+  // Built after the conversation, so an endpoint saved during it is heard THIS
+  // boot rather than the next one.
+  const voice = buildVoice(
+    { ...config, ttsUrl: setupTargets(config).voiceUrl() },
+    (m) => host.info(m),
+  )
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the

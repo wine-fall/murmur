@@ -96,8 +96,10 @@ export interface BedSource {
 }
 
 // 'anchor' keys one aired time anchor (spec 07 §2.4), so a restart inside the
-// window does not re-fire it.
-export type LedgerKind = 'topic' | 'song' | 'anchor'
+// window does not re-fire it. 'setup' keys the onboarding offer's standing
+// answer (spec 03-03 §7.1): a recorded decline is what turns later boots with
+// the same gaps quiet instead of re-opening the conversation.
+export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup'
 
 // The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
 // profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
@@ -203,6 +205,10 @@ export type GuideRequest = {
   readonly maxTurns: number
   readonly permissionMode?: PermissionMode // shipped default: 'default' (per-action confirm)
   readonly canUseTool?: CanUseTool // routes each pre-action ask to the user
+  // murmur-owned tools offered ALONGSIDE the SDK built-ins (spec 03-03 §7.2).
+  // Bounded via `tools`, not `allowedTools`, so they stay behind the same
+  // per-action confirm every built-in is behind.
+  readonly tools?: readonly TaskTool[]
   readonly onText?: (text: string) => void // the agent's text, streamed as it arrives
   // The user's next natural-language reply after each agent turn; null ends
   // the conversation. Absent = single-shot (one agent turn).

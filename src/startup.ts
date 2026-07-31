@@ -1,30 +1,11 @@
-// Startup checks (spec 03-02 §2.4): an extensible preflight phase the app runs
-// before broadcasting. A failed check degrades the session (talk-only), never
-// aborts the radio. This module holds the framework plus the deterministic
-// music preflight probes (spec 03-03 §2); the interactive repair check that
-// consumes them lives in guide.ts (musicSetupCheck).
+// The startup-check probes (spec 03-02 §2.4): the deterministic, local half of
+// the preflight phase the app runs before broadcasting. A failed probe degrades
+// the session (talk-only, plain front-end, silent voice), never aborts the
+// radio. The interactive half — naming the gaps and conversing the user through
+// fixing them — lives in guide.ts (runSetup, spec 03-03 §7), which aggregates
+// every probe here into ONE offer per boot.
 
 import { execFile } from 'node:child_process'
-
-import type { Host } from './host.ts'
-
-export type StartupCheck = {
-  name: string
-  // Interactive allowed (the host is the same stdin the Director uses).
-  // False = the feature this check gates is unavailable this session.
-  run(host: Host): Promise<boolean>
-}
-
-export async function runStartupChecks(
-  checks: StartupCheck[],
-  host: Host,
-): Promise<Record<string, boolean>> {
-  const results: Record<string, boolean> = {}
-  for (const check of checks) {
-    results[check.name] = await check.run(host).catch(() => false)
-  }
-  return results
-}
 
 // --- the deterministic music preflight (spec 03-03 §2) -------------------- //
 //

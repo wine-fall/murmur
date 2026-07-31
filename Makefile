@@ -8,8 +8,9 @@
 # Knobs:  VOICE=hosted|stub            (hosted TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
 #                                        no music — needs no network/binaries)
-#         TUI=1                        (spec 10 front-end: the OpenTUI client
-#                                        under Bun, instead of plain stdout)
+#         TUI=0                        (plain stdout instead of the spec 10
+#                                        front-end, which is the default; without
+#                                        bun it falls back to plain on its own)
 #         MURMUR_SCENE=morning|afternoon|evening|late-night
 #                                      (force the time-of-day scene for by-ear
 #                                       testing; unset = derive from the clock)
@@ -28,12 +29,13 @@ else
   PREFLIGHT_ARGS := --voice $(VOICE)
 endif
 
-ifdef TUI
-  RUN_ARGS       += --tui
-  PREFLIGHT_ARGS += --tui
+# The TUI is the default front-end (spec 10 §6); TUI=0 is the explicit escape.
+ifeq ($(TUI),0)
+  RUN_ARGS       += --plain
+  PREFLIGHT_ARGS += --plain
 endif
 
-.PHONY: help dev dev-fishaudio dev-opuslab logs preflight setup-music install sync-env
+.PHONY: help dev dev-fishaudio dev-opuslab logs preflight setup setup-music install sync-env
 
 help:
 	@echo "murmur dev:"
@@ -44,10 +46,11 @@ help:
 	@echo "  make logs         tail the dev log + memory (run in a 2nd terminal)"
 	@echo "                    INFO timeline by default; DEBUG=1 unmutes everything"
 	@echo "                    (memory is also recorded to $(MEM_LOG) while dev runs)"
-	@echo "  make preflight    check music/voice deps without launching"
-	@echo "  make setup-music  run the guided binary (yt-dlp/ffmpeg) repair"
+	@echo "  make preflight    report music/voice/front-end deps without launching"
+	@echo "  make setup        talk murmur through everything that is missing"
+	@echo "  make setup-music  just the music binaries (yt-dlp/ffmpeg)"
 	@echo ""
-	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)   TUI=1 (spec 10 front-end)"
+	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)   TUI=0 (plain stdout)"
 
 install: sync-env
 	pnpm install
@@ -95,15 +98,19 @@ dev-opuslab: sync-env
 
 dev: install
 	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) for the preflight
-	@# and the run, gate on the preflight, then launch with a side-car memory
-	@# recorder (external, app-agnostic): it samples the process tree into
-	@# mem.log for the whole run, torn down when the app exits. Its crash can
-	@# never take murmur down; stderr lands in mem.log so a fatal crash is
-	@# recorded, not swallowed.
+	@# and the run, REPORT what is missing, then launch either way — the app
+	@# owns onboarding from here (spec 03-03 §7.1) and repairs its own gaps by
+	@# talking. The only thing that still stops us is a node that cannot run the
+	@# reporter at all: without it there is nothing to converse with (§7.3
+	@# criterion 8). Then launch with a side-car memory recorder (external,
+	@# app-agnostic): it samples the process tree into mem.log for the whole run,
+	@# torn down when the app exits. Its crash can never take murmur down;
+	@# stderr lands in mem.log so a fatal crash is recorded, not swallowed.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	  node scripts/dev-preflight.ts $(PREFLIGHT_ARGS) || { \
 	    echo ""; \
-	    echo "make dev stopped — fix the blockers above (or: STUB=1 make dev)."; \
+	    echo "make dev stopped — node could not run the preflight."; \
+	    echo "install Node >= 24 and try again; everything else murmur fixes by talking."; \
 	    exit 1; \
 	  }; \
 	  mkdir -p .dev && : > $(DEV_LOG) && : > $(MEM_LOG); \
@@ -123,6 +130,15 @@ endif
 
 logs:
 	@node scripts/devwatch.ts --log $(DEV_LOG) --level $(LOG_LEVEL)
+
+setup: sync-env
+	@# The whole onboarding surface as one conversation: music binaries, bun,
+	@# and the voice endpoint (spec 03-03 §7.1). Loads .env so an endpoint you
+	@# already have is seen as configured rather than asked about again.
+	@# --voice matters: the run's own voice choice is what decides whether an
+	@# endpoint is wanted at all, so without it setup would skip the voice.
+	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
+	  node src/main.ts --setup --voice $(VOICE)
 
 setup-music:
 	node src/main.ts --setup-music

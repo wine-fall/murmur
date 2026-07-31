@@ -1,35 +1,43 @@
 // Non-interactive dev preflight for `make dev`.
 //
-// Reports each dependency the chosen run mode needs, with an actionable fix,
-// and exits non-zero when a hard blocker is missing so `make dev` can stop and
-// point the developer at the fix (no silent half-starts). It reuses murmur's
-// own music preflight probes (spec 03-03) so this and the in-app startup check
-// agree.
+// A REPORTER, not a gatekeeper (spec 03-03 §7.1): it names each dependency the
+// chosen run mode wants and what murmur will do without it, then exits 0 —
+// always. murmur assumes the user has Claude Code, so every gap named here is
+// one the app repairs by TALKING to the user (the setup conversation offered at
+// startup, or `make setup`), which means the shell must never stand between
+// them and the app. The one exception needs no code: without `node` the shell
+// cannot run this script at all, and `make dev` stops there (§7.3 criterion 8).
 //
 //   node scripts/dev-preflight.ts --voice hosted   # remote TTS wanted
 //   node scripts/dev-preflight.ts --voice stub     # silent voice
 //   node scripts/dev-preflight.ts --no-music       # skip the binary checks
-//   node scripts/dev-preflight.ts --tui            # the spec-10 front-end wanted
+//   node scripts/dev-preflight.ts --plain          # plain front-end, no bun
 
 import { parseArgs } from 'node:util'
 
+import { voiceConfigPath } from '../src/paths.ts'
 import { preflightBun, preflightFfmpeg, preflightYtdlp } from '../src/startup.ts'
+import { readVoiceConfig } from '../src/voice-config.ts'
 
 const OK = '\x1b[32m✓\x1b[0m'
-const NO = '\x1b[31m✗\x1b[0m'
+const NO = '\x1b[33m·\x1b[0m'
 
 const { values } = parseArgs({
   args: process.argv.slice(2),
   options: {
     voice: { type: 'string' },
     'no-music': { type: 'boolean' },
+    plain: { type: 'boolean' },
     tui: { type: 'boolean' },
   },
 })
 const voice = values.voice ?? 'hosted'
+// The TUI is the default front-end (spec 10 §6); --plain is the opt-out.
+const wantsTui = values.plain !== true
 
 console.log('preflight:')
-const fixes: string[] = []
+// What the session will be missing, in the words the app itself will use.
+const gaps: string[] = []
 
 if (values['no-music'] !== true) {
   const [yt, ff] = await Promise.all([preflightYtdlp(), preflightFfmpeg()])
@@ -44,39 +52,36 @@ if (values['no-music'] !== true) {
       broken.push(name)
     }
   }
-  if (broken.length > 0) {
-    const joined = broken.join(' ')
-    fixes.push(`music needs ${joined}. Fix with:  make setup-music   (or: brew install ${joined})`)
-  }
+  if (broken.length > 0) gaps.push(`music needs ${broken.join(' + ')} — the session will be talk-only`)
 }
 
-// spec 10 §2.2: bun is a provisioned binary. Without it the TUI is simply not
-// offered, so asking for it and not having it is a blocker worth naming here.
-if (values.tui === true) {
+if (wantsTui) {
   const bun = await preflightBun()
   if (bun.ok) console.log(`  ${OK} bun (tui front-end)`)
   else {
     console.log(`  ${NO} bun: ${bun.reason}`)
-    fixes.push('the tui front-end needs bun:  curl -fsSL https://bun.sh/install | bash')
+    gaps.push('the tui front-end needs bun — the plain front-end will be used')
   }
 }
 
 if (voice === 'hosted') {
-  // The endpoint is proven on the first synth; here we only catch the obvious
-  // misconfiguration (spec 02 §3.6: never a hardcoded URL).
-  const url = process.env.MURMUR_TTS_URL?.trim() ?? ''
+  // The endpoint is proven on the first synth; here we only report whether one
+  // is configured at all, from either layer the app reads (spec 03-03 §7.2).
+  const url = process.env.MURMUR_TTS_URL?.trim() || (readVoiceConfig(voiceConfigPath())?.ttsUrl ?? '')
   if (url === '') {
-    console.log(`  ${NO} hosted voice: MURMUR_TTS_URL not set`)
-    fixes.push('hosted voice needs an endpoint:  make dev-fishaudio   (or set MURMUR_TTS_URL in .env)')
+    console.log(`  ${NO} voice endpoint: not configured yet`)
+    gaps.push('the voice has no endpoint — lines will show as text, silently')
   } else {
     console.log(`  ${OK} hosted voice -> ${url}`)
   }
 }
 
-if (fixes.length > 0) {
-  console.log('\nblockers — fix these, or use an escape hatch:')
-  for (const fix of fixes) console.log(`  → ${fix}`)
-  console.log('  → skip everything (offline):  STUB=1 make dev')
-  process.exit(1)
+if (gaps.length > 0) {
+  console.log('\nmurmur will start anyway, with these gaps:')
+  for (const gap of gaps) console.log(`  · ${gap}`)
+  console.log('\nit will offer to fix them by talking you through it. You can also run:')
+  console.log('  make setup        the whole surface, as a conversation')
+  console.log('  make setup-music  just the music binaries')
+} else {
+  console.log('all set.')
 }
-console.log('all set.')

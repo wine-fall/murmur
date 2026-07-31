@@ -139,14 +139,19 @@ export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] 
 // this SDK auto-approves (executes without asking) and would defeat the
 // per-action confirm the guide exists to keep. Factored out so the isolation
 // and never-auto-approve invariants are unit-testable without a network call.
+// murmur-owned tools ride the same `tools` allowlist as the built-ins, so a
+// task-specific tool (spec 03-03 §7.2's write_voice_config) is offered without
+// escaping the per-action confirm.
 export function guideOptions(req: GuideRequest): Options {
+  const extra = req.tools ?? []
+  const server = extra.length > 0 ? createSdkMcpServer({ name: 'murmur', tools: [...extra] }) : null
   return {
     systemPrompt: req.systemPrompt,
     model: req.model,
     settingSources: [],
     strictMcpConfig: true,
-    tools: [...GUIDE_BUILTINS],
-    mcpServers: {},
+    tools: [...GUIDE_BUILTINS, ...extra.map((t) => `mcp__murmur__${t.name}`)],
+    mcpServers: server === null ? {} : { murmur: server },
     skills: [],
     permissionMode: req.permissionMode ?? 'default',
     ...(req.canUseTool !== undefined && { canUseTool: req.canUseTool }),

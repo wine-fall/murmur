@@ -17,6 +17,7 @@ export class InProcessMemoryStore implements MemoryStore {
   private topics: string[] = []
   private songs: string[] = []
   private anchors: string[] = []
+  private setup: string[] = []
 
   private maxlen: number
 
@@ -54,6 +55,10 @@ export class InProcessMemoryStore implements MemoryStore {
     return n > 0 ? this.anchors.slice(-n) : []
   }
 
+  recentEvents(kind: LedgerKind, n: number): string[] {
+    return n > 0 ? this.ledger(kind).slice(-n) : []
+  }
+
   private ledger(kind: LedgerKind): string[] {
     switch (kind) {
       case 'topic':
@@ -62,6 +67,8 @@ export class InProcessMemoryStore implements MemoryStore {
         return this.songs
       case 'anchor':
         return this.anchors
+      case 'setup':
+        return this.setup
     }
   }
 }
@@ -132,6 +139,7 @@ export class PersistentMemoryStore implements MemoryStore {
   private topics: string[] = []
   private songs: string[] = []
   private anchors: string[] = []
+  private setup: string[] = []
   private profileText = ''
   private watermark = 0
   private lastTs = 0
@@ -188,6 +196,23 @@ export class PersistentMemoryStore implements MemoryStore {
 
   recentAnchors(n: number): string[] {
     return n > 0 ? this.anchors.slice(-n) : []
+  }
+
+  // Any ledger kind, by name. Impl-level and deliberately NOT on the MemoryStore
+  // contract: the setup offer reads its own standing answer (spec 03-03 §7.1),
+  // and the Director has no business in that tier.
+  recentEvents(kind: LedgerKind, n: number): string[] {
+    if (n <= 0) return []
+    switch (kind) {
+      case 'topic':
+        return this.topics.slice(-n)
+      case 'song':
+        return this.songs.slice(-n)
+      case 'anchor':
+        return this.anchors.slice(-n)
+      case 'setup':
+        return this.setup.slice(-n)
+    }
   }
 
   // --- compaction surface (spec 05 §3.6 — driven by the Compactor) ---------- //
@@ -264,7 +289,9 @@ export class PersistentMemoryStore implements MemoryStore {
           ? this.songs
           : kind === 'anchor'
             ? this.anchors
-            : null
+            : kind === 'setup'
+              ? this.setup
+              : null
     if (target === null) return
     target.push(key)
     if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)

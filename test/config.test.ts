@@ -1,3 +1,7 @@
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it, vi } from 'vitest'
 
 import { parseCli } from '../src/config.ts'
@@ -185,17 +189,76 @@ describe('spec 06 CLI entry', () => {
   })
 })
 
-// spec 10 §2.2/§3.5: the front-end is a config knob and stays 'plain' until
-// the TUI earns the default by feel (§6).
+// spec 03-03 §7.1: the explicit entries are separate serial conversations,
+// never woven into a first run.
+describe('setup CLI entries (spec 03-03 §7)', () => {
+  it('--setup opens the full onboarding surface; --setup-music only the binaries', () => {
+    expect(parseCli([], NO_ENV).setup).toBe(false)
+    expect(parseCli(['--setup'], NO_ENV).setup).toBe(true)
+    expect(parseCli(['--setup'], NO_ENV).setupMusic).toBe(false)
+    expect(parseCli(['--setup-music'], NO_ENV).setup).toBe(false)
+  })
+})
+
+// spec 03-03 §7.2: the guide writes $MURMUR_HOME/voice.json; env keeps
+// precedence, so .env stays a dev-time override the app never writes.
+describe('voice config file precedence', () => {
+  const home = (config: object | null): NodeJS.ProcessEnv => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-cfg-'))
+    if (config !== null) writeFileSync(join(dir, 'voice.json'), JSON.stringify(config))
+    return { MURMUR_HOME: dir }
+  }
+
+  it('reads the endpoint from voice.json when the env says nothing', () => {
+    const { config } = parseCli([], home({ ttsUrl: 'https://file.example', seed: 9 }))
+    expect(config.ttsUrl).toBe('https://file.example')
+    expect(config.ttsSeed).toBe(9)
+  })
+
+  it('env beats the file', () => {
+    const env = { ...home({ ttsUrl: 'https://file.example', seed: 9 }) }
+    env.MURMUR_TTS_URL = 'https://env.example'
+    env.MURMUR_TTS_SEED = '1'
+    const { config } = parseCli([], env)
+    expect(config.ttsUrl).toBe('https://env.example')
+    expect(config.ttsSeed).toBe(1)
+  })
+
+  it('a CLI flag beats both', () => {
+    const env = { ...home({ ttsUrl: 'https://file.example' }) }
+    env.MURMUR_TTS_URL = 'https://env.example'
+    expect(parseCli(['--tts-url', 'http://box.local'], env).config.ttsUrl).toBe('http://box.local')
+  })
+
+  it('no file and no env is simply an unconfigured endpoint', () => {
+    expect(parseCli([], home(null)).config.ttsUrl).toBe('')
+  })
+
+  it('an unusable file degrades to unconfigured rather than aborting startup', () => {
+    const env = home(null)
+    writeFileSync(join(env.MURMUR_HOME!, 'voice.json'), 'not json at all')
+    expect(parseCli([], env).config.ttsUrl).toBe('')
+  })
+})
+
+// spec 10 §6 (decided 2026-07-31): the default front-end is 'tui'; a bun-less
+// machine falls back to plain at the app level, and --plain / TUI=0 are the
+// explicit escape.
 describe('front-end config', () => {
-  it('defaults to the plain host, with bun as the named binary', () => {
+  it('defaults to the TUI, with bun as the named binary', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.frontEnd).toBe('plain')
+    expect(config.frontEnd).toBe('tui')
     expect(config.bunCmd).toBe('bun')
   })
 
   it('--tui selects the TUI front-end', () => {
     expect(parseCli(['--tui'], NO_ENV).config.frontEnd).toBe('tui')
+  })
+
+  it('--plain is the escape back to the plain host, and beats --tui', () => {
+    expect(parseCli(['--plain'], NO_ENV).config.frontEnd).toBe('plain')
+    // An explicit opt-out is never overridden by a redundant opt-in.
+    expect(parseCli(['--tui', '--plain'], NO_ENV).config.frontEnd).toBe('plain')
   })
 
   it('resolves the wire socket under the (relocatable) murmur home', () => {
