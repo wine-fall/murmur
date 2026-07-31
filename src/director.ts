@@ -53,6 +53,11 @@ const MUSIC_START_ATTEMPTS = 2
 // (spec 05 §3.5) — cross-session on the persistent store.
 const AVOID_DEPTH = 8
 
+// How many recent turns the music situation carries (issue #76): choosing a
+// track needs the current mood, not the full talk window, and the discovery
+// prompt growing with memory was the measured hot-slower-than-cold term.
+const MUSIC_RECENT_TURNS = 6
+
 // spec 04 §3.3: talk look-ahead buffer depth — pre-synthesized beats kept
 // topped up so the next talk airs with no Brain/synth wait, even across music.
 // A module constant, not a config knob — deepen only if measurement shows a
@@ -179,6 +184,12 @@ export class Director {
 
   async run(maxSegments?: number): Promise<void> {
     this.deps.host.start()
+    // Prime the first pick immediately (issue #76): discovery is the measured
+    // dominant first-music term and is independent of the cold talk batch —
+    // serializing them cost the first song a ~25-35s head start. The persona
+    // (plus any prior-session ledger) is enough to choose by; staleness is
+    // the accepted spec 04 §3.1 trade.
+    this.prefetchMusic()
     let produced = 0
     while (!this.quit && (maxSegments === undefined || produced < maxSegments)) {
       this.beginBoundary()
@@ -480,7 +491,7 @@ export class Director {
     return {
       persona: this.deps.persona,
       situation: buildMusicSituation(
-        this.deps.memory.recent(this.deps.recentWindow),
+        this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.recentWindow)),
         this.deps.memory.recentSongs(AVOID_DEPTH),
       ),
     }

@@ -84,6 +84,38 @@ describe('music scheduling (cadence at the boundary)', () => {
 })
 
 describe('prefetch (spec 04 slice: never block the air)', () => {
+  it('the first pick starts resolving at startup, before the cold talk batch (issue #76)', async () => {
+    const { deps, brain, source } = build()
+    const order: string[] = []
+    source.nextTrack = async (ctx) => {
+      order.push('music')
+      source.calls++
+      source.contexts.push(ctx)
+      return null
+    }
+    const origNextTalks = brain.nextTalks.bind(brain)
+    brain.nextTalks = async (ctx, count) => {
+      order.push('talk')
+      return origNextTalks(ctx, count)
+    }
+    await new Director(deps).run(1)
+    // The pick's discovery is independent of the talk batch: serializing them
+    // was the measured ~25-35s head start the first song never got back.
+    expect(order[0]).toBe('music')
+  })
+
+  it('the music situation carries only the freshest turns, not the whole recent window (issue #76)', async () => {
+    const memory = new InProcessMemoryStore()
+    for (let i = 1; i <= 12; i++) memory.record({ role: 'radio', text: `turn ${i}` })
+    const { deps, source } = build({ memory, recentWindow: 12 })
+    await new Director(deps).run(1)
+    // Choosing music needs the current mood, not the full talk window — and a
+    // growing prompt was the measured hot-slower-than-cold term.
+    const situation = source.contexts[0]!.situation
+    expect(situation).toContain('turn 12')
+    expect(situation).not.toContain('turn 5')
+  })
+
   it('a pick still resolving yields a talk segment instead of dead air', async () => {
     const { deps, host, source, player } = build()
     const director = new Director({ ...deps, gapSeconds: 0.1 })

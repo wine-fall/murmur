@@ -7,7 +7,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-07-31 (latency re-measured; completed entries collapsed)_
+_Last updated: 2026-07-31 (first-music latency cut, #76 closed; by-ear passes remain)_
 
 ## Where we are
 
@@ -42,7 +42,6 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
-- **#76** (eng) Cut the first-music latency — the pick's agentic discovery is now the dominant term.
 - **#88** (eng) Conversational onboarding — the app fixes its own gaps by talking; spec 03-03 §7.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#78** (by-ear) Does it feel like a warm little radio? — spec 10 §5.11 plus the L0/L1 listening pass.

@@ -89,6 +89,21 @@ finished) `next_track` task:
   real mood), if music is wired and the slot is empty, start
   `asyncio.create_task(music.next_track(ctx))` and park it in the slot. The talk
   segment then airs as normal — the pick resolves in the background.
+- **Startup prime (issue #76):** the very first pick is fired at the top of
+  `Director.run`, before the cold talk batch — discovery is the measured
+  dominant first-music term (§3.3) and is independent of talk generation, so
+  serializing them cost the first song a ~25-35 s head start. The situation is
+  the pre-first-beat one ("the program just started" plus any prior-session
+  ledger); the persona is enough to choose by, under the same staleness trade
+  below.
+- **Situation bound (issue #76):** the music situation carries at most
+  `MUSIC_RECENT_TURNS = 6` recent turns (not the full `recentWindow`): a pick
+  needs the current mood, and the discovery prompt growing with memory was the
+  measured hot-slower-than-cold term (§3.3).
+- **Stage timing:** `MusicProgrammer` logs each discovery stage to the dev log
+  (`music.pick start situation=<n>ch` / `music.search` / `music.resolve` /
+  `music.probe` / `music.pick done`, each with elapsed ms) — the deterministic
+  seam for attributing where a slow pick's wall-clock goes.
 - **Consume:** when the music branch fires, the slot must hold a **resolved**
   pick to air a song. If it holds a task that is *already done*, `await` it
   (near-instant) instead of a cold `next_track`, clear the slot, and air the
@@ -230,6 +245,27 @@ mechanical, driven by JS promise semantics and the TS codebase's seams:
   to talk under the never-block-the-air rule and the song landed at boundary
   5 / 6. A primed pick costs ~4 s of stream spin-up. Hot being slower than cold
   says the variable is context growth, not process warmth.
+
+- **Re-measured after issue #76 (2026-07-31)** — same conditions (isolated
+  `MURMUR_HOME`, persona pre-seeded, bed cache warm, `MURMUR_ACTIVITY=present`,
+  hot = a second run carrying the first run's turns and songs), with the
+  startup prime, the `--flat-playlist` search, and the bounded situation in:
+
+  |  | cold | hot |
+  |---|---|---|
+  | pick fired | t0+3 s | t0+4 s |
+  | discovery (`music.pick done`) | 40.2 s | 54.7 s |
+  | t0 → first music | **71 s** (was 136 s) | **78 s** (was 195 s) |
+
+  Both songs landed at the **3rd boundary** — the `musicEveryN=2` cadence
+  minimum — with **zero** boundaries yielded to a still-resolving pick, and
+  hot now tracks cold (the situation is bounded: 201 ch cold / 479 ch hot).
+  First music is **cadence-bound, not discovery-bound**: the pick is ready
+  ~30 s before the boundary that airs it. Per-stage split (the new dev-log
+  lines): searches are ~2.3-2.6 s each under `--flat-playlist` (were 10-17 s);
+  resolve ~2.4-2.9 s; probe ~1-1.3 s; the rest is SDK spawn + model turns
+  (~15 s to the first search), including one dead-probe pick-again in both
+  runs (~10 s each).
 
 ### 3.4 Time-of-day scene (context enrichment)
 Adjacent to the latency work above; it rides in this spec (see the header note).

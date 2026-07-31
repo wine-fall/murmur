@@ -126,13 +126,15 @@ export function buildVoice(config: Config): VoiceProvider {
 // Music wiring (find+pull -> cadence -> engine), or undefined when the session
 // is talk-only: --no-music, a failed preflight, or the stub brain (the harness
 // behind the pick task is the real SDK).
-function buildMusic(config: Config, harness: Harness, engine: AudioEngine): MusicWiring {
+function buildMusic(config: Config, harness: Harness, engine: AudioEngine, host: Host): MusicWiring {
   const provider = new YtDlpMusicProvider({ binary: config.ytdlpCmd })
   const source = new MusicProgrammer({
     brain: harness,
     provider,
     model: config.musicModel,
     probe: (s) => probeStream(s, config.ffmpegCmd),
+    // Discovery stage timings land in the dev log (issue #76).
+    ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })
   const configured = buildCadence(config.cadenceMode, {
     everyN: config.musicEveryN,
@@ -272,7 +274,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     await engine.startBed(new CachedBedSource(cacheDir))
   }
 
-  const music = musicOk && claude !== null ? buildMusic(config, claude, engine) : undefined
+  const music = musicOk && claude !== null ? buildMusic(config, claude, engine, host) : undefined
   const pacing = buildPacing(config, memory)
 
   const director = new Director({

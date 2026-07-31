@@ -76,7 +76,10 @@ describe('YtDlpMusicProvider', () => {
       },
     })
     const candidates = await provider.search('late night city pop', 3)
-    expect(calls[0]).toEqual(['--dump-json', 'ytsearch3:late night city pop'])
+    // --flat-playlist (issue #76): one request for the whole result page
+    // instead of a full per-hit extraction — measured ~2s vs ~10-17s — and the
+    // flat entries still carry every field the brain judges on.
+    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch3:late night city pop'])
     expect(candidates).toHaveLength(1)
   })
 
