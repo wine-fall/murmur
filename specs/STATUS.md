@@ -36,33 +36,19 @@ how it got there:
 
 ## Open
 
-- **Latency's bottleneck has moved (measured 2026-07-31, #75).** t0 → first
-  music is **136 s cold / 195 s hot**; the music→talk boundary is **confirmed
-  zero-wait**, so spec 04 §3.3 delivered (record + conditions:
-  [`spec04/04-no-dead-air.md`](spec04/04-no-dead-air.md) §3.3). Attack in order:
-  the first music pick's agentic discovery, now the dominant term; the cold talk
-  batch, with nothing on air to hide it behind; hot being slower than cold,
-  which points at context growth, not process warmth. Untriaged from the same
-  runs: Ctrl-C did not finish shutdown within 30 s (no orphans survived).
-- **By-ear / sensory acceptance over the TS build (user-run).** The L0/L1
-  "sounds human, feels like radio" pass: TS voice quality, duck / crossfade
-  smoothness, bed levels, the announce-vs-stream-startup timing. A real
-  listening pass, not an assertion.
-- **spec 10 §5.11 sensory pass (user-run)** — does it feel like a warm little
-  radio with a soul, or a dashboard? Then the §6.1 art-direction session, which
-  restyles the built substrate without reopening its contracts.
-- **spec 07 §5.16 sensory pass (user-run)** — do the anchors land at the right
-  moments, does the invite read as inviting rather than needy, does walking away
-  make it go quiet without feeling dead? Every constant in the spec is a by-ear
-  guess and the first real day is expected to move several.
-- **spec 06 first-run pass in a real terminal** (criterion 12, user-run).
-- **Interactive guide acceptance (03-03 §5.3, user-run).** The repair flow in a
-  real terminal against a genuinely broken binary — checklist handed over at
-  Phase 4.5.
-- **Watch item, not a blocker (spec 10 §5.1):** Enter pressed during an
-  uncommitted IME composition may submit the line instead of committing the
-  candidate. The engine-side path is cleared by byte-level tests, so any
-  recurrence is the input widget's.
+Every open debt is a GitHub issue; this list is the **index, not the record**.
+One line each — the issue body carries what it is, the spec it touches, and how
+it closes. Add and remove entries with the `murmur-backlog` skill, never by
+hand: CI fails if this section points at an issue that is already closed.
+
+- **#76** (eng) Cut the first-music latency — the pick's agentic discovery is now the dominant term.
+- **#77** (eng) Ctrl-C does not finish shutdown within 30 s.
+- **#78** (by-ear) Does it feel like a warm little radio? — spec 10 §5.11 plus the L0/L1 listening pass.
+- **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
+- **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
+- **#81** (by-ear) A real day of pacing — spec 07 §5.16.
+- **#82** (by-ear) The guide's repair flow in a real terminal — spec 03-03 §5.3.
+- **#83** (watch) Enter during an uncommitted IME composition may submit the line.
 
 ## Pinned — do not relitigate
 

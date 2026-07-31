@@ -30,6 +30,8 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
   - `murmur-ship` — any build task end-to-end, from intent to a delivered PR.
   - `murmur-build-spec` — spec discipline + test-first (ship runs it for you).
   - `murmur-smoke` — real-boundary probing in a throwaway `scratch/` script.
+  - `murmur-backlog` — open / close / sync a debt: a GitHub issue plus one
+    pointer line in STATUS.md `## Open`.
   - `create-pr` — push + open the PR (runs the local CI pre-check first).
 - graphify: before any broad code search, run `graphify query "<question>"`.
   A post-commit hook rebuilds the graph for **code** changes only — after
