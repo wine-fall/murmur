@@ -11,8 +11,9 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { dataRoot, tuiSocketPath } from './paths.ts'
+import { dataRoot, homeRoot, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
+import { readVoiceConfig } from './voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
 // by-ear knob: fish TTS runs sentences together and its own pause hints are
@@ -69,14 +70,20 @@ export const ConfigSchema = z.object({
   gatingEnabled: z.boolean().default(true),
 
   // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
-  // 'plain' is the default until the TUI passes the sensory gate by feel
-  // (spec 10 §6); 'tui' spawns the OpenTUI client and speaks over the socket.
-  frontEnd: z.enum(['plain', 'tui']).default('plain'),
+  // The TUI is the face murmur shows by default (spec 10 §6): it spawns the
+  // OpenTUI client and speaks over the socket. A machine without bun falls back
+  // to plain at the app level with one notice; --plain / TUI=0 opt out outright.
+  frontEnd: z.enum(['plain', 'tui']).default('tui'),
   // The runtime the TUI client runs under — a provisioned binary like
   // yt-dlp/ffmpeg, never a dependency of the engine itself (spec 10 §2.2).
   bunCmd: z.string().default('bun'),
   // Where the two processes meet (spec 10 §2.3), resolved by paths.ts.
   tuiSocket: z.string().default(() => tuiSocketPath()),
+
+  // The one murmur home (spec 05 §2.3), resolved once here rather than re-read
+  // from the ambient env deeper in: it scopes the guide-written voice config
+  // (spec 03-03 §7.2), so it must be the SAME home the rest of the run uses.
+  home: z.string().default(() => homeRoot()),
 
   // --- memory (spec 05) --------------------------------------------------- //
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
@@ -93,6 +100,9 @@ export type CliInvocation = {
   maxSegments: number | undefined
   // Run the music setup guide directly and exit (spec 03-03's explicit entry).
   setupMusic: boolean
+  // Run the FULL onboarding conversation directly and exit (spec 03-03 §7.1):
+  // music binaries, bun, and the voice endpoint, in one serial pass.
+  setup: boolean
   // Run the profile bootstrap standalone and exit (spec 06 §3.4's re-entry for
   // a listener who declined it on the first run).
   bootstrapProfile: boolean
@@ -116,18 +126,36 @@ function envNumber(
   return undefined
 }
 
-// The MURMUR_TTS_* boundary (spec 02 §3.6) as Config fields.
+// The MURMUR_TTS_* boundary (spec 02 §3.6) as Config fields. Unset knobs are
+// OMITTED rather than blanked, so the guide-written voice.json underneath keeps
+// whatever env does not state (spec 03-03 §7.2: env beats file, per knob).
 function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
   const seed = envNumber(env, 'MURMUR_TTS_SEED', z.coerce.number().int().nonnegative())
   const padS = envNumber(env, 'MURMUR_TTS_SENTENCE_PAD_S', z.coerce.number().nonnegative())
+  const text = (name: string): string | undefined => {
+    const value = env[name]?.trim()
+    return value ? value : undefined
+  }
+  const url = text('MURMUR_TTS_URL')
+  const referenceId = text('MURMUR_TTS_REFERENCE_ID')
+  const apiKey = text('MURMUR_TTS_API_KEY')
+  const model = text('MURMUR_TTS_MODEL')
   return {
-    ttsUrl: env.MURMUR_TTS_URL?.trim() ?? '',
-    ttsReferenceId: env.MURMUR_TTS_REFERENCE_ID?.trim() ?? '',
-    ttsApiKey: env.MURMUR_TTS_API_KEY?.trim() ?? '',
-    ttsModel: env.MURMUR_TTS_MODEL?.trim() ?? '',
+    ...(url !== undefined && { ttsUrl: url }),
+    ...(referenceId !== undefined && { ttsReferenceId: referenceId }),
+    ...(apiKey !== undefined && { ttsApiKey: apiKey }),
+    ...(model !== undefined && { ttsModel: model }),
     ...(seed !== undefined && { ttsSeed: seed }),
     ...(padS !== undefined && { ttsSentencePadS: padS }),
   }
+}
+
+// The guide-written endpoint (spec 03-03 §7.2). The lowest layer of the three:
+// a damaged or absent file is simply no endpoint, never a boot failure.
+function ttsFromFile(env: NodeJS.ProcessEnv): Partial<Config> {
+  const saved = readVoiceConfig(voiceConfigPath(env))
+  if (saved === null) return {}
+  return { ttsUrl: saved.ttsUrl, ...(saved.seed !== undefined && { ttsSeed: saved.seed }) }
 }
 
 export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
@@ -148,6 +176,8 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'no-invites': { type: 'boolean' },
       'no-gating': { type: 'boolean' },
       tui: { type: 'boolean' },
+      plain: { type: 'boolean' },
+      setup: { type: 'boolean' },
       'setup-music': { type: 'boolean' },
       'bootstrap-profile': { type: 'boolean' },
       cadence: { type: 'string' },
@@ -155,7 +185,10 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     },
   })
   const config = ConfigSchema.parse({
+    // Endpoint precedence, lowest first: voice.json < env < flags.
+    ...ttsFromFile(env),
     ...ttsFromEnv(env),
+    home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
     tuiSocket: tuiSocketPath(env),
     ...(values.brain !== undefined && { brain: values.brain }),
@@ -172,6 +205,8 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values['no-invites'] === true && { invitesEnabled: false }),
     ...(values['no-gating'] === true && { gatingEnabled: false }),
     ...(values.tui === true && { frontEnd: 'tui' }),
+    // Last, so an explicit opt-out always wins over a redundant opt-in.
+    ...(values.plain === true && { frontEnd: 'plain' }),
     ...(values.cadence !== undefined && { cadenceMode: values.cadence }),
   })
   const maxSegments =
@@ -182,6 +217,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     config,
     maxSegments,
     setupMusic: values['setup-music'] === true,
+    setup: values.setup === true,
     bootstrapProfile: values['bootstrap-profile'] === true,
   }
 }

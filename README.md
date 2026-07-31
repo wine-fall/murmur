@@ -75,7 +75,7 @@ node src/main.ts --brain stub --voice stub
 node src/main.ts --voice hosted
 ```
 
-**Music** needs two external binaries — `ffmpeg` (decode) and `yt-dlp` (source) — which are deliberately *not* Python dependencies: the startup check detects a missing/broken one and the setup assistant offers to fix it (`murmur --setup-music` runs the same repair on demand). To provision by hand: `brew install ffmpeg yt-dlp`. Without them the radio runs talk-only; `--no-music` skips music entirely.
+**Missing pieces are fixed by talking, not by following instructions.** murmur assumes you have Claude Code, so that is the one thing it takes as given — everything else it can walk you through installing itself, asking before each change. The radio always launches: without `ffmpeg`/`yt-dlp` it runs talk-only, without `bun` it uses the plain text front-end, without a voice endpoint it shows its lines instead of speaking. On a boot with any of those gaps it names them and offers to sort them out; decline once and it stops asking. `murmur --setup` (or `--setup-music`) reopens that conversation on demand. To provision by hand instead: `brew install ffmpeg yt-dlp`. `--no-music` skips music entirely.
 
 Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats), `--no-invites` (it never turns to you and asks), and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
 
@@ -84,7 +84,7 @@ Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH
 One command sets up and runs the app; a second terminal tails a live debug log:
 
 ```bash
-make dev      # sync deps, preflight (prompts to fix any blocker), launch the app
+make dev      # sync deps, report what is missing, launch the app either way
 make logs     # in another terminal: tail diagnostics + memory while it runs
 ```
 

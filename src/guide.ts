@@ -1,18 +1,26 @@
-// Wire the guide harness into murmur's CLI Host (spec 03-03).
+// Wire the guide harness into murmur's Host (spec 03-03), and run the
+// conversational onboarding built on it (§7).
 //
-// The deterministic preflight decides whether to engage; when it does, the
-// guide runs with its ask/answer routed through the CLI Host — the agent's
-// text prints as it streams (onText), each pre-action permission request is
-// printed and answered from the same stdin the Director uses (canUseTool),
-// and the user's natural-language replies flow back (nextUserInput). We only
-// route the SDK's prompts; the SDK owns the ask/execute semantics.
+// The deterministic probes decide whether to engage; when they do, the guide
+// runs with its ask/answer routed through the Host — the agent's text prints as
+// it streams (onText), each pre-action permission request is printed and
+// answered from the same stdin the Director uses (canUseTool), and the user's
+// natural-language replies flow back (nextUserInput). We only route the SDK's
+// prompts; the SDK owns the ask/execute semantics.
+//
+// The posture the onboarding slice adds: murmur assumes the user has Claude
+// Code, so a gap is never a wall. The radio launches degraded and then OFFERS
+// to fix itself by talking. runSetup is that offer — once per boot, actively,
+// covering every gap in one conversation.
 
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 
-import type { GuideCapable } from './contracts.ts'
+import type { GuideCapable, LedgerKind } from './contracts.ts'
 import type { Host } from './host.ts'
-import { buildFixMusicPrompt, GUIDE_PERSONA } from './prompts.ts'
-import { preflightMusic, type PreflightResult, type StartupCheck } from './startup.ts'
+import { HostedVoice } from './hosted-voice.ts'
+import { buildSetupPrompt, GUIDE_PERSONA } from './prompts.ts'
+import { preflightBun, preflightMusic, type PreflightResult } from './startup.ts'
+import { type VoiceConfig, VOICE_PROBE_LINE, writeVoiceConfigTool } from './voice-config.ts'
 
 // Repair is judgment-heavy and occasional; the token cost amortizes (spec
 // 03-03 §3). Not a config knob until someone needs one.
@@ -71,57 +79,189 @@ export function cliConversation(host: Host, read: ReadLine): () => Promise<strin
   }
 }
 
-export type MusicSetupOptions = {
-  ytdlp?: string
-  ffmpeg?: string
-  // Injectable for tests; the real one probes the actual binaries.
-  preflight?: (binaries: { ytdlp: string; ffmpeg: string }) => Promise<PreflightResult>
+// --- conversational onboarding (spec 03-03 §7) ---------------------------- //
+
+export type GapKind = 'music' | 'bun' | 'voice'
+export type Gap = { readonly kind: GapKind; readonly reason: string }
+
+// The tier-3 ledger key for the onboarding offer's standing answer. A decline
+// is a fact about the user, so it belongs on the ledger and not in a dotfile.
+export const SETUP_DECLINED = 'declined'
+
+// The narrow ledger surface this flow needs — impl-level, like spec 06's
+// ProfileWritable. A session with no persistent memory simply has none.
+export type SetupLedger = {
+  recordEvent(kind: LedgerKind, key: string): void
+  recentEvents(kind: LedgerKind, n: number): string[]
 }
 
-// Preflight the music dependencies; if broken, offer the guide (routed through
-// the CLI Host), then recheck. Returns whether music is usable afterward.
-export async function runMusicSetup(
-  host: Host,
-  guide: GuideCapable,
-  options: MusicSetupOptions = {},
-): Promise<boolean> {
-  const ytdlp = options.ytdlp ?? 'yt-dlp'
-  const ffmpeg = options.ffmpeg ?? 'ffmpeg'
-  const check = options.preflight ?? preflightMusic
-  const result = await check({ ytdlp, ffmpeg })
-  if (result.ok) return true
+// What this session WANTS, and what it can see right now. `voiceUrl` is a thunk
+// rather than a string because the conversation may write one mid-flight — the
+// recheck has to read the world again, not the world as it was at boot.
+export type SetupTargets = {
+  readonly ytdlp: string
+  readonly ffmpeg: string
+  readonly bunCmd: string
+  readonly home: string // $MURMUR_HOME — the one place a voice config may land
+  readonly wantsMusic: boolean
+  readonly wantsBun: boolean
+  readonly wantsVoice: boolean
+  readonly voiceUrl: () => string
+}
 
-  // The offer and the guide both read the keyboard; make sure the reader is
-  // up (idempotent — the Director starts it too, spec 03-02 §2.4).
+export type SetupProbes = {
+  music: (binaries: { ytdlp: string; ffmpeg: string }) => Promise<PreflightResult>
+  bun: (binary: string) => Promise<PreflightResult>
+}
+
+const DEFAULT_PROBES: SetupProbes = { music: preflightMusic, bun: preflightBun }
+
+// The deterministic half (master §7 pillar 1 — local probes, 0 tokens). Nothing
+// the session does not want is probed at all: --no-music costs no yt-dlp search.
+export async function detectGaps(
+  targets: SetupTargets,
+  probes: Partial<SetupProbes> = {},
+): Promise<Gap[]> {
+  const probe = { ...DEFAULT_PROBES, ...probes }
+  const [music, bun] = await Promise.all([
+    targets.wantsMusic
+      ? probe.music({ ytdlp: targets.ytdlp, ffmpeg: targets.ffmpeg })
+      : Promise.resolve({ ok: true, reason: '' }),
+    targets.wantsBun ? probe.bun(targets.bunCmd) : Promise.resolve({ ok: true, reason: '' }),
+  ])
+  const gaps: Gap[] = []
+  if (!music.ok) gaps.push({ kind: 'music', reason: music.reason })
+  if (!bun.ok) gaps.push({ kind: 'bun', reason: bun.reason })
+  if (targets.wantsVoice && targets.voiceUrl().trim() === '') {
+    gaps.push({ kind: 'voice', reason: 'no endpoint configured' })
+  }
+  return gaps
+}
+
+// What the rest of the app wires itself from afterwards. One field per gap the
+// offer covers — an explicit entry reports completion off ALL of them, so a
+// gap missing here would silently read as "done".
+export type SetupOutcome = {
+  readonly musicOk: boolean
+  readonly bunOk: boolean
+  readonly voiceOk: boolean
+}
+
+export type SetupRun = {
+  host: Host
+  guide: GuideCapable
+  targets: SetupTargets
+  // Absent = nothing to remember by (a stub session): the offer still opens,
+  // it just cannot be silenced across boots.
+  ledger?: SetupLedger | undefined
+  probes?: Partial<SetupProbes>
+  // Prove a pasted endpoint by synthesizing one real line through it.
+  validateVoice?: (config: VoiceConfig) => Promise<void>
+  // An explicit entry (--setup / --setup-music): always converse, never consult
+  // or write the standing decline.
+  explicit?: boolean
+}
+
+const PLAIN_ENGLISH: Record<GapKind, string> = {
+  music: 'music needs yt-dlp and ffmpeg, so the program is talk-only for now',
+  bun: 'the terminal interface needs bun, so this is the plain text version',
+  voice: 'there is no voice endpoint yet, so lines are shown instead of spoken',
+}
+
+function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
+  const has = (kind: GapKind): boolean => gaps.some((g) => g.kind === kind)
+  return {
+    musicOk: targets.wantsMusic && !has('music'),
+    bunOk: targets.wantsBun && !has('bun'),
+    voiceOk: targets.wantsVoice && !has('voice'),
+  }
+}
+
+// The startup onboarding phase (spec 03-03 §7.1 point 3). The radio ALWAYS
+// launches; this is what stops a degraded launch from being a passive one. When
+// the deterministic probes find gaps, murmur names them in plain language and
+// opens a real conversation — the guide investigates, proposes, asks per action,
+// applies, and verifies. Declining is the only thing that makes later boots
+// quiet, and it costs exactly one info line thereafter.
+export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
+  const { host, guide, targets } = run
+  const explicit = run.explicit === true
+  const gaps = await detectGaps(targets, run.probes ?? {})
+  if (gaps.length === 0) return outcomeFrom(targets, gaps)
+
+  const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
+
+  // A standing decline: one line, no question, no re-nagging (§7.1 point 3).
+  if (!explicit && run.ledger?.recentEvents('setup', 1).includes(SETUP_DECLINED) === true) {
+    host.info(`${named}. Run \`make setup\` whenever you want to sort that out.`)
+    return outcomeFrom(targets, gaps)
+  }
+
+  // The offer and the guide both read the keyboard; make sure the reader is up
+  // (idempotent — the Director starts it too).
   host.start()
   const read = lineReader(host)
-  host.info(`music dependencies aren't working here: ${result.reason}`)
-  host.info("type 'y' to let the setup assistant look into it (anything else skips):")
+  host.info(`a couple of things aren't set up on this machine: ${named}.`)
+  for (const gap of gaps) host.info(`  · ${gap.kind}: ${gap.reason}`)
+  host.info("type 'y' and I'll walk you through fixing them right now (anything else skips):")
+
   if (!isYes(await read())) {
-    host.info('skipped music setup.')
-    return false
+    // Only the boot-time offer records the standing answer: backing out of an
+    // explicit `make setup` is not "stop asking me".
+    if (!explicit) {
+      run.ledger?.recordEvent('setup', SETUP_DECLINED)
+      host.info("no problem — I won't ask again. `make setup` reopens this any time.")
+    } else {
+      host.info('skipped setup.')
+    }
+    return outcomeFrom(targets, gaps)
   }
+
+  const wantsVoice = gaps.some((gap) => gap.kind === 'voice')
+  const tools = wantsVoice
+    ? [
+        writeVoiceConfigTool({
+          home: targets.home,
+          validate: run.validateVoice ?? validateEndpoint,
+          onWritten: (config) => host.info(`voice endpoint saved: ${config.ttsUrl}`),
+        }),
+      ]
+    : []
 
   await guide.runGuide({
     systemPrompt: GUIDE_PERSONA,
-    prompt: buildFixMusicPrompt({ ytdlp, ffmpeg, reason: result.reason }),
+    prompt: buildSetupPrompt({
+      gaps,
+      ytdlp: targets.ytdlp,
+      ffmpeg: targets.ffmpeg,
+      bunCmd: targets.bunCmd,
+    }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
     canUseTool: cliPermission(host, read),
+    ...(tools.length > 0 && { tools }),
     onText: (text) => host.info(text),
     nextUserInput: cliConversation(host, read),
   })
 
-  const recheck = await check({ ytdlp, ffmpeg })
-  host.info(recheck.ok ? 'music is working now.' : "music still isn't working.")
-  return recheck.ok
+  // Re-probe rather than believe the conversation: "the assistant said it
+  // installed yt-dlp" is not the same fact as "yt-dlp works" (CLAUDE.md).
+  const left = await detectGaps(targets, run.probes ?? {})
+  if (left.length === 0) host.info('all set — everything is working now.')
+  else host.info(`still not working: ${left.map((gap) => gap.kind).join(', ')}.`)
+  return outcomeFrom(targets, left)
 }
 
-// The music startup check (spec 03-02 §2.4): where 03-03's auto-trigger lands.
-// A failed/declined repair degrades the session to talk-only, never aborts.
-export function musicSetupCheck(guide: GuideCapable, options: MusicSetupOptions = {}): StartupCheck {
-  return {
-    name: 'music',
-    run: (host) => runMusicSetup(host, guide, options),
+// The real validation: one synth through the pasted endpoint. A clip that comes
+// back is the only proof that matters, and it costs one short line.
+async function validateEndpoint(config: VoiceConfig): Promise<void> {
+  const voice = new HostedVoice({
+    baseUrl: config.ttsUrl,
+    ...(config.seed !== undefined && { seed: config.seed }),
+  })
+  try {
+    await voice.synthesize(VOICE_PROBE_LINE)
+  } finally {
+    await voice.close()
   }
 }

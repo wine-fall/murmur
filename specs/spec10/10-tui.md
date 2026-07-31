@@ -535,6 +535,12 @@ TUI work is built on the framework choice.
   in-program notice (and the guide can provision bun — spec 03-03 §7).
   `--plain` / `TUI=0` are the explicit escape. The user chose to flip ahead
   of the §5.11 sensory pass; that pass stays owed (#78).
+  **As built (2026-07-31)**: the flip is `ConfigSchema.frontEnd`'s default, and
+  `--plain` is applied after `--tui` so an explicit opt-out always wins. The
+  fallback notice is exactly one line and says nothing about how to install bun
+  — that is the setup conversation's job (spec 03-03 §7.1), not a shell lecture
+  printed at a user who never asked. `make dev` no longer passes `--tui`; the
+  `TUI=0` knob passes `--plain` instead.
 - **Reconciler**: React chosen (§3.1); if gate 1 or early build friction
   implicates React specifically, Solid is the drop-in alternative (opencode's
   production path).

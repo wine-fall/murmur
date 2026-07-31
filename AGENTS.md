@@ -10,12 +10,16 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 
 ## Commands
 
-- `make dev` — preflight + run the radio (diagnostics stream to `.dev/dev.log`).
+- `make dev` — dependency report + run the radio (diagnostics stream to
+  `.dev/dev.log`). The report never blocks: the radio always launches, degraded
+  if need be, and offers to fix its own gaps by talking (spec 03-03 §7).
 - `make logs` — tail those diagnostics (run in a 2nd terminal).
-- `make preflight` — startup checks only, no run.
+- `make preflight` — report the dependencies without launching.
+- `make setup` / `make setup-music` — the onboarding conversation on demand
+  (whole surface / just the music binaries).
 - `STUB=1 make dev` — full offline: canned brain, silent voice, no music.
-- `TUI=1 make dev` — run the spec-10 front-end (OpenTUI client under Bun)
-  instead of plain stdout; needs `bun` on PATH.
+- `TUI=0 make dev` — plain stdout instead of the spec-10 front-end, which is
+  the default (without `bun` it falls back to plain on its own).
 - `pnpm test` — the fast (model-free) vitest suite; `pnpm run typecheck` /
   `pnpm run lint` — the static gates.
 - `pre-commit run --all-files` — all gates (source-language + tsc + oxlint +

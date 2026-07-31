@@ -86,7 +86,7 @@
 
 ---
 
-## 7. Slice — conversational onboarding (decided 2026-07-31; build pending)
+## 7. Slice — conversational onboarding (decided + built 2026-07-31)
 
 > Decision record (grilling session, 2026-07-31): **the app assumes the user
 > has Claude Code** — the brain SDK is the one dependency taken as given — so
@@ -104,7 +104,13 @@
    owns onboarding from there.
 2. **The guide's coverage grows** from the music binaries to the full
    onboarding surface:
-   - `yt-dlp` + `ffmpeg` — as built (§1-§5);
+   - `yt-dlp` + `ffmpeg` — as built (§1-§5). **Install channel (decided
+     2026-07-31)**: for a *missing* binary the guide prefers the user's own
+     package manager — on macOS Homebrew, the same channel `ffmpeg` comes from
+     — so both binaries stay on ONE upgrade path; a Python-tool installer
+     (`uv tool` / `pipx`) for `yt-dlp` is the fallback, used only when Homebrew
+     is unavailable or cannot provide it. The remedy is still never prescribed
+     beyond this channel preference; the cause remains the agent's to diagnose;
    - `bun` — the spec-10 front-end runtime (pays off spec 10 §5.10): the guide
      offers the official installer with per-action consent and verifies with
      `preflightBun`; until then the front-end has fallen back to plain
@@ -142,6 +148,14 @@
 
 ### 7.3 Acceptance (continues §5)
 
+> **Status (2026-07-31)**: criteria 5-8 are built and pinned by unit tests at
+> their deterministic seams (`test/setup.test.ts`, `test/voice-config.test.ts`,
+> `test/dev-preflight.test.ts`, `test/app.test.ts`) plus an isolated-environment
+> smoke (`scripts/onboarding-smoke.ts`: throwaway `$MURMUR_HOME`, a PATH holding
+> only node + claude, real probes and real writes). What remains user-run is the
+> same thing §5.3 always was — the real-SDK conversation on a real broken
+> machine, which no fake can prove.
+
 5. With no `.env` and no voice config, `make dev` launches, names the gap in
    plain language, and the guide conversation ends with a validated
    `$MURMUR_HOME` voice config and an audible line — the user never touches
@@ -154,3 +168,39 @@
    not re-open the conversation.
 8. A missing `node` still stops `make dev` at the shell — there is nothing
    to converse with.
+
+### 7.4 As built (2026-07-31)
+
+Mechanism decisions this slice settled while building, recorded so they are not
+relitigated. Criteria 5-8 are pinned by unit tests at the deterministic seams;
+the full real-SDK conversation is a user/dispatcher run (§5.3's posture).
+
+- **One aggregated offer replaced the per-check registry.** `StartupCheck` /
+  `runStartupChecks` (03-02 §2.4) is gone: it registered one interactive check
+  per gap, and §7.1 point 3 requires the opposite — every gap named together and
+  offered **once**. `guide.ts::runSetup` is now that phase. The deterministic
+  probes it aggregates (`preflightMusic`, `preflightBun`, the voice-endpoint
+  read) stay exactly where they were, and `detectGaps` skips any probe the
+  session does not want, so `--no-music` still costs no yt-dlp search.
+- **A degraded launch is active, not passive.** With gaps, murmur names them in
+  plain language and opens the conversation on every boot. The single quiet info
+  line applies ONLY after an explicit decline (`setup.declined` on the tier-③
+  ledger). The explicit entries ignore the record entirely, and declining an
+  explicit `make setup` does **not** write one — reaching for setup on purpose
+  and backing out is not the standing "stop asking me" the boot offer records.
+- **The recheck re-probes rather than believes the conversation.** "The
+  assistant said it installed yt-dlp" is not the fact "yt-dlp works"; the
+  outcome the session wires itself from comes from a second probe.
+- **`voiceUrl` is read as a thunk**, so an endpoint written mid-conversation is
+  heard on THIS boot: the voice provider is built after the setup phase.
+- **The ledger gained a `setup` kind** and an impl-level `recentEvents(kind, n)`
+  reader on both stores — deliberately not on the `MemoryStore` contract, the
+  same posture spec 06 used for `writeProfile`.
+- **`write_voice_config` takes no path argument.** The destination is closure-
+  bound to `$MURMUR_HOME/voice.json`, resolved with realpath: a symlinked home
+  is followed (relocating `~/.murmur` is normal), but a symlink planted *at*
+  `voice.json` is refused. The path is resolved BEFORE the validation synth, so
+  an endpoint that could never be persisted costs no TTS call.
+- **Config precedence is per knob**: `voice.json` < env < flags. Unset env
+  variables are omitted rather than blanked, so `.env` overrides only what it
+  actually states — and the app never writes `.env`.

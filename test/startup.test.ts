@@ -4,14 +4,11 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { Host } from '../src/host.ts'
 import {
   preflightBun,
   preflightFfmpeg,
   preflightMusic,
   preflightYtdlp,
-  runStartupChecks,
-  type StartupCheck,
 } from '../src/startup.ts'
 
 // Stand-in binaries (spec 03-03 §5 testing): tiny executable scripts standing
@@ -23,49 +20,6 @@ function standIn(body: string, { executable = true } = {}): string {
   writeFileSync(path, `#!/bin/sh\n${body}\n`, { mode: executable ? 0o755 : 0o644 })
   return path
 }
-
-function fakeHost(): { host: Host; infos: string[] } {
-  const infos: string[] = []
-  const host: Host = {
-    start: () => {},
-    peekLine: () => new Promise(() => {}),
-    takeLine: () => undefined,
-    onRadioSegment: () => {},
-    onUserLine: () => {},
-    info: (m) => void infos.push(m),
-    banner: () => {},
-  }
-  return { host, infos }
-}
-
-describe('runStartupChecks', () => {
-  it('runs registered checks in order and collects results by name', async () => {
-    const ran: string[] = []
-    const make = (name: string, ok: boolean): StartupCheck => ({
-      name,
-      run: async () => {
-        ran.push(name)
-        return ok
-      },
-    })
-    const { host } = fakeHost()
-    // a second registered check runs without any app-loop change (the seam is real)
-    const results = await runStartupChecks([make('music', false), make('other', true)], host)
-    expect(ran).toEqual(['music', 'other'])
-    expect(results).toEqual({ music: false, other: true })
-  })
-
-  it('a throwing check degrades to false, not a crash', async () => {
-    const boom: StartupCheck = {
-      name: 'boom',
-      run: async () => {
-        throw new Error('nope')
-      },
-    }
-    const { host } = fakeHost()
-    expect(await runStartupChecks([boom], host)).toEqual({ boom: false })
-  })
-})
 
 describe('preflight probes (spec 03-03 §2 — deterministic, no LLM)', () => {
   it('yt-dlp: ok needs exit 0 AND output (a fetch probe with nothing fetched is broken)', async () => {

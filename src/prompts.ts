@@ -214,8 +214,10 @@ export type FixMusicPromptInput = {
 }
 
 // High-level task: diagnose (cause unknown) and repair the music dependencies.
-// Deliberately does NOT prescribe the fix. `reason` is the preflight's finding,
-// handed over as evidence to seed the diagnosis.
+// Deliberately does NOT prescribe the fix — but it DOES state a channel
+// preference (spec 03-03 §7.1): Homebrew is the same channel ffmpeg comes from,
+// so a machine ends up with one package manager owning both binaries instead of
+// a brew/uv split that nobody remembers how to upgrade.
 export function buildFixMusicPrompt({ ytdlp, ffmpeg, reason = '' }: FixMusicPromptInput): string {
   const finding = reason ? `\nA quick automated check just reported:\n  ${reason}\n` : ''
   return `murmur's music depends on TWO external binaries: \`${ytdlp}\` (fetches tracks) and
@@ -229,9 +231,92 @@ Please:
    perfectly common cause.
 3. Explain in plain language what is wrong and the fix you propose, then ASK me
    to confirm before changing anything and WAIT for my go-ahead. Once I agree,
-   apply the smallest safe fix (installing via the user's own package manager,
-   e.g. Homebrew on macOS, is a fine fix for a missing binary).
+   apply the smallest safe fix.
+   For a MISSING binary, prefer the user's own package manager — on macOS that
+   is Homebrew (\`brew install yt-dlp\` / \`brew install ffmpeg\`), which keeps
+   both binaries on ONE upgrade path. Only if Homebrew is unavailable or cannot
+   provide it, fall back to a Python-tool installer (uv tool / pipx) for
+   yt-dlp.
 4. Verify BOTH now work.
+`
+}
+
+// --- conversational onboarding (spec 03-03 §7) ---------------------------- //
+
+// One gap the deterministic probes found, in the shape the prompt renders.
+export type SetupGapInput = {
+  readonly kind: 'music' | 'bun' | 'voice'
+  readonly reason: string
+}
+
+export type SetupPromptInput = {
+  readonly gaps: readonly SetupGapInput[]
+  readonly ytdlp: string
+  readonly ffmpeg: string
+  readonly bunCmd: string
+}
+
+function bunSection(bunCmd: string, reason: string): string {
+  return `**The terminal front-end needs \`${bunCmd}\`.**
+A quick automated check reported:
+  ${reason}
+
+murmur's interface (its status strip, program log, visualizer and pixel pet)
+runs as a small client under Bun. Without it murmur falls back to plain text
+output, which works but is not what it is supposed to look like.
+
+The official installer is \`curl -fsSL https://bun.sh/install | bash\`. Explain
+what it does, ask before running it, and afterwards verify with
+\`${bunCmd} --version\`.`
+}
+
+function voiceSection(): string {
+  return `**The voice has no endpoint yet.**
+murmur speaks through a hosted text-to-speech endpoint, and none is configured,
+so every line is currently shown as text in silence.
+
+There are two ways to get one, and the user picks:
+  - a fish.audio account, which gives them an API key and a hosted endpoint URL;
+  - a self-hosted fish-speech server, which gives them a URL of their own.
+
+Explain both in plain language, then ask them to paste the endpoint URL. When
+they do, call the \`write_voice_config\` tool with it. That tool proves the
+endpoint by synthesizing ONE real line through it before saving anything, so a
+wrong or dead URL saves nothing — if it comes back with an error, explain what
+the error means and let them correct it.
+
+Do NOT write \`.env\` or any other file for this, and do not ask them to. The
+\`write_voice_config\` tool is the only supported way to set the endpoint.`
+}
+
+// The whole onboarding surface as ONE conversation (spec 03-03 §7.1): the gaps
+// the deterministic probes actually found, each with its findings as evidence.
+// The remedy is still never prescribed — only the install CHANNEL preference is.
+export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd }: SetupPromptInput): string {
+  const sections = gaps.map((gap) => {
+    switch (gap.kind) {
+      case 'music':
+        return buildFixMusicPrompt({ ytdlp, ffmpeg, reason: gap.reason })
+      case 'bun':
+        return bunSection(bunCmd, gap.reason)
+      case 'voice':
+        return voiceSection()
+    }
+  })
+  const plural = gaps.length === 1 ? 'one piece' : `${String(gaps.length)} pieces`
+  return `murmur is running, but ${plural} of its setup is incomplete on this machine.
+Work through them WITH the user, one at a time, in the order below. For each
+one: investigate, explain in plain language, propose the fix, ask, wait for the
+go-ahead, apply the smallest safe change, and verify it actually works.
+
+The user does not have to touch a shell themselves — you have the tools. They
+may also decline any individual piece; if they do, move on to the next without
+arguing.
+
+${sections.join('\n\n---\n\n')}
+
+When every piece is either fixed or explicitly skipped, say so in one short
+sentence and stop.
 `
 }
 

@@ -7,7 +7,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-07-31 (first-music latency cut, #76 closed; by-ear passes remain)_
+_Last updated: 2026-07-31 (conversational onboarding built, #88; by-ear passes remain)_
 
 ## Where we are
 
@@ -15,9 +15,8 @@ _Last updated: 2026-07-31 (first-music latency cut, #76 closed; by-ear passes re
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
 bed + spec 05 memory. Unit gate green (vitest); real-SDK smokes passed per
-phase. One decided slice awaits its build (#88, conversational onboarding —
-spec 03-03 §7); everything else left is under **Open** — engineering items
-first, then the by-ear passes.
+phase. Everything left is under **Open** — engineering items first, then the
+by-ear passes.
 
 Built, with the PR that landed it — read the spec for what it does, the PR for
 how it got there:
@@ -31,7 +30,11 @@ how it got there:
   section (#67).
 - spec 07 presence, time anchors, invites, away gating (#68).
 - spec 10 TUI — the wire + `IpcHost` + OpenTUI client (#71); the visualizer
-  feed + pixel pet + warmth kit (#74). Redesign decisions: #70.
+  feed + pixel pet + warmth kit (#74). Redesign decisions: #70. The TUI is now
+  the DEFAULT front-end (spec 10 §6), falling back to plain without bun.
+- spec 03-03 §7 conversational onboarding — the shell preflight demoted to a
+  reporter, one aggregated setup offer per boot with a ledger-recorded decline,
+  and the guide-written voice endpoint (#88).
 - Spec restructure — persona stays stable, 06 rescoped, 07 extended, 08 and 09
   retired (#65).
 
@@ -42,7 +45,6 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
-- **#88** (eng) Conversational onboarding — the app fixes its own gaps by talking; spec 03-03 §7.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#78** (by-ear) Does it feel like a warm little radio? — spec 10 §5.11 plus the L0/L1 listening pass.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.

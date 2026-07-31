@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSy
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { IdleSensor } from '../src/activity.ts'
 import {
@@ -12,7 +12,8 @@ import {
   buildVoice,
   resolvePersonaPath,
   runBootstrapProfileCli,
-  runMusicSetupCli,
+  runSetupCli,
+  setupTargets,
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
@@ -25,6 +26,10 @@ import { StubVoice } from '../src/voice.ts'
 
 const config = (argv: string[], env: NodeJS.ProcessEnv = {}) => parseCli(argv, env).config
 
+// A murmur home with nothing in it — so a stray real ~/.murmur/voice.json on
+// the developer's machine can never decide what these tests see.
+const emptyHome = (): string => mkdtempSync(join(tmpdir(), 'murmur-home-'))
+
 describe('app wiring', () => {
   it('builds the configured voice provider', () => {
     expect(buildVoice(config([]))).toBeInstanceOf(StubVoice)
@@ -33,13 +38,43 @@ describe('app wiring', () => {
     ).toBeInstanceOf(HostedVoice)
   })
 
-  it('refuses the hosted voice with no endpoint configured, naming the knob', () => {
-    expect(() => buildVoice(config(['--voice', 'hosted']))).toThrow(/MURMUR_TTS_URL/)
+  // spec 03-03 §7.1 point 4: the radio ALWAYS launches. An unconfigured
+  // endpoint costs the sound, not the session — the lines still land visibly,
+  // which is what keeps "talk to murmur to fix it" possible at all.
+  it('degrades an unconfigured hosted voice to silence, saying so, instead of throwing', () => {
+    const said: string[] = []
+    const voice = buildVoice(config(['--voice', 'hosted'], { MURMUR_HOME: emptyHome() }), (m) =>
+      said.push(m),
+    )
+    expect(voice).toBeInstanceOf(StubVoice)
+    expect(said.join('\n')).toContain('see the lines')
   })
 
-  it('--setup-music needs the real brain: a stub run refuses instead of hanging', async () => {
+  it('--setup / --setup-music need the real brain: a stub run refuses instead of hanging', async () => {
     // The guide IS the real Claude Code agent; there is no stub of it.
-    expect(await runMusicSetupCli(config(['--brain', 'stub']))).toBe(false)
+    expect(await runSetupCli(config(['--brain', 'stub']))).toBe(false)
+    expect(await runSetupCli(config(['--brain', 'stub']), { musicOnly: true })).toBe(false)
+  })
+})
+
+// spec 03-03 §7.1: what the setup conversation is allowed to look at is derived
+// from the session's own config — it never probes for something unwanted.
+describe('setup targets', () => {
+  it('wants exactly what this session is configured to use', () => {
+    const full = setupTargets(config(['--voice', 'hosted'], { MURMUR_TTS_URL: 'https://x' }))
+    expect(full).toMatchObject({ wantsMusic: true, wantsBun: true, wantsVoice: true })
+    expect(full.voiceUrl()).toBe('https://x')
+
+    const lean = setupTargets(config(['--no-music', '--plain'], { MURMUR_HOME: emptyHome() }))
+    expect(lean).toMatchObject({ wantsMusic: false, wantsBun: false, wantsVoice: false })
+  })
+
+  it('re-reads the endpoint each call, so a mid-conversation write is picked up', () => {
+    const home = emptyHome()
+    const targets = setupTargets(config(['--voice', 'hosted'], { MURMUR_HOME: home }))
+    expect(targets.voiceUrl()).toBe('')
+    writeFileSync(join(home, 'voice.json'), JSON.stringify({ ttsUrl: 'https://written.example' }))
+    expect(targets.voiceUrl()).toBe('https://written.example')
   })
 })
 
@@ -137,8 +172,8 @@ describe('front-end wiring (spec 10)', () => {
     return path
   }
 
-  it('defaults to the plain host, with nothing to tear down', async () => {
-    const bundle = await buildHost(config([]))
+  it('--plain is the explicit escape, with nothing to tear down', async () => {
+    const bundle = await buildHost(config(['--plain']))
     expect(bundle.host).toBeInstanceOf(CliHost)
     await bundle.close()
   })
@@ -175,13 +210,21 @@ describe('front-end wiring (spec 10)', () => {
     await bundle.close()
   })
 
-  it('degrades to the plain host, saying so, when Bun is absent', async () => {
+  // spec 10 §6 (decided 2026-07-31): the TUI is the default, and a bun-less
+  // machine falls back automatically — with ONE notice, not a shell lecture.
+  // Installing bun is the setup conversation's job (spec 03-03 §7.1).
+  it('degrades to the plain host with exactly ONE notice when Bun is absent', async () => {
+    const said: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((m: unknown) => void said.push(String(m)))
     const bundle = await buildHost({
-      ...config(['--tui']),
+      ...config([]), // no flag at all: the default is the TUI
       tuiSocket: join(mkdtempSync(join(tmpdir(), 'murmur-front-')), 'tui.sock'),
       bunCmd: '/nope/bun',
     })
+    log.mockRestore()
     expect(bundle.host).toBeInstanceOf(CliHost)
+    expect(said).toHaveLength(1)
+    expect(said[0]).toContain('bun')
     await bundle.close()
   })
 })

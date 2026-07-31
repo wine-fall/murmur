@@ -46,3 +46,11 @@ export function runRoot(env: NodeJS.ProcessEnv = process.env): string {
 export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(runRoot(env), 'tui.sock')
 }
+
+// The guide-written voice endpoint (spec 03-03 §7.2). It sits at the home root
+// rather than under data/ because it is configuration the user can re-obtain,
+// not irreplaceable state — and because it is the one file the setup
+// conversation is allowed to write.
+export function voiceConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'voice.json')
+}
