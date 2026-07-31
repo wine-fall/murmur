@@ -54,7 +54,7 @@ const SPEC_PATH_RE = /specs\/[\w./-]+\.md/g
 
 export const STATUS_PATH = 'specs/STATUS.md'
 
-// STATUS.md is a card, not a ledger (see its own header and the murmur-backlog
+// STATUS.md is a card, not a ledger (see its own header and the murmur-issue
 // skill). The cap is the only thing that makes that rule mechanical: the file
 // stood at 66 lines after the 2026-07-31 backlog migration, and 85 is that plus
 // ~25% headroom — enough for a few new pointer lines or a reworded section,
@@ -86,7 +86,7 @@ export function validateStatus(text: string, issueState: (issue: number) => Issu
     errors.push(
       `${STATUS_PATH} is ${lines} lines, over the ${STATUS_LINE_CAP}-line cap.\n` +
         'It is a card, not a ledger: delete completed entries, move measured facts into the\n' +
-        'spec they verify, and let issue bodies carry the detail (see the murmur-backlog skill).',
+        'spec they verify, and let issue bodies carry the detail (see the murmur-issue skill).',
     )
   }
 
@@ -104,7 +104,7 @@ export function validateStatus(text: string, issueState: (issue: number) => Issu
   if (stale.length > 0) {
     errors.push(
       `${STATUS_PATH} "## Open" points at closed issue(s): ${stale.map((n) => `#${n}`).join(', ')}.\n` +
-        'Closing a debt deletes its line here in the same change (murmur-backlog: close).',
+        'Closing a debt deletes its line here in the same change (murmur-issue: close).',
     )
   }
 
