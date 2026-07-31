@@ -41,7 +41,7 @@ After the PR merges — whether you merged it or the user did — leave the loca
 
 ## Exit in exactly one of
 
-- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). When merged: the worktree and its branch are removed and the main checkout is back on an up-to-date `main` (see Post-merge cleanup — all three steps, always). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`). Anything the build found but did not fix — an owed by-ear pass, a measured defect, a watch item — leaves through `murmur-backlog` (an issue plus one pointer line), never as a paragraph in STATUS.md.
+- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). When merged: the worktree and its branch are removed and the main checkout is back on an up-to-date `main` (see Post-merge cleanup — all three steps, always). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`). Anything the build found but did not fix — an owed by-ear pass, a measured defect, a watch item — leaves through `murmur-issue` (an issue plus one pointer line), never as a paragraph in STATUS.md.
 - **Paused — needs human input** — a gate failed past budget, a sensory checklist is owed, CI won't pick up, or a decision is needed (spec divergence, an open question, a multi-source conflict). State exactly what's needed.
 - **Won't-do** — decided against the change: close the PR, remove the worktree, delete the branch, and say why.
 

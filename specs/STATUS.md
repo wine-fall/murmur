@@ -38,7 +38,7 @@ how it got there:
 
 Every open debt is a GitHub issue; this list is the **index, not the record**.
 One line each — the issue body carries what it is, the spec it touches, and how
-it closes. Add and remove entries with the `murmur-backlog` skill, never by
+it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
 - **#76** (eng) Cut the first-music latency — the pick's agentic discovery is now the dominant term.
