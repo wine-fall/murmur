@@ -3,7 +3,7 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
-_Last updated: 2026-07-30 (spec 10 slices 2-3 built: viz feed + pet/warmth kit)_
+_Last updated: 2026-07-31 (end-to-end latency re-measured on real `make dev` runs)_
 
 - **spec 10 slice 1 is built (2026-07-29).** The wire (`src/ipc.ts`: zod
   schemas, ndjson framing, one source of truth for both processes), the
@@ -137,9 +137,45 @@ _Last updated: 2026-07-30 (spec 10 slices 2-3 built: viz feed + pet/warmth kit)_
   §3.3). Real-SDK smoke: refill resolved mid-song; the music→talk boundary
   aired a prebuilt clip with zero Brain/synth wait (first cold batch was ~24 s
   — the latency now hidden). The `talkBatch` config knob is retired.
-- **Open: end-to-end latency measurement.** The motivating ~76s first-music
-  wait has not been re-measured on a real TS run. Owed: a `make dev`
-  before/after now that the look-ahead has landed.
+- **End-to-end latency, measured on real runs (2026-07-31).** Two real `make dev`
+  runs, no `STUB`: real brain (`claude-opus-4-8`), real `yt-dlp`, the hosted
+  fish.audio voice, audio out of the speakers. **Conditions**: macOS; an isolated
+  `MURMUR_HOME` with the bundled persona pre-seeded (so first-run onboarding does
+  not fire) and the bed cache warm; `MURMUR_ACTIVITY=present` pinned so the
+  spec-07 away-gate cannot short-circuit the cadence; everything else default
+  (`cadence=every_n`, `musicEveryN=2`, `gapSeconds=2`, `TALK_LOOKAHEAD=2`).
+  t0 = the moment `make dev` execs `node src/main.ts` (`pnpm install` + preflight
+  cost a further ~3.7 s ahead of it). **cold** = first run, empty memory; **hot** =
+  a second run nine minutes later, memory carrying the cold run's turns and songs.
+  - **(a) t0 → first music: 136 s cold / 195 s hot.** *Worse* than the ~76 s
+    motivating number — whose measurement conditions were never recorded, so read
+    the comparison as indicative, not like-for-like. The look-ahead is not the
+    cost: t0 → banner (startup checks + warm bed) 4.2 / 4.7 s; the one cold
+    `nextTalks` + TTS batch 24.5 / 33.9 s, so **t0 → first audible word is 28.7 s
+    cold / 38.6 s hot**. Music is then held first by the *cadence* (`musicEveryN=2`
+    makes it eligible only at the 3rd boundary — t0+74 s / t0+101 s) and then by
+    the **first music pick still resolving**: 2 (cold) / 3 (hot) consecutive music
+    boundaries yielded to talk under the never-block-the-air rule (spec 04 slice
+    1), so the song landed at boundary 5 / 6. That first pick took ~75-105 s
+    (cold) / ~125-155 s (hot) to resolve, bracketed by the boundaries that saw it
+    unresolved. With a primed pick the music boundary costs **~4 s** of stream
+    spin-up (cold's second song), and the announce lands ~1 s later.
+  - **(b) music→talk boundary: zero producer wait, confirmed.** cold: song ended
+    ≈10:56:38 → `talk.buffer warm depth=2` at 10:56:40 → clip on air at
+    10:56:40.08. hot: ≈11:07:06 → 11:07:08 → 11:07:08.27. **All 13 buffered
+    boundaries across both runs aired in the same second as their warm marker**
+    (0 s residual Brain/synth wait); the only dead air left is the configured 2 s
+    `gapSeconds`. The ~24 s cold batch is paid once per session at startup and
+    never again at a boundary — spec 04 §3.3 delivers what it claimed.
+  - **Open, in the order worth attacking** (nothing was changed here — this was a
+    measurement pass): the first music pick's agentic discovery, which is now the
+    dominant term in (a); the cold talk batch, with nothing on air to hide it
+    behind; and the fact that **hot is slower than cold** — a richer memory
+    context slows both the batch and the discovery, so context growth, not
+    process warmth, is the variable that moved.
+  - Also observed, untriaged and untouched: Ctrl-C did not finish shutdown within
+    30 s in either run (`stopping...` printed; `stopped cleanly.` never did) and
+    the runner had to `SIGKILL`. No orphan processes survived it.
 - **Open: by-ear / sensory acceptance over the TS build (user-run).** The
   L0/L1 "sounds human, feels like radio" pass: TS voice quality, duck /
   crossfade smoothness, bed levels (`_BED_GAIN`-equivalent knobs), the
