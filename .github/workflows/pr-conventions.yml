@@ -7,6 +7,12 @@ name: PR conventions
 #      e.g. specs/DESIGN.md or specs/spec03/03-01-brain-harness.md).
 # Rules 2-3 apply only to product-behavior PRs (feat/fix/perf/refactor);
 # infra/meta types (ci/chore/docs/build/style/test/revert) are exempt.
+#
+# And keeps specs/STATUS.md a card rather than a ledger — every session reads
+# it, so both failure modes get a mechanical gate:
+#   4. It stays under the line cap declared in the script.
+#   5. Nothing in its "## Open" section points at an issue that is already
+#      closed. Needs issues: read; an unreadable state never fails the build.
 
 on:
   pull_request:
@@ -14,12 +20,18 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   check:
     runs-on: ubuntu-latest
     steps:
+      # This job runs the PR's OWN copy of check-pr.ts, so it must not leave a
+      # token lying in .git/config for that code to pick up: the one step that
+      # needs credentials gets them explicitly through env, nothing else does.
       - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
 
       # The script is TypeScript run straight off disk (node's type stripping),
       # so it needs the same Node the repo targets — no dependency install, it
@@ -28,10 +40,18 @@ jobs:
         with:
           node-version: 24
 
-      - name: Validate PR title + description
+      - name: Validate PR title + description, and STATUS.md
         env:
           # Pass via env (never interpolate ${{ }} into the script) to avoid
           # shell injection from attacker-controlled PR text.
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
+          # Reads the state of the issues STATUS.md's "## Open" section points
+          # at. Scoped to issues: read above, and this repository and its issues
+          # are public — so the scope grants nothing an anonymous request could
+          # not already do. The token is used for the rate limit (5000/h vs 60/h),
+          # not for access: unauthenticated reads would be throttled into the
+          # "unknown" branch and silently mute the gate. A fork PR's token is
+          # read-only by GitHub policy.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: node .github/scripts/check-pr.ts
