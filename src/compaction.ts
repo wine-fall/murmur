@@ -19,6 +19,12 @@ export interface CompactionStore {
 
 type Fold = { promise: Promise<void>; done: () => boolean }
 
+// How long a shutdown flush may wait on the model before it gives up. A fold
+// is a full model call — measured at 53 s on a real run — so this is not a
+// generous version of "wait for it": it is only long enough to collect a fold
+// that was already nearly done, and Ctrl-C must feel like stopping.
+const FLUSH_TIMEOUT_MS = 3_000
+
 export class Compactor {
   private store: CompactionStore
   private brain: Pick<Brain, 'compactProfile'>
@@ -46,9 +52,24 @@ export class Compactor {
   // (shutdown / startup catch-up). Drains a fold already in flight first — its
   // slice predates the current tail — then folds what is left, so turns
   // recorded during that fold are not stranded until a future run.
-  // Best-effort; bounded to two rounds so a persistently-failing fold can
-  // never spin here.
-  async flush(): Promise<void> {
+  // Bounded two ways, so a persistently-failing fold can never spin here and a
+  // slow one can never hold the process open: two rounds, and a wall-clock
+  // budget. Losing the fold costs nothing — the turns are already on disk and
+  // the watermark only advances on a successful apply, so the next run folds
+  // them again. Overrunning the budget abandons the wait, not the fold: a
+  // promise cannot be cancelled, so it keeps running — and its SDK subprocess
+  // does not hold the process open, because main.ts exits explicitly rather
+  // than waiting for the loop to drain (the same disposal the in-flight music
+  // pick already relies on; measured: 3.5 s from Ctrl-C to exit).
+  async flush(timeoutMs = FLUSH_TIMEOUT_MS): Promise<void> {
+    await Promise.race([
+      this.foldRemaining(),
+      // .unref(): the bound must never be the thing keeping the loop alive.
+      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs).unref()),
+    ])
+  }
+
+  private async foldRemaining(): Promise<void> {
     await this.drain()
     if (this.store.compactionSlice().turns.length > 0) {
       this.launch()

@@ -259,6 +259,22 @@ describe('interjections during a song (duck, never stop)', () => {
     await run
     expect(player.handles[0]!.stopped).toBe(true)
   })
+
+  // Ctrl-C is the same intent as /quit but arrives as a signal, not a line —
+  // so it has no racer against the song, and a real run sat through the rest of
+  // the track before shutdown even began. The song here never ends on its own:
+  // if requestQuit does not wake the wait, this test hangs.
+  it('requestQuit during a song stops it too, without riding the track out', async () => {
+    const { director, player, source } = build()
+    source.picks = [pickOf('https://stream/song')]
+    const run = director.run(5)
+    await until(() => player.handles.length === 1, 'song on air')
+
+    director.requestQuit()
+    await run
+
+    expect(player.handles[0]!.stopped).toBe(true)
+  })
 })
 
 // spec 10 §3.2-D: what keeps "now playing" on the status strip for the whole

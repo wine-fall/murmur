@@ -319,7 +319,8 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     await engine.aclose()
     await voice.close()
     // Final compaction flush (spec 05 §3.6): fold any remaining backlog so a
-    // long session's tail lands in the profile. Best-effort; never blocks exit.
+    // long session's tail lands in the profile. Best-effort and time-boxed by
+    // the Compactor — a fold is a model call, and Ctrl-C must not wait on one.
     try {
       await compactor?.flush()
     } catch {
