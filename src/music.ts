@@ -1,10 +1,13 @@
 // The music source (spec 03-01 §2.2): search + resolve over the yt-dlp binary,
 // which covers YouTube and Bilibili with no login.
 //
-// search runs `--dump-json ytsearch{limit}:<query>` — full metadata, so the
-// brain can reject junk (hour-long loops, low-quality re-uploads) and prefer
-// official audio. resolve runs `-f bestaudio/best -g` and returns a STREAM URL,
-// never a download (master decision A); Phase 3's engine decodes it.
+// search runs `--dump-json --flat-playlist ytsearch{limit}:<query>` — one
+// request for the whole result page (issue #76: a full per-hit extraction
+// measured ~10-17s per search; flat is ~2s) whose entries still carry the
+// judging signal (title, uploader, duration, view_count), so the brain can
+// reject junk (hour-long loops, low-quality re-uploads) and prefer official
+// audio. resolve runs `-f bestaudio/best -g` and returns a STREAM URL, never a
+// download (master decision A); Phase 3's engine decodes it.
 //
 // yt-dlp's JSON is an untrusted boundary, so every hit is zod-parsed and a hit
 // that does not fit is skipped rather than coerced.
@@ -88,7 +91,7 @@ export class YtDlpMusicProvider implements MusicProvider {
   }
 
   async search(query: string, limit = 5): Promise<TrackCandidate[]> {
-    return parseSearchOutput(await this.run(['--dump-json', `ytsearch${limit}:${query}`]), limit)
+    return parseSearchOutput(await this.run(['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`]), limit)
   }
 
   async resolve(ref: string): Promise<AudioClip> {

@@ -140,3 +140,58 @@ describe('MusicProgrammer.nextTrack', () => {
     expect(await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)).toBeNull()
   })
 })
+
+// Per-stage discovery timing (issue #76): where the pick's wall-clock goes —
+// model turns vs search vs resolve vs probe — readable from the dev log.
+describe('discovery instrumentation', () => {
+  it('reports every stage with its elapsed time through debug', async () => {
+    const lines: string[] = []
+    const harness = new FakeHarness(async (tools) => {
+      await callTool(tools, 'search_music', { query: 'city pop', limit: 2 })
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits' })
+    })
+    await new MusicProgrammer({
+      brain: harness,
+      provider: provider(),
+      model: 'haiku',
+      probe: async () => true,
+      debug: (m) => lines.push(m),
+    }).nextTrack(ctx)
+
+    expect(lines[0]).toMatch(/^music\.pick start situation=\d+ch$/)
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.search \d+ms hits=2 query="city pop"$/))
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.resolve \d+ms ok$/))
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.probe \d+ms ok$/))
+    expect(lines.at(-1)).toMatch(/^music\.pick done \d+ms picked=yes$/)
+  })
+
+  it('times the failure paths too — a dead resolve and a dead probe are stages, not gaps', async () => {
+    const music = provider()
+    music.broken.add('loop')
+    const lines: string[] = []
+    const harness = new FakeHarness(async (tools) => {
+      await callTool(tools, 'submit_pick', { ref: 'loop', why: 'dead ref' })
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'dead stream' })
+    })
+    const pick = await new MusicProgrammer({
+      brain: harness,
+      provider: music,
+      model: 'haiku',
+      probe: async () => false,
+      debug: (m) => lines.push(m),
+    }).nextTrack(ctx)
+
+    expect(pick).toBeNull()
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.resolve \d+ms failed: .*loop/))
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.probe \d+ms dead$/))
+    expect(lines.at(-1)).toMatch(/^music\.pick done \d+ms picked=no$/)
+  })
+
+  it('stays silent with no debug sink', async () => {
+    const harness = new FakeHarness(async (tools) => {
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits' })
+    })
+    const pick = await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
+    expect(pick).not.toBeNull() // instrumentation is optional and changes nothing
+  })
+})
