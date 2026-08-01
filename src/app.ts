@@ -199,11 +199,36 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     home: config.home,
     wantsMusic: config.musicEnabled,
     wantsBun: config.frontEnd === 'tui',
-    wantsVoice: config.voice === 'hosted',
+    // Always considered, never read off the voice knob: with no endpoint the
+    // knob says 'stub', the stub engine works, no probe fails — and a new
+    // listener would never be told at boot that the radio has no real voice
+    // (issue #93). A configured endpoint or a recorded decline is what removes
+    // it from the offer; it is an offer item, never a blocker.
+    wantsVoice: true,
     // Env/flags keep precedence over the file, exactly as parseCli layered it.
     voiceUrl: () => config.ttsUrl || (readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))?.ttsUrl ?? ''),
     ...over,
   }
+}
+
+// The voice a run speaks with once the setup conversation has had its turn.
+// An endpoint that appeared DURING this boot is one the listener just set up
+// through the guide (spec 03-03 §7.2), so it is heard now rather than next
+// time — that is what makes §7.3 criterion 5's "audible line" true.
+//
+// Two things it must never do: override a voice the listener ASKED for (an
+// explicit `--voice stub` is a request for silence this run, and the endpoint
+// is still saved for the next one), or touch a run that already had an
+// endpoint. The result is the single source for both what plays and what the
+// banner reports.
+export function voiceAfterSetup(config: Config, url: string): Config {
+  if (url === '' || config.ttsUrl !== '') return config
+  // The endpoint is a fact about the world, so the fresh one is always taken.
+  // WHICH provider speaks is a preference, so only a stub nobody asked for is
+  // promoted — `--voice hosted` still gets the new endpoint, `--voice stub`
+  // still gets silence.
+  if (config.voiceExplicit) return { ...config, ttsUrl: url }
+  return { ...config, voice: 'hosted', ttsUrl: url }
 }
 
 // The explicit setup entries (spec 03-03 §7.1): `murmur --setup` walks the whole
@@ -287,22 +312,22 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // missing and murmur offers — once per boot — to fix it by talking. A decline
   // is remembered on the tier-3 ledger so later boots stay quiet. The radio
   // launches either way; the gaps only decide how degraded it starts.
+  const targets = setupTargets(config)
   let musicOk = config.musicEnabled && claude !== null
   if (claude !== null) {
     const outcome = await runSetup({
       host,
       guide: claude,
-      targets: setupTargets(config),
+      targets,
       ...(memory instanceof PersistentMemoryStore && { ledger: memory }),
     })
     musicOk = outcome.musicOk
   }
-  // Built after the conversation, so an endpoint saved during it is heard THIS
-  // boot rather than the next one.
-  const voice = buildVoice(
-    { ...config, ttsUrl: setupTargets(config).voiceUrl() },
-    (m) => host.info(m),
-  )
+  // Resolved after the conversation, so an endpoint saved during it is heard
+  // THIS boot rather than the next one — and so the banner reports the voice
+  // that is actually playing, not the one the flags asked for.
+  const resolved = voiceAfterSetup(config, targets.voiceUrl())
+  const voice = buildVoice(resolved, (m) => host.info(m))
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the
@@ -353,7 +378,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const away = memory instanceof PersistentMemoryStore ? memory.awaySeconds() : undefined
   host.banner(personaLine(persona), {
     brain: config.brain,
-    voice: config.voice,
+    voice: resolved.voice,
     ...(away !== undefined && { away }),
   })
   try {

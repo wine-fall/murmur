@@ -24,7 +24,14 @@ export const ConfigSchema = z.object({
   // Which Brain to construct: 'claude' (real, default) or 'stub' (canned, no network).
   brain: z.enum(['claude', 'stub']).default('claude'),
   // 'hosted' is the real voice (spec 02 §3.6); local MLX voices are dropped.
+  // The default is endpoint-derived in parseCli — hosted when one is
+  // configured, this stub otherwise.
   voice: z.enum(['stub', 'hosted']).default('stub'),
+  // Whether `voice` above was ASKED FOR rather than derived. Provenance, not a
+  // knob: a stub that the listener typed is a request for silence and survives
+  // an endpoint arriving mid-boot (spec 03-03 §7.2), while a stub that merely
+  // fell out of "no endpoint configured" does not.
+  voiceExplicit: z.boolean().default(false),
   // Model id for the core loop; tiered models are spec 08.
   model: z.string().default('claude-opus-4-8'),
   personaPath: z.string().default(DEFAULT_PERSONA_PATH),
@@ -184,15 +191,22 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'max-segments': { type: 'string' },
     },
   })
+  // Endpoint precedence, lowest first: voice.json < env < flags.
+  const tts = { ...ttsFromFile(env), ...ttsFromEnv(env) }
+  const endpoint = (values['tts-url'] ?? tts.ttsUrl ?? '').trim()
+
   const config = ConfigSchema.parse({
-    // Endpoint precedence, lowest first: voice.json < env < flags.
-    ...ttsFromFile(env),
-    ...ttsFromEnv(env),
+    ...tts,
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
     tuiSocket: tuiSocketPath(env),
+    // Having an endpoint IS the reason to speak with it: a voice configured
+    // through the setup conversation (spec 03-03 §7.2) would otherwise be
+    // written, validated, and then silently ignored because the knob still
+    // said 'stub'. An explicit --voice below still wins, both ways.
+    ...(endpoint !== '' && { voice: 'hosted' }),
     ...(values.brain !== undefined && { brain: values.brain }),
-    ...(values.voice !== undefined && { voice: values.voice }),
+    ...(values.voice !== undefined && { voice: values.voice, voiceExplicit: true }),
     ...(values.model !== undefined && { model: values.model }),
     ...(values.persona !== undefined && { personaPath: values.persona }),
     ...(values.gap !== undefined && { gapSeconds: values.gap }),

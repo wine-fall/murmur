@@ -135,8 +135,8 @@ setup: sync-env
 	@# The whole onboarding surface as one conversation: music binaries, bun,
 	@# and the voice endpoint (spec 03-03 §7.1). Loads .env so an endpoint you
 	@# already have is seen as configured rather than asked about again.
-	@# --voice matters: the run's own voice choice is what decides whether an
-	@# endpoint is wanted at all, so without it setup would skip the voice.
+	@# --voice carries the run's own voice choice through; the endpoint is
+	@# considered either way (issue #93), so this only picks what plays after.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	  node src/main.ts --setup --voice $(VOICE)
 

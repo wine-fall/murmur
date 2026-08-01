@@ -150,6 +150,12 @@ console.log('3. the next boot with the same gaps')
   await runSetup({ host, guide: neverRuns, targets: targets(), ledger: reopened })
   assert.equal(infos.length, 1, `expected ONE quiet info line, got ${String(infos.length)}`)
   assert.match(infos[0]!, /make setup/, 'the quiet line does not say how to reopen setup')
+  // Parity with the offer itself (issue #93): every gap it named is named
+  // again here, the voice included — a quiet line that quietly drops one is
+  // how the voice gap went unnoticed in the first place.
+  for (const gap of ['yt-dlp|music', 'bun', 'voice']) {
+    assert.match(infos[0]!, new RegExp(gap, 'i'), `the quiet line omits the ${gap} gap`)
+  }
   console.log(`   ok — one line: "${infos[0]!}"\n`)
 }
 

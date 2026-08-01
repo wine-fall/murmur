@@ -116,6 +116,17 @@
      `preflightBun`; until then the front-end has fallen back to plain
      (spec 10 §6 default record);
    - the **hosted-voice endpoint** — §7.2.
+   - **Amended (2026-08-01, issue #93)**: the voice endpoint is a **nameable
+     gap at boot regardless of the voice knob**. With no endpoint the knob
+     reads `stub`, the stub engine works, and no probe fails — so keying the
+     gap off `voice === 'hosted'` meant a new listener was never told at boot
+     that the radio has no real voice. The gap follows the ENDPOINT (env or
+     `voice.json`), never the knob; it is an offer item, never a blocker (the
+     radio still launches on the stub voice). Corollary: the voice knob's
+     default is endpoint-derived — `hosted` when one is configured, `stub`
+     otherwise, an explicit `--voice` always winning — because a voice the
+     conversation just wrote and validated must be audible (§7.3 criterion 5)
+     rather than written and then ignored.
 3. **Trigger policy**: at startup — after first-run (spec 06) when both apply;
    the two conversations stay separate and serial — the aggregated startup
    checks (03-02 §2.4 seam) name the gaps and offer the guide **once per
