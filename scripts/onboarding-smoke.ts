@@ -15,17 +15,19 @@
 
 import { strict as assert } from 'node:assert'
 import { execFile, execFileSync } from 'node:child_process'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
+import { buildVoice, voiceAfterSetup } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import type { GuideCapable } from '../src/contracts.ts'
 import { runSetup, SETUP_DECLINED, type SetupTargets } from '../src/guide.ts'
 import type { Host } from '../src/host.ts'
+import { HostedVoice } from '../src/hosted-voice.ts'
 import { PersistentMemoryStore } from '../src/memory.ts'
-import { readVoiceConfig, writeVoiceConfigTool } from '../src/voice-config.ts'
+import { readVoiceConfig, type VoiceConfig, writeVoiceConfigTool } from '../src/voice-config.ts'
 
 const run = promisify(execFile)
 const REPO = join(import.meta.dirname, '..')
@@ -49,8 +51,18 @@ function fakeHost(lines: string[]): { host: Host; infos: string[] } {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
     takeLine: () => lines.shift(),
-    // A closed stdin: any read past the scripted lines declines instead of hanging.
-    eof: () => Promise.resolve(),
+    // stdin closes once the scripted lines are used up: while any remain the
+    // reader must take THEM, and any read past them declines rather than hangs.
+    eof: () =>
+      new Promise<void>((resolve) => {
+        const timer = setInterval(() => {
+          if (lines.length === 0) {
+            clearInterval(timer)
+            resolve()
+          }
+        }, 5)
+        timer.unref()
+      }),
     onRadioSegment: () => {},
     onUserLine: () => {},
     info: (m) => void infos.push(m),
@@ -107,6 +119,7 @@ const targets = (over: Partial<SetupTargets> = {}): SetupTargets => ({
   wantsBun: true,
   wantsVoice: true,
   voiceUrl: () => readVoiceConfig(join(home, 'voice.json'))?.ttsUrl ?? '',
+  voiceConfig: () => readVoiceConfig(join(home, 'voice.json')),
   ...over,
 })
 
@@ -212,6 +225,64 @@ console.log('5. no gaps, no offer')
   assert.deepEqual(infos, [], 'it spoke up with nothing to fix')
   assert.equal(outcome.voiceOk, true)
   console.log('   ok — silent\n')
+}
+
+// --- 6. the hosted (fish.audio) shape: key, model, and same-boot pickup ---- //
+
+console.log('6. a hosted endpoint configured by conversation (issue #96)')
+{
+  const secret = 'sk-smoke-not-a-real-key'
+  // 'y' takes the offer; the key is the next line the user types — and it is
+  // the TOOL that reads it, through the same Host the conversation uses.
+  const { host, infos } = fakeHost(['y', secret])
+  const probed: VoiceConfig[] = []
+  const guide: GuideCapable = {
+    runGuide: async (req) => {
+      const tool = req.tools?.[0]
+      assert.ok(tool !== undefined, 'the voice gap got no write tool')
+      const result = await tool.handler(
+        { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', needsApiKey: true },
+        {},
+      )
+      const block = result.content[0]
+      assert.ok(block !== undefined && block.type === 'text', 'the tool returned no text')
+      // What goes BACK to the model carries the fact, never the credential.
+      assert.ok(!block.text.includes(secret), 'the tool handed the key back to the model')
+      return 'done'
+    },
+  }
+  // Its own home: this is a brand-new user, so the voice gap has to be real.
+  const fresh = mkdtempSync(join(tmpdir(), 'murmur-onboarding-hosted-'))
+  await runSetup({
+    host,
+    guide,
+    targets: targets({
+      home: fresh,
+      wantsMusic: false,
+      wantsBun: false,
+      voiceUrl: () => readVoiceConfig(join(fresh, 'voice.json'))?.ttsUrl ?? '',
+      voiceConfig: () => readVoiceConfig(join(fresh, 'voice.json')),
+    }),
+    validateVoice: async (config) => void probed.push(config),
+  })
+
+  assert.equal(probed[0]?.apiKey, secret, 'the probe synth went out without the key')
+  assert.equal(probed[0]?.model, 's2.1-pro-free', 'the probe synth went out without the model')
+  const saved = readVoiceConfig(join(fresh, 'voice.json'))
+  assert.equal(saved?.apiKey, secret, 'the key never reached the config file')
+  assert.equal(statSync(join(fresh, 'voice.json')).mode & 0o777, 0o600, 'the config is not owner-only')
+  assert.ok(
+    !infos.some((line) => line.includes(secret)),
+    'murmur printed the key',
+  )
+
+  // And the run wires itself from it THIS boot, not the next one.
+  const resolved = voiceAfterSetup(parseCli([], { MURMUR_HOME: fresh }).config, saved)
+  assert.equal(resolved.voice, 'hosted')
+  assert.equal(resolved.ttsApiKey, secret)
+  assert.equal(resolved.ttsModel, 's2.1-pro-free')
+  assert.ok(buildVoice(resolved) instanceof HostedVoice, 'the hosted voice was not built')
+  console.log('   ok — key captured off-conversation, file owner-only, voice live this boot\n')
 }
 
 console.log(`all onboarding smoke assertions passed.\nartifacts left in ${home}`)

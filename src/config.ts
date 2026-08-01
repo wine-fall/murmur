@@ -2,9 +2,10 @@
 // defaults, parsed with zod at the boundary (issue #54 rule) so every knob is
 // validated once and the static type derives from the schema.
 //
-// The hosted voice's endpoint knobs come from env (spec 02 §3.6) so a URL or key
-// is never hardcoded; the CLI overrides all of them except the API key, which
-// stays env-only — a secret does not belong on the command line.
+// The hosted voice's endpoint knobs come from env (spec 02 §3.6) or the
+// guide-written voice.json (spec 03-03 §7.2) so a URL or key is never
+// hardcoded; the CLI overrides all of them except the API key, which never
+// takes a flag — a secret does not belong on the command line.
 
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
@@ -13,7 +14,7 @@ import { z } from 'zod'
 
 import { dataRoot, homeRoot, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
-import { readVoiceConfig } from './voice-config.ts'
+import { readVoiceConfig, type VoiceConfig } from './voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
 // by-ear knob: fish TTS runs sentences together and its own pause hints are
@@ -159,10 +160,21 @@ function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
 
 // The guide-written endpoint (spec 03-03 §7.2). The lowest layer of the three:
 // a damaged or absent file is simply no endpoint, never a boot failure.
-function ttsFromFile(env: NodeJS.ProcessEnv): Partial<Config> {
-  const saved = readVoiceConfig(voiceConfigPath(env))
+//
+// `endpoint` is where this run actually points once env and flags have had
+// their say. The saved key belongs to the saved endpoint and travels nowhere
+// else — otherwise pointing a run at a self-hosted box with `--tts-url` would
+// hand that box a hosted provider's credential.
+function ttsFromFile(saved: VoiceConfig | null, endpoint: string): Partial<Config> {
   if (saved === null) return {}
-  return { ttsUrl: saved.ttsUrl, ...(saved.seed !== undefined && { ttsSeed: saved.seed }) }
+  const sameEndpoint = saved.ttsUrl.trim() === endpoint
+  return {
+    ttsUrl: saved.ttsUrl,
+    ...(saved.model !== undefined && { ttsModel: saved.model }),
+    ...(saved.referenceId !== undefined && { ttsReferenceId: saved.referenceId }),
+    ...(saved.apiKey !== undefined && sameEndpoint && { ttsApiKey: saved.apiKey }),
+    ...(saved.seed !== undefined && { ttsSeed: saved.seed }),
+  }
 }
 
 export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
@@ -192,8 +204,10 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     },
   })
   // Endpoint precedence, lowest first: voice.json < env < flags.
-  const tts = { ...ttsFromFile(env), ...ttsFromEnv(env) }
-  const endpoint = (values['tts-url'] ?? tts.ttsUrl ?? '').trim()
+  const saved = readVoiceConfig(voiceConfigPath(env))
+  const fromEnv = ttsFromEnv(env)
+  const endpoint = (values['tts-url'] ?? fromEnv.ttsUrl ?? saved?.ttsUrl ?? '').trim()
+  const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv }
 
   const config = ConfigSchema.parse({
     ...tts,

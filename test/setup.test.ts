@@ -5,10 +5,19 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { GuideCapable, GuideRequest, LedgerKind } from '../src/contracts.ts'
-import { detectGaps, runSetup, SETUP_DECLINED, type SetupLedger, type SetupTargets } from '../src/guide.ts'
+import {
+  detectGaps,
+  runSetup,
+  SETUP_DECLINED,
+  type SetupLedger,
+  type SetupTargets,
+  validateEndpoint,
+} from '../src/guide.ts'
 import type { Host } from '../src/host.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import type { PreflightResult } from '../src/startup.ts'
+import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice-config.ts'
+import { encodeWav } from '../src/wav.ts'
 
 const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }
@@ -66,6 +75,7 @@ const targets = (over: Partial<SetupTargets> = {}): SetupTargets => ({
   wantsBun: true,
   wantsVoice: true,
   voiceUrl: () => '',
+  voiceConfig: () => null,
   ...over,
 })
 
@@ -304,6 +314,94 @@ describe('runSetup — the once-per-boot offer', () => {
       probes,
     })
     expect(outcome.voiceOk).toBe(true)
+  })
+})
+
+// Issue #96: hosted fish.audio rejects a request that carries only a URL — the
+// key and the `model` header are required, and reference_id is what keeps the
+// timbre from drifting. The probe synth must therefore speak with the WHOLE
+// config, or the one backend new users are pointed at can never validate.
+describe('validateEndpoint (spec 03-03 §7.2 — the proof-of-life synth)', () => {
+  // What a healthy TTS server hands back: the probe measures the clip, so the
+  // fake has to be a real wav rather than an arbitrary blob.
+  const oneWav = (): ArrayBuffer => {
+    const wav = encodeWav({ channels: 1, sampleRate: 16_000, bitsPerSample: 16 }, Buffer.alloc(320))
+    const body = new ArrayBuffer(wav.byteLength)
+    new Uint8Array(body).set(wav)
+    return body
+  }
+
+  it('sends every hosted knob the endpoint needs', async () => {
+    const seen: { headers: Headers; body: string }[] = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      seen.push({
+        headers: new Headers(init?.headers),
+        body: typeof init?.body === 'string' ? init.body : '',
+      })
+      return new Response(oneWav(), { status: 200 })
+    }
+    await validateEndpoint(
+      {
+        ttsUrl: 'https://api.fish.audio',
+        model: 's2.1-pro-free',
+        referenceId: 'abc123',
+        apiKey: 'sk-not-a-real-key',
+      },
+      fetchImpl,
+    )
+    expect(seen).toHaveLength(1)
+    expect(seen[0]!.headers.get('authorization')).toBe('Bearer sk-not-a-real-key')
+    expect(seen[0]!.headers.get('model')).toBe('s2.1-pro-free')
+    expect(JSON.parse(seen[0]!.body)).toMatchObject({
+      reference_id: 'abc123',
+      text: VOICE_PROBE_LINE,
+    })
+  })
+
+  it('a self-hosted URL still validates with nothing but the URL', async () => {
+    const seen: Headers[] = []
+    const fetchImpl: typeof fetch = async (_url, init) => {
+      seen.push(new Headers(init?.headers))
+      return new Response(oneWav(), { status: 200 })
+    }
+    await validateEndpoint({ ttsUrl: 'https://self-hosted.example' }, fetchImpl)
+    expect(seen[0]!.get('authorization')).toBeNull()
+    expect(seen[0]!.get('model')).toBeNull()
+  })
+})
+
+describe('runSetup — the voice endpoint conversation (issue #96)', () => {
+  const probes = { music: async () => OK, bun: async () => OK }
+
+  it('captures the API key at the keyboard, and never says it out loud', async () => {
+    const secret = 'sk-not-a-real-key'
+    // 'y' answers the offer; the key is the NEXT line the user types — read by
+    // the tool itself, not by the conversation.
+    const { host, infos } = fakeHost(['y', secret])
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    const written: VoiceConfig[] = []
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        const tool = req.tools?.[0]
+        if (tool === undefined) throw new Error('the voice gap got no write tool')
+        await tool.handler(
+          { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', needsApiKey: true },
+          {},
+        )
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, home }),
+      probes,
+      validateVoice: async (config) => void written.push(config),
+    })
+    expect(written[0]?.apiKey).toBe(secret)
+    expect(readVoiceConfig(join(home, 'voice.json'))?.apiKey).toBe(secret)
+    // Everything murmur printed — the ask included — carries no credential.
+    expect(infos.join('\n')).not.toContain(secret)
   })
 })
 

@@ -144,14 +144,57 @@
 ### 7.2 Voice-endpoint onboarding (new guide task)
 
 - **Config home**: guide-written config lives under `$MURMUR_HOME` via
-  `src/paths.ts` (path governance applies): `voice.json`, zod-validated
-  (`{ ttsUrl, seed? }`). Environment variables keep precedence — `make dev`
-  still loads `.env`, and env beats file — so `.env` stays a dev-time
-  override the app itself never writes.
+  `src/paths.ts` (path governance applies): `voice.json`, zod-validated, and
+  **mirroring the `MURMUR_TTS_*` env surface knob for knob** —
+  `{ ttsUrl, model?, referenceId?, apiKey?, seed? }`. Everything but the URL is
+  optional, so a self-hosted server stays a one-field config; a hosted API needs
+  the rest (below). Environment variables keep precedence **per knob** — `make
+  dev` still loads `.env`, and env beats file — so `.env` stays a dev-time
+  override the app itself never writes. The file may hold a credential, so it is
+  written **owner-only (0600)**, and a **saved key is bound to the saved
+  endpoint**: pointing the run somewhere else (`--tts-url`, `MURMUR_TTS_URL`)
+  leaves the stored credential behind rather than handing it to another host.
+  *Amended 2026-08-01 (issue #96): a URL-only config could never reach hosted
+  fish.audio — it requires a Bearer key AND a `model` header on every request —
+  so the one backend new users are pointed at could not be configured by
+  conversation at all.*
 - **Flow**: the guide explains where an endpoint comes from (a fish.audio
-  account → API key, or a self-hosted URL), the user pastes it, and the guide
-  **validates by synthesizing one real line** through the endpoint before
-  writing anything; a failed validation is explained and nothing is written.
+  account, or a self-hosted URL), walks the registration if needed (below), the
+  user supplies it, and the guide **validates by synthesizing one real line**
+  through the endpoint — with the whole config, key and model header included —
+  before writing anything; a failed validation is explained and nothing is
+  written. A configuration written mid-conversation is wired into **this** boot
+  in full, not just its URL, or the freshly configured voice stays silent (§7.3
+  criterion 5).
+- **Registration walkthrough** (hosted): murmur cannot click for the user, so
+  the guide narrates and offers to **open** each page with the usual per-action
+  consent — the signup page, then the API-keys page — and names what to click
+  there. Two things it must also get, or the result does not work:
+  - the **`model`**, which the hosted API requires on every call;
+  - a **`referenceId`** — the user picks a voice from the provider's library.
+    fish.audio has no default voice identity and no `seed` in its request
+    schema, so without one the timbre changes from line to line. murmur ships
+    **no default voice id**: the one in the maintainer's `.env.fishaudio` is a
+    *private* model that would 403 for anyone else, and the public library's
+    most popular voices are celebrity and character clones — not an identity
+    murmur should hand a new listener by default. Skipping the pick is allowed,
+    and the guide says plainly what it costs.
+- **Tool-captured secrets** (the rule, not just this case): a secret the user
+  types **as a conversation message** becomes an SDK user message — it is sent
+  to the API and kept in the local session transcript, where it outlives the
+  conversation and is readable by any later session. So murmur-owned tools
+  never take a credential as an argument. `write_voice_config` takes
+  `needsApiKey` instead, and the **tool handler itself** asks the user through
+  the Host and reads the line. The model learns only that a key was saved. The
+  guide prompt says the same thing in words, because the model must not ask for
+  one either.
+- **No dated claims**: the guide states nothing about a provider's pricing,
+  free tier or limits from memory — free windows move, and a wrong date is a
+  promise murmur breaks silently. It **reads the current policy live**
+  (WebFetch, consented) and reports what it just read; if it cannot reach the
+  page it says so and hands over the link. No such date is hardcoded anywhere
+  in murmur — prompts included. Consequently `WebFetch` joins the guide's
+  built-in surface; it is strictly narrower than the `Bash` already there.
 - **Tool surface**: this guide task gets ONE murmur-owned extra tool,
   `write_voice_config` (zod input, realpath-scoped to that single config
   path — the same trust-boundary posture as spec 06 slice B). The SDK

@@ -66,7 +66,7 @@ describe('voiceAfterSetup (issue #93)', () => {
   it('speaks with an endpoint the conversation just wrote', () => {
     const before = config([], home())
     expect(before.voice).toBe('stub')
-    const after = voiceAfterSetup(before, 'https://written.example')
+    const after = voiceAfterSetup(before, { ttsUrl: 'https://written.example' })
     expect(after.voice).toBe('hosted')
     expect(after.ttsUrl).toBe('https://written.example')
     expect(buildVoice(after)).toBeInstanceOf(HostedVoice)
@@ -76,13 +76,13 @@ describe('voiceAfterSetup (issue #93)', () => {
     // An explicit `--voice stub` on a machine that HAS an endpoint is a
     // deliberate request for silence, not a gap the conversation just closed.
     const silent = config(['--voice', 'stub'], { MURMUR_TTS_URL: 'https://env.example' })
-    expect(voiceAfterSetup(silent, 'https://env.example')).toEqual(silent)
-    expect(buildVoice(voiceAfterSetup(silent, 'https://env.example'))).toBeInstanceOf(StubVoice)
+    expect(voiceAfterSetup(silent, { ttsUrl: 'https://env.example' })).toEqual(silent)
+    expect(buildVoice(voiceAfterSetup(silent, { ttsUrl: 'https://env.example' }))).toBeInstanceOf(StubVoice)
   })
 
   it('a declined or failed voice setup stays silent, not half-configured', () => {
     const before = config([], home())
-    expect(voiceAfterSetup(before, '')).toEqual(before)
+    expect(voiceAfterSetup(before, null)).toEqual(before)
   })
 
   // Peer review (codex): the promotion could not tell a DERIVED stub (no
@@ -92,23 +92,54 @@ describe('voiceAfterSetup (issue #93)', () => {
   it('never overrides an explicit --voice stub, even right after configuring one', () => {
     const silent = config(['--voice', 'stub'], home())
     expect(silent.ttsUrl).toBe('')
-    const after = voiceAfterSetup(silent, 'https://written.example')
+    const after = voiceAfterSetup(silent, { ttsUrl: 'https://written.example' })
     expect(after.voice).toBe('stub')
     expect(buildVoice(after)).toBeInstanceOf(StubVoice)
   })
 
   it('an explicit --voice hosted is honoured once an endpoint arrives', () => {
     const wanted = config(['--voice', 'hosted'], home())
-    const after = voiceAfterSetup(wanted, 'https://written.example')
+    const after = voiceAfterSetup(wanted, { ttsUrl: 'https://written.example' })
     expect(after.voice).toBe('hosted')
     expect(after.ttsUrl).toBe('https://written.example')
+  })
+
+  // Issue #96: a hosted endpoint is more than a URL. Carrying only the URL out
+  // of the conversation meant the key and the `model` header the guide had just
+  // captured were dropped for the rest of THIS boot — so §7.3 criterion 5's
+  // "an audible line" was false for exactly the backend new users are sent to.
+  it('carries the whole config out of the conversation, not just the URL', () => {
+    const after = voiceAfterSetup(config([], home()), {
+      ttsUrl: 'https://api.fish.audio',
+      model: 's2.1-pro-free',
+      referenceId: 'abc123',
+      apiKey: 'sk-not-a-real-key',
+    })
+    expect(after).toMatchObject({
+      voice: 'hosted',
+      ttsUrl: 'https://api.fish.audio',
+      ttsModel: 's2.1-pro-free',
+      ttsReferenceId: 'abc123',
+      ttsApiKey: 'sk-not-a-real-key',
+    })
+  })
+
+  it('still lets env and flags win per knob over what the file just said', () => {
+    const env = config([], { ...home(), MURMUR_TTS_MODEL: 'env-model' })
+    const after = voiceAfterSetup(env, {
+      ttsUrl: 'https://api.fish.audio',
+      model: 'file-model',
+      apiKey: 'sk-not-a-real-key',
+    })
+    expect(after.ttsModel).toBe('env-model')
+    expect(after.ttsApiKey).toBe('sk-not-a-real-key')
   })
 
   // Peer review (codex): the banner read config.voice while audio was built
   // from the promoted config, so the first post-setup run advertised 'stub'
   // while speaking. One resolved config now feeds both.
   it('is the single source for what plays AND what the banner reports', () => {
-    const after = voiceAfterSetup(config([], home()), 'https://written.example')
+    const after = voiceAfterSetup(config([], home()), { ttsUrl: 'https://written.example' })
     expect(after.voice).toBe('hosted')
     expect(buildVoice(after)).toBeInstanceOf(HostedVoice)
   })
@@ -151,6 +182,24 @@ describe('setup targets', () => {
     expect(targets.voiceUrl()).toBe('')
     writeFileSync(join(home, 'voice.json'), JSON.stringify({ ttsUrl: 'https://written.example' }))
     expect(targets.voiceUrl()).toBe('https://written.example')
+  })
+
+  it('hands back the whole written config, so a captured key is live this boot', () => {
+    const home = emptyHome()
+    const targets = setupTargets(config([], { MURMUR_HOME: home }))
+    expect(targets.voiceConfig()).toBeNull()
+    writeFileSync(
+      join(home, 'voice.json'),
+      JSON.stringify({
+        ttsUrl: 'https://api.fish.audio',
+        model: 's2.1-pro-free',
+        apiKey: 'sk-not-a-real-key',
+      }),
+    )
+    expect(targets.voiceConfig()).toMatchObject({
+      model: 's2.1-pro-free',
+      apiKey: 'sk-not-a-real-key',
+    })
   })
 })
 

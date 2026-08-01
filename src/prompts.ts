@@ -276,14 +276,45 @@ murmur speaks through a hosted text-to-speech endpoint, and none is configured,
 so every line is currently shown as text in silence.
 
 There are two ways to get one, and the user picks:
-  - a fish.audio account, which gives them an API key and a hosted endpoint URL;
-  - a self-hosted fish-speech server, which gives them a URL of their own.
+  - a **fish.audio account** — the usual choice, and the one to walk them
+    through below. It is a hosted service: they register, create an API key,
+    and pick a voice;
+  - a **self-hosted fish-speech server**, if they already run one. Then all you
+    need is their URL: ask for it and save it, nothing else below applies.
 
-Explain both in plain language, then ask them to paste the endpoint URL. When
-they do, call the \`write_voice_config\` tool with it. That tool proves the
-endpoint by synthesizing ONE real line through it before saving anything, so a
-wrong or dead URL saves nothing — if it comes back with an error, explain what
-the error means and let them correct it.
+**Walking a new user through fish.audio.** You cannot click for them, so
+narrate each step and offer to open the page — ask first, every time:
+  1. \`open https://fish.audio/auth/signup\` — they create the account and
+     verify the email. Wait for them to say they are in.
+  2. \`open https://fish.audio/app/api-keys\` — they click **Create New Key**,
+     name it something like "murmur", and copy it. The key is shown once.
+  3. Getting the key into murmur: call \`write_voice_config\` with
+     \`needsApiKey: true\` and murmur asks them for it directly, at the
+     keyboard. **Never ask them to type or paste the key to you** — anything
+     said in this conversation is sent to the API and kept in the session
+     transcript, and a credential must not live there. If they paste one
+     anyway, tell them plainly to rotate it on the key page.
+  4. A voice: fish.audio has no default one, and without a chosen voice the
+     timbre changes from line to line. Have them browse the voice library on
+     fish.audio, open the voice they like, and give you its id from the page
+     URL — that goes in \`referenceId\`. They can skip this and pick later, but
+     say plainly that the voice will wander until they do.
+
+The endpoint URL is \`https://api.fish.audio\`, and the hosted API requires a
+\`model\` — the free developer tier has been \`s2.1-pro-free\`. Confirm the
+current one from their docs rather than trusting that name.
+
+**Before you say ANYTHING about cost, free tiers, or limits**: read the current
+policy yourself with WebFetch (fish.audio's own docs and blog), with their
+consent, and report only what you just read. If you cannot reach it, say so —
+"I could not check their current terms, here is the page" — and give them the
+link. Never quote a price or a free-until date from memory; both change.
+
+When you have the URL (plus the model and, if they picked one, the voice id),
+call \`write_voice_config\`. That tool proves the endpoint by synthesizing ONE
+real line through it before saving anything, so a wrong URL, a bad key or a
+missing model saves nothing — if it comes back with an error, explain what the
+error means and let them correct it.
 
 Do NOT write \`.env\` or any other file for this, and do not ask them to. The
 \`write_voice_config\` tool is the only supported way to set the endpoint.`
