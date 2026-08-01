@@ -23,6 +23,7 @@ import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
+import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona, personaLine } from './persona.ts'
 import { runSetup, type SetupTargets } from './guide.ts'
@@ -345,6 +346,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
 
   const music = musicOk && claude !== null ? buildMusic(config, claude, engine, host) : undefined
   const pacing = buildPacing(config, memory)
+  // The agentic reply turn (spec 11): rides the same harness as the pick task,
+  // on the main tier — the reply is the soul. A stub run has no harness, so the
+  // Director keeps its tool-less respond path there by construction.
+  const steer = claude !== null ? new SteerResponder({ brain: claude, model: config.model }) : undefined
 
   const director = new Director({
     persona,
@@ -357,6 +362,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     recentWindow: config.recentWindow,
     ...(pacing !== undefined && { pacing }),
     ...(music !== undefined && { music }),
+    ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
   })
 

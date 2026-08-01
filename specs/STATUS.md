@@ -7,7 +7,8 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-01 (listening + guided-repair passes run; #78/#82 closed)_
+_Last updated: 2026-08-01 (spec 11 agentic-steer built: the reply turn gets
+tools — switch_music / two-phase end_broadcast; by-ear pass owed)_
 
 ## Where we are
 
@@ -37,6 +38,9 @@ how it got there:
   and the guide-written voice endpoint (#88).
 - Spec restructure — persona stays stable, 06 rescoped, 07 extended, 08 and 09
   retired (#65).
+- spec 11 agentic-steer — the reply turn runs the harness with
+  `switch_music` (handover-on-resolve) / `end_broadcast` (confirm-first) /
+  `submit_reply`; boundary automation stays local policy.
 
 ## Open
 
@@ -52,6 +56,8 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
 - **#81** (by-ear) A real day of pacing — spec 07 §5.16.
 - **#83** (watch) Enter during an uncommitted IME composition may submit the line.
+- **#98** (eng) Steer tool-choice eval (Ollama) owed — the smoke is on-demand only; spec 11 §5.
+- **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 
 ## Pinned — do not relitigate
 

@@ -177,6 +177,7 @@ export class FakeMusicHandle implements MusicHandle {
   ducks = 0
   unducks = 0
   stopped = false
+  endedNaturally = false
   // Scripted: does the stream produce real audio? (false = the dead-403 case)
   startedOk = true
 
@@ -190,6 +191,7 @@ export class FakeMusicHandle implements MusicHandle {
 
   // Test control: the song reaches its natural end.
   end(): void {
+    this.endedNaturally = true
     this.release()
   }
 
@@ -223,6 +225,12 @@ export class FakeMixingPlayer extends FakePlayer implements MixingPlayer {
 
   async playMusic(clip: AudioClip): Promise<MusicHandle> {
     this.music.push(clip)
+    // Mirrors the engine's single-music invariant (engine.ts playMusic): a new
+    // track cuts whatever music is still live.
+    const previous = this.handles.at(-1)
+    if (previous !== undefined && !previous.stopped && !previous.endedNaturally) {
+      await previous.stop()
+    }
     const handle = this.nextHandles.shift() ?? new FakeMusicHandle()
     this.handles.push(handle)
     return handle
