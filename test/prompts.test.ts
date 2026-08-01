@@ -10,6 +10,7 @@ import {
   buildNextTalksPrompt,
   buildRespondPrompt,
   buildSeedPersonaPrompt,
+  buildSetupPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
   FIND_MUSIC_INSTRUCTION,
@@ -344,6 +345,54 @@ describe('status microcopy (spec 10 §3.7.4)', () => {
     )
     expect(statusMicrocopy({ kind: 'gap', awaitingReply: false }, () => 0.999)).toBe(
       STATUS_MICROCOPY.gap.at(-1),
+    )
+  })
+})
+
+// Issue #96: the walkthrough has to take a brand-new user from "no account" to
+// an audible line without ever touching a shell — and without murmur claiming
+// anything about fish.audio's terms that it has not just checked.
+describe('the voice-endpoint walkthrough (spec 03-03 §7.2)', () => {
+  const prompt = (): string =>
+    buildSetupPrompt({
+      gaps: [{ kind: 'voice', reason: 'no endpoint configured' }],
+      ytdlp: 'yt-dlp',
+      ffmpeg: 'ffmpeg',
+      bunCmd: 'bun',
+    })
+
+  it('walks registration by name: signup, the key page, the model header', () => {
+    const text = prompt()
+    expect(text).toContain('https://fish.audio/auth/signup')
+    expect(text).toContain('https://fish.audio/app/api-keys')
+    // The `model` header is required by the hosted API; a config without it
+    // cannot validate no matter how good the URL and key are.
+    expect(text).toContain('model')
+    expect(text).toContain('write_voice_config')
+  })
+
+  it('routes the key through the tool, never through the conversation', () => {
+    const text = prompt()
+    expect(text).toContain('needsApiKey')
+    expect(text.toLowerCase()).toMatch(/never ask (them|the user) to (type|paste|send)[^.]*key/)
+  })
+
+  it('has the user pick a voice, because a hosted config without one drifts', () => {
+    // fish.audio has no default voice identity and ignores `seed`, so
+    // reference_id is the only thing that keeps the timbre stable.
+    expect(prompt()).toContain('referenceId')
+  })
+
+  it('states no policy from memory: the free tier is checked live or not claimed', () => {
+    const text = prompt()
+    expect(text.toLowerCase()).toContain('webfetch')
+    // A date in the prompt is a promise that expires silently. There is none:
+    // no year, no month name, anywhere in the setup prompt.
+    expect(text).not.toMatch(/\b(19|20)\d{2}\b/)
+    // ('may' is left out — it is an ordinary English word, and the year guard
+    // above is what actually catches a written-out date.)
+    expect(text).not.toMatch(
+      /\b(january|february|march|april|june|july|august|september|october|november|december)\b/i,
     )
   })
 })

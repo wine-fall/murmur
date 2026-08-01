@@ -224,6 +224,58 @@ describe('voice config file precedence', () => {
     expect(config.ttsSeed).toBe(1)
   })
 
+  // Issue #96: the file mirrors the MURMUR_TTS_* surface, so a conversation
+  // that configured hosted fish.audio produces a session that can actually
+  // reach it — key, model header and voice id included.
+  it('reads every hosted knob the guide can write', () => {
+    const { config } = parseCli(
+      [],
+      home({
+        ttsUrl: 'https://api.fish.audio',
+        model: 's2.1-pro-free',
+        referenceId: 'abc123',
+        apiKey: 'sk-not-a-real-key',
+      }),
+    )
+    expect(config.ttsModel).toBe('s2.1-pro-free')
+    expect(config.ttsReferenceId).toBe('abc123')
+    expect(config.ttsApiKey).toBe('sk-not-a-real-key')
+  })
+
+  it('env beats the file per knob, and the file fills what env leaves unset', () => {
+    const env = {
+      ...home({
+        ttsUrl: 'https://file.example',
+        model: 'file-model',
+        referenceId: 'file-ref',
+        apiKey: 'file-key',
+      }),
+      MURMUR_TTS_MODEL: 'env-model',
+    }
+    const { config } = parseCli([], env)
+    expect(config.ttsModel).toBe('env-model')
+    expect(config.ttsReferenceId).toBe('file-ref')
+    expect(config.ttsApiKey).toBe('file-key')
+  })
+
+  // Peer review (codex): per-knob precedence let a saved credential ride along
+  // to somewhere else — `--tts-url http://box.local` on a machine whose
+  // voice.json holds a fish.audio key sent that key to box.local. A stored key
+  // belongs to the endpoint it was stored with.
+  it('never sends a stored key to an endpoint it was not stored with', () => {
+    const saved = { ttsUrl: 'https://api.fish.audio', apiKey: 'sk-not-a-real-key' }
+    expect(parseCli([], { ...home(saved), MURMUR_TTS_URL: 'http://box.local' }).config.ttsApiKey).toBe('')
+    expect(parseCli(['--tts-url', 'http://box.local'], home(saved)).config.ttsApiKey).toBe('')
+    // The same endpoint re-stated from another layer is still that endpoint.
+    expect(parseCli(['--tts-url', 'https://api.fish.audio'], home(saved)).config.ttsApiKey).toBe(
+      'sk-not-a-real-key',
+    )
+    expect(parseCli([], home(saved)).config.ttsApiKey).toBe('sk-not-a-real-key')
+    // An env key is the caller's own statement and always applies.
+    const env = { ...home(saved), MURMUR_TTS_URL: 'http://box.local', MURMUR_TTS_API_KEY: 'sk-env' }
+    expect(parseCli([], env).config.ttsApiKey).toBe('sk-env')
+  })
+
   it('a CLI flag beats both', () => {
     const env = { ...home({ ttsUrl: 'https://file.example' }) }
     env.MURMUR_TTS_URL = 'https://env.example'

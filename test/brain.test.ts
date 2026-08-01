@@ -90,6 +90,13 @@ describe('guideOptions (spec 03-03 §5.1)', () => {
     expect(o.extraArgs).toHaveProperty('disable-slash-commands')
   })
 
+  // Issue #96: the walkthrough must read a provider's CURRENT terms rather
+  // than repeat a date from training. WebFetch is how it reads them, and it is
+  // strictly narrower than the Bash the guide already holds.
+  it('can read a page, so it never quotes a policy from memory', () => {
+    expect(GUIDE_BUILTINS).toContain('WebFetch')
+  })
+
   it('never auto-approves: allowedTools stays unset, permission flow gates each action', () => {
     // In this SDK `allowedTools` EXECUTES WITHOUT ASKING — the opposite of the
     // per-action confirm the guide is for. The surface is bounded via `tools`.

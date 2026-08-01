@@ -29,7 +29,7 @@ import { runSetup, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { preflightBun } from './startup.ts'
 import { VizFeed } from './viz.ts'
-import { readVoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
+import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
 import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
@@ -189,9 +189,10 @@ export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
 }
 
 // What the setup conversation is allowed to look at and repair this run
-// (spec 03-03 §7.1). `voiceUrl` is a thunk: the guide may write voice.json
-// mid-conversation, and the recheck has to read the world again.
+// (spec 03-03 §7.1). The voice readers are thunks: the guide may write
+// voice.json mid-conversation, and the recheck has to read the world again.
 export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): SetupTargets {
+  const saved = (): VoiceConfig | null => readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))
   return {
     ytdlp: config.ytdlpCmd,
     ffmpeg: config.ffmpegCmd,
@@ -206,7 +207,10 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     // it from the offer; it is an offer item, never a blocker.
     wantsVoice: true,
     // Env/flags keep precedence over the file, exactly as parseCli layered it.
-    voiceUrl: () => config.ttsUrl || (readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))?.ttsUrl ?? ''),
+    voiceUrl: () => config.ttsUrl || (saved()?.ttsUrl ?? ''),
+    // The file as written, for the run to wire itself from: a hosted endpoint
+    // is a key and a model header too, not a URL alone (issue #96).
+    voiceConfig: saved,
     ...over,
   }
 }
@@ -221,14 +225,26 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
 // is still saved for the next one), or touch a run that already had an
 // endpoint. The result is the single source for both what plays and what the
 // banner reports.
-export function voiceAfterSetup(config: Config, url: string): Config {
-  if (url === '' || config.ttsUrl !== '') return config
-  // The endpoint is a fact about the world, so the fresh one is always taken.
+// A hosted endpoint is the whole config, not the URL: fish.audio needs the key
+// and the `model` header on every call (issue #96), so the knobs travel
+// together or the freshly configured voice cannot speak.
+export function voiceAfterSetup(config: Config, saved: VoiceConfig | null): Config {
+  if (saved === null || config.ttsUrl !== '') return config
+  // The endpoint is a fact about the world, so the fresh one is always taken —
+  // per knob, still behind whatever env or a flag already stated.
+  const next: Config = {
+    ...config,
+    ttsUrl: saved.ttsUrl,
+    ...(config.ttsModel === '' && saved.model !== undefined && { ttsModel: saved.model }),
+    ...(config.ttsReferenceId === '' &&
+      saved.referenceId !== undefined && { ttsReferenceId: saved.referenceId }),
+    ...(config.ttsApiKey === '' && saved.apiKey !== undefined && { ttsApiKey: saved.apiKey }),
+    ...(config.ttsSeed === undefined && saved.seed !== undefined && { ttsSeed: saved.seed }),
+  }
   // WHICH provider speaks is a preference, so only a stub nobody asked for is
   // promoted — `--voice hosted` still gets the new endpoint, `--voice stub`
   // still gets silence.
-  if (config.voiceExplicit) return { ...config, ttsUrl: url }
-  return { ...config, voice: 'hosted', ttsUrl: url }
+  return config.voiceExplicit ? next : { ...next, voice: 'hosted' }
 }
 
 // The explicit setup entries (spec 03-03 §7.1): `murmur --setup` walks the whole
@@ -326,7 +342,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // Resolved after the conversation, so an endpoint saved during it is heard
   // THIS boot rather than the next one — and so the banner reports the voice
   // that is actually playing, not the one the flags asked for.
-  const resolved = voiceAfterSetup(config, targets.voiceUrl())
+  const resolved = voiceAfterSetup(config, targets.voiceConfig())
   const voice = buildVoice(resolved, (m) => host.info(m))
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any

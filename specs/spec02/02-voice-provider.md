@@ -173,6 +173,17 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
   (the voice changes line to line). `MURMUR_TTS_SEED` pins the sampled voice so a
   run keeps one consistent voice; a registered `reference_id` is the stronger,
   cross-text-stable option once a reference is saved server-side.
+  **Which knob pins depends on the backend** (verified against the hosted API,
+  2026-08-01): a **self-hosted** fish-speech server honours `seed`, while
+  **hosted fish.audio has no `seed` in its request schema at all** — there,
+  `reference_id` is the only thing that keeps one voice across calls.
+- **The guide-written file mirrors this env surface knob for knob**
+  (spec 03-03 §7.2): `$MURMUR_HOME/voice.json` holds
+  `{ ttsUrl, model?, referenceId?, apiKey?, seed? }`, layered *under* env and
+  flags per knob. A URL alone is a complete config only for a self-hosted
+  server; the hosted API requires the key and the `model` header on every
+  request, so an endpoint configured by conversation carries all of them —
+  through the validation synth and into the run.
 - **Wire protocol — fish-speech native `/v1/tts`** (the chosen server): `POST`
   a JSON body (`text`, `reference_id`, `format:"wav"`, `streaming:false`,
   `normalize:true`, and the sampling defaults) with `content-type:

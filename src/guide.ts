@@ -107,6 +107,9 @@ export type SetupTargets = {
   readonly wantsBun: boolean
   readonly wantsVoice: boolean
   readonly voiceUrl: () => string
+  // The saved config behind that URL, re-read the same way: what the run wires
+  // its voice from once the conversation is over (issue #96).
+  readonly voiceConfig: () => VoiceConfig | null
 }
 
 export type SetupProbes = {
@@ -222,7 +225,15 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     ? [
         writeVoiceConfigTool({
           home: targets.home,
-          validate: run.validateVoice ?? validateEndpoint,
+          validate: run.validateVoice ?? ((config) => validateEndpoint(config)),
+          // The secret's own channel: murmur asks, the user types, the tool
+          // keeps it. It never becomes a message, so it never reaches the API
+          // or the session transcript the SDK keeps (spec 03-03 §7.2).
+          promptSecret: async (label) => {
+            host.info(`paste your ${label} and press enter (murmur reads it directly):`)
+            return await read()
+          },
+          // The URL is public knowledge; the key is not. Print only this.
           onWritten: (config) => host.info(`voice endpoint saved: ${config.ttsUrl}`),
         }),
       ]
@@ -253,11 +264,20 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
 }
 
 // The real validation: one synth through the pasted endpoint. A clip that comes
-// back is the only proof that matters, and it costs one short line.
-async function validateEndpoint(config: VoiceConfig): Promise<void> {
+// back is the only proof that matters, and it costs one short line. It speaks
+// with the WHOLE config — hosted fish.audio rejects a call without its key and
+// `model` header, so a URL-only probe could only ever fail there (issue #96).
+export async function validateEndpoint(
+  config: VoiceConfig,
+  fetchImpl?: typeof fetch,
+): Promise<void> {
   const voice = new HostedVoice({
     baseUrl: config.ttsUrl,
+    ...(config.model !== undefined && { model: config.model }),
+    ...(config.referenceId !== undefined && { referenceId: config.referenceId }),
+    ...(config.apiKey !== undefined && { apiKey: config.apiKey }),
     ...(config.seed !== undefined && { seed: config.seed }),
+    ...(fetchImpl !== undefined && { fetch: fetchImpl }),
   })
   try {
     await voice.synthesize(VOICE_PROBE_LINE)

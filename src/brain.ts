@@ -131,7 +131,10 @@ export function agenticOptions(
 // the environment. A curated set (no network fetch tools) — the bounded
 // surface a setup/repair task needs, in contrast to the tool-less find-music
 // task (per-task tool surface, spec 03-03 §3).
-export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep'] as const
+// WebFetch is here so the guide can read a provider's CURRENT terms instead of
+// repeating a free-tier date from training (spec 03-03 §7.2); it is strictly
+// narrower than the Bash already on the list, and asks like everything else.
+export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch'] as const
 
 // Options for the guide harness (spec 03-03): same isolation as the other
 // harnesses (no user settings/skills/MCP), but the curated BUILT-IN tools are
