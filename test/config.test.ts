@@ -234,6 +234,31 @@ describe('voice config file precedence', () => {
     expect(parseCli([], home(null)).config.ttsUrl).toBe('')
   })
 
+  // issue #93: having an endpoint IS the reason to speak with it. Deriving the
+  // default from the endpoint is what makes a voice configured through the
+  // guide (spec 03-03 §7.2) audible on the next boot rather than silently
+  // ignored because the knob still says 'stub'.
+  it('defaults the voice to hosted when an endpoint is configured, from either layer', () => {
+    expect(parseCli([], home({ ttsUrl: 'https://file.example' })).config.voice).toBe('hosted')
+    const env = { ...home(null), MURMUR_TTS_URL: 'https://env.example' }
+    expect(parseCli([], env).config.voice).toBe('hosted')
+    expect(parseCli(['--tts-url', 'http://box.local'], home(null)).config.voice).toBe('hosted')
+  })
+
+  it('stays on the stub voice when there is no endpoint anywhere', () => {
+    expect(parseCli([], home(null)).config.voice).toBe('stub')
+  })
+
+  it('an explicit --voice always wins over the derived default, both ways', () => {
+    // Someone who asked for silence gets silence, endpoint or not...
+    expect(
+      parseCli(['--voice', 'stub'], home({ ttsUrl: 'https://file.example' })).config.voice,
+    ).toBe('stub')
+    // ...and asking for the hosted voice with nothing configured still degrades
+    // at build time rather than being quietly rewritten here.
+    expect(parseCli(['--voice', 'hosted'], home(null)).config.voice).toBe('hosted')
+  })
+
   it('an unusable file degrades to unconfigured rather than aborting startup', () => {
     const env = home(null)
     writeFileSync(join(env.MURMUR_HOME!, 'voice.json'), 'not json at all')

@@ -14,6 +14,7 @@ import {
   runBootstrapProfileCli,
   runSetupCli,
   setupTargets,
+  voiceAfterSetup,
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
@@ -57,6 +58,62 @@ describe('app wiring', () => {
   })
 })
 
+// spec 03-03 §7.3 criterion 5: the conversation ends with a validated config
+// AND an audible line. An endpoint saved mid-boot has to be HEARD this boot.
+describe('voiceAfterSetup (issue #93)', () => {
+  const home = () => ({ MURMUR_HOME: emptyHome() })
+
+  it('speaks with an endpoint the conversation just wrote', () => {
+    const before = config([], home())
+    expect(before.voice).toBe('stub')
+    const after = voiceAfterSetup(before, 'https://written.example')
+    expect(after.voice).toBe('hosted')
+    expect(after.ttsUrl).toBe('https://written.example')
+    expect(buildVoice(after)).toBeInstanceOf(HostedVoice)
+  })
+
+  it('leaves a run that already had an endpoint exactly as configured', () => {
+    // An explicit `--voice stub` on a machine that HAS an endpoint is a
+    // deliberate request for silence, not a gap the conversation just closed.
+    const silent = config(['--voice', 'stub'], { MURMUR_TTS_URL: 'https://env.example' })
+    expect(voiceAfterSetup(silent, 'https://env.example')).toEqual(silent)
+    expect(buildVoice(voiceAfterSetup(silent, 'https://env.example'))).toBeInstanceOf(StubVoice)
+  })
+
+  it('a declined or failed voice setup stays silent, not half-configured', () => {
+    const before = config([], home())
+    expect(voiceAfterSetup(before, '')).toEqual(before)
+  })
+
+  // Peer review (codex): the promotion could not tell a DERIVED stub (no
+  // endpoint, so the default resolved to stub) from an EXPLICIT `--voice stub`,
+  // so it overrode a deliberate request for silence. The flag wins for this
+  // run; the endpoint is still saved, so the next boot speaks.
+  it('never overrides an explicit --voice stub, even right after configuring one', () => {
+    const silent = config(['--voice', 'stub'], home())
+    expect(silent.ttsUrl).toBe('')
+    const after = voiceAfterSetup(silent, 'https://written.example')
+    expect(after.voice).toBe('stub')
+    expect(buildVoice(after)).toBeInstanceOf(StubVoice)
+  })
+
+  it('an explicit --voice hosted is honoured once an endpoint arrives', () => {
+    const wanted = config(['--voice', 'hosted'], home())
+    const after = voiceAfterSetup(wanted, 'https://written.example')
+    expect(after.voice).toBe('hosted')
+    expect(after.ttsUrl).toBe('https://written.example')
+  })
+
+  // Peer review (codex): the banner read config.voice while audio was built
+  // from the promoted config, so the first post-setup run advertised 'stub'
+  // while speaking. One resolved config now feeds both.
+  it('is the single source for what plays AND what the banner reports', () => {
+    const after = voiceAfterSetup(config([], home()), 'https://written.example')
+    expect(after.voice).toBe('hosted')
+    expect(buildVoice(after)).toBeInstanceOf(HostedVoice)
+  })
+})
+
 // spec 03-03 §7.1: what the setup conversation is allowed to look at is derived
 // from the session's own config — it never probes for something unwanted.
 describe('setup targets', () => {
@@ -66,7 +123,26 @@ describe('setup targets', () => {
     expect(full.voiceUrl()).toBe('https://x')
 
     const lean = setupTargets(config(['--no-music', '--plain'], { MURMUR_HOME: emptyHome() }))
-    expect(lean).toMatchObject({ wantsMusic: false, wantsBun: false, wantsVoice: false })
+    expect(lean).toMatchObject({ wantsMusic: false, wantsBun: false })
+  })
+
+  // issue #93: the boot offer never named the voice gap, because wantsVoice was
+  // read off config.voice — which defaults to 'stub'. A brand-new user was
+  // therefore never told at boot that the radio has no real voice.
+  it('considers the voice endpoint even on a stub-voice run', () => {
+    const home = emptyHome()
+    expect(setupTargets(config([], { MURMUR_HOME: home })).wantsVoice).toBe(true)
+    // Even when the listener explicitly asked for silence: it is offered once,
+    // and declining is what records the standing answer.
+    expect(setupTargets(config(['--voice', 'stub'], { MURMUR_HOME: home })).wantsVoice).toBe(true)
+  })
+
+  it('scopes --setup-music to the binaries alone', () => {
+    const targets = setupTargets(config([], { MURMUR_HOME: emptyHome() }), {
+      wantsBun: false,
+      wantsVoice: false,
+    })
+    expect(targets).toMatchObject({ wantsMusic: true, wantsBun: false, wantsVoice: false })
   })
 
   it('re-reads the endpoint each call, so a mid-conversation write is picked up', () => {

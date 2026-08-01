@@ -102,6 +102,29 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
     })
     expect(gaps).toEqual([])
   })
+
+  // issue #93: env / file / neither — the three ways an endpoint can be
+  // present or absent. `voiceUrl` is the one seam that collapses them, so the
+  // gap must follow it and nothing else.
+  it('names the voice gap only when neither layer supplies an endpoint', async () => {
+    const probes = { music: async () => OK, bun: async () => OK }
+    const voiceGaps = async (url: string): Promise<string[]> =>
+      (await detectGaps(targets({ voiceUrl: () => url }), probes)).map((g) => g.kind)
+
+    expect(await voiceGaps('https://env.example')).toEqual([]) // env supplied it
+    expect(await voiceGaps('https://file.example')).toEqual([]) // voice.json did
+    expect(await voiceGaps('')).toEqual(['voice']) // neither
+    // Whitespace is not an endpoint.
+    expect(await voiceGaps('   ')).toEqual(['voice'])
+  })
+
+  it('never blocks: the voice gap is one item among the others, not a stopper', async () => {
+    const gaps = await detectGaps(targets(), {
+      music: async () => NO_YTDLP,
+      bun: async () => NO_BUN,
+    })
+    expect(gaps.map((g) => g.kind)).toEqual(['music', 'bun', 'voice'])
+  })
 })
 
 // The posture that matters (spec 03-03 §7.1 point 3): a degraded launch is NOT
