@@ -7,7 +7,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-01 (listening pass run, #78 closed; by-ear passes remain)_
+_Last updated: 2026-08-01 (listening + guided-repair passes run; #78/#82 closed)_
 
 ## Where we are
 
@@ -47,10 +47,10 @@ hand: CI fails if this section points at an issue that is already closed.
 
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#95** (eng) A config knob to turn the TUI pet off — flagged by the listening pass; spec 10.
+- **#44** (eng) Cold-start talk repeats the same cozy imagery — a model-attractor problem, not hardcoded text.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
 - **#81** (by-ear) A real day of pacing — spec 07 §5.16.
-- **#82** (by-ear) The guide's repair flow in a real terminal — spec 03-03 §5.3.
 - **#83** (watch) Enter during an uncommitted IME composition may submit the line.
 
 ## Pinned — do not relitigate

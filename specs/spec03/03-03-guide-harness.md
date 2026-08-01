@@ -14,7 +14,7 @@
 > that regressed the Python build). The SDK's safe-command classifier may run
 > read-only commands (e.g. `echo`) without an ask; every state-changing action
 > still asks — consent semantics stay SDK-owned per §2. Interactive acceptance
-> (§5.3) on the TS build is a user-run checklist, pending.
+> (§5.3) on the TS build **passed 2026-08-01** on a delegated real-SDK run.
 > **Part**: The third part of spec 03 (the music family), riding the brain-harness from [`03-01-brain-harness.md`](03-01-brain-harness.md): shape the **native Claude Code agent** to diagnose and — with the user's consent — fix why the music dependencies (**yt-dlp + ffmpeg** — both unbound external binaries per master §10.1) aren't working in *their* environment (missing entirely, or broken — e.g. a corporate proxy whose CA yt-dlp doesn't trust). This is what makes 03's music **actually usable** on constrained machines. See master [`../DESIGN.md`](../DESIGN.md) §3.2 (the brain is a harnessed agent), §10.1 (guided provisioning), §7 pillar 1 (deterministic checks are local, 0 tokens).
 > **Milestone**: L1 — part of delivering working music (03). Depends on 03-01 (the harness) + 01 (CLI Host); independent of 03-02 (ducking).
 > **Conventions**: English; written for a coding agent. We do **not** build an agent — Claude Code is the agent; we shape it. Prompts centralized in `src/prompts.ts`; no CJK in source (master §0).
@@ -69,6 +69,7 @@
 1. **Guide options** are isolated (`setting_sources=[]`, `strict_mcp_config=True`), built-ins allowlisted, and `permission_mode="default"`. *(Unit — done.)*
 2. **Preflight** deterministically detects broken/missing/healthy states for BOTH binaries with **no LLM call** (unit: failing / passing stand-in binaries → correct `ok` + reason), and the aggregate is ok only when both are (a combined reason names each broken piece).
 3. **Interactive repair (the real bar, human-run)**: on a machine where yt-dlp is broken (e.g. a corporate proxy CA), starting murmur → it tells you plainly it's broken → offers to fix → **you confirm** → it fixes it, asking before each action → yt-dlp then works (a real search returns JSON, no `--no-check-certificate`). The agent produces the fix; the user answers the confirmations. Can't be self-verified (needs a human + a real broken env).
+   **Passed on the TS build — 2026-08-01, delegated real-SDK run**: yt-dlp made unresolvable via a sandboxed PATH; the report named exactly the broken binary, each action asked for consent, the consented fix was applied, and the recheck came back green through the real preflight probe.
 4. **`bypassPermissions` never appears** in the shipped path (grep-able invariant).
 
 ### Testing (master §11)
