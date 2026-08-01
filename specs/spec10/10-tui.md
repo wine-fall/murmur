@@ -525,6 +525,8 @@ TUI work is built on the framework choice.
     like a warm little radio with a soul — pet alive, bars breathing,
     microcopy in voice — and not a dev-tool dashboard? The agent produces the
     checklist; the user judges (master §11.2 layer 3).
+    **Result — 2026-08-01 user listening pass**: bed and ducking accepted, pet
+    flagged; follow-ups #95 (off switch) and #79 (identity).
 
 ---
 
@@ -534,7 +536,7 @@ TUI work is built on the framework choice.
   bun absent the startup probe falls the front-end back to `plain` with one
   in-program notice (and the guide can provision bun — spec 03-03 §7).
   `--plain` / `TUI=0` are the explicit escape. The user chose to flip ahead
-  of the §5.11 sensory pass; that pass stays owed (#78).
+  of the §5.11 sensory pass; that pass has since run (§5.11, 2026-08-01).
   **As built (2026-07-31)**: the flip is `ConfigSchema.frontEnd`'s default, and
   `--plain` is applied after `--tui` so an explicit opt-out always wins. The
   fallback notice is exactly one line and says nothing about how to install bun
