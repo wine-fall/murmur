@@ -1,12 +1,16 @@
+<p align="center">
+  <img src="assets/murmur-logo.svg" alt="A minimal line drawing of a person whispering behind a raised hand" width="150">
+</p>
+
 # murmur
 
-**A fully-local companion radio — "a radio that broadcasts for an audience of one," with Claude as its brain.**
+**A local-first companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
 murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It's *mostly broadcasting*, but occasionally turns to you and asks something — if you don't engage, it gracefully slides back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **local + proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
-> Open-source, non-commercial, and **fully local** — the only two network hops are ① Claude brain inference and ② the music stream. Everything else (logic, I/O, memory) stays on your machine.
+> Open-source, non-commercial, and **local-first** — the only network hops are ① brain inference, ② the music stream, and ③ a hosted voice for now (a local TTS is the noted want). Everything else (logic, I/O, memory, mixing) stays on your machine.
 
 ## Core experience
 
@@ -35,7 +39,7 @@ A single Node.js (TypeScript) process. One loop drives "speaking up," a readline
 ### Key decisions (and why)
 
 - **TypeScript on the Claude Agent SDK** — the brain harness is the heart of the product, and `@anthropic-ai/claude-agent-sdk` is the first-class surface for it (the Python implementation served as the behavior oracle for the rewrite — GitHub issue #54). The mixer is a Web Audio graph on `node-web-audio-api`; local TTS models are deferred, so no Python/MLX runtime is needed.
-- **Brain = Claude, subscription auth** — reuses your local Claude Code OAuth credentials; no `ANTHROPIC_API_KEY` needed. Every model sits behind a seam (`Brain`, `VoiceProvider`, `MusicProvider`) so swaps are adapter/config changes.
+- **Brain = a harnessed agent (Claude today), subscription auth** — reuses your local Claude Code OAuth credentials; no `ANTHROPIC_API_KEY` needed. Every model sits behind a seam (`Brain`, `VoiceProvider`, `MusicProvider`) so swaps are adapter/config changes; a second brain backend (Codex SDK) is a recorded direction.
 - **Keyboard in, voice out** — no ASR this round; ASR is solved and not the value-add. The hard part is making the AI *sound human*, and that's the focus.
 - **Two-phase model strategy** — experiment now with the best available models (private, personal use); adopt paid/properly-licensed models at distribution.
 
@@ -43,15 +47,23 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 
 ## Status
 
-Building, in ordered sub-specs under [`specs/`](specs/). Each step runs and adds something audible.
+**Every code spec on the roadmap is built.** Built in ordered sub-specs under
+[`specs/`](specs/), each step adding something audible:
 
-- **✅ Spec 01 — `core-loop`** (implemented & verified): the L0 spine — CLI Host + Director + Brain + static persona + typed talk-back + session history + the basic player (superseded by 03-02's engine).
-- **✅ Spec 02 — `voice-provider`** (code-implemented; real-voice acceptance is a hands-on gate): the hosted fish-speech voice (`MURMUR_TTS_*` endpoint config, sentence pacing, seed-pinned timbre); local TTS backends are deferred. **L0 is now audible.**
-- **✅ Spec 03 — `brain-harness` + `ducking` + `guide-harness`** (code-implemented; by-ear acceptance is the open gate): Claude-driven music discovery, the mixing AudioEngine with ducking, cadence scheduling, startup checks + the yt-dlp repair guide. **L1 is code-complete.**
+- the L0 spine — host, director, brain, typed talk-back — with the hosted
+  fish-speech voice (01, 02);
+- the brain harness, the mixing engine with ducking, and the talking setup
+  guide (03);
+- the no-dead-air look-ahead (04), persistent three-tier memory (05),
+  first-run persona seed & rapport (06), presence — time anchors, invites,
+  going quiet when you're away (07);
+- the TUI front-end with the visualizer and pixel pet, now the default (10);
+- the agentic reply turn — ask and it switches the music, tell it you're done
+  and it wraps up the broadcast properly (11).
 
-Also landed since: the no-dead-air look-ahead (04) and persistent memory across sessions (05). Still ahead: proactive + pacing — turning to you, time anchors, going quiet when you're away (07); first run & rapport — the setup questions, an optional read of your Claude Code history to get to know you sooner, and the memory of how you two get on (06); the TUI (10). Two former specs are gone: the token economy is now folded into the specs that own the behavior, and Claude Code ingestion lives inside first-run setup.
-
-> **The L0 loop is talk-only.** The irreducible magic is "autonomous voice + you can talk back"; music is the immediate next step (L1).
+What remains is acceptance **by ear** — pacing over a real day, onboarding in
+a real terminal, how the steering feels — plus a few engineering debts. The
+live tracker is [`specs/STATUS.md`](specs/STATUS.md).
 
 ## Requirements
 
