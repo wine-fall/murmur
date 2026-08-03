@@ -511,6 +511,50 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   )
 }
 
+// --- the steer task (spec 11 §2.2) ----------------------------------------- //
+
+// The reply turn's instruction: decide whether the listener's words ask the
+// program to DO something, act with the tools, then answer. Bullets are gated
+// on the wired capabilities so the model is never offered an action the
+// program cannot perform.
+const STEER_SWITCH_RULE =
+  '- Different or next music, skip this song, or a specific style/artist/mood ' +
+  'request -> call switch_music FIRST (put the stated style, artist, or mood ' +
+  'in `hint`). In the reply: acknowledge, cover the wait, and never name or ' +
+  'promise a specific track — the next one introduces itself when it airs.\n'
+
+const STEER_END_RULE =
+  '- An explicit ask to stop or close the radio -> call end_broadcast and ' +
+  'follow its status. Never call it for a mood remark (tired is not a request).\n'
+
+const STEER_REPLY_RULE =
+  '- Anything else is just conversation — no action tools.\n\n' +
+  'Always finish by calling submit_reply with your spoken reply, in character, ' +
+  'easing back into the program.'
+
+// Rides the prompt only while the Director's armed flag is set (spec 11 §2.1):
+// the model must know it is in the confirm leg of the two-phase shutdown.
+export const STEER_ARMED_NOTE =
+  'Shutdown is ARMED: last turn you asked the listener to confirm closing the ' +
+  'radio. If this turn confirms it, call end_broadcast again to close; if it ' +
+  'does not, do NOT call end_broadcast and just carry on (it disarms on its own).'
+
+export function buildSteerPrompt(
+  userText: string,
+  ctx: ContextPack,
+  opts: { musicWired: boolean; shutdownArmed: boolean },
+): string {
+  const transcript = renderTranscript(ctx, userText)
+  const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
+  const rules = `${opts.musicWired ? STEER_SWITCH_RULE : ''}${STEER_END_RULE}${STEER_REPLY_RULE}`
+  const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
+  return (
+    `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n\n` +
+    `Decide whether their words ask the program to DO something; act with the ` +
+    `tools if so, then answer them.\n${rules}${armed}`
+  )
+}
+
 // --- status microcopy (spec 10 §3.7.4) ------------------------------------- //
 
 // What the front-end's status strip says the program is doing — in the DJ's own

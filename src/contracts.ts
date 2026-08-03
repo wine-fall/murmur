@@ -192,6 +192,39 @@ export interface Harness {
   runTask<T>(task: Task<T>): Promise<T | null>
 }
 
+// --- the steer task (spec 11 §2.2) ----------------------------------------- //
+//
+// The Director-owned surface a steer task's tools act through: callbacks closed
+// over live program state (current track, pick slot, shutdown arming). Tools
+// never import the Director. `music` is absent when music is not wired — which
+// is what gates switch_music out of the tool set.
+export type SteerMusicActions = {
+  playing(): boolean
+  switchTrack(hint?: string): void
+}
+
+// Two-phase shutdown (spec 11 §2.1): an unarmed end_broadcast call can only arm
+// and ask for confirmation; a call while armed closes. The armed flag is
+// Director-owned so it survives across steer tasks and disarms when a task
+// passes without the call.
+export type SteerShutdownActions = {
+  armed(): boolean
+  arm(): void
+  confirm(): void
+}
+
+export type SteerActions = {
+  readonly music?: SteerMusicActions
+  readonly shutdown: SteerShutdownActions
+}
+
+// The agentic reply capability (spec 11 §2.2): resolves to the reply text the
+// model finished with, or null when it never made the terminal call — the
+// caller then falls back to the tool-less Brain.respond.
+export interface SteerBrain {
+  respond(userText: string, ctx: ContextPack, actions: SteerActions): Promise<string | null>
+}
+
 // --- the guide harness (spec 03-03 §2) ------------------------------------ //
 //
 // A DIFFERENT harness from runTask: the native Claude Code agent with its

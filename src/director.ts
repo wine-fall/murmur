@@ -26,6 +26,8 @@ import type {
   MusicContext,
   MusicHandle,
   Player,
+  SteerActions,
+  SteerBrain,
   TalkBeat,
   TrackPick,
   TrackSource,
@@ -122,6 +124,9 @@ export type DirectorDeps = {
   recentWindow: number
   music?: MusicWiring
   pacing?: PacingWiring
+  // The agentic reply turn (spec 11): preferred over brain.respond when
+  // present; absent on stub runs (the harness behind it is the real SDK).
+  steer?: SteerBrain
   // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
@@ -168,6 +173,25 @@ export class Director {
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
   private pendingPick: Pending<TrackPick | null> | null = null
+  // The steer-task state (spec 11): a due switch hands the air over when the
+  // fresh pick resolves (or owns the next boundary when no track is live);
+  // pickPredatesTurn tells a hinted switch whether the primed pick is stale.
+  private switchDue = false
+  private pickPredatesTurn = false
+  // Two-phase shutdown (spec 11 §2.1): armed survives across steer tasks;
+  // steerEndCalled tracks whether the task that just ran touched end_broadcast
+  // (a task that did not disarms); quitAfterReply defers the confirmed close
+  // until the sign-off reply has aired.
+  private shutdownArmed = false
+  private steerEndCalled = false
+  private quitAfterReply = false
+  // A merged reply discards its in-flight steer task, but the task cannot be
+  // cancelled — the epoch makes the orphan's late tool calls dead instead of
+  // letting them mutate live state (mirrors talkEpoch).
+  private steerEpoch = 0
+  // The track currently on air, for the steer tools' playing() — runVoice owns
+  // its lifetime.
+  private liveSong: MusicHandle | null = null
 
   private deps: DirectorDeps
 
@@ -320,7 +344,7 @@ export class Director {
     // Same two primings the ordinary talk path does, so an anchor does not leave
     // the next boundary cold: the music pick resolves around this beat's mood,
     // and the look-ahead (untouched by the anchor) is topped back up.
-    this.prefetchMusic(beat.text)
+    this.prefetchMusic(`- radio: ${beat.text}`)
     this.prefetchTalk()
     await this.runVoice(onAir(this.deps.player.play(clip)))
   }
@@ -414,7 +438,7 @@ export class Director {
       this.deps.host.debug?.(`talk.buffer warm depth=${this.talkAhead.length + 1}`)
       // Prime the next music pick around the airing text (mood) — it needs no
       // audio, so the find-and-pull overlaps this beat's airtime.
-      this.prefetchMusic(primed.beat.text)
+      this.prefetchMusic(`- radio: ${primed.beat.text}`)
       const clip = await primed.clip
       return clip === null ? null : { beat: primed.beat, clip }
     }
@@ -422,7 +446,7 @@ export class Director {
     const beats = await this.generateTalks(TALK_LOOKAHEAD, [], this.talkCue())
     const first = beats.shift()
     if (first === undefined) return null
-    this.prefetchMusic(first.text)
+    this.prefetchMusic(`- radio: ${first.text}`)
     // Beat 1's synth first (it airs next), the look-ahead synths right behind
     // it — all in flight together on a concurrent backend.
     const firstClip = this.synthesizeOrSkip(first.text)
@@ -477,6 +501,9 @@ export class Director {
   private async wantsMusic(): Promise<boolean> {
     const music = this.deps.music
     if (music === undefined) return false
+    // A due switch owns the boundary (spec 11 §2.3): the listener asked, so the
+    // cadence policy is bypassed until a track airs or the pick comes back empty.
+    if (this.switchDue) return true
     const recent = this.deps.memory.recent(this.deps.recentWindow)
     const situation = recent.map((t) => `- ${t.role}: ${t.text}`).join('\n')
     const kind = await music.cadence.nextKind({
@@ -497,14 +524,28 @@ export class Director {
     }
   }
 
-  private prefetchMusic(latest?: string): void {
+  // `extraLine` is a pre-rendered situation line (the airing beat, or a
+  // listener request from switch_music).
+  private prefetchMusic(extraLine?: string): void {
     const music = this.deps.music
     if (music === undefined || this.pendingPick !== null) return
     const base = this.musicContext()
     const ctx =
-      latest === undefined ? base : { ...base, situation: `${base.situation}\n- radio: ${latest}` }
+      extraLine === undefined ? base : { ...base, situation: `${base.situation}\n${extraLine}` }
     // A failed prefetch degrades like an empty pick at the boundary.
     this.pendingPick = pending(music.source.nextTrack(ctx).catch(() => null))
+  }
+
+  // spec 11 §2.1: the listener asked for different music. A hinted request must
+  // not air a pick primed before it — the stale slot is dropped (the abandoned
+  // promise resolves unobserved) and a fresh one primed with the request riding
+  // the situation. The due switch then hands the air over on resolve, or owns
+  // the next boundary when no track is live.
+  private switchMusic(hint?: string): void {
+    if (hint !== undefined && this.pickPredatesTurn) this.pendingPick = null
+    this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`)
+    this.switchDue = true
+    this.deps.host.debug?.('music.switch due')
   }
 
   // The pick for the boundary: the prefetched one if primed (near-instant when
@@ -519,7 +560,6 @@ export class Director {
   // Find, confirm, announce, and air one track. False = nothing aired (the
   // caller falls back to talk — a music error must never crash the radio).
   private async musicSegment(): Promise<boolean> {
-    const music = this.deps.music!
     // Never block the air on a pick still resolving: air talk instead and
     // re-attempt music at the next boundary while it keeps resolving.
     if (this.pendingPick !== null && !this.pendingPick.done()) return false
@@ -531,37 +571,17 @@ export class Director {
       for (let attempt = 0; attempt < MUSIC_START_ATTEMPTS && !this.quit; attempt++) {
         const pick = await this.takePick()
         if (pick === null) {
+          if (this.switchDue) {
+            this.switchDue = false
+            this.deps.host.debug?.('music.switch failed')
+          }
           this.deps.host.info('music: nothing suitable found; back to talk.')
           return false
         }
-        // Start the stream, then synthesize the intro WHILE it spins up, but
-        // commit to the announce only once real audio is confirmed — the
-        // narration must never claim a song that turns out silent.
-        const handle = await music.engine.playMusic(pick.clip)
-        const announced =
-          pick.announce === undefined ? null : this.synthesizeOrSkip(pick.announce)
-        if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S))) {
-          await announced?.then(
-            () => {},
-            () => {},
-          )
-          await handle.stop()
-          continue
-        }
-        const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
-        this.deps.host.info(`now playing: ${label}`)
-        this.emitState('music', label)
-        // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
-        // only — not a dropped candidate. Feeds the music avoid-list.
-        this.deps.memory.recordEvent('song', label)
-        let voice: OnAir | null = null
-        const announceClip = announced === null ? null : await announced
-        if (pick.announce !== undefined && announceClip !== null) {
-          this.deps.host.onRadioSegment(pick.announce)
-          this.deps.memory.record({ role: 'radio', text: pick.announce })
-          voice = onAir(this.deps.player.play(announceClip))
-        }
-        await this.runVoice(voice, handle)
+        const started = await this.startTrack(pick)
+        if (started === null) continue
+        this.switchDue = false
+        await this.runVoice(started.voice, started.handle)
         return true
       }
       if (!this.quit) {
@@ -572,6 +592,61 @@ export class Director {
       this.deps.host.info(`music segment failed (${String(err)}); back to talk.`)
       return false
     }
+  }
+
+  // Start a pick on the engine and confirm real audio before anything is said
+  // about it (spec 03-02 §3.5): the intro synthesizes WHILE the stream spins
+  // up, but the announce commits only once audio is confirmed — the narration
+  // must never claim a song that turns out silent. Null = the stream never
+  // produced audio; the pick is spent (a previous track, if any, was already
+  // cut by the engine's single-music playMusic).
+  private async startTrack(pick: TrackPick): Promise<{ handle: MusicHandle; voice: OnAir | null } | null> {
+    const music = this.deps.music!
+    const handle = await music.engine.playMusic(pick.clip)
+    const announced = pick.announce === undefined ? null : this.synthesizeOrSkip(pick.announce)
+    if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S))) {
+      await announced?.then(
+        () => {},
+        () => {},
+      )
+      await handle.stop()
+      return null
+    }
+    const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
+    this.deps.host.info(`now playing: ${label}`)
+    this.emitState('music', label)
+    // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
+    // only — not a dropped candidate. Feeds the music avoid-list.
+    this.deps.memory.recordEvent('song', label)
+    let voice: OnAir | null = null
+    const announceClip = announced === null ? null : await announced
+    if (pick.announce !== undefined && announceClip !== null) {
+      this.deps.host.onRadioSegment(pick.announce)
+      this.deps.memory.record({ role: 'radio', text: pick.announce })
+      voice = onAir(this.deps.player.play(announceClip))
+    }
+    return { handle, voice }
+  }
+
+  // The mid-segment swap (spec 11 §2.3): the switch's fresh pick landed while a
+  // track is on air. Null = nothing changed (the pick came back empty; the old
+  // track plays on). Otherwise the engine's playMusic already cut the old track
+  // — `handle` is the new one, or undefined when the new stream died after the
+  // cut (rare; the segment continues voice-only and ends at the boundary).
+  private async handoverTrack(): Promise<{ handle?: MusicHandle; voice: OnAir | null } | null> {
+    const pick = await this.takePick()
+    this.switchDue = false
+    if (pick === null) {
+      this.deps.host.debug?.('music.switch failed')
+      return null
+    }
+    const started = await this.startTrack(pick)
+    if (started === null) {
+      this.deps.host.debug?.('music.switch failed')
+      return { voice: null }
+    }
+    this.deps.host.debug?.('music.switch handover')
+    return started
   }
 
   // Batched generation with bounded retry; [] on ultimate failure (degrade —
@@ -638,26 +713,48 @@ export class Director {
   // /quit. An initial steer seeds the loop (the gap path, nothing on air).
   private async runVoice(voice: OnAir | null, song?: MusicHandle, seed?: Steer): Promise<void> {
     let current = voice
+    let track = song
     let steer: Steer | null = seed ?? null
+    this.liveSong = track ?? null
     try {
       while (!this.quit) {
         if (steer === null) {
           const voiceLive = current !== null && !current.done()
           const audio = voiceLive
             ? current!.promise.then(() => 'voice' as const)
-            : song !== undefined
-              ? song.wait().then(() => 'song' as const)
+            : track !== undefined
+              ? track.wait().then(() => 'song' as const)
               : null
           if (audio === null) return
+          // A due switch races its fresh pick too (spec 11 §2.3): the handover
+          // must wait for neither the song's end nor the listener's next line.
+          const pickReady =
+            track !== undefined && this.switchDue && this.pendingPick !== null
+              ? this.pendingPick.promise.then(() => 'pick' as const)
+              : null
           const winner = await Promise.race([
             audio,
+            ...(pickReady !== null ? [pickReady] : []),
             this.deps.host.peekLine().then(() => 'line' as const),
             this.quitting,
           ])
           if (winner === 'quit') return // the finally below cuts voice and song
           if (winner === 'song') return // the song ended -> segment over
+          if (winner === 'pick') {
+            // One voice clip at a time: let a still-airing reply finish, then
+            // swap — the cut lands between clips, never over one.
+            if (current !== null && !current.done()) await current.promise
+            current = null
+            const swapped = await this.handoverTrack()
+            if (swapped !== null) {
+              track = swapped.handle
+              this.liveSong = track ?? null
+              current = swapped.voice
+            }
+            continue
+          }
           if (winner === 'voice') {
-            if (song === undefined) return // clip ended -> segment over
+            if (track === undefined) return // clip ended -> segment over
             current = null // intro/reply finished; keep racing the song
             continue
           }
@@ -681,15 +778,24 @@ export class Director {
         // any still-playing song) instead of going cold at the next boundary.
         this.prefetchTalk()
         current = onAir(this.deps.player.play(composed.clip))
+        // A confirmed end_broadcast (spec 11 §2.1): the reply is the sign-off —
+        // let it air in full, then the same orderly close /quit performs.
+        if (this.quitAfterReply) {
+          this.quitAfterReply = false
+          await current.promise
+          this.quit = true
+          return
+        }
       }
     } finally {
+      this.liveSong = null
       // /quit or shutdown while audio is live: cut the voice, stop the song.
       if (this.quit) {
         if (current !== null && !current.done()) {
           await this.deps.player.stop()
           await current.promise
         }
-        if (song !== undefined) await song.stop()
+        if (track !== undefined) await track.stop()
       }
     }
   }
@@ -702,7 +808,10 @@ export class Director {
     const texts = [first]
     this.deps.host.onUserLine(first)
     this.deps.memory.record({ role: 'user', text: first })
-    // The user's turn is fresh mood signal: prime the next pick around it.
+    // The user's turn is fresh mood signal: prime the next pick around it. A
+    // pick already in flight predates this turn — a hinted switch_music uses
+    // that to decide whether it must re-prime (spec 11 §2.1).
+    this.pickPredatesTurn = this.pendingPick !== null
     this.prefetchMusic()
     while (true) {
       const prep = this.prepareReply(texts)
@@ -712,6 +821,7 @@ export class Director {
       ])
       if (winner.kind === 'ready') return winner.r
       prep.catch(() => {}) // discarded in-flight prepare (cannot cancel a promise)
+      this.steerEpoch++ // the orphaned steer task's actions are dead (spec 11 §2.2)
       const merged = this.takeSteer()
       if (merged.intent === 'quit') {
         this.quit = true
@@ -728,12 +838,66 @@ export class Director {
   private async prepareReply(texts: string[]): Promise<{ reply: string; clip: AudioClip } | null> {
     let reply: string
     try {
-      reply = await this.deps.brain.respond(texts.join('\n'), this.context())
+      reply = await this.composeReply(texts.join('\n'))
     } catch (err) {
       this.deps.host.info(`reply failed (${String(err)}); back to the program.`)
       return null
     }
     const clip = await this.synthesizeOrSkip(reply)
     return clip === null ? null : { reply, clip }
+  }
+
+  // The agentic reply (spec 11 §2.2) with its fallback chain: a steer task that
+  // never finishes (or throws) degrades to the tool-less respond. The armed
+  // shutdown disarms when a task passes without touching end_broadcast — the
+  // listener moved on.
+  private async composeReply(userText: string): Promise<string> {
+    const steer = this.deps.steer
+    if (steer === undefined) return this.deps.brain.respond(userText, this.context())
+    const armedBefore = this.shutdownArmed
+    this.steerEndCalled = false
+    let reply: string | null = null
+    try {
+      reply = await steer.respond(userText, this.context(), this.steerActions())
+    } catch (err) {
+      this.deps.host.debug?.(`steer task failed (${String(err)}); falling back to respond`)
+    }
+    if (armedBefore && !this.steerEndCalled) this.shutdownArmed = false
+    if (reply !== null) return reply
+    return this.deps.brain.respond(userText, this.context())
+  }
+
+  // The Director-owned surface the steer tools act through (spec 11 §2.2):
+  // callbacks closed over live state; tools never import the Director. `music`
+  // rides only when music is wired — that absence gates switch_music out of
+  // the tool set.
+  private steerActions(): SteerActions {
+    // Mutators are live only while this attempt is the latest — a merged reply
+    // orphans its predecessor, whose late calls must land on a dead surface.
+    const epoch = this.steerEpoch
+    const live = () => epoch === this.steerEpoch
+    return {
+      ...(this.deps.music !== undefined && {
+        music: {
+          playing: () => this.liveSong !== null,
+          switchTrack: (hint?: string) => {
+            if (live()) this.switchMusic(hint)
+          },
+        },
+      }),
+      shutdown: {
+        armed: () => this.shutdownArmed,
+        arm: () => {
+          if (!live()) return
+          this.shutdownArmed = true
+          this.steerEndCalled = true
+        },
+        confirm: () => {
+          if (!live()) return
+          this.quitAfterReply = true
+          this.steerEndCalled = true
+        },
+      },
+    }
   }
 }
