@@ -41,7 +41,7 @@ After the PR merges — whether you merged it or the user did — leave the loca
 
 ## Exit in exactly one of
 
-- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). When merged: the worktree and its branch are removed and the main checkout is back on an up-to-date `main` (see Post-merge cleanup — all three steps, always). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`). Anything the build found but did not fix — an owed by-ear pass, a measured defect, a watch item — leaves through `murmur-issue` (an issue plus one pointer line), never as a paragraph in STATUS.md.
+- **Shipped** — gates green, acceptance verified, PR merged (or green + handed over per the merge knob). When merged: the worktree and its branch are removed and the main checkout is back on an up-to-date `main` (see Post-merge cleanup — all three steps, always). If it advanced the milestone or the next target, `specs/STATUS.md` reflects the new state (how: see `murmur-build-spec`). Anything the build found but did not fix leaves through `murmur-issue` **only if it clears that skill's threshold — all three of: an evidence anchor, an explicit close condition, and a follow-up that needs scheduling** (an issue plus one pointer line). Everything that misses it takes the route `murmur-issue` names instead: a repro-less, action-less observation becomes one line in the governing spec or nothing; an unscheduled direction becomes nothing. All the by-ear acceptance **this** ship owes is **one** issue with the criteria as a checklist, never one per criterion. Never a paragraph in STATUS.md.
 - **Paused — needs human input** — a gate failed past budget, a sensory checklist is owed, CI won't pick up, or a decision is needed (spec divergence, an open question, a multi-source conflict). State exactly what's needed.
 - **Won't-do** — decided against the change: close the PR, remove the worktree, delete the branch, and say why.
 
@@ -57,3 +57,4 @@ After the PR merges — whether you merged it or the user did — leave the loca
 - Declaring "done" before a user-set acceptance bar is met.
 - Building, editing, or committing in the shared main checkout instead of a linked worktree — step 2 is not optional.
 - Leaving the merged worktree/branch behind or a stale local `main` after shipping — Post-merge cleanup runs in full, every time, once the PR is merged.
+- Emptying the session's leftovers into a row of new issues at the Shipped exit — the threshold in `murmur-issue` is a conjunction, and one ship owes at most one by-ear issue.

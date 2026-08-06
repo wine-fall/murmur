@@ -15,21 +15,38 @@ line cap is red, and an `## Open` line pointing at a **closed** issue is red.
 
 ## The threshold — what earns an issue
 
-**Only work that will outlive the current PR.** If you can finish it before you
-open the PR, finish it; an issue for it is noise that someone has to close.
+An open issue is a standing claim on someone's time, so the bar is high and it
+is a **conjunction**. Open one only when the thing **outlives the current PR**
+(finishable before you open the PR → finish it) **and all three** of these hold:
 
-Open one when the thing is:
+1. **An evidence anchor.** A measurement, reproduction steps, or a concrete
+   session observation — with where it came from: the number, the
+   `.dev/dev.log` line, the code seam (`file:line`), the failing command. "It
+   felt off" and "this could break" are not anchors.
+2. **An explicit close condition.** You can state today, in one falsifiable
+   sentence, what makes it closable. If the close condition is "someone decides
+   what we want here", the decision is the missing work — not an issue.
+3. **A follow-up action that needs scheduling.** Real work a future session
+   would pick up and do. If nobody would ever schedule it, an issue only ages.
 
-- **owed to the user** — a sensory / by-ear pass nobody but they can run;
-- **measured but unfixed** — a real number or a real observation, with no fix in
-  this change (this is the honest exit from "I found something while doing
-  something else");
-- **seen once, not reproduced** — a `watch` item;
-- **decided but not built** — a direction that needs its own build task.
+Miss any one and it does **not** get an issue. Route it instead:
 
-Do **not** open one for: a refactor you are about to do anyway, a hypothetical,
-a nice-to-have nobody has asked for, or a restatement of something the spec
-already carries as an open question.
+| The thing | Where it goes |
+|---|---|
+| Observed once, no repro, nothing to do about it | one line in the governing spec's section — or nothing at all |
+| A direction with no schedule ("we could also back this with X") | nothing; it earns an issue when someone schedules it. Precedent: #89 is the shape to stop opening |
+| An open question the spec already carries | leave it in the spec; do not mirror it |
+| A refactor you are about to do anyway, a hypothetical, an unrequested nice-to-have | nothing |
+
+**One ship, one by-ear issue.** All sensory acceptance a single ship leaves
+owed goes into **one** `by-ear` issue whose **Done when** is a checklist of the
+criteria — never one issue per criterion, and never one per spec section. If a
+by-ear issue for the same surface is still open and unrun, append the new
+criteria to it instead of opening a sibling.
+
+An issue that clears the bar today can stop clearing it. When a `watch` item
+has not recurred, or a scheduled follow-up turns out to be nobody's plan, close
+it with that as the conclusion (Action: close) — do not let it sit.
 
 ## Labels — two composable axes
 
@@ -38,8 +55,11 @@ already carries as an open question.
 | Label | Means | Closes on |
 |---|---|---|
 | `eng` | a measured defect or a performance target | a re-measurement or a regression test |
-| `by-ear` | user-run sensory acceptance, not assertable in a test | the user's judgment |
-| `watch` | observed once, not reproduced | a recurrence (→ becomes `eng`) **or** "did not recur" |
+| `by-ear` | user-run sensory acceptance, not assertable in a test — one issue per ship, criteria as a checklist | the user's judgment |
+| `watch` | observed once, not reproduced, **and** carrying an action (a probe to add, a guard to try) | a recurrence (→ becomes `eng`) **or** "did not recur" |
+
+A repro-less observation with no action is not a `watch` issue — it is a line in
+the spec, or nothing (see the threshold).
 
 **Nature** (optional — stacks on top of lifecycle): `bug` when a spec'd
 contract is violated (cite the section); `enhancement` when behavior is within
@@ -47,7 +67,11 @@ contract but should be better. Example: #77 is `bug, eng`.
 
 ## Action: open
 
-1. **Check the threshold above.** Then check it is not already filed:
+1. **Clear the threshold above — name the anchor, the close condition, and the
+   follow-up out loud before you write anything.** Cannot name all three → say
+   which one is missing and take the route in the table instead. Then check it
+   is not already filed, and whether an open issue should **absorb** this
+   instead of a new one (the same surface, the same ship's by-ear pass):
    `gh issue list --state open`.
 2. **Gather evidence before writing.** The session usually already holds it:
    error output, `.dev/dev.log` lines, measured numbers, the code seam
@@ -110,9 +134,9 @@ lives in that spec, point at the section.>
 **Done when**
 
 <The falsifiable close condition. For `eng`: a re-measurement or a regression
-test. For `by-ear`: what the user has to have run, and that a "no" becomes
-follow-up issues rather than a reopened contract. For `watch`: both exits —
-recurrence, or did-not-recur.>
+test. For `by-ear`: a `- [ ]` checklist with one box per criterion this ship
+owes, plus the note that a "no" becomes follow-up issues rather than a reopened
+contract. For `watch`: both exits — recurrence, or did-not-recur.>
 ```
 
 Optional sections, when they earn their place: **Not yet investigated** (what
@@ -123,6 +147,12 @@ file).
 ## Anti-patterns
 
 - Filing an issue for work that finishes in the current PR.
+- Draining a ship's leftovers into issues one by one at the end — the threshold
+  is a conjunction, and by-ear passes merge into one issue per ship.
+- An issue whose whole content is a direction nobody has scheduled, or a "keep
+  an eye on this" with no anchor and no action.
+- An issue whose close condition is "decide what we want" — the decision is the
+  work; have it, then file what it produced.
 - Asking the user to describe what the session already witnessed.
 - A body that says "see conversation" — the future reader has no conversation.
 - An unverified hypothesis stated as the root cause.
