@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   awayGreeting,
+  bandLayout,
   cells,
   loadPoses,
   parseFrames,
@@ -127,6 +128,33 @@ describe('poseFor (spec 10 §3.2-D: the display-state inventory)', () => {
 
   it('idles before the engine has said anything', () => {
     expect(poseFor(null)).toBe('idle')
+  })
+})
+
+describe('bandLayout (spec 10 §3.3: the alive band, pet optional)', () => {
+  it('shows the pet by default — the off switch is opt-in', () => {
+    expect(bandLayout({}).pet).toBe(true)
+    expect(bandLayout({ MURMUR_TUI_PET: '1' }).pet).toBe(true)
+  })
+
+  it('hides the pet on MURMUR_TUI_PET=0, and on the spellings of "0" people type', () => {
+    expect(bandLayout({ MURMUR_TUI_PET: '0' }).pet).toBe(false)
+    expect(bandLayout({ MURMUR_TUI_PET: ' 0 ' }).pet).toBe(false)
+    for (const off of ['off', 'false', 'no', 'OFF']) {
+      expect(bandLayout({ MURMUR_TUI_PET: off }).pet, off).toBe(false)
+    }
+  })
+
+  it('gives the spectrum the whole band when the pet is off — no dead hole', () => {
+    // The gutter exists to separate the two; with nothing to separate, it is a
+    // one-column indent the bars do not start at.
+    expect(bandLayout({ MURMUR_TUI_PET: '0' }).vizPadLeft).toBe(0)
+    expect(bandLayout({}).vizPadLeft).toBeGreaterThan(0)
+  })
+
+  it('treats an unusable value as the default, never as an outage', () => {
+    expect(bandLayout({ MURMUR_TUI_PET: 'maybe' }).pet).toBe(true)
+    expect(bandLayout({ MURMUR_TUI_PET: '' }).pet).toBe(true)
   })
 })
 

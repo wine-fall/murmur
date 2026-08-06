@@ -16,6 +16,7 @@ import { Bars, render } from './bars.ts'
 import { accentFor, INK, mix, type Accent } from './palette.ts'
 import {
   awayGreeting,
+  bandLayout,
   cells,
   loadPoses,
   petPalette,
@@ -34,8 +35,13 @@ const LOG_MAX = 500
 const POSES = loadPoses()
 
 // The alive band is as tall as the pet, and the bars fill it — one band, not two
-// stacked strips (§3.3).
+// stacked strips (§3.3). Its height stays the pet's whether or not the pet is
+// shown: the band is the bars' room, and it must not resize under a knob.
 const BAND_ROWS = POSES.idle[0]!.length / 2
+
+// Whether the creature is part of that band at all, and what the bars get when
+// it is not (§3.3, issue #95). Read once: it is an env knob, not a live setting.
+const BAND = bandLayout()
 
 // Half-block: the upper pixel is the ink, the lower is the ground behind it.
 const HALF = '▀'
@@ -237,8 +243,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       </scrollbox>
 
       <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
-        <Pet pose={pose} accent={accent} />
-        <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+        {BAND.pet && <Pet pose={pose} accent={accent} />}
+        <box style={{ flexGrow: 1, paddingLeft: BAND.vizPadLeft }}>
           <Visualizer sink={vizSink} accent={accent} />
         </box>
       </box>
