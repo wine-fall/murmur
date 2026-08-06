@@ -11,6 +11,8 @@
 #         TUI=0                        (plain stdout instead of the spec 10
 #                                        front-end, which is the default; without
 #                                        bun it falls back to plain on its own)
+#         MURMUR_TUI_PET=0             (hide the pixel pet; the spectrum takes
+#                                       the whole alive band — spec 10 §3.3)
 #         MURMUR_SCENE=morning|afternoon|evening|late-night
 #                                      (force the time-of-day scene for by-ear
 #                                       testing; unset = derive from the clock)

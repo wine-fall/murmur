@@ -340,6 +340,17 @@ Exact composition, palette, and the pet's look belong to the §6.1 creative
 session; this spec fixes only the four functional regions and that the input
 line owns focus permanently.
 
+**As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
+(also `off` / `false` / `no`) drops the creature from the alive band, and the
+gutter that separated it from the bars goes with it — the spectrum spans the
+band, and the band keeps the pet's height, so nothing above or below moves and
+no dead hole is left where it sat. **Default is ON**: the §5.11 listening pass
+judged the pet's current form, not its existence, and §6.1 still owns its
+identity. The knob is client-side env, like `MURMUR_TUI_KITTY_KEYBOARD` (§5.1)
+— not a `Config` field, because the engine has no business in what the band
+contains, and a front-end knob that traveled through the engine would be the
+first plank of the theming engine §1 rules out.
+
 ### 3.4 Input & interruption
 
 The TUI owns the keyboard. A submitted line goes over the wire as `line`; the
@@ -526,7 +537,8 @@ TUI work is built on the framework choice.
     microcopy in voice — and not a dev-tool dashboard? The agent produces the
     checklist; the user judges (master §11.2 layer 3).
     **Result — 2026-08-01 user listening pass**: bed and ducking accepted, pet
-    flagged; follow-ups #95 (off switch) and #79 (identity).
+    flagged; follow-ups #95 (off switch — shipped 2026-08-06, §3.3) and #79
+    (identity, still open).
 
 ---
 

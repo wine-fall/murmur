@@ -50,7 +50,6 @@ it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
-- **#95** (eng) A config knob to turn the TUI pet off — flagged by the listening pass; spec 10.
 - **#44** (eng) Cold-start talk repeats the same cozy imagery — a model-attractor problem, not hardcoded text.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.

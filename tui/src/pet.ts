@@ -118,6 +118,22 @@ export function poseFor(state: ProgramState | null): PoseName {
   }
 }
 
+// The alive band's composition (§3.3): the pet on the left, the spectrum filling
+// the rest. `MURMUR_TUI_PET=0` drops the pet — the listening pass (§5.11) liked
+// the radio and not the creature, and until §6.1 gives it an identity the
+// listener may want the band to be spectrum only. Default is ON: the pass judged
+// the pet's current form, not its existence. Hiding it takes the gutter with it,
+// so the bars start at the band's edge and there is no dead hole.
+const OFF = new Set(['0', 'false', 'off', 'no'])
+
+export function bandLayout(env: NodeJS.ProcessEnv = process.env): {
+  pet: boolean
+  vizPadLeft: number
+} {
+  const pet = !OFF.has((env.MURMUR_TUI_PET ?? '').trim().toLowerCase())
+  return { pet, vizPadLeft: pet ? 1 : 0 }
+}
+
 const HOUR = 3600
 const DAY = 86_400
 
