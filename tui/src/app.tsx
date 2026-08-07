@@ -27,10 +27,14 @@ import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
   bandLayout,
+  halve,
   loadPoses,
   POSE_FPS,
+  POSE_NAMES,
   poseFor,
+  splitNowPlaying,
   type PoseName,
+  type Sprite,
 } from './pet.ts'
 import type { Wire } from './wire.ts'
 
@@ -46,11 +50,17 @@ const POSES = loadPoses()
 // ultra-wide terminal centers that frame rather than stretching it.
 const MAX_COLS = 184
 
+// The narrow band draws the pet at half scale — the full 42x44 grid would eat
+// a 24-row terminal whole (codex review, 2026-08-07).
+const BAND_POSES = Object.fromEntries(
+  POSE_NAMES.map((pose) => [pose, POSES[pose].map(halve)]),
+) as Record<PoseName, Sprite[]>
+
 // The alive band is as tall as the pet, and the bars fill it — one band, not two
 // stacked strips (§3.3). Its height stays the pet's whether or not the pet is
 // shown: the band is the bars' room, and it must not resize under a knob.
 // Half-blocks fold two pixel rows per terminal row.
-const BAND_ROWS = POSES.idle[0]!.length / 2
+const BAND_ROWS = BAND_POSES.idle[0]!.length / 2
 
 // Whether the creature is part of that band is a live setting now (spec 12
 // §3.7), so its layout is computed per render inside App — the env override
@@ -109,7 +119,7 @@ function Visualizer({ sink, accent }: { sink: VizSink; accent: Accent }): React.
 // The pet (§3.7.1): one pose at a time, its frames looped at the pose's own rate.
 function Pet({ pose }: { pose: PoseName }): React.ReactNode {
   const [frame, setFrame] = useState(0)
-  const frames = POSES[pose]
+  const frames = BAND_POSES[pose]
 
   useEffect(() => {
     setFrame(0)
@@ -506,15 +516,15 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <box style={{ flexDirection: 'row', justifyContent: 'center' }}>
             {state?.nowPlaying !== undefined && state.nowPlaying !== '' ? (
               (() => {
-                const split = state.nowPlaying.split(/\s+[—–-]+\s+/, 2)
+                const split = splitNowPlaying(state.nowPlaying)
                 return (
                   <text>
                     <span fg={PERIWINKLE}>{'♪ '}</span>
-                    {split.length === 2 ? (
+                    {split !== null ? (
                       <>
-                        <span fg={EMBER}>{split[0]}</span>
+                        <span fg={EMBER}>{split.head}</span>
                         <span fg={INK.dim}>{' —— '}</span>
-                        <span fg={INK.notice}>{split[1]}</span>
+                        <span fg={INK.notice}>{split.rest}</span>
                       </>
                     ) : (
                       <span fg={INK.notice}>{state.nowPlaying}</span>
@@ -539,8 +549,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </box>
       )}
 
+      {/* Persona rides the identity line: the wide strip is the program's
+          words, but WHO is on air must survive in the status region (§3.3). */}
       <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
-        <text style={{ fg: INK.dim }}>{`${identity.brain} · ${identity.voice}`}</text>
+        <text style={{ fg: INK.dim }}>
+          {[identity.persona, identity.brain, identity.voice].filter(Boolean).join(' · ')}
+        </text>
       </box>
 
       <box

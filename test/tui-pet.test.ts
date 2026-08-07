@@ -11,10 +11,12 @@ import { describe, expect, it } from 'vitest'
 import {
   awayGreeting,
   bandLayout,
+  halve,
   loadPoses,
   parseFrames,
   POSE_FPS,
   poseFor,
+  splitNowPlaying,
   type PoseName,
 } from '../tui/src/pet.ts'
 
@@ -56,6 +58,39 @@ describe('the committed sprite assets', () => {
     const idle = POSES.idle[0]!.join('')
     expect(idle).toContain('x')
     expect(idle).toContain('w')
+  })
+})
+
+describe('halve (the narrow band cannot afford the full grid)', () => {
+  it('folds 2x2 sprite pixels to one, so the band fits a 24-row terminal', () => {
+    const half = halve(POSES.idle[0]!)
+    expect(half.length).toBe(POSES.idle[0]!.length / 2)
+    expect(half[0]!.length).toBe(Math.floor(POSES.idle[0]![0]!.length / 2))
+    // Half-block folding downstream still needs an even row count.
+    expect(half.length % 2).toBe(0)
+  })
+
+  it('lets a lone sparkle survive the fold', () => {
+    expect(halve(['s...', '....', '....', '....'])).toEqual(['s.', '..'])
+  })
+
+  it('keeps only keys the renderers know', () => {
+    for (const glyph of halve(POSES.talk.at(-1)!).join('')) {
+      expect(['x', 'w', 's', '.']).toContain(glyph)
+    }
+  })
+})
+
+describe('splitNowPlaying (unsanitized labels must not truncate)', () => {
+  it('splits at the first spaced dash and keeps the rest whole', () => {
+    expect(splitNowPlaying('Song — Live — Artist')).toEqual({
+      head: 'Song',
+      rest: 'Live — Artist',
+    })
+  })
+
+  it('declines a label with no separator', () => {
+    expect(splitNowPlaying('just a title')).toBeNull()
   })
 })
 

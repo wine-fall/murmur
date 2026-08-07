@@ -62,6 +62,39 @@ export function loadPoses(dir = ASSET_DIR): Record<PoseName, Sprite[]> {
   return poses
 }
 
+// The narrow band's pet is the same asset at half scale (the 42x44 grid would
+// eat a 24-row terminal): 2x2 sprite pixels fold to one, any ink beating
+// empty and the sparkle beating the body inks — sparks are one pixel and must
+// survive the fold.
+export function halve(sprite: Sprite): Sprite {
+  const rows: string[] = []
+  for (let y = 0; y + 1 < sprite.length; y += 2) {
+    let row = ''
+    for (let x = 0; x + 1 < sprite[y]!.length; x += 2) {
+      const quad = [sprite[y]![x]!, sprite[y]![x + 1]!, sprite[y + 1]![x]!, sprite[y + 1]![x + 1]!]
+      row +=
+        quad.includes('s') ? 's'
+        : quad.includes('x') || quad.includes('w')
+          ? (quad.filter((key) => key === 'x').length >= quad.filter((key) => key === 'w').length &&
+            quad.includes('x')
+              ? 'x'
+              : 'w')
+          : '.'
+    }
+    rows.push(row)
+  }
+  return rows
+}
+
+// One split at the FIRST spaced dash: the head takes the accent, the rest —
+// dashes and all — stays intact. Labels carry unsanitized track metadata, so
+// a second dash inside the title must never truncate it.
+export function splitNowPlaying(label: string): { head: string; rest: string } | null {
+  const match = label.match(/\s+[—–-]+\s+/)
+  if (match === null || match.index === undefined) return null
+  return { head: label.slice(0, match.index), rest: label.slice(match.index + match[0].length) }
+}
+
 // Which pose the program is in (§3.2-D). Precedence is the order of what the
 // listener needs to notice: an empty room first, then whatever is on air.
 export function poseFor(state: ProgramState | null): PoseName {
