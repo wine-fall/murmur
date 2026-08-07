@@ -338,7 +338,11 @@ where it lands):
 
 Exact composition, palette, and the pet's look belong to the §6.1 creative
 session; this spec fixes only the four functional regions and that the input
-line owns focus permanently.
+line owns focus permanently. **One sanctioned exception (2026-08-07, spec 12
+§3.6)**: the listener-invoked `/settings` pane routes keys to itself until
+Esc. The permanent-focus rule defends against *radio output* stealing focus
+mid-keystroke; a mode the listener opened is the listener spending their own
+focus, and the broadcast never pauses under it.
 
 **As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
 (also `off` / `false` / `no`) drops the creature from the alive band, and the
@@ -346,10 +350,13 @@ gutter that separated it from the bars goes with it — the spectrum spans the
 band, and the band keeps the pet's height, so nothing above or below moves and
 no dead hole is left where it sat. **Default is ON**: the §5.11 listening pass
 judged the pet's current form, not its existence, and §6.1 still owns its
-identity. The knob is client-side env, like `MURMUR_TUI_KITTY_KEYBOARD` (§5.1)
-— not a `Config` field, because the engine has no business in what the band
-contains, and a front-end knob that traveled through the engine would be the
-first plank of the theming engine §1 rules out.
+identity. ~~The knob is client-side env, like `MURMUR_TUI_KITTY_KEYBOARD`
+(§5.1) — not a `Config` field, because the engine has no business in what the
+band contains.~~ **Superseded (2026-08-07, spec 12 §3.7)**: the knob is
+`tuiPet` in the settings layer — the engine is the single configuration
+holder, and one boolean riding the existing `settings` snapshot is not the
+theming engine this section feared. `MURMUR_TUI_PET` survives as the
+client-local escape hatch and final override (env beats file, per knob).
 
 ### 3.4 Input & interruption
 
