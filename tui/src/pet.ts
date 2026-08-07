@@ -23,7 +23,7 @@ export type Sprite = string[]
 
 export type Cell = { fg: string; bg: string }
 
-export const POSE_NAMES = ['idle', 'talk', 'music', 'turn', 'doze', 'wake'] as const
+export const POSE_NAMES = ['idle', 'talk', 'music', 'doze', 'wake'] as const
 
 export type PoseName = (typeof POSE_NAMES)[number]
 
@@ -35,7 +35,6 @@ export const POSE_FPS: Record<PoseName, number> = {
   idle: 3,
   talk: 6,
   music: 4,
-  turn: 2,
   doze: 2,
   wake: 2,
 }
@@ -102,11 +101,9 @@ export function cells(sprite: Sprite, palette: Record<string, string>): Cell[][]
 }
 
 // Which pose the program is in (§3.2-D). Precedence is the order of what the
-// listener needs to notice: an open invite first (it is waiting on THEM), then an
-// empty room, then whatever is on air.
+// listener needs to notice: an empty room first, then whatever is on air.
 export function poseFor(state: ProgramState | null): PoseName {
   if (state === null) return 'idle'
-  if (state.awaitingReply) return 'turn'
   if (state.activity === 'away') return 'doze'
   switch (state.kind) {
     case 'talk':

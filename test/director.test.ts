@@ -295,7 +295,6 @@ describe('Director — program state (spec 10)', () => {
     await director.run(1)
     const talk = host.states.filter((s) => s.kind === 'talk')
     expect(talk).toHaveLength(1)
-    expect(talk[0]!.awaitingReply).toBe(false)
     expect(SCENES).toContain(talk[0]!.scene)
   })
 

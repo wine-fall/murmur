@@ -203,7 +203,7 @@ describe('setup targets', () => {
   })
 })
 
-// spec 07 §3.7/§5.15: the three switches, and what "all off" has to mean.
+// spec 07 §3.7/§5.15: the two switches, and what "both off" has to mean.
 describe('pacing wiring', () => {
   const memory = new InProcessMemoryStore()
 
@@ -211,19 +211,18 @@ describe('pacing wiring', () => {
     const pacing = buildPacing(config([]), memory)!
     expect(pacing.sensor).toBeInstanceOf(IdleSensor)
     expect(pacing.scheduler).toBeInstanceOf(LedgerScheduler)
-    expect(pacing).toMatchObject({ invites: true, gating: true })
+    expect(pacing).toMatchObject({ gating: true })
   })
 
   it('drops each feature on its flag while keeping the sensor', () => {
     expect(buildPacing(config(['--no-anchors']), memory)!.scheduler).toBeUndefined()
-    expect(buildPacing(config(['--no-invites']), memory)!.invites).toBe(false)
     expect(buildPacing(config(['--no-gating']), memory)!.gating).toBe(false)
   })
 
-  it('all three off drops the block entirely — pre-spec-07 prompts AND timing', () => {
+  it('both off drops the block entirely — pre-spec-07 prompts AND timing', () => {
     // Not merely "no anchors": with the block gone the Director adds no
     // activity cue to the pack and never stretches the gap.
-    expect(buildPacing(config(['--no-anchors', '--no-invites', '--no-gating']), memory)).toBeUndefined()
+    expect(buildPacing(config(['--no-anchors', '--no-gating']), memory)).toBeUndefined()
   })
 })
 

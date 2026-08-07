@@ -211,12 +211,7 @@ describe('cleanBeats', () => {
     expect(beats).toEqual([{ text: 'keep' }, { text: 'and me' }])
   })
 
-  it('carries the invite mark through, and only when set (spec 07 §2.6)', () => {
-    expect(cleanBeats([{ text: 'a', invite: true }, { text: 'b', invite: false }], 5)).toEqual([
-      { text: 'a', invite: true },
-      { text: 'b' },
-    ])
-    // A model that ignores the field simply produces a normal beat.
+  it('a bare beat stays bare — no optional fields invented (spec 04 §3.2)', () => {
     expect(cleanBeats([{ text: 'a' }], 5)).toEqual([{ text: 'a' }])
   })
 })

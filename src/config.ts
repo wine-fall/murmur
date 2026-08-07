@@ -71,10 +71,9 @@ export const ConfigSchema = z.object({
   bedEnabled: z.boolean().default(true),
 
   // --- proactive & pacing (spec 07 §3.7) ---------------------------------- //
-  // On/off as config; the behavioral shape (thresholds, windows, intervals)
-  // stays as module constants. All three off = pre-spec-07 behavior.
+  // On/off as config; the behavioral shape (thresholds, windows) stays as
+  // module constants. Both off = pre-spec-07 behavior.
   anchorsEnabled: z.boolean().default(true),
-  invitesEnabled: z.boolean().default(true),
   gatingEnabled: z.boolean().default(true),
 
   // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
@@ -192,7 +191,6 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'no-music': { type: 'boolean' },
       'no-bed': { type: 'boolean' },
       'no-anchors': { type: 'boolean' },
-      'no-invites': { type: 'boolean' },
       'no-gating': { type: 'boolean' },
       tui: { type: 'boolean' },
       plain: { type: 'boolean' },
@@ -230,7 +228,6 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values['no-music'] === true && { musicEnabled: false }),
     ...(values['no-bed'] === true && { bedEnabled: false }),
     ...(values['no-anchors'] === true && { anchorsEnabled: false }),
-    ...(values['no-invites'] === true && { invitesEnabled: false }),
     ...(values['no-gating'] === true && { gatingEnabled: false }),
     ...(values.tui === true && { frontEnd: 'tui' }),
     // Last, so an explicit opt-out always wins over a redundant opt-in.

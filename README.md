@@ -55,8 +55,8 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 - the brain harness, the mixing engine with ducking, and the talking setup
   guide (03);
 - the no-dead-air look-ahead (04), persistent three-tier memory (05),
-  first-run persona seed & rapport (06), presence — time anchors, invites,
-  going quiet when you're away (07);
+  first-run persona seed & rapport (06), presence — time anchors, going
+  quiet when you're away (07);
 - the TUI front-end with the visualizer and pixel pet, now the default (10);
 - the agentic reply turn — ask and it switches the music, tell it you're done
   and it wraps up the broadcast properly (11).
@@ -89,7 +89,7 @@ node src/main.ts --voice hosted
 
 **Missing pieces are fixed by talking, not by following instructions.** murmur assumes you have Claude Code, so that is the one thing it takes as given — everything else it can walk you through installing itself, asking before each change. The radio always launches: without `ffmpeg`/`yt-dlp` it runs talk-only, without `bun` it uses the plain text front-end, without a voice endpoint it shows its lines instead of speaking. On a boot with any of those gaps it names them and offers to sort them out; decline once and it stops asking. `murmur --setup` (or `--setup-music`) reopens that conversation on demand. To provision by hand instead: `brew install ffmpeg yt-dlp`. `--no-music` skips music entirely.
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats), `--no-invites` (it never turns to you and asks), and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
+Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats) and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
 
 ## Development
 

@@ -101,21 +101,23 @@ export interface Host {
   type ProgramState = {
     kind: 'talk' | 'music' | 'gap'
     nowPlaying?: string            // title, when kind === 'music'
-    awaitingReply: boolean         // an invite window is open (spec 07 §3.5)
     scene?: string                 // time-of-day scene (spec 04 §3.4)
     activity?: Activity            // presence (spec 07); absent = unknown
   }
   ```
 
-  The Director emits it at segment boundaries and on invite-window
-  transitions — no polling, no timers.
+  (`awaitingReply` left with the retired spec-07 invite degree, 2026-08-07 —
+  a breaking removal, so `protocol` bumped 1 → 2 per §2.3.)
+
+  The Director emits it at segment boundaries and when a typed line refreshes
+  presence — no polling, no timers.
 
   **As built**: `onState?` is optional, mirroring the existing `debug?`/`eof?`
   convention, so a host with no status region implements nothing (`CliHost`
   does not). `banner` moved onto the interface, since the factory below returns
-  the seam rather than a concrete host. A re-emit on an invite opening or a
-  typed line reports the CURRENT segment, so a reply during a song keeps
-  `nowPlaying` on the strip (§5.3).
+  the seam rather than a concrete host. A re-emit on a typed line reports the
+  CURRENT segment, so a reply during a song keeps `nowPlaying` on the strip
+  (§5.3).
 - Front-end selection is config-driven (`frontEnd: 'plain' | 'tui'`, default
   `'plain'`), mirroring the provider knobs. The core never imports a concrete
   host; a `buildHost(name)` factory returns the seam.
@@ -180,7 +182,7 @@ Engine → TUI:
 
 | type | payload | carries |
 |---|---|---|
-| `hello` | `{ protocol: 1, persona, brain, voice, away? }` | handshake; replaces `banner`. `away` = seconds since murmur last heard anything, for §3.7.3 |
+| `hello` | `{ protocol: 2, persona, brain, voice, away? }` | handshake; replaces `banner`. `away` = seconds since murmur last heard anything, for §3.7.3 |
 | `segment` | `{ text }` | `onRadioSegment` |
 | `userLine` | `{ text }` | `onUserLine` echo |
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
@@ -192,7 +194,7 @@ TUI → Engine:
 
 | type | payload | carries |
 |---|---|---|
-| `attach` | `{ protocol: 1 }` | must be first; version mismatch → engine replies `bye` |
+| `attach` | `{ protocol: 2 }` | must be first; version mismatch → engine replies `bye` |
 | `line` | `{ text }` | a submitted input line — talk-back, Q&A answers, and commands alike (`/quit` included; the engine owns all parsing, same as stdin today) |
 | `vizSub` | `{ on: boolean, fps?: number }` | subscribe/unsubscribe the viz stream |
 
@@ -278,7 +280,6 @@ sends `line` and renders the outcome):
 | radio is talking | barge-in: interrupt → in-persona reply → program resumes (spec 01 step 3) | reply appears as a segment; no special UI |
 | music is playing | **duck**: music dips, reply airs over it, music recovers (spec 03-02) | now-playing stays visible while the reply segment renders |
 | any time | **steer**: buffered look-ahead beats are discarded so upcoming talk follows the user's direction (spec 04 §3.3) | invisible mechanically — but this is why typing feels steering-shaped, worth reflecting in §6.1's affordance thinking |
-| invite window open (spec 07 §3.5) | the line answers the DJ's turn-to-you; window clears via the ordinary talkback path | `awaitingReply` in `ProgramState` — status region + pet show "it's waiting for you"; clears on the next `state` |
 
 Every typed line is also a **presence signal** (spec 07: the host stamps the
 ActivitySensor; typing flips `away` back to `engaged` and un-gates
@@ -312,7 +313,6 @@ where it lands):
 | Signal | Source | Rendered in |
 |---|---|---|
 | talk on-air / music + title / gap | Director segment boundaries | status region; pet pose |
-| awaiting-reply (invite open) | spec 07 §3.5 window | status badge + pet turns to you |
 | time-of-day scene | spec 04 §3.4 | status region; tint fallback (§3.7) |
 | presence (engaged / present / away) | spec 07 ActivitySensor | pet pose (away = dozing); away also means sparse talk — the pet explains the quiet |
 | anchor moments (good-morning …) | spec 07 §3.4 | ordinary segments; no special UI |
@@ -475,8 +475,8 @@ provides them):
   visualizer's quiet-state source.
 - **spec 03-03 / spec 06**: the `lineReader` Q&A flows the TUI must render
   (§3.2-B); master §10.1's guided-install rule provisions Bun.
-- **spec 07**: `Activity` + the invite window for pet poses and the
-  awaiting-reply badge (soft — absent fields just mean no pose).
+- **spec 07**: `Activity` for pet poses (soft — an absent field just means no
+  pose).
 - External: `@opentui/core` + `@opentui/react` (version pinned), Bun ≥1.3,
   `node:net` + zod for the wire (no new protocol dependency).
 
@@ -520,9 +520,8 @@ TUI work is built on the framework choice.
 5. The visualizer moves with real music (engine FFT feed), sits quiet on the
    bed, and costs the engine nothing when the TUI is detached or unsubscribed
    (assert: no analyser reads headless).
-6. The invite state is visible: with a spec-07 invite window open,
-   `awaitingReply` renders (status badge / pet pose) and clears when answered
-   or expired.
+6. ~~The invite state is visible~~ — **[retired 2026-08-07]** with the spec-07
+   invite degree (`awaitingReply` and the `turn` pose are gone).
 7. Kill the TUI process mid-song: the engine keeps playing, logs one line,
    and accepts a fresh attach (the §2.3 liveness rule, pinned on fakes).
 8. `/quit` and Ctrl-C from the TUI tear down TUI, engine, and voice in order;

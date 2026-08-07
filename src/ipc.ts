@@ -12,16 +12,16 @@ import { z } from 'zod'
 import { ACTIVITIES } from './activity.ts'
 
 // Bumped only by a breaking change; additive message types do not touch it.
-export const PROTOCOL = 1
+export const PROTOCOL = 2
 
 const ENVELOPE = 1
 
-// The engine's view of the program, pushed at segment boundaries and on invite
-// transitions (spec 10 §2.1). Optional fields absent = unknown, not "off".
+// The engine's view of the program, pushed at segment boundaries and when a
+// typed line refreshes presence (spec 10 §2.1). Optional fields absent =
+// unknown, not "off".
 export const ProgramStateSchema = z.object({
   kind: z.enum(['talk', 'music', 'gap']),
   nowPlaying: z.string().optional(),
-  awaitingReply: z.boolean(),
   scene: z.string().optional(),
   activity: z.enum(ACTIVITIES).optional(),
 })

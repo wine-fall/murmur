@@ -29,7 +29,7 @@ export interface Host {
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void
   // What the program is doing right now (spec 10 §2.1): pushed at segment
-  // boundaries and invite transitions, never polled. Optional, like debug — a
+  // boundaries and presence refreshes, never polled. Optional, like debug — a
   // host with no status region has nothing to do with it.
   onState?(state: ProgramState): void
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a

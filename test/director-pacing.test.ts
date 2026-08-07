@@ -1,7 +1,6 @@
 // The Director's proactive-and-pacing behavior on fakes (spec 07 §5): presence
-// reaches the pack, an away room gets longer gaps and no talk generation, time
-// anchors beat the buffer, and the invite/slide-back window is one flag plus
-// one deadline.
+// reaches the pack, an away room gets longer gaps and no talk generation, and
+// time anchors beat the buffer.
 import { describe, expect, it } from 'vitest'
 
 import { IdleSensor, type Activity, type ActivitySensor } from '../src/activity.ts'
@@ -267,124 +266,16 @@ describe('time anchors (acceptance 10, 11, 15)', () => {
   })
 })
 
-describe('turning to you, and sliding back (acceptance 12, 13, 14, 15)', () => {
-  const cues = (brain: FakeBrain) => brain.talkContexts.map((c) => c.cue)
-
-  it('no invite before the interval has passed, and none right after a user line', async () => {
+// The retired spec-07 turn-to-you machinery must stay gone: an ordinary talk
+// batch never carries a cue — the cue channel belongs to anchors alone.
+describe('ordinary talk carries no cue', () => {
+  it('plain talk batches never ask the model to turn to the listener', async () => {
     const { brain, host, director } = build({ gapSeconds: 0 })
-    brain.batches = Array.from({ length: 10 }, (_, i) => [`beat ${i}a`, `beat ${i}b`])
-    await director.run(3)
-    expect(cues(brain).slice(0, 3)).toEqual([undefined, undefined, undefined])
-    expect(host.radio).toHaveLength(3)
-  })
-
-  it('asks for an invite once the interval has passed', async () => {
-    const { brain, director } = build({ gapSeconds: 0 })
     brain.batches = Array.from({ length: 12 }, (_, i) => [`beat ${i}a`, `beat ${i}b`])
     await director.run(6)
-    expect(cues(brain)).toContain('invite')
-  })
-
-  it('never queues a second invite behind one that has not aired yet', async () => {
-    // An invited beat sits in the look-ahead for a boundary or two. The refills
-    // in between must not stack another question behind it.
-    const { brain, director } = build({ gapSeconds: 0 })
-    let call = 0
-    brain.nextTalks = async (ctx, count) => {
-      brain.nextTalksCalls++
-      brain.talkContexts.push(ctx)
-      call++
-      return Array.from({ length: count }, (_, i) => ({
-        text: `beat ${call}-${i}`,
-        ...(ctx.cue === 'invite' && i === 0 && { invite: true }),
-      }))
-    }
-    await director.run(10)
-    const asked = cues(brain)
-      .map((cue, i) => (cue === 'invite' ? i : -1))
-      .filter((i) => i >= 0)
-    for (let i = 1; i < asked.length; i++) {
-      expect(asked[i]! - asked[i - 1]!).toBeGreaterThanOrEqual(4) // INVITE_EVERY_N
-    }
-  })
-
-  it('never asks while away', async () => {
-    const { brain, sensor, director } = build({ gapSeconds: 0 }, { gating: false })
-    sensor.activity = 'away'
-    brain.batches = Array.from({ length: 12 }, (_, i) => [`beat ${i}a`, `beat ${i}b`])
-    await director.run(6)
-    expect(cues(brain)).not.toContain('invite')
-  })
-
-  it('--no-invites never asks', async () => {
-    const { brain, director } = build({ gapSeconds: 0 }, { invites: false })
-    brain.batches = Array.from({ length: 12 }, (_, i) => [`beat ${i}a`, `beat ${i}b`])
-    await director.run(6)
-    expect(cues(brain)).not.toContain('invite')
-  })
-
-  it('an unanswered invite expires into a slide-back, with no second invite', async () => {
-    const { brain, host, director } = build({ gapSeconds: 0 })
-    brain.batches = [
-      [{ text: 'so what have you been listening to?', invite: true }],
-      ['b'],
-      ['c'],
-      ['d'],
-      ['e'],
-      ['f'],
-    ]
-    await director.run(5)
-    const asked = cues(brain)
-    expect(host.radio[0]).toContain('listening to')
-    // The window holds for ~2 segments, then exactly one slide-back is asked
-    // for — and no invite comes sooner than the normal interval.
-    expect(asked).toContain('slide-back')
-    expect(asked.filter((c) => c === 'slide-back')).toHaveLength(1)
-    const slideAt = asked.indexOf('slide-back')
-    expect(asked.slice(0, slideAt + 1)).not.toContain('invite')
-  })
-
-  it('an answered invite clears the window with no slide-back', async () => {
-    const { brain, player, host, director } = build({ gapSeconds: 0 })
-    brain.batches = [
-      [{ text: 'what are you up to?', invite: true }],
-      ['bg'],
-      ['after'],
-      ['more'],
-      ['still more'],
-    ]
-    player.auto = false
-    const run = director.run(3)
-    await until(() => host.radio.length === 1, 'invite aired')
-    host.type('reading, mostly')
-    await until(() => host.radio.includes('re:reading, mostly'), 'ordinary talkback reply')
-    player.finish()
-    await until(() => host.radio.length >= 3, 'program resumes')
-    host.type('/quit')
-    player.finish()
-    await run
-    expect(cues(brain)).not.toContain('slide-back')
-  })
-
-  // spec 10 §5.6: the badge/pose the front-end draws from the same window.
-  it('an open invite window is visible in the program state, and clears when answered', async () => {
-    const { brain, player, host, director } = build({ gapSeconds: 0 })
-    brain.batches = [
-      [{ text: 'what are you up to?', invite: true }],
-      ['bg'],
-      ['after'],
-      ['more'],
-    ]
-    player.auto = false
-    const run = director.run(3)
-    await until(() => host.radio.length === 1, 'invite aired')
-    expect(host.states.at(-1)!.awaitingReply).toBe(true)
-    host.type('reading, mostly')
-    await until(() => host.states.at(-1)!.awaitingReply === false, 'window cleared')
-    player.finish()
-    await until(() => host.radio.length >= 3, 'program resumes')
-    host.type('/quit')
-    player.finish()
-    await run
+    expect(brain.talkContexts.map((c) => c.cue)).toEqual(
+      Array.from({ length: brain.talkContexts.length }, () => undefined),
+    )
+    expect(host.radio).toHaveLength(6)
   })
 })
