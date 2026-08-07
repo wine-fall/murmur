@@ -39,9 +39,11 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
     `## Open`.
   - `create-pr` — push + open the PR (runs the local CI pre-check first).
 - graphify: before any broad code search, run `graphify query "<question>"`.
-  A post-commit hook rebuilds the graph for **code** changes only — after
-  editing `specs/*.md`, run `/graphify --update` by hand. `graphify-out/` is
-  gitignored; never commit it.
+  A post-commit hook rebuilds the graph for **code** changes only; doc/spec
+  edits are not auto-indexed. Do **not** run `/graphify --update` per PR —
+  batch the doc debt: run it only once ~10 PRs have landed since the last
+  update, or when a graph query visibly misses recent docs. `graphify-out/`
+  is gitignored; never commit it.
 
 ## Working norms / red lines
 
