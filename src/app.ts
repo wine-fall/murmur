@@ -153,17 +153,16 @@ function buildMusic(config: Config, harness: Harness, engine: AudioEngine, host:
 }
 
 // Presence wiring (spec 07). The sensor is what puts the activity cue in the
-// pack and stretches the away gap, so it rides along whenever ANY of the three
-// features is on — but with all three off, the block is dropped entirely and
-// the Director is exactly its pre-spec-07 self (§5.15: not merely no anchors,
-// but unchanged prompts and unchanged timing).
+// pack and stretches the away gap, so it rides along whenever EITHER feature
+// is on — but with both off, the block is dropped entirely and the Director is
+// exactly its pre-spec-07 self (§5.15: not merely no anchors, but unchanged
+// prompts and unchanged timing).
 export function buildPacing(config: Config, memory: MemoryStore): PacingWiring | undefined {
-  if (!config.anchorsEnabled && !config.invitesEnabled && !config.gatingEnabled) return undefined
+  if (!config.anchorsEnabled && !config.gatingEnabled) return undefined
   const probe = osIdleProbe()
   return {
     sensor: new IdleSensor({ ...(probe !== undefined && { probe }) }),
     ...(config.anchorsEnabled && { scheduler: new LedgerScheduler(memory) }),
-    invites: config.invitesEnabled,
     gating: config.gatingEnabled,
   }
 }

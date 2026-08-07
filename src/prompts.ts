@@ -47,7 +47,7 @@ export const ACTIVITY_GUIDANCE: Record<string, string> = {
   away: 'The room is quiet — keep it low and unhurried, the way you would with someone half-asleep in the next room.',
 }
 
-// Per-call intents the Director asks the prompt to carry (spec 07 §3.4/§3.5).
+// Per-call intents the Director asks the prompt to carry (spec 07 §3.4).
 // Local policy decides WHETHER; the model writes WHAT. An unknown key renders
 // nothing, so a cue this build does not know degrades to an ordinary beat.
 export const CUE_GUIDANCE: Record<string, string> = {
@@ -60,15 +60,6 @@ export const CUE_GUIDANCE: Record<string, string> = {
   'anchor:night':
     'This beat closes the day: a good-night that lets it settle, quiet and ' +
     'unhurried, asking nothing of them.',
-  invite:
-    'End ONE of these beats by turning to the listener — something small and ' +
-    'genuinely curious that grows out of what you were just saying, and mark ' +
-    'that beat with `invite: true`. Ask because you want to know, not because ' +
-    'you need an answer: no pressing, no "are you there", nothing needy.',
-  'slide-back':
-    'You turned to them a little while ago and nobody answered. Move on ' +
-    'gracefully: pick the program back up, do not repeat the question, and do ' +
-    'not remark on the silence.',
 }
 
 function pacingLines(ctx: ContextPack): string {
@@ -566,23 +557,16 @@ export function buildSteerPrompt(
 // the front-end renders the persona's voice, it does not write it. That is why
 // the picked line travels on the wire's `state` message.
 export const STATUS_MICROCOPY = {
-  awaiting: [
-    'turning to you — say anything',
-    'your turn, whenever you like',
-    'the mic is yours',
-  ],
   talk: ['on the air', 'thinking out loud', 'just talking'],
   music: ['letting this one play', 'sitting with this one', 'this one is for the hour'],
   gap: ['letting it breathe', 'a beat of quiet', 'listening to the room'],
 } as const satisfies Record<string, readonly string[]>
 
-// An open invite is the one thing the strip must say out loud, whatever segment
-// is on air (§3.2-A) — a listener who missed the spoken turn-to-you can still
-// see it. `roll` is injectable so a test can pin the pick.
+// `roll` is injectable so a test can pin the pick.
 export function statusMicrocopy(
-  state: { kind: 'talk' | 'music' | 'gap'; awaitingReply: boolean },
+  state: { kind: 'talk' | 'music' | 'gap' },
   roll: () => number = Math.random,
 ): string {
-  const pool = STATUS_MICROCOPY[state.awaitingReply ? 'awaiting' : state.kind]
+  const pool = STATUS_MICROCOPY[state.kind]
   return pool[Math.min(Math.floor(roll() * pool.length), pool.length - 1)]!
 }

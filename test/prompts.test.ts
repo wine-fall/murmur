@@ -294,17 +294,6 @@ describe('pacing cues (spec 07 §2.2/§3.4/§3.5)', () => {
     expect(CUE_GUIDANCE['anchor:morning']).not.toBe(CUE_GUIDANCE['anchor:night'])
   })
 
-  it('the invite cue asks for the mark and forbids pressing', () => {
-    const p = buildNextTalksPrompt(pack({ cue: 'invite' }), 2)
-    expect(p).toContain('invite')
-    expect(p).toContain(CUE_GUIDANCE.invite)
-  })
-
-  it('the slide-back cue moves on without repeating or commenting on silence', () => {
-    const p = buildNextTalksPrompt(pack({ cue: 'slide-back' }), 2)
-    expect(p).toContain(CUE_GUIDANCE['slide-back'])
-  })
-
   it('an unknown cue renders nothing', () => {
     expect(buildNextTalksPrompt(pack({ cue: 'nonsense' }), 2)).toBe(buildNextTalksPrompt(pack({}), 2))
   })
@@ -327,25 +316,14 @@ describe('status microcopy (spec 10 §3.7.4)', () => {
 
   it('draws from the pool that matches what the program is doing', () => {
     for (const kind of ['talk', 'music', 'gap'] as const) {
-      const line = statusMicrocopy({ kind, awaitingReply: false })
+      const line = statusMicrocopy({ kind })
       expect(STATUS_MICROCOPY[kind]).toContain(line)
     }
   })
 
-  it('an open invite wins over whatever segment is on air', () => {
-    // §3.2-A: awaiting a reply is the one thing the strip must say out loud,
-    // even mid-song.
-    const line = statusMicrocopy({ kind: 'music', awaitingReply: true })
-    expect(STATUS_MICROCOPY.awaiting).toContain(line)
-  })
-
   it('costs no tokens — it is a fixed local pool, picked deterministically', () => {
-    expect(statusMicrocopy({ kind: 'gap', awaitingReply: false }, () => 0)).toBe(
-      STATUS_MICROCOPY.gap[0],
-    )
-    expect(statusMicrocopy({ kind: 'gap', awaitingReply: false }, () => 0.999)).toBe(
-      STATUS_MICROCOPY.gap.at(-1),
-    )
+    expect(statusMicrocopy({ kind: 'gap' }, () => 0)).toBe(STATUS_MICROCOPY.gap[0])
+    expect(statusMicrocopy({ kind: 'gap' }, () => 0.999)).toBe(STATUS_MICROCOPY.gap.at(-1))
   })
 })
 

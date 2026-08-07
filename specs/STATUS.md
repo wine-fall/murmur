@@ -7,8 +7,9 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-01 (spec 11 agentic-steer built: the reply turn gets
-tools — switch_music / two-phase end_broadcast; by-ear pass owed)_
+_Last updated: 2026-08-07 (spec 07 invites retired: murmur is a radio and does
+not solicit interaction — the turn-to-you/slide-back chain is removed; typed
+talkback, anchors, gating, and the activity sensor stay)_
 
 ## Where we are
 
@@ -29,7 +30,8 @@ how it got there:
 - spec 05 persistent three-tier memory + compaction (#59).
 - spec 06 first-run persona seed, consented profile bootstrap, relationship
   section (#67).
-- spec 07 presence, time anchors, invites, away gating (#68).
+- spec 07 presence, time anchors, away gating (#68; the invite degree was
+  retired 2026-08-07 — spec 07 status note).
 - spec 10 TUI — the wire + `IpcHost` + OpenTUI client (#71); the visualizer
   feed + pixel pet + warmth kit (#74). Redesign decisions: #70. The TUI is now
   the DEFAULT front-end (spec 10 §6), falling back to plain without bun.

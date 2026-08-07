@@ -43,7 +43,7 @@ A **fully-local companion radio** — "a radio that broadcasts for an audience o
 
 > **Product framing**: murmur is an **open-source, non-commercial product** distributed to users. "Audience of one" is the *experience* — each user runs their own private, fully-local radio — **not** a personal one-off; the earlier "personal use" framing is retired. Model choices follow a **two-phase strategy** (§3.7): experiment with good local/open models now, adopt paid/licensed models at distribution.
 
-It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **mostly broadcasting, but occasionally turns to me and asks something** (if I don't engage, it gracefully slides back into the program). It has a **persona seeded by a few questions up front** and it **keeps learning me** as it keeps me company, so it fits me better over time. (Amended 2026-07-29, §2.3: the *host's character* stays stable — what grows is what it knows about me and how we get on.) I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
+It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **broadcasting, never soliciting** — it keeps going whether or not I say anything, and when I type, we chat for a bit before it eases back into the program. (Amended 2026-08-07, §2.2: the earlier "occasionally turns to me and asks" degree is retired — a radio does not solicit interaction.) It has a **persona seeded by a few questions up front** and it **keeps learning me** as it keeps me company, so it fits me better over time. (Amended 2026-07-29, §2.3: the *host's character* stays stable — what grows is what it knows about me and how we get on.) I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 **Differentiation**: existing tools are either "voice-control Claude Code to write code" or message-driven assistants. **Nobody occupies the "local + proactive + emotional companionship + voice radio" combination.** That gap is murmur.
 
@@ -60,10 +60,17 @@ It is not a "you ask, I answer" assistant — it is a **program stream that neve
 - ⏰ **Time-anchor segments**: good-morning / midday / good-night — "fixed programming" that must hit on schedule, layered on top of the stream.
 
 ### 2.2 Hybrid proactive/passive (interaction model = C)
+
+> **Amended 2026-08-07 — the "turn to you" degree is retired** (spec 07 status
+> note): murmur is a radio, and a radio does not solicit interaction. It never
+> turns to the listener to ask something; there is no invite and no slide-back.
+> Broadcasting stays proactive (talk, music, anchors); **interaction is
+> listener-initiated** — typing to the radio is the model, and a typed line
+> still gets the chat-for-a-bit reply below.
+
 - **Mostly broadcasting**: it talks at you like real radio and **does not require a reply** — if you say nothing, it keeps going. Companionship is "that voice in the background," pressure-free.
-- **Occasionally turns to you**: at the right moment it turns and asks you something.
-- **If you engage, you chat for a bit; if you don't, it gracefully slides back into the program.**
-- The exact **degree** of "occasionally" (how often it turns to you, what triggers it, how long before it slides back) is a detail for a later sub-spec.
+- ~~**Occasionally turns to you**: at the right moment it turns and asks you something.~~ *(retired 2026-08-07)*
+- **If you engage, you chat for a bit** — you type, it replies in persona and eases back into the program.
 
 ### 2.3 A persona that grows
 The persona is **not a hard-coded constant — it is an evolving, living asset**:
@@ -178,7 +185,7 @@ Each item records the **why**, to avoid re-litigating later.
 | Component | Responsibility | Notes |
 |---|---|---|
 | **CLI Host** | Render "now playing" + read keyboard input | proactive + typing share the terminal |
-| **Program Director** | The soul: continuously decide "what plays next" (autonomous talk / music / time-anchor), modulate talk density by activity + time-of-day; manage "turn to you / slide back" | mostly local policy — not every decision calls Claude |
+| **Program Director** | The soul: continuously decide "what plays next" (autonomous talk / music / time-anchor), modulate talk density by activity + time-of-day | mostly local policy — not every decision calls Claude |
 | **Brain** | Claude SDK session: ① generate talk-segment scripts / pick topics ② respond when you type. Persona + memory injected | see token economy |
 | **VoiceProvider** | text → speech, hot-swappable TTS (v1 = hosted endpoint), splittable fast/rich by scenario | candidate pool in 3.5 |
 | **MusicProvider** | topic/query → audio stream, hot-swappable | v1 = yt-dlp |

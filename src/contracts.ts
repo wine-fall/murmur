@@ -24,13 +24,10 @@ export type Turn = {
 }
 
 // One self-initiated talk beat from the batched call (spec 04 §3.2). `topic`
-// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4);
-// `invite` marks the beat that ends by turning to the listener (spec 07 §2.6) —
-// a model that ignores it just produces a normal beat.
+// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4).
 export type TalkBeat = {
   readonly text: string
   readonly topic?: string
-  readonly invite?: boolean
 }
 
 // The compact context handed to the Brain per call (master §6). Beyond the
@@ -39,7 +36,7 @@ export type TalkBeat = {
 // (spec 05 §3.5 — coveredTopics is cross-day, the issue-#44 anti-repeat).
 // `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
 // and `cue` the per-call intent the Director asks the prompt to carry (an
-// anchor, an invite, a slide-back — spec 07 §3.4/§3.5).
+// anchor — spec 07 §3.4).
 // All optional: absent renders nothing, so spec-01 call sites stay valid.
 export type ContextPack = {
   readonly persona: string

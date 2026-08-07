@@ -66,14 +66,9 @@ const MUSIC_RECENT_TURNS = 6
 // remaining gap (spec 04 §6).
 const TALK_LOOKAHEAD = 2
 
-// spec 07 §3.7: behavioral shape as module constants, tunable by ear in one
-// place. How much longer the gap runs in an empty room; how many segments must
-// air between invites; how long an aired invite stays outstanding (segments OR
-// wall-clock, whichever comes first — a song can outlast two segments).
+// spec 07 §3.7: behavioral shape as a module constant, tunable by ear in one
+// place. How much longer the gap runs in an empty room.
 const AWAY_GAP_FACTOR = 3
-const INVITE_EVERY_N = 4
-const INVITE_WINDOW_SEGMENTS = 2
-const INVITE_WINDOW_MS = 90_000
 
 export type Steer = { intent: 'quit' } | { intent: 'talkback'; text: string }
 
@@ -104,12 +99,11 @@ export type MusicWiring = {
 
 // Proactive-and-pacing wiring (spec 07), optional as a block: without it the
 // Director behaves exactly as it did before spec 07 — no presence signal in the
-// pack, no anchors, no invites, no gating.
+// pack, no anchors, no gating.
 export type PacingWiring = {
   sensor: ActivitySensor
   // Absent = --no-anchors.
   scheduler?: Scheduler
-  invites?: boolean // default true; false = --no-invites
   gating?: boolean // default true; false = --no-gating
 }
 
@@ -163,13 +157,6 @@ export class Director {
   private activity: Activity | undefined
   // The segment the front-end is currently showing (spec 10 §2.1).
   private segment: { kind: ProgramState['kind']; nowPlaying?: string } = { kind: 'gap' }
-  // The invite state machine in full (§3.5): one counter, one flag, one
-  // deadline — there is deliberately nothing more, because a retry path is what
-  // would make the radio needy.
-  private segmentsSinceInvite = 0
-  private segmentsSinceUserLine = 1
-  private awaitingReply: { deadlineMs: number; segments: number } | null = null
-  private slideBackDue = false
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
   private pendingPick: Pending<TrackPick | null> | null = null
@@ -236,24 +223,12 @@ export class Director {
     }
   }
 
-  // --- presence, anchors, invites (spec 07) -------------------------------- //
+  // --- presence, anchors (spec 07) ----------------------------------------- //
 
-  // Once per boundary: read the clock and the presence signal, age the invite
-  // window, and turn an expired one into a slide-back.
+  // Once per boundary: read the clock and the presence signal.
   private beginBoundary(): void {
     this.now = new Date()
     this.readActivity()
-    this.segmentsSinceInvite++
-    this.segmentsSinceUserLine++
-    const outstanding = this.awaitingReply
-    if (outstanding === null) return
-    outstanding.segments--
-    if (outstanding.segments > 0 && this.now.getTime() < outstanding.deadlineMs) return
-    // Nobody answered: drop the question and slide back into the program. There
-    // is no retry path — the interval counter runs from the invite that AIRED.
-    this.awaitingReply = null
-    this.slideBackDue = true
-    this.deps.host.debug?.('invite: window expired; sliding back')
   }
 
   // The sensor read, honoring MURMUR_ACTIVITY (by-ear). Also taken right after
@@ -272,58 +247,13 @@ export class Director {
     return pacing !== undefined && (pacing.gating ?? true) && this.activity === 'away'
   }
 
-  // Whether the NEXT batch may be asked to turn to the listener — all local,
-  // 0 tokens (§3.6). Re-evaluated at request time, not at air time.
-  private inviteEligible(): boolean {
-    const pacing = this.deps.pacing
-    if (pacing === undefined || pacing.invites === false) return false
-    return (
-      this.activity !== 'away' &&
-      this.awaitingReply === null &&
-      this.segmentsSinceInvite >= INVITE_EVERY_N &&
-      // They just typed — they are already engaged, so asking is redundant.
-      this.segmentsSinceUserLine >= 1
-    )
-  }
-
-  // The one place local policy picks a cue for an ordinary talk batch. The
-  // slide-back is one-shot: asked for once, then gone.
-  private talkCue(): string | undefined {
-    if (this.slideBackDue) {
-      this.slideBackDue = false
-      return 'slide-back'
-    }
-    if (!this.inviteEligible()) return undefined
-    // The interval restarts at REQUEST time, not at air time: an invited beat
-    // sits in the look-ahead for a boundary or two before it airs, and a refill
-    // in between must not queue a second one behind it (back-to-back questions
-    // are exactly the pressure §3.5 exists to prevent). A model that ignores
-    // the field simply costs this round's ask — the next comes at the normal
-    // interval, never sooner.
-    this.segmentsSinceInvite = 0
-    return 'invite'
-  }
-
-  private openInviteWindow(): void {
-    this.segmentsSinceInvite = 0
-    this.awaitingReply = {
-      deadlineMs: this.now.getTime() + INVITE_WINDOW_MS,
-      segments: INVITE_WINDOW_SEGMENTS,
-    }
-    this.deps.host.debug?.('invite: aired; awaiting a reply')
-    this.restate()
-  }
-
-  // Every typed line funnels through here: it stamps the presence sensor, and
-  // it clears any outstanding invite — the listener took the floor, so an
-  // answered invite is just ordinary talkback and no slide-back is owed (§3.9).
+  // Every typed line funnels through here: it stamps the presence sensor and
+  // refreshes the presence reading — the listener just proved they are back.
   private takeSteer(): Steer {
     const line = this.deps.host.takeLine()!
     this.now = new Date()
     this.deps.pacing?.sensor.noteInput(this.now)
     this.readActivity()
-    this.segmentsSinceUserLine = 0
-    this.awaitingReply = null
     this.restate()
     return steerFromLine(line)
   }
@@ -367,13 +297,12 @@ export class Director {
     this.restate()
   }
 
-  // Re-announce the CURRENT segment because something around it moved (an
-  // invite opened, a typed line closed one). Deliberately not emitState('talk'):
-  // a reply during a song is ducked over it, so the track has to stay named.
+  // Re-announce the CURRENT segment because something around it moved (a typed
+  // line refreshed presence). Deliberately not emitState('talk'): a reply
+  // during a song is ducked over it, so the track has to stay named.
   private restate(): void {
     this.deps.host.onState?.({
       ...this.segment,
-      awaitingReply: this.awaitingReply !== null,
       scene: currentScene(this.now),
       ...(this.activity !== undefined && { activity: this.activity }),
     })
@@ -406,9 +335,6 @@ export class Director {
     const aired = await this.nextTalkClip()
     if (aired === null) return // generation/synthesis degraded; the loop keeps broadcasting
     this.airBeat(aired.beat)
-    // The beat the model marked as turning to the listener (spec 07 §2.6):
-    // hold the reply window open from the moment it airs.
-    if (aired.beat.invite === true) this.openInviteWindow()
     // Refill AFTER recording, so the top-up's context already carries this
     // just-aired beat and its Brain+synth overlap the playback below.
     this.prefetchTalk()
@@ -443,7 +369,7 @@ export class Director {
       return clip === null ? null : { beat: primed.beat, clip }
     }
     this.deps.host.debug?.('talk.buffer cold; batching inline')
-    const beats = await this.generateTalks(TALK_LOOKAHEAD, [], this.talkCue())
+    const beats = await this.generateTalks(TALK_LOOKAHEAD)
     const first = beats.shift()
     if (first === undefined) return null
     this.prefetchMusic(`- radio: ${first.text}`)
@@ -476,7 +402,7 @@ export class Director {
     const epoch = this.talkEpoch
     const queued = this.talkAhead.map((b) => b.beat.text)
     this.deps.host.debug?.(`talk.refill need=${need} queued=${queued.length}`)
-    const beats = await this.generateTalks(need, queued, this.talkCue())
+    const beats = await this.generateTalks(need, queued)
     // A steer discarded the buffer while the batch was in flight: its beats
     // predate the user's turn — drop them.
     if (epoch !== this.talkEpoch) return

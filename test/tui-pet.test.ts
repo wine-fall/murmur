@@ -26,7 +26,7 @@ const PALETTE = petPalette(accentFor('evening'), 0)
 
 describe('the committed sprite assets', () => {
   it('ships a frame set for every pose the state feed can ask for', () => {
-    const asked: PoseName[] = ['idle', 'talk', 'music', 'turn', 'doze', 'wake']
+    const asked: PoseName[] = ['idle', 'talk', 'music', 'doze', 'wake']
     for (const pose of asked) expect(POSES[pose]!.length).toBeGreaterThan(0)
   })
 
@@ -110,20 +110,15 @@ describe('cells (the krabby half-block technique)', () => {
 })
 
 describe('poseFor (spec 10 §3.2-D: the display-state inventory)', () => {
-  it('turns to you when an invite is open, whatever is on air', () => {
-    expect(poseFor({ kind: 'music', nowPlaying: 'a song', awaitingReply: true })).toBe('turn')
-    expect(poseFor({ kind: 'gap', awaitingReply: true })).toBe('turn')
-  })
-
   it('dozes when the room is empty — the pet explains the quiet', () => {
-    expect(poseFor({ kind: 'gap', awaitingReply: false, activity: 'away' })).toBe('doze')
+    expect(poseFor({ kind: 'gap', activity: 'away' })).toBe('doze')
   })
 
   it('follows the segment the rest of the time', () => {
-    expect(poseFor({ kind: 'talk', awaitingReply: false })).toBe('talk')
-    expect(poseFor({ kind: 'music', awaitingReply: false })).toBe('music')
-    expect(poseFor({ kind: 'gap', awaitingReply: false })).toBe('idle')
-    expect(poseFor({ kind: 'talk', awaitingReply: false, activity: 'engaged' })).toBe('talk')
+    expect(poseFor({ kind: 'talk' })).toBe('talk')
+    expect(poseFor({ kind: 'music', nowPlaying: 'a song' })).toBe('music')
+    expect(poseFor({ kind: 'gap' })).toBe('idle')
+    expect(poseFor({ kind: 'talk', activity: 'engaged' })).toBe('talk')
   })
 
   it('idles before the engine has said anything', () => {

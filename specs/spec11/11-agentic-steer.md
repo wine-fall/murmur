@@ -176,7 +176,7 @@ interface SteerBrain {
   A pick that returns `null` clears the switch (log `music.switch failed`);
   the old track simply plays on, and the next boundary behaves normally.
 - **Switch with no track playing** (or the old track ends before the pick
-  resolves): a one-shot forced-music boundary (`slideBackDue` pattern) makes
+  resolves): a one-shot forced-music boundary (a self-clearing flag) makes
   the next boundary a music segment; if the pick is still resolving there, air
   a buffered talk beat and keep the force for the boundary after (bounded: the
   force clears once a track airs or the pick returns null).
