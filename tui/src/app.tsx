@@ -13,15 +13,21 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { Constellation, panelWidth, type Run } from './constellation.ts'
-import { accentFor, INK, mix, type Accent } from './palette.ts'
+import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
+import {
+  cellPixels,
+  deleteFigures,
+  encodeFigurePng,
+  figurePen,
+  figureScale,
+  placeFigure,
+} from './figure-image.ts'
+import { accentFor, EMBER, INK, mix, PERIWINKLE, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
   bandLayout,
-  cells,
   loadPoses,
-  petPalette,
   POSE_FPS,
   poseFor,
   type PoseName,
@@ -36,17 +42,19 @@ const LOG_MAX = 500
 // that can change under a running client.
 const POSES = loadPoses()
 
+// The sky composition's max width (§6.1): the concept frames its page; an
+// ultra-wide terminal centers that frame rather than stretching it.
+const MAX_COLS = 184
+
 // The alive band is as tall as the pet, and the bars fill it — one band, not two
 // stacked strips (§3.3). Its height stays the pet's whether or not the pet is
 // shown: the band is the bars' room, and it must not resize under a knob.
+// Half-blocks fold two pixel rows per terminal row.
 const BAND_ROWS = POSES.idle[0]!.length / 2
 
 // Whether the creature is part of that band is a live setting now (spec 12
 // §3.7), so its layout is computed per render inside App — the env override
 // stays, resolved in bandLayout itself.
-
-// Half-block: the upper pixel is the ink, the lower is the ground behind it.
-const HALF = '▀'
 
 // How far the pet's ink fades toward the room while it sleeps.
 const DOZE_FADE = 0.45
@@ -99,7 +107,7 @@ function Visualizer({ sink, accent }: { sink: VizSink; accent: Accent }): React.
 }
 
 // The pet (§3.7.1): one pose at a time, its frames looped at the pose's own rate.
-function Pet({ pose, accent }: { pose: PoseName; accent: Accent }): React.ReactNode {
+function Pet({ pose }: { pose: PoseName }): React.ReactNode {
   const [frame, setFrame] = useState(0)
   const frames = POSES[pose]
 
@@ -115,20 +123,26 @@ function Pet({ pose, accent }: { pose: PoseName; accent: Accent }): React.ReactN
     return () => clearInterval(timer)
   }, [pose, frames])
 
-  const grid = cells(frames[frame % frames.length]!, petPalette(accent, pose === 'doze' ? DOZE_FADE : 0))
-  return (
-    <box style={{ flexDirection: 'column' }}>
-      {grid.map((row, y) => (
-        <text key={y}>
-          {row.map((cell, x) => (
-            <span key={x} fg={cell.fg} bg={cell.bg}>
-              {HALF}
-            </span>
-          ))}
-        </text>
-      ))}
-    </box>
-  )
+  const fade = pose === 'doze' ? DOZE_FADE : 0
+  const cream = mix(INK.text, INK.bg, fade)
+  const warm = mix(WARM, INK.bg, fade)
+  const ember = mix(EMBER, INK.bg, fade)
+  const ink = (key: string | undefined): string =>
+    key === 'x' ? cream : key === 'w' ? warm : key === 's' ? ember : INK.bg
+  const sprite = frames[frame % frames.length]!
+  const rows: React.ReactNode[] = []
+  for (let top = 0; top + 1 < sprite.length; top += 2) {
+    rows.push(
+      <text key={top}>
+        {[...sprite[top]!].map((_, x) => (
+          <span key={x} fg={ink(sprite[top]![x])} bg={ink(sprite[top + 1]![x])}>
+            {'▀'}
+          </span>
+        ))}
+      </text>,
+    )
+  }
+  return <box style={{ flexDirection: 'column' }}>{rows}</box>
 }
 
 // The wide-terminal sky (§6.1 quiet-constellation): starfield, particle mist,
@@ -157,7 +171,7 @@ function SkyPanel({
   const sky = useRef<Constellation | null>(null)
   const tick = useRef(0)
   const [painted, setPainted] = useState<Run[][]>([])
-  if (sky.current === null) sky.current = new Constellation(width, rows)
+  if (sky.current === null) sky.current = new Constellation(width, rows, 1, penFor(process.env))
 
   useEffect(() => {
     sink.current = (bins) => bars.current.push(bins)
@@ -169,10 +183,14 @@ function SkyPanel({
     const timer = setInterval(() => {
       tick.current++
       const at = Math.floor(tick.current / (SKY_FPS / POSE_FPS[pose])) % frames.length
-      const pet = showPet
-        ? cells(frames[at]!, petPalette(accent, pose === 'doze' ? DOZE_FADE : 0))
-        : null
-      setPainted(sky.current!.frame(bars.current.levels(), accent, pet))
+      setPainted(
+        sky.current!.frame(
+          bars.current.levels(),
+          accent,
+          showPet ? frames[at]! : null,
+          pose === 'doze' ? DOZE_FADE : 0,
+        ),
+      )
     }, 1000 / SKY_FPS)
     return () => clearInterval(timer)
   }, [accent, pose, frames, showPet])
@@ -297,39 +315,111 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // beside the log; narrow ones keep the classic bottom band. Same four
   // regions either way (§3.3) — only the composition moves.
   const dims = useTerminalDimensions()
-  const skyWidth = panelWidth(dims.width)
-  // In the sky composition now-playing lives under the panel as its own quiet
-  // line; in the band composition it stays in the strip.
-  const strip = [
-    greeting ?? microcopy ?? 'warming up...',
-    skyWidth === null ? state?.nowPlaying : undefined,
-  ]
-    .filter((part) => part !== undefined && part !== '')
-    .join('  ♪ ')
+  // The composition has a max width: past it, a wide terminal gets symmetric
+  // margins instead of a log pinned to the left edge and a stretched sky.
+  const cols = Math.min(dims.width, MAX_COLS)
+  const gutter = Math.floor((dims.width - cols) / 2)
+  const skyWidth = panelWidth(cols)
+  // In the sky composition the strip is one centred line over a full-width
+  // rule (concept 04), and now-playing lives under the panel; in the band
+  // composition the strip stays two-sided and carries now-playing itself.
+  const strip =
+    skyWidth === null
+      ? [greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
+          .filter((part) => part !== undefined && part !== '')
+          .join('  ♪ ')
+      : [
+          greeting ?? microcopy ?? 'murmur is on the air',
+          state?.scene,
+          state?.activity ?? 'here',
+        ]
+          .filter((part) => part !== undefined && part !== '')
+          .join(' · ')
   // The alive band's composition follows the live pet setting (spec 12 §3.7),
   // with the env override resolved inside bandLayout.
   const band = bandLayout(process.env, settings?.values.tuiPet)
   const items = paneOpen && settings !== null ? paneItems(settings) : null
-  // Rows left for the sky once the strip, identity, input, and now-playing
-  // lines take theirs.
-  const skyRows = Math.max(dims.height - 4, 4)
+  // Rows left for the sky once the strip, its rule, identity, input, and
+  // now-playing take theirs.
+  const skyRows = Math.max(dims.height - 5, 4)
+  // The newest broadcast line carries the bullet (concept 04); older lines
+  // stand back.
+  const latestSegment = entries.findLast((entry) => entry.kind === 'segment')?.id
+
+  // The raster figure (§6.1): a kitty-graphics terminal draws the whisper-girl
+  // as a real PNG at the design's own pixel pitch — the sky stays characters,
+  // only the figure earns pixels. Scale comes from the terminal's actual cell
+  // size; placement re-runs on any relayout, after the text frame settles.
+  const figMode = figurePen(process.env)
+  useEffect(() => {
+    if (skyWidth === null || figMode !== 'image' || !band.pet) return
+    let cancelled = false
+    let loop: ReturnType<typeof setInterval> | undefined
+    const settle = setTimeout(() => {
+      void (async () => {
+        const cell = await cellPixels()
+        if (cancelled) return
+        const frames = POSES[pose]
+        const spriteCols = frames[0]![0]!.length
+        const scale = figureScale(cell?.width ?? 0, spriteCols)
+        const fade = pose === 'doze' ? DOZE_FADE : 0
+        const pngs = frames.map((frame) => encodeFigurePng(frame, scale, fade))
+        const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
+        const imgRows = Math.ceil((frames[0]!.length * scale) / (cell?.height ?? 16))
+        const centerRow = 2 + circleOf((skyWidth - 1) * 2, skyRows * 4).cy / 4
+        const panelLeft = gutter + cols - skyWidth
+        const col = Math.max(1, Math.round(panelLeft + (skyWidth - 1) / 2 - imgCols / 2) + 1)
+        const row = Math.max(1, Math.round(centerRow - imgRows / 2) + 1)
+        // Retransmitting under one id replaces the frame in place — the pose
+        // loop is a stream of tiny PNGs at the pose's own rate.
+        let at = 0
+        const paint = (): void =>
+          void process.stdout.write(placeFigure(pngs[at++ % pngs.length]!, row, col, 1))
+        paint()
+        if (pngs.length > 1) loop = setInterval(paint, 1000 / POSE_FPS[pose])
+      })()
+    }, 600)
+    return () => {
+      cancelled = true
+      clearTimeout(settle)
+      clearInterval(loop)
+      process.stdout.write(deleteFigures())
+    }
+  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, pose])
 
   return (
-    <box style={{ flexDirection: 'column', height: '100%', backgroundColor: INK.bg }}>
-      <box
-        style={{
-          flexDirection: 'row',
-          justifyContent: 'space-between',
-          paddingLeft: 1,
-          paddingRight: 1,
-          backgroundColor: INK.bg,
-        }}
-      >
-        <text style={{ fg: accent.bright }}>{strip}</text>
-        <text style={{ fg: INK.dim }}>
-          {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
-        </text>
-      </box>
+    <box
+      style={{
+        flexDirection: 'column',
+        height: '100%',
+        backgroundColor: INK.bg,
+        paddingLeft: gutter,
+        paddingRight: gutter,
+      }}
+    >
+      {skyWidth === null ? (
+        <box
+          style={{
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            paddingLeft: 1,
+            paddingRight: 1,
+            backgroundColor: INK.bg,
+          }}
+        >
+          <text style={{ fg: accent.bright }}>{strip}</text>
+          <text style={{ fg: INK.dim }}>
+            {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
+          </text>
+        </box>
+      ) : (
+        <box style={{ flexDirection: 'column' }}>
+          <box style={{ flexDirection: 'row', justifyContent: 'center', height: 1 }}>
+            <text style={{ fg: accent.bright }}>{strip}</text>
+          </box>
+          <text style={{ fg: mix(INK.dim, INK.bg, 0.45) }}>{'─'.repeat(cols)}</text>
+        </box>
+      )}
 
       <box style={{ flexGrow: 1, flexDirection: 'row' }}>
       {items !== null && settings !== null ? (
@@ -372,7 +462,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         >
           {entries.map((entry) => (
             // The sky composition lets the log breathe — one blank line between
-            // entries, the poem spacing of §6.1. The band composition stays dense.
+            // entries, the poem spacing of §6.1, no icon markers (the speaker
+            // lives in the color), the newest broadcast line carrying a bullet.
+            // The band composition stays dense with its marker column.
             <box key={entry.id} style={{ marginBottom: skyWidth === null ? 0 : 1 }}>
               <text
                 style={{
@@ -384,7 +476,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                         : INK.notice,
                 }}
               >
-                {MARKER[entry.kind]}
+                {skyWidth === null
+                  ? MARKER[entry.kind]
+                  : entry.id === latestSegment
+                    ? '● '
+                    : entry.kind === 'info'
+                      ? '· '
+                      : ''}
                 {entry.text}
               </text>
             </box>
@@ -399,22 +497,42 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             sink={vizSink}
             accent={accent}
             pose={pose}
-            showPet={band.pet}
+            showPet={band.pet && figMode === 'sprite'}
             width={skyWidth - 1}
             rows={skyRows}
           />
-          <text style={{ fg: accent.dim }}>
-            {state?.nowPlaying !== undefined && state.nowPlaying !== ''
-              ? `♪ ${state.nowPlaying}`
-              : ''}
-          </text>
+          {/* Centred, in the concept's colors: violet note, ember artist,
+              cool title. A title without a dash stays one cool phrase. */}
+          <box style={{ flexDirection: 'row', justifyContent: 'center' }}>
+            {state?.nowPlaying !== undefined && state.nowPlaying !== '' ? (
+              (() => {
+                const split = state.nowPlaying.split(/\s+[—–-]+\s+/, 2)
+                return (
+                  <text>
+                    <span fg={PERIWINKLE}>{'♪ '}</span>
+                    {split.length === 2 ? (
+                      <>
+                        <span fg={EMBER}>{split[0]}</span>
+                        <span fg={INK.dim}>{' —— '}</span>
+                        <span fg={INK.notice}>{split[1]}</span>
+                      </>
+                    ) : (
+                      <span fg={INK.notice}>{state.nowPlaying}</span>
+                    )}
+                  </text>
+                )
+              })()
+            ) : (
+              <text> </text>
+            )}
+          </box>
         </box>
       )}
       </box>
 
       {skyWidth === null && (
         <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
-          {band.pet && <Pet pose={pose} accent={accent} />}
+          {band.pet && <Pet pose={pose} />}
           <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
             <Visualizer sink={vizSink} accent={accent} />
           </box>
@@ -434,15 +552,20 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           backgroundColor: INK.bg,
         }}
       >
-        <text style={{ fg: accent.bright }}>{'> '}</text>
+        {/* The listener's channel is periwinkle — the room's one cold accent
+            (§6.1): prompt, typed text, and the resting invitation alike. */}
+        <text style={{ fg: PERIWINKLE }}>{'> '}</text>
         <input
           ref={input}
           focused={!paneOpen}
           placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back'}
           style={{
-            flexGrow: 1,
-            textColor: INK.text,
-            placeholderColor: INK.dim,
+            // The sky composition bounds the field and lets a quiet rule carry
+            // the rest of the row (concept 04's input line); long input scrolls
+            // inside the field. The band composition keeps the full width.
+            ...(skyWidth === null ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
+            textColor: PERIWINKLE,
+            placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
             backgroundColor: INK.bg,
           }}
           // The reconciler wires an input's onSubmit to the ENTER event, which
@@ -450,6 +573,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
           onSubmit={submit as InputProps['onSubmit']}
         />
+        {skyWidth !== null && (
+          <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+            <text style={{ fg: mix(INK.dim, INK.bg, 0.45) }}>{'─'.repeat(cols)}</text>
+          </box>
+        )}
       </box>
     </box>
   )

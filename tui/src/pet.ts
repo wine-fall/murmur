@@ -1,27 +1,21 @@
-// The pixel pet's substrate (spec 10 §3.7.1), built on krabby's technique:
-// sprites are committed TEXT assets, not images — no image machinery, renders in
-// every terminal, and a later art pass replaces the .pix files and nothing else
-// (§6.1 owns what the creature actually looks like).
+// The pixel pet's substrate (spec 10 §3.7.1): sprites are committed TEXT
+// assets, not images — no image machinery, renders in every terminal, and a
+// later art pass replaces the .pix files and nothing else (§6.1 owns what the
+// figure actually looks like).
 //
-// An asset is a grid of PIXELS, one character per pixel, each character a key
-// into a palette this module colors at render time ('.' = transparent). Two
-// pixel rows fold into one terminal cell drawn as an upper-half block: the upper
-// pixel is the foreground, the lower is the background. That is what makes cell
-// art read as pixel art, and it costs one glyph per two pixels.
-//
-// Keeping the palette in code rather than baking ANSI into the assets is what
-// lets the pet tint with the hour (§3.7.2) and fade when it dozes.
+// An asset is a grid of square PIXELS, one character per pixel, derived from
+// the murmur logo figure in the 04 concept art at its true pixel mesh. 'x' is
+// cream fill, 'w' the warm outline ink, 's' the ember whisper-sparkle, '.'
+// empty. Two pixel rows fold into one terminal cell drawn as half-blocks — a
+// full-width half-height block is the terminal's square solid pixel.
 
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { ProgramState } from '../../src/ipc.ts'
-import { INK, mix, type Accent } from './palette.ts'
 
 // A frame is its pixel rows, top first. All rows the same width.
 export type Sprite = string[]
-
-export type Cell = { fg: string; bg: string }
 
 export const POSE_NAMES = ['idle', 'talk', 'music', 'doze', 'wake'] as const
 
@@ -41,9 +35,9 @@ export const POSE_FPS: Record<PoseName, number> = {
 
 const ASSET_DIR = join(import.meta.dirname, '..', 'assets', 'pet')
 
-// Split an asset into frames on blank lines, padding every row out to the widest
-// one: trailing transparent pixels are trailing whitespace, and every editor and
-// formatter in the chain wants to eat them.
+// Split an asset into frames on blank lines, padding every row out to the
+// widest one: trailing empty sub-pixels are trailing whitespace, and every
+// editor and formatter in the chain wants to eat them.
 export function parseFrames(text: string): Sprite[] {
   return text
     .split(/\n\s*\n/)
@@ -66,42 +60,6 @@ export function loadPoses(dir = ASSET_DIR): Record<PoseName, Sprite[]> {
     poses[pose] = parseFrames(readFileSync(join(dir, file), 'utf-8'))
   }
   return poses
-}
-
-// The palette the .pix keys resolve through. The figure borrows the hour's
-// accent (§3.7.2), so it warms and cools with the program; `fade` toward the
-// room is how a dozing figure dims without a second set of assets.
-//
-// The whisper figure (§6.1) reads by solid fill, cross-stitch style: hair as
-// the dim mass, skin as the bright mass, and dark seams carrying the detail
-// (the closed eye, the mouth, the gaps between fingers).
-export function petPalette(accent: Accent, fade: number): Record<string, string> {
-  const dim = (color: string): string => (fade === 0 ? color : mix(color, INK.bg, fade))
-  return {
-    o: dim('#2a2620'), // outline
-    b: dim(accent.dim), // hair
-    e: dim(mix(INK.bg, accent.dim, 0.35)), // seams: eye, mouth, finger gaps
-    m: dim(accent.bright), // skin
-  }
-}
-
-// Fold pixel rows into cell rows. An odd trailing pixel row would be dropped, so
-// the assets are held to an even count by test rather than padded silently here.
-export function cells(sprite: Sprite, palette: Record<string, string>): Cell[][] {
-  const rows: Cell[][] = []
-  for (let top = 0; top + 1 < sprite.length; top += 2) {
-    const upper = sprite[top]!
-    const lower = sprite[top + 1]!
-    const row: Cell[] = []
-    for (let x = 0; x < upper.length; x++) {
-      row.push({
-        fg: palette[upper[x]!] ?? INK.bg,
-        bg: palette[lower[x]!] ?? INK.bg,
-      })
-    }
-    rows.push(row)
-  }
-  return rows
 }
 
 // Which pose the program is in (§3.2-D). Precedence is the order of what the

@@ -11,18 +11,14 @@ import { describe, expect, it } from 'vitest'
 import {
   awayGreeting,
   bandLayout,
-  cells,
   loadPoses,
   parseFrames,
-  petPalette,
   POSE_FPS,
   poseFor,
   type PoseName,
 } from '../tui/src/pet.ts'
-import { accentFor } from '../tui/src/palette.ts'
 
 const POSES = loadPoses()
-const PALETTE = petPalette(accentFor('evening'), 0)
 
 describe('the committed sprite assets', () => {
   it('ships a frame set for every pose the state feed can ask for', () => {
@@ -44,15 +40,22 @@ describe('the committed sprite assets', () => {
     const frames = Object.values(POSES).flat()
     const sizes = new Set(frames.map((frame) => `${frame.length}x${frame[0]!.length}`))
     expect(sizes.size).toBe(1)
-    // Half-block cells pair two pixel rows, so an odd row count would drop one.
+    // Half-block cells pair two pixel rows, so an odd count would drop one.
     expect(frames[0]!.length % 2).toBe(0)
   })
 
-  it('uses only palette keys the renderer knows how to color', () => {
-    const known = new Set([...Object.keys(PALETTE), '.'])
+  it('uses only pixel keys the renderers know: figure, outline, sparkle, empty', () => {
     for (const frame of Object.values(POSES).flat()) {
-      for (const glyph of frame.join('')) expect(known, `unknown key ${glyph}`).toContain(glyph)
+      for (const glyph of frame.join('')) {
+        expect(['x', 'w', 's', '.'], `unknown key ${glyph}`).toContain(glyph)
+      }
     }
+  })
+
+  it('keeps the figure two-tone: cream fill AND the warm outline', () => {
+    const idle = POSES.idle[0]!.join('')
+    expect(idle).toContain('x')
+    expect(idle).toContain('w')
   })
 })
 
@@ -73,39 +76,6 @@ describe('parseFrames', () => {
   it('ignores trailing blank lines instead of emitting an empty frame', () => {
     expect(parseFrames('ab\n\n\n')).toEqual([['ab']])
     expect(parseFrames('')).toEqual([])
-  })
-})
-
-describe('cells (the krabby half-block technique)', () => {
-  it('folds two pixel rows into one cell row: upper is ink, lower is ground', () => {
-    const grid = cells(['bo', 'oe'], PALETTE)
-    expect(grid).toHaveLength(1)
-    expect(grid[0]).toEqual([
-      { fg: PALETTE.b, bg: PALETTE.o },
-      { fg: PALETTE.o, bg: PALETTE.e },
-    ])
-  })
-
-  it('renders a transparent pixel as the room behind it', () => {
-    const grid = cells(['..', '..'], PALETTE)
-    expect(grid[0]![0]!.fg).toBe(grid[0]![0]!.bg)
-  })
-
-  it('gives a real sprite half as many cell rows as it has pixel rows', () => {
-    const frame = POSES.idle[0]!
-    const grid = cells(frame, PALETTE)
-    expect(grid).toHaveLength(frame.length / 2)
-    expect(grid[0]).toHaveLength(frame[0]!.length)
-  })
-
-  it('dims the whole palette for a sleeping pet without touching the assets', () => {
-    const awake = petPalette(accentFor('evening'), 0)
-    const asleep = petPalette(accentFor('evening'), 0.6)
-    expect(asleep.b).not.toBe(awake.b)
-  })
-
-  it('takes its body color from the accent, so the pet tints with the hour', () => {
-    expect(petPalette(accentFor('morning'), 0).b).not.toBe(petPalette(accentFor('late-night'), 0).b)
   })
 })
 

@@ -14,15 +14,30 @@ export type Accent = {
   bright: string
 }
 
-// The quiet-constellation ground (§6.1 art direction): a deep blue-charcoal
-// night sky, constant across scenes, with warm paper ink floating on it.
+// The quiet-constellation ground (§6.1 art direction), every value sampled
+// from the 04 concept itself: a deep blue-black night, and — the design's
+// defining temperature — WARM greys for everything quiet. The only cold ink
+// in the whole room is the periwinkle the listener types in.
 export const INK = {
-  bg: '#0a0d15',
-  dim: '#4e5464',
-  text: '#d4cabb',
-  user: '#c9a878',
-  notice: '#697080',
+  bg: '#090e17',
+  dim: '#4a4642',
+  text: '#ddd0c0',
+  // The listener's ink is sage — the one green in the room.
+  user: '#96a47e',
+  notice: '#787068',
 }
+
+// The three temperatures of the constellation wave (§6.1, sampled from the 04
+// concept): peach-ember peaks over cream mids over a warm quiet grey, the
+// same trio the stars borrow.
+export const EMBER = '#eab48c'
+export const QUIET = '#5e5852'
+// The figure's outline ink, sampled from the designer's own figure: the
+// whisper-girl is two-tone — cream fill inside a warm brown line.
+export const WARM = '#b07849'
+// The listener's channel: the input line and the now-playing note glyph,
+// the room's one cold accent.
+export const PERIWINKLE = '#a4aede'
 
 const DEFAULT_ACCENT: Accent = { dim: '#6e665a', bright: '#c9bda8' }
 
@@ -33,7 +48,7 @@ const DEFAULT_ACCENT: Accent = { dim: '#6e665a', bright: '#c9bda8' }
 // The §6.1 discipline: each scene is ONE near-monochrome family on the shared
 // night ground — the hour changes the warmth of the light, never the room.
 const ACCENTS: Record<string, Accent> = {
-  morning: { dim: '#73695a', bright: '#dcceb2' },
+  morning: { dim: '#776e60', bright: '#ddd0c0' },
   afternoon: { dim: '#6e6a5e', bright: '#d5ccb8' },
   evening: { dim: '#7c624e', bright: '#e0b088' },
   'late-night': { dim: '#4e5878', bright: '#a8b6dd' },
