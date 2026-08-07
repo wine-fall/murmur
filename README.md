@@ -6,7 +6,7 @@
 
 **A local-first companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
-murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It's *mostly broadcasting*, but occasionally turns to you and asks something — if you don't engage, it gracefully slides back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
+murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It *broadcasts, never solicits* — it keeps going whether or not you say anything, and when you type back it chats for a bit, then eases back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **local + proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
@@ -27,7 +27,7 @@ A single Node.js (TypeScript) process. One loop drives "speaking up," a readline
 | Component | Responsibility |
 |---|---|
 | **CLI Host** | render "now playing" + read keyboard input (proactive + typing share the terminal) |
-| **Program Director** | the soul: continuously decide what plays next (talk / music / time-anchor); modulate pacing; manage "turn to you / slide back" |
+| **Program Director** | the soul: continuously decide what plays next (talk / music / time-anchor); modulate pacing |
 | **Brain** | Claude session (via `@anthropic-ai/claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
 | **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted fish-speech endpoint) |
 | **MusicProvider** | topic/query → audio stream; hot-swappable (v1 = yt-dlp, covering YouTube + Bilibili) |

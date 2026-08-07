@@ -22,7 +22,7 @@ AI short-form drama, or productivity tooling. murmur is none of these — it is
 **AI that sits closer to the person**. A local-first companion radio with an
 agent for a brain (Claude today; the brain is a swappable seam): always on the
 air, it finds its own topics, plays music,
-turns to you occasionally, and answers in a voice that sounds human. The
+and answers in a voice that sounds human when you type to it. The
 homepage succeeds when a visitor *feels* that closeness within one screen and
 can run it in two commands.
 
