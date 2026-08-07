@@ -9,7 +9,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { Constellation, panelWidth, WIDE_MIN } from '../tui/src/constellation.ts'
+import { Constellation, hash01, panelWidth, WIDE_MIN } from '../tui/src/constellation.ts'
 import { accentFor } from '../tui/src/palette.ts'
 
 const ACCENT = accentFor('late-night')
@@ -101,12 +101,41 @@ describe('Constellation (§6.1: starfield + particle mist)', () => {
     expect(withPet.length).toBeGreaterThan(0)
   })
 
+  it('bows the mist floor into an arc — edge columns bottom out higher than center ones', () => {
+    const rows = new Constellation(48, 20, 7).frame(Array.from({ length: 24 }, () => 0.6), ACCENT, null)
+    const deepestBraille = (fromCol: number, toCol: number): number => {
+      let deepest = -1
+      rows.forEach((row, y) => {
+        const chars = [...rowText(row)]
+        for (let x = fromCol; x < toCol; x++) {
+          if (isBraille(chars[x] ?? ' ')) deepest = Math.max(deepest, y)
+        }
+      })
+      return deepest
+    }
+    const edge = Math.max(deepestBraille(0, 6), deepestBraille(42, 48))
+    const center = deepestBraille(21, 27)
+    expect(center).toBeGreaterThan(edge)
+  })
+
   it('survives hostile bins and degenerate panels', () => {
     const sky = new Constellation(2, 2, 7)
     for (const frame of [[], [Number.NaN], [2, -1], [0.5]]) {
       const rows = sky.frame(frame, ACCENT, null)
       expect(rows).toHaveLength(2)
       for (const row of rows) expect([...rowText(row)]).toHaveLength(2)
+    }
+  })
+})
+
+describe('hash01 (the survival dice behind every density knob)', () => {
+  it('stays inside 0..1 — a signed hash passes every threshold and defeats the knobs', () => {
+    for (let x = 0; x < 200; x++) {
+      for (const [y, tick] of [[0, 0], [7, 3], [-5, 11], [1000, 999]]) {
+        const roll = hash01(x, y!, tick!)
+        expect(roll).toBeGreaterThanOrEqual(0)
+        expect(roll).toBeLessThan(1)
+      }
     }
   })
 })
