@@ -14,25 +14,29 @@ export type Accent = {
   bright: string
 }
 
-// Deep warm ink, constant across scenes — the room the accents light up.
+// The quiet-constellation ground (§6.1 art direction): a deep blue-charcoal
+// night sky, constant across scenes, with warm paper ink floating on it.
 export const INK = {
-  bg: '#161310',
-  dim: '#7d7166',
-  text: '#e8ded2',
-  user: '#9fc3a8',
-  notice: '#8d8378',
+  bg: '#0d0f16',
+  dim: '#565c6b',
+  text: '#d9d2c4',
+  user: '#c9a878',
+  notice: '#6e7280',
 }
 
-const DEFAULT_ACCENT: Accent = { dim: '#8a5a3c', bright: '#f2c078' }
+const DEFAULT_ACCENT: Accent = { dim: '#68625a', bright: '#d9c9a8' }
 
 // Scene keys are spec 04's (`morning` | `afternoon` | `evening` | `late-night`),
 // but this is the far side of a wire: an unknown scene from a newer engine gets
 // the default rather than a missing color.
+//
+// The §6.1 discipline: each scene is ONE near-monochrome family on the shared
+// night ground — the hour changes the warmth of the light, never the room.
 const ACCENTS: Record<string, Accent> = {
-  morning: { dim: '#7c6a3f', bright: '#ffd98a' },
-  afternoon: { dim: '#6f6a4a', bright: '#e8dfa8' },
-  evening: { dim: '#8a4a3c', bright: '#f29a6b' },
-  'late-night': { dim: '#3f4a7c', bright: '#9fb4f2' },
+  morning: { dim: '#6e6656', bright: '#e8d8b0' },
+  afternoon: { dim: '#67705f', bright: '#cfd9b8' },
+  evening: { dim: '#7c5f4e', bright: '#e5b98c' },
+  'late-night': { dim: '#49527a', bright: '#a9b9e8' },
 }
 
 export function accentFor(scene: string | undefined): Accent {

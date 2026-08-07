@@ -8,11 +8,12 @@
 // the art direction session (§6.1) can restyle murmur without touching logic.
 
 import { useEffect, useRef, useState } from 'react'
-import { useKeyboard, type InputProps } from '@opentui/react'
+import { useKeyboard, useTerminalDimensions, type InputProps } from '@opentui/react'
 import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
+import { Constellation, panelWidth, type Run } from './constellation.ts'
 import { accentFor, INK, mix, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
@@ -130,6 +131,67 @@ function Pet({ pose, accent }: { pose: PoseName; accent: Accent }): React.ReactN
   )
 }
 
+// The wide-terminal sky (§6.1 quiet-constellation): starfield, particle mist,
+// and the pet floating in it. Painted on its own clock — viz frames only feed
+// the smoother, so the sky breathes (stars twinkle, the pet animates) even when
+// the engine has nothing to say. Constellation is per-mount; the parent keys
+// this component on its size, so a resize builds a fresh sky.
+const SKY_FPS = 12
+
+function SkyPanel({
+  sink,
+  accent,
+  pose,
+  showPet,
+  width,
+  rows,
+}: {
+  sink: VizSink
+  accent: Accent
+  pose: PoseName
+  showPet: boolean
+  width: number
+  rows: number
+}): React.ReactNode {
+  const bars = useRef(new Bars())
+  const sky = useRef<Constellation | null>(null)
+  const tick = useRef(0)
+  const [painted, setPainted] = useState<Run[][]>([])
+  if (sky.current === null) sky.current = new Constellation(width, rows)
+
+  useEffect(() => {
+    sink.current = (bins) => bars.current.push(bins)
+    return () => void (sink.current = null)
+  }, [sink])
+
+  const frames = POSES[pose]
+  useEffect(() => {
+    const timer = setInterval(() => {
+      tick.current++
+      const at = Math.floor(tick.current / (SKY_FPS / POSE_FPS[pose])) % frames.length
+      const pet = showPet
+        ? cells(frames[at]!, petPalette(accent, pose === 'doze' ? DOZE_FADE : 0))
+        : null
+      setPainted(sky.current!.frame(bars.current.levels(), accent, pet))
+    }, 1000 / SKY_FPS)
+    return () => clearInterval(timer)
+  }, [accent, pose, frames, showPet])
+
+  return (
+    <box style={{ flexDirection: 'column' }}>
+      {painted.map((runs, y) => (
+        <text key={y}>
+          {runs.map((run, at) => (
+            <span key={at} fg={run.fg} bg={run.bg ?? INK.bg}>
+              {run.text}
+            </span>
+          ))}
+        </text>
+      ))}
+    </box>
+  )
+}
+
 export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): React.ReactNode {
   const [identity, setIdentity] = useState<Identity>({ persona: '', brain: '', voice: '' })
   const [entries, setEntries] = useState<Entry[]>([])
@@ -231,13 +293,26 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // The hour's accent, swapped whenever the engine reports a new scene (§3.7.2).
   const accent = accentFor(state?.scene)
   const pose = greeting !== null ? 'wake' : poseFor(state)
-  const strip = [greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
+  // The §6.1 breakpoint: wide terminals compose the alive band as a sky panel
+  // beside the log; narrow ones keep the classic bottom band. Same four
+  // regions either way (§3.3) — only the composition moves.
+  const dims = useTerminalDimensions()
+  const skyWidth = panelWidth(dims.width)
+  // In the sky composition now-playing lives under the panel as its own quiet
+  // line; in the band composition it stays in the strip.
+  const strip = [
+    greeting ?? microcopy ?? 'warming up...',
+    skyWidth === null ? state?.nowPlaying : undefined,
+  ]
     .filter((part) => part !== undefined && part !== '')
     .join('  ♪ ')
   // The alive band's composition follows the live pet setting (spec 12 §3.7),
   // with the env override resolved inside bandLayout.
   const band = bandLayout(process.env, settings?.values.tuiPet)
   const items = paneOpen && settings !== null ? paneItems(settings) : null
+  // Rows left for the sky once the strip, identity, input, and now-playing
+  // lines take theirs.
+  const skyRows = Math.max(dims.height - 4, 4)
 
   return (
     <box style={{ flexDirection: 'column', height: '100%', backgroundColor: INK.bg }}>
@@ -256,6 +331,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </text>
       </box>
 
+      <box style={{ flexGrow: 1, flexDirection: 'row' }}>
       {items !== null && settings !== null ? (
         <box style={{ flexGrow: 1, flexDirection: 'column', paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
           <text style={{ fg: accent.bright }}>settings</text>
@@ -287,33 +363,63 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <scrollbox
           stickyScroll
           stickyStart="bottom"
-          style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1, rootOptions: { backgroundColor: INK.bg } }}
+          style={{
+            flexGrow: 1,
+            paddingLeft: skyWidth === null ? 1 : 2,
+            paddingRight: 1,
+            rootOptions: { backgroundColor: INK.bg },
+          }}
         >
           {entries.map((entry) => (
-            <text
-              key={entry.id}
-              style={{
-                fg:
-                  entry.kind === 'segment'
-                    ? accent.bright
-                    : entry.kind === 'user'
-                      ? INK.user
-                      : INK.notice,
-              }}
-            >
-              {MARKER[entry.kind]}
-              {entry.text}
-            </text>
+            // The sky composition lets the log breathe — one blank line between
+            // entries, the poem spacing of §6.1. The band composition stays dense.
+            <box key={entry.id} style={{ marginBottom: skyWidth === null ? 0 : 1 }}>
+              <text
+                style={{
+                  fg:
+                    entry.kind === 'segment'
+                      ? accent.bright
+                      : entry.kind === 'user'
+                        ? INK.user
+                        : INK.notice,
+                }}
+              >
+                {MARKER[entry.kind]}
+                {entry.text}
+              </text>
+            </box>
           ))}
         </scrollbox>
       )}
 
-      <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
-        {band.pet && <Pet pose={pose} accent={accent} />}
-        <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
-          <Visualizer sink={vizSink} accent={accent} />
+      {skyWidth !== null && (
+        <box style={{ width: skyWidth, flexDirection: 'column', paddingRight: 1 }}>
+          <SkyPanel
+            key={`${skyWidth}x${skyRows}`}
+            sink={vizSink}
+            accent={accent}
+            pose={pose}
+            showPet={band.pet}
+            width={skyWidth - 1}
+            rows={skyRows}
+          />
+          <text style={{ fg: accent.dim }}>
+            {state?.nowPlaying !== undefined && state.nowPlaying !== ''
+              ? `♪ ${state.nowPlaying}`
+              : ''}
+          </text>
         </box>
+      )}
       </box>
+
+      {skyWidth === null && (
+        <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
+          {band.pet && <Pet pose={pose} accent={accent} />}
+          <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
+            <Visualizer sink={vizSink} accent={accent} />
+          </box>
+        </box>
+      )}
 
       <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
         <text style={{ fg: INK.dim }}>{`${identity.brain} · ${identity.voice}`}</text>
