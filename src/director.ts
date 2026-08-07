@@ -41,6 +41,7 @@ import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
 const QUIT_COMMAND = '/quit'
+const SETTINGS_COMMAND = '/settings'
 
 // Bounded attempts for a Brain/synth call before it degrades (lose the beat,
 // never the radio).
@@ -70,10 +71,16 @@ const TALK_LOOKAHEAD = 2
 // place. How much longer the gap runs in an empty room.
 const AWAY_GAP_FACTOR = 3
 
-export type Steer = { intent: 'quit' } | { intent: 'talkback'; text: string }
+export type Steer =
+  | { intent: 'quit' }
+  | { intent: 'settings' }
+  | { intent: 'talkback'; text: string }
 
 export function steerFromLine(line: string): Steer {
-  return line.trim() === QUIT_COMMAND ? { intent: 'quit' } : { intent: 'talkback', text: line }
+  const trimmed = line.trim()
+  if (trimmed === QUIT_COMMAND) return { intent: 'quit' }
+  if (trimmed === SETTINGS_COMMAND) return { intent: 'settings' }
+  return { intent: 'talkback', text: line }
 }
 
 // A promise with a synchronously readable settled flag: barge-in tells "still
@@ -107,6 +114,16 @@ export type PacingWiring = {
   gating?: boolean // default true; false = --no-gating
 }
 
+// The live knobs the loop consults per decision (spec 12 §3.2): a thunk rather
+// than captured scalars, so a settings change lands at the next boundary with
+// no reconstruction. The SettingsStore's current() satisfies it directly.
+export type DirectorSettings = {
+  gapSeconds: number
+  recentWindow: number
+  anchorsEnabled: boolean
+  musicEnabled: boolean
+}
+
 export type DirectorDeps = {
   persona: string
   brain: Brain
@@ -114,8 +131,7 @@ export type DirectorDeps = {
   player: Player
   memory: MemoryStore
   host: Host
-  gapSeconds: number
-  recentWindow: number
+  settings: () => DirectorSettings
   music?: MusicWiring
   pacing?: PacingWiring
   // The agentic reply turn (spec 11): preferred over brain.respond when
@@ -204,7 +220,11 @@ export class Director {
     let produced = 0
     while (!this.quit && (maxSegments === undefined || produced < maxSegments)) {
       this.beginBoundary()
-      const anchor = this.deps.pacing?.scheduler?.due(this.now) ?? null
+      // The scheduler stays constructed; the live flag decides at the fire
+      // site (spec 12 §3.2), so an anchors toggle needs no restart.
+      const anchor = this.deps.settings().anchorsEnabled
+        ? (this.deps.pacing?.scheduler?.due(this.now) ?? null)
+        : null
       // An anchor is checked BEFORE cadence, so it always wins the boundary it
       // is due at (spec 07 §2.3).
       if (anchor !== null) {
@@ -318,14 +338,15 @@ export class Director {
   // in the Director, so the stateless Brain is told what is already scheduled,
   // not only what has aired and been recorded.
   private context(queued: readonly string[] = [], cue?: string): ContextPack {
-    const recent = this.deps.memory.recent(this.deps.recentWindow)
+    const window = this.deps.settings().recentWindow
+    const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
     return {
       persona: this.deps.persona,
       recent: queued.length === 0 ? recent : [...recent, ...turns],
       scene: currentScene(new Date()),
       profile: this.deps.memory.profile(),
-      coveredTopics: this.deps.memory.recentTopics(this.deps.recentWindow),
+      coveredTopics: this.deps.memory.recentTopics(window),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
     }
@@ -427,10 +448,14 @@ export class Director {
   private async wantsMusic(): Promise<boolean> {
     const music = this.deps.music
     if (music === undefined) return false
+    // The live off switch (spec 12 §3.2): pure talk radio from the very next
+    // boundary — checked ahead of a due switch, because a listener who turned
+    // music off outranks their own earlier request for a different song.
+    if (!this.deps.settings().musicEnabled) return false
     // A due switch owns the boundary (spec 11 §2.3): the listener asked, so the
     // cadence policy is bypassed until a track airs or the pick comes back empty.
     if (this.switchDue) return true
-    const recent = this.deps.memory.recent(this.deps.recentWindow)
+    const recent = this.deps.memory.recent(this.deps.settings().recentWindow)
     const situation = recent.map((t) => `- ${t.role}: ${t.text}`).join('\n')
     const kind = await music.cadence.nextKind({
       talksSinceMusic: this.talksSinceMusic,
@@ -444,7 +469,7 @@ export class Director {
     return {
       persona: this.deps.persona,
       situation: buildMusicSituation(
-        this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.recentWindow)),
+        this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         this.deps.memory.recentSongs(AVOID_DEPTH),
       ),
     }
@@ -455,6 +480,9 @@ export class Director {
   private prefetchMusic(extraLine?: string): void {
     const music = this.deps.music
     if (music === undefined || this.pendingPick !== null) return
+    // The live off switch gates the SPEND, not just the airtime (spec 12 §3.2):
+    // a disabled session must not pay discovery calls it will never play.
+    if (!this.deps.settings().musicEnabled) return
     const base = this.musicContext()
     const ctx =
       extraLine === undefined ? base : { ...base, situation: `${base.situation}\n${extraLine}` }
@@ -618,7 +646,9 @@ export class Director {
     // Longer gaps in an empty room (spec 07 §3.2) — the stream keeps playing,
     // it just stops crowding a room nobody is in.
     const factor = this.activity === 'away' ? AWAY_GAP_FACTOR : 1
-    const slept = sleep(this.deps.gapSeconds * factor * 1000, undefined, { signal: ac.signal }).then(
+    const slept = sleep(this.deps.settings().gapSeconds * factor * 1000, undefined, {
+      signal: ac.signal,
+    }).then(
       () => true,
       () => false,
     )
@@ -690,6 +720,15 @@ export class Director {
           this.quit = true
           return
         }
+        if (steer.intent === 'settings') {
+          // A command, not a turn (spec 12 §3.6): nothing on air is touched and
+          // no reply is composed. A pane-capable host shows the pane; the plain
+          // host gets the one pointer it can act on.
+          if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
+          else this.deps.host.info('settings live in settings.json under the murmur home.')
+          steer = null
+          continue
+        }
         this.discardTalkAhead() // buffered look-ahead predates this user turn -> stale
         const composed = await this.compose(steer.text)
         steer = null
@@ -752,6 +791,13 @@ export class Director {
       if (merged.intent === 'quit') {
         this.quit = true
         return null
+      }
+      if (merged.intent === 'settings') {
+        // A /settings typed mid-compose is still just a command: show the pane
+        // (or the pointer) and keep composing the reply already in flight.
+        if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
+        else this.deps.host.info('settings live in settings.json under the murmur home.')
+        continue
       }
       texts.push(merged.text)
       this.deps.host.onUserLine(merged.text)

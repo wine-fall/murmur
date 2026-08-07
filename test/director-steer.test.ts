@@ -9,6 +9,7 @@ import type { ContextPack, SteerActions, SteerBrain } from '../src/contracts.ts'
 import { Director, type DirectorDeps } from '../src/director.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import {
+  directorSettings,
   FakeBrain,
   FakeHost,
   FakeMixingPlayer,
@@ -50,8 +51,7 @@ function build(steer: SteerBrain, opts: { music?: boolean } = {}) {
     player,
     memory,
     host,
-    gapSeconds: 0,
-    recentWindow: 6,
+    settings: () => directorSettings({ recentWindow: 6 }),
     ...(opts.music !== false && {
       music: { source, cadence: new EveryNCadence(1), engine: player },
     }),

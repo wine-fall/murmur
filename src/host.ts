@@ -32,6 +32,9 @@ export interface Host {
   // boundaries and presence refreshes, never polled. Optional, like debug — a
   // host with no status region has nothing to do with it.
   onState?(state: ProgramState): void
+  // A typed /settings wants the pane (spec 12 §3.6). Optional: a host without
+  // one leaves it undefined and the Director points at the file instead.
+  showSettings?(): void
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void

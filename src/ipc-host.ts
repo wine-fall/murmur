@@ -25,6 +25,8 @@ import {
   PROTOCOL,
   type EngineMessage,
   type ProgramState,
+  type SettingsPatch,
+  type SettingsSnapshot,
 } from './ipc.ts'
 import { statusMicrocopy } from './prompts.ts'
 
@@ -44,6 +46,14 @@ export type IpcHostOptions = {
   devLog?: string | undefined
 }
 
+// How the host reaches the settings authority (spec 12 §2.5): a snapshot thunk
+// for the wire, and the store's set() for inbound patches. Wired by the app
+// after the store exists — like the viz subscriber, the client can attach first.
+export type SettingsBridge = {
+  snapshot: () => SettingsSnapshot
+  apply: (patch: SettingsPatch) => boolean
+}
+
 export class IpcHost implements Host {
   private queue = new LineQueue()
   private server: Server | null = null
@@ -55,6 +65,7 @@ export class IpcHost implements Host {
   private opts: IpcHostOptions
   private vizSubscriber: ((on: boolean, fps: number | undefined) => void) | null = null
   private vizWanted: { on: boolean; fps: number | undefined } | null = null
+  private settingsBridge: SettingsBridge | null = null
   private mirror: (name: string, message: string) => void
   private markEof!: () => void
   private eofSeen: Promise<void>
@@ -112,6 +123,13 @@ export class IpcHost implements Host {
       if (!attached) return
       if (message.type === 'line') this.queue.push(message.text)
       if (message.type === 'vizSub') this.wantViz(message.on, message.fps)
+      if (message.type === 'settingsSet') {
+        // A successful set is broadcast by the store's own change event (the
+        // app wires onChange -> sendSettings); the host answers only what
+        // would otherwise go silent, so the pane always converges on truth.
+        const applied = this.settingsBridge?.apply(message.patch) ?? false
+        if (!applied) this.sendSettings()
+      }
     })
     socket.on('data', (chunk: string) => feed(chunk))
     // A front-end that vanished mid-write is not an engine problem.
@@ -136,6 +154,9 @@ export class IpcHost implements Host {
     this.client = socket
     this.write(socket, { v: 1, type: 'hello', ...this.greeting() })
     for (const message of this.replay) this.write(socket, message)
+    // Every attach gets a fresh snapshot (spec 12 §2.5) — which is exactly why
+    // snapshots stay out of the replay backlog above.
+    this.sendSettings()
   }
 
   // The handshake payload, built in one place so a client that attaches late
@@ -183,6 +204,28 @@ export class IpcHost implements Host {
   // frames would both flood it out and be meaningless by the time they arrived.
   sendViz(bins: number[]): void {
     if (this.client !== null) this.write(this.client, { v: 1, type: 'viz', bins })
+  }
+
+  setSettings(bridge: SettingsBridge): void {
+    this.settingsBridge = bridge
+  }
+
+  // The current snapshot, straight to the attached client — also NOT through
+  // send(): an attach is answered with a fresh one, so a replayed stale copy
+  // could only ever arrive after (and contradict) it.
+  sendSettings(opts: { open?: boolean } = {}): void {
+    if (this.settingsBridge === null || this.client === null) return
+    this.write(this.client, {
+      v: 1,
+      type: 'settings',
+      ...this.settingsBridge.snapshot(),
+      ...(opts.open === true && { open: true as const }),
+    })
+  }
+
+  // A typed /settings (spec 12 §3.6): the Director asks, the pane opens.
+  showSettings(): void {
+    this.sendSettings({ open: true })
   }
 
   // --- Host ---------------------------------------------------------------- //

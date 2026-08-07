@@ -7,14 +7,16 @@ import { describe, expect, it } from 'vitest'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { Director, steerFromLine, type DirectorDeps } from '../src/director.ts'
 import { SCENES } from '../src/scene.ts'
-import { FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
+import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
-function setup(over: Partial<DirectorDeps> = {}) {
+function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
+  const { gapSeconds = 0, ...rest } = over
   const brain = new FakeBrain()
   const voice = new FakeVoice()
   const player = new FakePlayer()
   const host = new FakeHost()
   const memory = new InProcessMemoryStore()
+  const knobs = directorSettings({ gapSeconds })
   const director = new Director({
     persona: 'p',
     brain,
@@ -22,17 +24,76 @@ function setup(over: Partial<DirectorDeps> = {}) {
     player,
     memory,
     host,
-    gapSeconds: 0,
-    recentWindow: 12,
-    ...over,
+    settings: () => knobs,
+    ...rest,
   })
-  return { brain, voice, player, host, memory, director }
+  return { brain, voice, player, host, memory, knobs, director }
 }
 
 describe('steerFromLine', () => {
-  it('classifies /quit and talkback', () => {
+  it('classifies /quit, /settings and talkback', () => {
     expect(steerFromLine(' /quit ')).toEqual({ intent: 'quit' })
+    expect(steerFromLine('/settings')).toEqual({ intent: 'settings' })
     expect(steerFromLine('hello')).toEqual({ intent: 'talkback', text: 'hello' })
+  })
+})
+
+// spec 12 §3.6: /settings is a command like /quit — the engine owns the parse.
+// A front-end with a pane is told to show it; the plain host gets one pointer
+// line. Neither burns a reply turn nor interrupts what is on air.
+describe('Director — /settings command', () => {
+  it('tells a pane-capable host to show the pane, without composing a reply', async () => {
+    const { brain, host, director } = setup({ gapSeconds: 3 })
+    let shown = 0
+    host.showSettings = () => void shown++
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/settings')
+    await until(() => shown === 1, 'pane shown')
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([]) // never treated as talkback
+  })
+
+  it('points a plain host at the file instead', async () => {
+    const { brain, host, director } = setup({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/settings')
+    await until(() => host.infos.some((m) => m.includes('settings.json')), 'pointer line')
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([])
+  })
+})
+
+// spec 12 §3.2: gap and memory span read the live thunk — a change lands at the
+// next boundary with no reconstruction.
+describe('Director — live settings', () => {
+  it('picks up a changed recentWindow at the next brain call', async () => {
+    const { brain, memory, knobs, director } = setup()
+    for (let i = 1; i <= 6; i++) memory.record({ role: 'radio', text: `old ${i}` })
+    knobs.recentWindow = 3
+    brain.batches = [['a', 'b']]
+    await director.run(1)
+    expect(brain.talkContexts[0]!.recent.length).toBe(3)
+  })
+
+  it('picks up a changed gapSeconds at the next gap', async () => {
+    const { brain, player, host, knobs, director } = setup({ gapSeconds: 60 })
+    player.auto = false
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => player.played.length === 1, 'clip on air')
+    knobs.gapSeconds = 0 // lands while the clip still plays -> the gap reads it
+    player.finish()
+    // A captured 60s gap would park the loop here; the live read airs b now.
+    await until(() => player.played.length === 2, 'second segment aired')
+    player.finish()
+    await run
+    expect(host.radio).toEqual(['a', 'b'])
   })
 })
 

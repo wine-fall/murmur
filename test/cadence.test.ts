@@ -4,6 +4,7 @@ import {
   BrainCadence,
   buildCadence,
   EveryNCadence,
+  LiveCadence,
   PacingCadence,
   RandomCadence,
   type CadencePolicy,
@@ -135,5 +136,49 @@ describe('PacingCadence — activity gating (spec 07 §2.5, acceptance 7)', () =
     const cadence = new PacingCadence(new BrainCadence({ brain: harness, model: 'm' }))
     expect(await cadence.nextKind({ talksSinceMusic: 0, activity: 'away' })).toBe('music')
     expect(harness.calls).toBe(0)
+  })
+})
+
+// spec 12 §3.2: the mix gear is live — the decision point reads the current
+// mode and depth, so a settings change lands at the next boundary with no
+// rebuild. The stateless policies are constructed per call; the brain policy
+// (which holds a harness) is built once and reused.
+describe('LiveCadence (spec 12)', () => {
+  it('follows the live mode and depth at each decision point', async () => {
+    let mode: 'every_n' | 'random' | 'brain' = 'every_n'
+    let everyN = 2
+    const cadence = new LiveCadence({
+      settings: () => ({ cadenceMode: mode, musicEveryN: everyN }),
+    })
+    expect(await cadence.nextKind({ talksSinceMusic: 1 })).toBe('talk')
+    everyN = 1
+    expect(await cadence.nextKind({ talksSinceMusic: 1 })).toBe('music')
+    mode = 'every_n'
+    everyN = 9
+    expect(await cadence.nextKind({ talksSinceMusic: 3 })).toBe('talk')
+  })
+
+  it('brain mode consults the harnessed policy, and leaving it stops the calls', async () => {
+    let mode: 'every_n' | 'random' | 'brain' = 'brain'
+    const harness = new FakeHarness(async (tools) => {
+      await callTool(tools, 'choose_segment', { kind: 'music' })
+    })
+    const cadence = new LiveCadence({
+      settings: () => ({ cadenceMode: mode, musicEveryN: 2 }),
+      brain: harness,
+      model: 'm',
+    })
+    expect(await cadence.nextKind({ talksSinceMusic: 0 })).toBe('music')
+    expect(harness.calls).toBe(1)
+    mode = 'every_n'
+    expect(await cadence.nextKind({ talksSinceMusic: 0 })).toBe('talk')
+    expect(harness.calls).toBe(1) // no further brain spend
+  })
+
+  it('brain mode without a harness falls back to every_n at the live depth', async () => {
+    const cadence = new LiveCadence({
+      settings: () => ({ cadenceMode: 'brain', musicEveryN: 1 }),
+    })
+    expect(await cadence.nextKind({ talksSinceMusic: 1 })).toBe('music')
   })
 })

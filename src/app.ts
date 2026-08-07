@@ -10,7 +10,7 @@ import { AudioContext } from 'node-web-audio-api'
 import { IdleSensor, osIdleProbe } from './activity.ts'
 import { CachedBedSource, DEFAULT_MANIFEST, defaultBedCacheDir, pullBed, ytdlpDownload } from './bed.ts'
 import { ClaudeBrain, StubBrain } from './brain.ts'
-import { buildCadence, PacingCadence } from './cadence.ts'
+import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
 import type { Config } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
@@ -28,10 +28,11 @@ import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona, personaLine } from './persona.ts'
 import { runSetup, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
+import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import { preflightBun } from './startup.ts'
 import { VizFeed } from './viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
-import { StubVoice } from './voice.ts'
+import { MutableVoice, StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
 // memoryDir; a stub run stays in-process so canned chatter never touches the
@@ -128,10 +129,53 @@ export function buildVoice(config: Config, notify: (message: string) => void = (
   }
 }
 
+// The one run-wide settings authority (spec 12 §2.4): seeded from the merged
+// config so flags and env are respected at boot, persisting around whatever
+// keys the user's own file already holds.
+export function buildSettingsStore(
+  resolved: Config,
+  log: (message: string) => void = () => {},
+): SettingsStore {
+  const path = join(resolved.home, SETTINGS_FILE)
+  return new SettingsStore({
+    path,
+    initial: {
+      anchorsEnabled: resolved.anchorsEnabled,
+      musicEnabled: resolved.musicEnabled,
+      cadenceMode: resolved.cadenceMode,
+      musicEveryN: resolved.musicEveryN,
+      gapSeconds: resolved.gapSeconds,
+      recentWindow: resolved.recentWindow,
+      voice: resolved.voice,
+      tuiPet: resolved.tuiPet,
+    },
+    touched: readSettingsFile(path, log),
+    derivedVoice: () => (resolved.ttsUrl !== '' ? 'hosted' : 'stub'),
+    log,
+  })
+}
+
+// Whether the music pipeline is constructed (spec 12 §3.2): whenever its
+// dependencies exist, so the live toggle has something to enable. Boot-enabled
+// music trusts the preflight (broken binaries = no pipeline, and the pane greys
+// the toggle); boot-disabled music was never probed — the probe is a network
+// search --no-music deliberately skips — so it builds optimistically and a
+// later toggle-on degrades honestly at use.
+export function musicWiringWanted(config: Config, hasBrain: boolean, setupMusicOk: boolean): boolean {
+  return hasBrain && (config.musicEnabled ? setupMusicOk : true)
+}
+
 // Music wiring (find+pull -> cadence -> engine), or undefined when the session
-// is talk-only: --no-music, a failed preflight, or the stub brain (the harness
-// behind the pick task is the real SDK).
-function buildMusic(config: Config, harness: Harness, engine: AudioEngine, host: Host): MusicWiring {
+// can never play music: a failed preflight or the stub brain (the harness
+// behind the pick task is the real SDK). The cadence reads the live settings,
+// so the pane's mix gear lands at the next boundary.
+function buildMusic(
+  config: Config,
+  settings: SettingsStore,
+  harness: Harness,
+  engine: AudioEngine,
+  host: Host,
+): MusicWiring {
   const provider = new YtDlpMusicProvider({ binary: config.ytdlpCmd })
   const source = new MusicProgrammer({
     brain: harness,
@@ -141,8 +185,8 @@ function buildMusic(config: Config, harness: Harness, engine: AudioEngine, host:
     // Discovery stage timings land in the dev log (issue #76).
     ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })
-  const configured = buildCadence(config.cadenceMode, {
-    everyN: config.musicEveryN,
+  const configured = new LiveCadence({
+    settings: () => settings.current(),
     brain: harness,
     model: config.musicModel,
   })
@@ -162,7 +206,11 @@ export function buildPacing(config: Config, memory: MemoryStore): PacingWiring |
   const probe = osIdleProbe()
   return {
     sensor: new IdleSensor({ ...(probe !== undefined && { probe }) }),
-    ...(config.anchorsEnabled && { scheduler: new LedgerScheduler(memory) }),
+    // Always constructed (spec 12 §3.2): the Director's fire site consults the
+    // live anchorsEnabled, so the pane's toggle works without a restart. The
+    // both-flags-off boot above stays the pre-spec-07 escape hatch — a state
+    // the pane itself cannot reach (gating is not a pane knob).
+    scheduler: new LedgerScheduler(memory),
     gating: config.gatingEnabled,
   }
 }
@@ -329,7 +377,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // is remembered on the tier-3 ledger so later boots stay quiet. The radio
   // launches either way; the gaps only decide how degraded it starts.
   const targets = setupTargets(config)
-  let musicOk = config.musicEnabled && claude !== null
+  let setupMusicOk = false
   if (claude !== null) {
     const outcome = await runSetup({
       host,
@@ -337,13 +385,23 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       targets,
       ...(memory instanceof PersistentMemoryStore && { ledger: memory }),
     })
-    musicOk = outcome.musicOk
+    setupMusicOk = outcome.musicOk
   }
   // Resolved after the conversation, so an endpoint saved during it is heard
   // THIS boot rather than the next one — and so the banner reports the voice
   // that is actually playing, not the one the flags asked for.
   const resolved = voiceAfterSetup(config, targets.voiceConfig())
-  const voice = buildVoice(resolved, (m) => host.info(m))
+  // The live settings authority (spec 12 §2.4), seeded from the fully resolved
+  // config: everything below reads it instead of captured scalars.
+  const settings = buildSettingsStore(resolved, (m) => host.info(m))
+  // The unmuted provider for this run: hosted whenever an endpoint exists (a
+  // mute must not cost the warm connection), the honest degraded path when the
+  // listener explicitly asked for a hosted voice that has no endpoint.
+  const real = buildVoice(
+    { ...resolved, voice: resolved.ttsUrl === '' ? resolved.voice : 'hosted' },
+    (m) => host.info(m),
+  )
+  const voice = new MutableVoice({ real, muted: () => settings.current().voice === 'stub' })
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the
@@ -359,7 +417,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     await engine.startBed(new CachedBedSource(cacheDir))
   }
 
-  const music = musicOk && claude !== null ? buildMusic(config, claude, engine, host) : undefined
+  const music =
+    musicWiringWanted(config, claude !== null, setupMusicOk) && claude !== null
+      ? buildMusic(config, settings, claude, engine, host)
+      : undefined
   const pacing = buildPacing(config, memory)
   // The agentic reply turn (spec 11): rides the same harness as the pick task,
   // on the main tier — the reply is the soul. A stub run has no harness, so the
@@ -373,13 +434,29 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     player: engine,
     memory,
     host,
-    gapSeconds: config.gapSeconds,
-    recentWindow: config.recentWindow,
+    settings: () => settings.current(),
     ...(pacing !== undefined && { pacing }),
     ...(music !== undefined && { music }),
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
   })
+
+  // The settings bridge (spec 12 §2.5): the pane reads and writes through the
+  // engine, and every accepted change is broadcast by the store's own event.
+  if (host instanceof IpcHost) {
+    host.setSettings({
+      snapshot: () => ({
+        values: settings.current(),
+        home: resolved.home,
+        voiceConfigured: resolved.ttsUrl !== '',
+        musicAvailable: music !== undefined,
+      }),
+      apply: (patch) => settings.set(patch),
+    })
+    settings.onChange(() => host.sendSettings())
+    // The client usually attached before the bridge existed: push it the state.
+    host.sendSettings()
+  }
 
   // Orderly shutdown on Ctrl-C (spec 01 §3.6): first signal asks the loop to
   // stop (it cuts playback on the way out); a second forces exit.
