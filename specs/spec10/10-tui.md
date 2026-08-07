@@ -7,11 +7,11 @@
 > commits the candidate or submits the line (§5.1's note below). Slice 2
 > (engine FFT tap + `viz` feed, §3.6) and slice 3 (pet substrate + warmth kit,
 > §3.7) landed 2026-07-30. The §6.1 art-direction session chose and landed the
-> **quiet-constellation** composition (2026-08-07): the palette discipline,
-> the wide-terminal sky panel (§3.3), and the mist rendering of the viz feed
-> (§3.6) — contracts untouched. What remains open is sensory: the §5.11 human
-> pass and the by-eye tuning of the new skin (issue #79), plus the pet's
-> identity, which stays a §6.1 question.
+> **quiet-constellation** composition (2026-08-07): the sampled palette, the
+> centered wide-terminal sky panel (§3.3), the octant sub-pixel rendering of
+> the viz feed (§3.6), and the raster whisper-figure (§3.7) — contracts
+> untouched. What remains open is sensory: the §5.11 human pass and the
+> by-eye tuning of the new skin (issue #79).
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin
 > with a real TUI. The **single richer front-end murmur ever gets**: there is
 > no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md)
@@ -348,14 +348,17 @@ mid-keystroke; a mode the listener opened is the listener spending their own
 focus, and the broadcast never pauses under it.
 
 **As built (2026-08-07, §6.1 quiet-constellation): composition has one
-breakpoint.** At ≥ 96 columns the alive band recomposes as a **sky panel**
-beside the log: the program log keeps the left with one blank line between
-entries, the panel takes the right — a seeded starfield, the visualizer's
-bins as a floating braille particle mist (§3.6), the pet drifting inside it,
-and now-playing as a dim `♪` line under the panel. Below 96 columns the
-classic bottom band stands unchanged, and now-playing stays in the status
-strip. Same four regions either way; only the composition moves, which is
-exactly the §6.1 licence.
+breakpoint, and one max width.** At ≥ 96 columns the alive band recomposes
+as a **sky panel** beside the log: the program log keeps the left with one
+blank line between entries and the newest broadcast line carrying a bullet,
+the panel takes the right — a seeded ring-biased starfield, the visualizer's
+bins as a radial wave riding an implied circle (§3.6), the whisper-figure at
+the circle's center (§3.7), and now-playing as a centered tricolor `♪` line
+under the panel. The strip becomes one centered line over a full-width rule.
+Past 184 columns the whole frame centers with symmetric margins instead of
+stretching. Below 96 columns the classic bottom band stands unchanged, and
+now-playing stays in the status strip. Same four regions either way; only
+the composition moves, which is exactly the §6.1 licence.
 
 **As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
 (also `off` / `false` / `no`) drops the creature from the alive band, and the
@@ -417,15 +420,22 @@ only the client — one shutdown path.
   *speaks*; on the bed it breathes low. (What ships in v1 is a §6.1 styling
   call; the feed contract is the same.)
 - **As built (2026-08-07, §6.1)**: the bar strip is the narrow composition;
-  wide terminals re-render the SAME feed as the constellation mist —
-  braille-cell particles climbing from an **arced floor** (high at the panel's
-  edges, dipping at the center, the figure floating in the hollow), density
-  following the bin level, jittered so cells stay fine-grained, fading out at
-  the panel's side walls, a sparse fallout drifting below. The sky paints on the
-  client's own 12fps clock and viz frames only feed the smoother, so stars
-  twinkle and the pet animates even when the engine is silent. All of it is
-  client-side arithmetic (`tui/src/constellation.ts`); the feed contract is
-  untouched.
+  wide terminals re-render the SAME feed as the constellation wave. The panel
+  draws on one canvas of square **sub-pixels** — two per cell width, four per
+  cell height — folded to **octant mosaics** (Unicode 16) where the terminal
+  synthesizes them (Ghostty/kitty/WezTerm; `penFor`, override
+  `MURMUR_TUI_PIXEL=octant|half`) and to half-blocks everywhere else. The
+  wave is dashed columns of square blocks whose **bases ride the lower arc of
+  one implied circle** (deep at the center, shallow at the arms), three
+  temperatures by level (peach-ember peaks / cream mids / warm-grey quiet),
+  fraying tips, ghost echoes past the tip. The starfield is concentric
+  **ripple rings** off the same circle — quasi-regular arc spacing, jittered,
+  gap-broken, near-dark — under a thin free scatter with rare warm accents.
+  A near-covered cell holding exactly two inks keeps both (majority ink on
+  the glyph, the other behind it). The sky paints on the client's own 12fps
+  clock and viz frames only feed the smoother, so stars twinkle and the
+  figure animates even when the engine is silent. All of it is client-side
+  arithmetic (`tui/src/constellation.ts`); the feed contract is untouched.
 
 ### 3.7 The warmth kit (techniques adopted from the case research)
 
@@ -437,6 +447,15 @@ provides them):
    as assets — zero image machinery, renders everywhere, upgradeable to
    octant glyphs on capable terminals. Idle loop at 2–8 fps via OpenTUI's
    timeline; reaction poses keyed off `ProgramState` (§3.2-D).
+   **As built (2026-08-07, §6.1)**: the asset stays text (`.pix` grids, keys
+   `x` cream fill / `w` warm outline / `s` ember sparkle), but on
+   kitty-graphics terminals (Ghostty/kitty; `figurePen`, override
+   `MURMUR_TUI_FIGURE=image|sprite`) the wide-panel figure renders as a
+   **runtime-encoded PNG** over the kitty graphics protocol
+   (`tui/src/figure-image.ts`) — integer nearest-neighbour scale chosen from
+   the tty's real cell pixel size, pose frames streamed under one image id,
+   doze fading the inks toward the ground. Character terminals and the
+   narrow band keep the text-sprite path unchanged.
 2. **Content-derived tinting** (kew's signature): when a track starts, derive
    a small accent palette and tint the UI with it — the interface breathes
    with the music. v1 may fall back to scene-based tinting (spec 04's
@@ -593,8 +612,11 @@ TUI work is built on the framework choice.
 - **Per-track palette source** (§3.7.2): thumbnails vs metadata-derived vs
   scene-only for v1 — decide when the tinting mechanism lands.
 - **Visualizer during talk** (§3.6): voice envelope vs quiet strip — by ear.
-- **opentui#92** (graphics-protocol bitmaps): when it lands, evaluate a crisp
-  pet / album-art upgrade behind the same sprite substrate.
+- **opentui#92** (graphics-protocol bitmaps): when it lands, evaluate album
+  art behind the same substrate. **Partly superseded (2026-08-07)**: the
+  figure already ships as a kitty-graphics raster via direct escape emission
+  (§3.7) without waiting for OpenTUI support; opentui#92 remains relevant
+  only if album art wants renderer-managed images.
 - **Bun→Node exit**: revisit when OpenTUI's Node FFI support leaves
   experimental status.
 
@@ -606,23 +628,27 @@ spec builds and does not reopen the contracts above.
 **Decided (2026-08-07, concept session over `scratch/ui-concepts/logo-pet`):
 the skin is `04-quiet-constellation`.** Its terms:
 
-- **Palette discipline**: one shared deep blue-charcoal night ground; each
-  scene is a single near-monochrome accent family on it (dawn cream /
-  daylight sage / ember / moonlight) — the hour changes the warmth of the
-  light, never the room. Values live in `tui/src/palette.ts` and stay by-eye
-  knobs.
-- **Composition**: the one-breakpoint sky-panel layout (§3.3) and the mist
-  rendering of the viz feed (§3.6).
+- **Palette discipline**: one shared deep blue-black night ground; each
+  scene is a single near-monochrome accent family on it — the hour changes
+  the warmth of the light, never the room. **Sampled from the concept
+  (2026-08-07)**: everything quiet is a WARM grey (`QUIET`), the bright warm
+  accent is peach (`EMBER`), the figure's outline is warm brown (`WARM`),
+  the listener's channel — input line and `♪` — is periwinkle, the room's
+  one cold ink, and the listener's own words are sage. Values live in
+  `tui/src/palette.ts` and stay by-eye knobs.
+- **Composition**: the one-breakpoint, max-width sky-panel layout (§3.3) and
+  the octant sub-pixel rendering of the viz feed (§3.6).
 - **Rejected**: the analog-radio dial chrome (01), the framed scene panel
   (02 — per-scene hand art, cost without a daily payoff), the zine poster
   (03 — display type has no CJK form and no small-terminal degradation).
 
 **The pet's identity is the murmur logo (decided 2026-08-07):** the
-whisper-figure in profile, rendered in the solid-fill cross-stitch reading —
-hair as the dim accent mass, skin as the bright mass, dark seams carrying
-the closed eye, mouth, and finger gaps. The committed sprites are generated
-over a downscale of `assets/murmur-logo.svg`; whisper sparkles and drifting
-notes are the pose overlays. Still open: the by-eye tuning of all of the
-above in a real terminal (issue #79) — mist arc/density/fade, star density,
-twinkle, figure size and placement, per-scene accents (sampled from the
-concept mockup; values in `tui/src/palette.ts`).
+whisper-figure in profile, hand raised to the lips. The committed sprite is
+**machine-derived, not hand-drawn**: the designer's own figure from the 04
+concept, extracted at its true 2px mesh by `proper-pixel-art`
+(`scratch/make-pet.py` regenerates), yielding a 42×44 two-tone grid — cream
+fill inside a warm outline — with the drifting embers lifted into pose
+overlay frames. On kitty-graphics terminals it renders as a raster (§3.7);
+elsewhere as octant/half-block cells. Still open: the by-eye tuning of all
+of the above in a real terminal (issue #79) — wave depth/density/fray, star
+ring density, twinkle, figure size and placement, per-scene accents.
