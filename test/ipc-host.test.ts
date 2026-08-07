@@ -7,7 +7,15 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 import { IpcHost } from '../src/ipc-host.ts'
-import { PROTOCOL, decodeEngineMessage, encode, ndjson, type EngineMessage } from '../src/ipc.ts'
+import {
+  PROTOCOL,
+  decodeEngineMessage,
+  encode,
+  ndjson,
+  type EngineMessage,
+  type Settings,
+  type SettingsPatch,
+} from '../src/ipc.ts'
 import { STATUS_MICROCOPY } from '../src/prompts.ts'
 
 // A stand-in TUI: the fast layer proves the bridge, never a rendered frame.
@@ -49,6 +57,10 @@ class FakeClient {
 
   vizSub(on: boolean, fps?: number): void {
     this.send(encode({ v: 1, type: 'vizSub', on, ...(fps !== undefined && { fps }) }))
+  }
+
+  set(patch: SettingsPatch): void {
+    this.send(encode({ v: 1, type: 'settingsSet', patch }))
   }
 
   close(): void {
@@ -307,6 +319,108 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       c.attach()
       await c.settle()
       expect(c.received[0]).not.toHaveProperty('away')
+    })
+  })
+
+  // spec 12 §2.5: the settings bridge. The host routes; the store (wired by the
+  // app) is the single authority — a successful set is broadcast by the store's
+  // own change event, so the host answers only what would otherwise go silent.
+  describe('the settings bridge (spec 12)', () => {
+    const VALUES: Settings = {
+      anchorsEnabled: true,
+      musicEnabled: true,
+      cadenceMode: 'every_n',
+      musicEveryN: 2,
+      gapSeconds: 2,
+      recentWindow: 12,
+      muted: false,
+      tuiPet: true,
+    }
+
+    function wire(applyOk = true): SettingsPatch[] {
+      const applied: SettingsPatch[] = []
+      host.setSettings({
+        snapshot: () => ({ values: VALUES, home: '/tmp/m', voiceConfigured: true, musicAvailable: true }),
+        apply: (patch) => {
+          applied.push(patch)
+          return applyOk
+        },
+      })
+      return applied
+    }
+
+    it('sends a snapshot after hello on every attach', async () => {
+      wire()
+      const c = await client()
+      c.attach()
+      await c.settle()
+      expect(c.types()).toEqual(['hello', 'settings'])
+      expect(c.received[1]).toMatchObject({ type: 'settings', home: '/tmp/m', values: VALUES })
+    })
+
+    it('routes a set to the store; a rejected patch is answered with truth', async () => {
+      const applied = wire(false)
+      const c = await client()
+      c.attach()
+      await c.settle()
+      c.set({ musicEnabled: false })
+      await c.settle()
+      expect(applied).toEqual([{ musicEnabled: false }])
+      // The rejection's only reply is a fresh (unchanged) snapshot.
+      expect(c.types().filter((t) => t === 'settings')).toHaveLength(2)
+    })
+
+    it('leaves the broadcast of a successful set to the store change event', async () => {
+      const applied = wire(true)
+      const c = await client()
+      c.attach()
+      await c.settle()
+      c.set({ gapSeconds: 4 })
+      await c.settle()
+      expect(applied).toEqual([{ gapSeconds: 4 }])
+      expect(c.types().filter((t) => t === 'settings')).toHaveLength(1) // the attach one
+      host.sendSettings() // what the app's onChange wiring performs
+      await c.settle()
+      expect(c.types().filter((t) => t === 'settings')).toHaveLength(2)
+    })
+
+    it('showSettings answers /settings with an open-flagged snapshot', async () => {
+      wire()
+      const c = await client()
+      c.attach()
+      await c.settle()
+      host.showSettings()
+      await c.settle()
+      expect(c.received.at(-1)).toMatchObject({ type: 'settings', open: true })
+    })
+
+    it('snapshots never enter the replay backlog', async () => {
+      wire()
+      host.info('a notice')
+      host.sendSettings()
+      host.sendSettings()
+      const c = await client()
+      c.attach()
+      await c.settle()
+      // One snapshot — the attach one — not the two stale broadcasts.
+      expect(c.types()).toEqual(['hello', 'info', 'settings'])
+    })
+
+    it('a set before the bridge is wired is dropped without a crash', async () => {
+      const c = await client()
+      c.attach()
+      await c.settle()
+      c.set({ tuiPet: false })
+      await c.settle()
+      expect(c.types()).toEqual(['hello'])
+    })
+
+    it('ignores a set from a client that never attached', async () => {
+      const applied = wire()
+      const c = await client()
+      c.set({ musicEnabled: false })
+      await c.settle()
+      expect(applied).toEqual([])
     })
   })
 

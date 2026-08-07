@@ -12,8 +12,9 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { dataRoot, homeRoot, tuiSocketPath, voiceConfigPath } from './paths.ts'
+import { dataRoot, homeRoot, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
+import { readSettingsFile } from './settings.ts'
 import { readVoiceConfig, type VoiceConfig } from './voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
@@ -75,6 +76,15 @@ export const ConfigSchema = z.object({
   // module constants. Both off = pre-spec-07 behavior.
   anchorsEnabled: z.boolean().default(true),
   gatingEnabled: z.boolean().default(true),
+
+  // Whether the TUI shows the pixel pet (spec 12 §3.7). An engine field only so
+  // the settings layer can persist and serve it; the client env MURMUR_TUI_PET
+  // stays the local final override.
+  tuiPet: z.boolean().default(true),
+  // The listener's mute (spec 12 §3.4): the engine's master output gain, a
+  // settings-layer knob. Distinct from `voice` above — muted keeps synthesizing
+  // and playing, just silently; `--voice stub` does not synthesize at all.
+  muted: z.boolean().default(false),
 
   // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
   // The TUI is the face murmur shows by default (spec 10 §6): it spawns the
@@ -206,8 +216,11 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   const fromEnv = ttsFromEnv(env)
   const endpoint = (values['tts-url'] ?? fromEnv.ttsUrl ?? saved?.ttsUrl ?? '').trim()
   const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv }
+  // The listener's persisted knobs (spec 12 §2.2): the lowest layer, per knob.
+  const fromSettings = readSettingsFile(settingsPath(env), (m) => console.warn(`warning: ${m}`))
 
   const config = ConfigSchema.parse({
+    ...fromSettings,
     ...tts,
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),

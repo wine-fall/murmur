@@ -9,7 +9,9 @@ import {
   buildHost,
   buildMemory,
   buildPacing,
+  buildSettingsStore,
   buildVoice,
+  musicWiringWanted,
   resolvePersonaPath,
   runBootstrapProfileCli,
   runSetupCli,
@@ -23,6 +25,7 @@ import { HostedVoice } from '../src/hosted-voice.ts'
 import { IpcHost } from '../src/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { LedgerScheduler } from '../src/scheduler.ts'
+import { readSettingsFile } from '../src/settings.ts'
 import { StubVoice } from '../src/voice.ts'
 
 const config = (argv: string[], env: NodeJS.ProcessEnv = {}) => parseCli(argv, env).config
@@ -214,8 +217,10 @@ describe('pacing wiring', () => {
     expect(pacing).toMatchObject({ gating: true })
   })
 
-  it('drops each feature on its flag while keeping the sensor', () => {
-    expect(buildPacing(config(['--no-anchors']), memory)!.scheduler).toBeUndefined()
+  it('keeps the scheduler constructed under --no-anchors (the live flag gates firing)', () => {
+    // spec 12 §3.2: anchors toggle hot, so the scheduler exists whenever the
+    // pacing block does — the Director's fire site consults the live setting.
+    expect(buildPacing(config(['--no-anchors']), memory)!.scheduler).toBeInstanceOf(LedgerScheduler)
     expect(buildPacing(config(['--no-gating']), memory)!.gating).toBe(false)
   })
 
@@ -273,6 +278,47 @@ describe('memory wiring', () => {
 
     expect(readFileSync(home, 'utf-8')).toBe('the persona I hand-edited')
     expect(statSync(home).mtimeMs).toBe(before)
+  })
+})
+
+// spec 12 §2.4: one store per run, seeded from the merged config (flags/env
+// respected), persisting around the file's user-touched keys.
+describe('settings store wiring (spec 12)', () => {
+  it('starts from the merged config and persists around the touched keys', () => {
+    const home = emptyHome()
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ gapSeconds: 5 }))
+    const store = buildSettingsStore(config(['--gap', '1'], { MURMUR_HOME: home }))
+    expect(store.current().gapSeconds).toBe(1) // the flag won at boot
+    store.set({ tuiPet: false })
+    // ...but the file remembers the user's own 5 for the next flag-less boot.
+    expect(readSettingsFile(join(home, 'settings.json'))).toEqual({ gapSeconds: 5, tuiPet: false })
+  })
+
+  it('a persisted mute seeds the store without touching the voice provider', () => {
+    const home = emptyHome()
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ muted: true }))
+    const c = config([], { MURMUR_HOME: home, MURMUR_TTS_URL: 'https://x' })
+    expect(c.voice).toBe('hosted') // the provider still derives from the endpoint
+    const store = buildSettingsStore(c)
+    expect(store.current().muted).toBe(true)
+    store.set({ muted: false })
+    expect(store.current().muted).toBe(false)
+  })
+})
+
+// spec 12 §3.2: the music pipeline is built whenever its dependencies exist so
+// the live toggle has something to enable — with the one preflight exception.
+describe('music wiring decision (spec 12)', () => {
+  it('follows the preflight when boot-enabled, builds optimistically when boot-disabled', () => {
+    expect(musicWiringWanted(config([]), true, true)).toBe(true)
+    // Boot-enabled but broken binaries: no pipeline — the pane greys the toggle.
+    expect(musicWiringWanted(config([]), true, false)).toBe(false)
+    // Boot-disabled: the binaries were never probed (the probe is a network
+    // search); build, and let a later toggle-on degrade honestly at use.
+    expect(musicWiringWanted(config(['--no-music']), true, false)).toBe(true)
+    // No harness (stub brain): never.
+    expect(musicWiringWanted(config(['--no-music']), false, false)).toBe(false)
+    expect(musicWiringWanted(config([]), false, true)).toBe(false)
   })
 })
 

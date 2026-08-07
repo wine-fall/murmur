@@ -35,6 +35,10 @@ const START_SAFETY_S = 0.05
 // Dead-sink margin: play() must never hang forever if the output stops pulling.
 const VOICE_TIMEOUT_MARGIN_S = 5
 
+// The listener's mute (spec 12 §3.4): fast enough to feel instant, long enough
+// not to click.
+const MUTE_RAMP_S = 0.08
+
 // The visualizer tap (spec 10 §3.6). 1024 samples buys ~47Hz resolution at the
 // mix rate, which the log-spaced bands need at the bass end to look like music
 // rather than one fat bar. Modest analyser smoothing takes the jitter off a
@@ -246,7 +250,8 @@ export class AudioEngine implements MixingPlayer {
 
   // Everything the engine plays lands on this one node instead of straight on
   // the destination, so the visualizer has a single master bus to tap (spec 10
-  // §3.6). Unity gain, never automated: it changes nothing about the mix.
+  // §3.6) — and so the listener's mute is one gain move (spec 12 §3.4). The
+  // only automation it ever carries is that mute; the mix itself never rides it.
   private bus: GainNode
   private analyser: AnalyserNode | null = null
 
@@ -298,6 +303,16 @@ export class AudioEngine implements MixingPlayer {
     node.smoothingTimeConstant = VIZ_SMOOTHING
     this.bus.connect(node)
     return node
+  }
+
+  // -- the listener's mute (spec 12 §3.4) ------------------------------------ //
+
+  // Output gain only: the program (synthesis, discovery, scheduling, the clips
+  // themselves) never notices. Instant both ways, mid-word — unmute resumes the
+  // sentence in flight, exactly like a radio's volume knob. The visualizer taps
+  // the bus, so muted bars honestly go flat.
+  setMuted(muted: boolean): void {
+    ramp(this.bus.gain, muted ? 0 : FULL_GAIN, this.ctx.currentTime, MUTE_RAMP_S)
   }
 
   // -- Player seam (spec 01): the voice channel ----------------------------- //

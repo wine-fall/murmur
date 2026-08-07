@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot, tuiSocketPath } from '../src/paths.ts'
+import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot, settingsPath, tuiSocketPath } from '../src/paths.ts'
 
 describe('paths', () => {
   it('defaults to ~/.murmur with data/ and cache/ beneath', () => {
@@ -52,5 +52,13 @@ describe('the TUI socket', () => {
     // macOS caps sun_path at 104 bytes; a socket that cannot bind is a
     // front-end that never starts.
     expect(tuiSocketPath({}).length).toBeLessThan(100)
+  })
+})
+
+// spec 12 §2.1: the listener's knobs sit beside voice.json at the home root.
+describe('the settings file', () => {
+  it('lives at the home root and moves with MURMUR_HOME', () => {
+    expect(settingsPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/settings.json')
+    expect(settingsPath({}).endsWith('/.murmur/settings.json')).toBe(true)
   })
 })

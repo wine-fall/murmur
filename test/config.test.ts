@@ -312,6 +312,67 @@ describe('voice config file precedence', () => {
   })
 })
 
+// spec 12 §2.2: settings.json merges under env and flags, per knob; a voice key
+// present in the file is an explicit choice (the pane's mute), so it carries
+// the same provenance a typed --voice does.
+describe('settings file layer (spec 12)', () => {
+  const home = (settings: object | string | null): NodeJS.ProcessEnv => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-cfg-'))
+    if (settings !== null) {
+      const body = typeof settings === 'string' ? settings : JSON.stringify(settings)
+      writeFileSync(join(dir, 'settings.json'), body)
+    }
+    return { MURMUR_HOME: dir }
+  }
+
+  it('a hand-written settings.json changes the running defaults', () => {
+    const { config } = parseCli([], home({ gapSeconds: 5, musicEnabled: false, tuiPet: false }))
+    expect(config.gapSeconds).toBe(5)
+    expect(config.musicEnabled).toBe(false)
+    expect(config.tuiPet).toBe(false)
+    expect(config.recentWindow).toBe(12) // untouched knobs keep their defaults
+  })
+
+  it('flags beat the file per knob', () => {
+    const { config } = parseCli(['--gap', '1'], home({ gapSeconds: 5, musicEveryN: 4 }))
+    expect(config.gapSeconds).toBe(1)
+    expect(config.musicEveryN).toBe(4) // the un-flagged sibling still applies
+  })
+
+  it('a file-set mute rides into the config without touching the voice knob', () => {
+    // spec 12 §3.4: muted is the output gain; the voice PROVIDER still derives
+    // from the endpoint exactly as before — a muted run keeps its warm voice.
+    const env = home({ muted: true })
+    env.MURMUR_TTS_URL = 'https://env.example'
+    const { config } = parseCli([], env)
+    expect(config.muted).toBe(true)
+    expect(config.voice).toBe('hosted')
+  })
+
+  it('defaults to unmuted', () => {
+    expect(parseCli([], NO_ENV).config.muted).toBe(false)
+  })
+
+  it('a broken key is dropped alone while its siblings apply', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const { config } = parseCli([], home({ gapSeconds: -5, musicEveryN: 3 }))
+    expect(config.gapSeconds).toBe(2) // the broken key falls back to default
+    expect(config.musicEveryN).toBe(3)
+    expect(warn).toHaveBeenCalledOnce()
+    warn.mockRestore()
+  })
+
+  it('an unparseable file degrades to defaults rather than aborting startup', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseCli([], home('{not json')).config.gapSeconds).toBe(2)
+    warn.mockRestore()
+  })
+
+  it('defaults the pet on', () => {
+    expect(parseCli([], NO_ENV).config.tuiPet).toBe(true)
+  })
+})
+
 // spec 10 §6 (decided 2026-07-31): the default front-end is 'tui'; a bun-less
 // machine falls back to plain at the app level, and --plain / TUI=0 are the
 // explicit escape.

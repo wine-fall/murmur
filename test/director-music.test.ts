@@ -7,6 +7,7 @@ import { EveryNCadence } from '../src/cadence.ts'
 import { Director, type DirectorDeps } from '../src/director.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import {
+  directorSettings,
   FakeBrain,
   FakeHost,
   FakeMixingPlayer,
@@ -17,7 +18,10 @@ import {
   until,
 } from './fakes.ts'
 
-function build(overrides: Partial<DirectorDeps> = {}) {
+function build(
+  overrides: Partial<DirectorDeps> & { gapSeconds?: number; recentWindow?: number } = {},
+) {
+  const { gapSeconds = 0, recentWindow = 6, ...rest } = overrides
   const brain = new FakeBrain()
   brain.batches = [
     ['talk one', 'talk two'],
@@ -29,6 +33,7 @@ function build(overrides: Partial<DirectorDeps> = {}) {
   const host = new FakeHost()
   const source = new FakeTrackSource()
   const memory = new InProcessMemoryStore()
+  const knobs = directorSettings({ gapSeconds, recentWindow })
   const deps: DirectorDeps = {
     persona: 'persona',
     brain,
@@ -36,12 +41,11 @@ function build(overrides: Partial<DirectorDeps> = {}) {
     player,
     memory,
     host,
-    gapSeconds: 0,
-    recentWindow: 6,
+    settings: () => knobs,
     music: { source, cadence: new EveryNCadence(1), engine: player },
-    ...overrides,
+    ...rest,
   }
-  return { deps, brain, voice, player, host, source, memory, director: new Director(deps) }
+  return { deps, knobs, brain, voice, player, host, source, memory, director: new Director(deps) }
 }
 
 describe('music scheduling (cadence at the boundary)', () => {
@@ -118,7 +122,8 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
 
   it('a pick still resolving yields a talk segment instead of dead air', async () => {
     const { deps, host, source, player } = build()
-    const director = new Director({ ...deps, gapSeconds: 0.1 })
+    const slow = directorSettings({ gapSeconds: 0.1, recentWindow: 6 })
+    const director = new Director({ ...deps, settings: () => slow })
     let resolvePick!: (p: ReturnType<typeof pickOf> | null) => void
     const gated = new Promise<ReturnType<typeof pickOf> | null>((r) => (resolvePick = r))
     source.nextTrack = async (ctx) => {
@@ -335,6 +340,50 @@ describe('program state during music (spec 10)', () => {
     expect(host.states.at(-1)).toMatchObject({ kind: 'music', nowPlaying: 'Song — Artist' })
     player.handles[0]!.end()
     host.type('/quit')
+    await run
+  })
+})
+
+// spec 12 §3.2: the music switch is live at the scheduling site — flipping it
+// off makes the very next boundary talk (pure talk radio), flipping it back on
+// lets the cadence schedule again. The pipeline is never torn down.
+describe('live musicEnabled (spec 12)', () => {
+  it('off yields talk at the next boundary; on resumes scheduling', async () => {
+    const { knobs, player, host, source, director } = build()
+    source.picks = [pickOf('https://stream/s1'), pickOf('https://stream/s2')]
+    knobs.musicEnabled = false
+    await director.run(3) // cadence would say music at every other boundary
+    expect(player.music.length).toBe(0)
+    expect(host.radio.length).toBe(3) // all talk
+    const on = build()
+    on.source.picks = [pickOf('https://stream/s3')]
+    const run = on.director.run(2)
+    await until(() => on.player.handles.length === 1, 'music back on air')
+    on.player.handles[0]!.end()
+    await run
+  })
+
+  // Peer review (codex): with the pipeline always constructed, the prefetch
+  // paths (run start, per beat, per reply) still spent real discovery calls on
+  // a session whose live flag said no music. Off = zero spend, not just zero
+  // airtime.
+  it('spends nothing on discovery while music is off', async () => {
+    const { knobs, source, director } = build()
+    knobs.musicEnabled = false
+    await director.run(3)
+    expect(source.calls).toBe(0)
+  })
+
+  it('toggling on schedules music again at the next boundary (the away-stream cold path)', async () => {
+    const { knobs, player, source, director } = build({ gapSeconds: 0 })
+    knobs.musicEnabled = false
+    source.picks = [pickOf('https://stream/later')]
+    await director.run(1) // one talk segment, no priming while off
+    expect(source.calls).toBe(0)
+    knobs.musicEnabled = true
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'music on air after the toggle')
+    player.handles[0]!.end()
     await run
   })
 })

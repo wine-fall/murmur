@@ -9,6 +9,7 @@ import { Director, type DirectorDeps, type PacingWiring } from '../src/director.
 import { InProcessMemoryStore } from '../src/memory.ts'
 import type { AnchorId, Scheduler } from '../src/scheduler.ts'
 import {
+  directorSettings,
   FakeBrain,
   FakeHost,
   FakeMixingPlayer,
@@ -60,13 +61,18 @@ class FakeScheduler implements Scheduler {
 }
 
 // `pacing: null` builds a pre-spec-07 Director (no pacing block at all).
-function build(over: Partial<DirectorDeps> = {}, pacing: Partial<PacingWiring> | null = {}) {
+function build(
+  over: Partial<DirectorDeps> & { gapSeconds?: number; anchorsEnabled?: boolean } = {},
+  pacing: Partial<PacingWiring> | null = {},
+) {
+  const { gapSeconds = 0, anchorsEnabled = true, ...rest } = over
   const brain = new FakeBrain()
   const voice = new FakeVoice()
   const player = new FakeMixingPlayer()
   const host = new FakeHost()
   const memory = new InProcessMemoryStore()
   const sensor = new FakeSensor()
+  const knobs = directorSettings({ gapSeconds, anchorsEnabled })
   const deps: DirectorDeps = {
     persona: 'p',
     brain,
@@ -74,12 +80,11 @@ function build(over: Partial<DirectorDeps> = {}, pacing: Partial<PacingWiring> |
     player,
     memory,
     host,
-    gapSeconds: 0,
-    recentWindow: 12,
+    settings: () => knobs,
     ...(pacing !== null && { pacing: { sensor, ...pacing } }),
-    ...over,
+    ...rest,
   }
-  return { brain, voice, player, host, memory, sensor, deps, director: new Director(deps) }
+  return { brain, voice, player, host, memory, sensor, knobs, deps, director: new Director(deps) }
 }
 
 // Music wiring whose cadence always says music — the away room's stream.
@@ -277,5 +282,26 @@ describe('ordinary talk carries no cue', () => {
       Array.from({ length: brain.talkContexts.length }, () => undefined),
     )
     expect(host.radio).toHaveLength(6)
+  })
+})
+
+// spec 12 §3.2: anchors are gated live at the fire site — the scheduler stays
+// constructed, the flag decides at each boundary.
+describe('live anchorsEnabled (spec 12)', () => {
+  it('a due anchor is skipped while off and fires once back on', async () => {
+    const scheduler = new FakeScheduler('morning')
+    const { brain, host, knobs, director } = build({}, { scheduler })
+    knobs.anchorsEnabled = false
+    brain.batches = [['plain talk', 'more talk'], ['later']]
+    const off = director.run(1)
+    await off
+    expect(scheduler.fired).toEqual([]) // due, but the live flag said no
+    expect(host.radio).toEqual(['plain talk'])
+
+    const again = new FakeScheduler('morning')
+    const on = build({}, { scheduler: again })
+    on.brain.batches = [['anchor beat', 'x'], ['y']]
+    await on.director.run(1)
+    expect(again.fired).toEqual(['morning'])
   })
 })

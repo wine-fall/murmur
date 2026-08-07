@@ -146,6 +146,47 @@ function chooseSegmentTool(finish: (kind: SegmentKind) => void) {
   )
 }
 
+export type LiveCadenceDeps = {
+  // The live mix knobs (spec 12 §3.2): read at every decision point, so the
+  // pane's gear lands at the next boundary with no rebuild.
+  settings: () => { cadenceMode: 'every_n' | 'random' | 'brain'; musicEveryN: number }
+  brain?: Harness
+  model?: string
+}
+
+// The settings-aware policy: stateless modes are constructed per decision
+// (EveryNCadence is two fields), the brain policy — which holds a harness —
+// is built once on first use and reused. Without a harness, brain mode falls
+// back to every_n at the live depth rather than failing the boundary.
+export class LiveCadence implements CadencePolicy {
+  private deps: LiveCadenceDeps
+  private random = new RandomCadence()
+  private brainPolicy: BrainCadence | null = null
+
+  constructor(deps: LiveCadenceDeps) {
+    this.deps = deps
+  }
+
+  async nextKind(state: CadenceState): Promise<SegmentKind> {
+    const { cadenceMode, musicEveryN } = this.deps.settings()
+    switch (cadenceMode) {
+      case 'every_n':
+        return new EveryNCadence(musicEveryN).nextKind(state)
+      case 'random':
+        return this.random.nextKind(state)
+      case 'brain': {
+        if (this.deps.brain === undefined) return new EveryNCadence(musicEveryN).nextKind(state)
+        this.brainPolicy ??= new BrainCadence({
+          brain: this.deps.brain,
+          model: this.deps.model ?? '',
+          fallback: new EveryNCadence(musicEveryN),
+        })
+        return this.brainPolicy.nextKind(state)
+      }
+    }
+  }
+}
+
 export function buildCadence(
   mode: 'every_n' | 'random' | 'brain',
   { everyN, brain, model = '' }: { everyN: number; brain?: Harness; model?: string },

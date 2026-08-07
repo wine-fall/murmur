@@ -22,9 +22,16 @@ import type {
   TrackSource,
   Turn,
 } from '../src/contracts.ts'
+import type { DirectorSettings } from '../src/director.ts'
 import type { Host } from '../src/host.ts'
 import type { ProgramState } from '../src/ipc.ts'
 import { LineQueue } from '../src/host.ts'
+
+// The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
+// returned object to exercise hot application.
+export function directorSettings(over: Partial<DirectorSettings> = {}): DirectorSettings {
+  return { gapSeconds: 0, recentWindow: 12, anchorsEnabled: true, musicEnabled: true, ...over }
+}
 
 // Stands in for the model driving an agentic task: `play` is handed the task's
 // tools and calls them the way the model would. Whatever a tool passes to
@@ -265,6 +272,9 @@ export class FakeHost implements Host {
   debugs: string[] = []
   states: ProgramState[] = []
   banners: { personaFirstLine: string; brain: string; voice: string }[] = []
+  // Assign in a test to model a front-end with a settings pane (spec 12 §3.6);
+  // left undefined, the host is the plain one and the Director degrades to info.
+  showSettings?: () => void
 
   start(): void {}
 
