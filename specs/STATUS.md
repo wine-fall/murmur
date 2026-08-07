@@ -7,10 +7,10 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-07 (spec 10 §6.1 art direction landed: the
-quiet-constellation skin — night-ground palette, wide-terminal sky panel with
-braille mist + floating pet, narrow fallback unchanged; by-eye tuning stays
-issue #79)_
+_Last updated: 2026-08-07 (spec 10 §6.1 refined per first by-eye feedback:
+the pet is now the logo whisper-figure, the mist floor is an arc with the
+figure in its hollow, and the palette is sampled from the concept mockup;
+remaining tuning stays issue #79)_
 
 ## Where we are
 

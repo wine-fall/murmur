@@ -68,16 +68,20 @@ export function loadPoses(dir = ASSET_DIR): Record<PoseName, Sprite[]> {
   return poses
 }
 
-// The palette the .pix keys resolve through. The body borrows the hour's accent
-// (§3.7.2), so the pet warms and cools with the program; `fade` toward the room
-// is how a dozing pet dims without a second set of assets.
+// The palette the .pix keys resolve through. The figure borrows the hour's
+// accent (§3.7.2), so it warms and cools with the program; `fade` toward the
+// room is how a dozing figure dims without a second set of assets.
+//
+// The whisper figure (§6.1) reads by solid fill, cross-stitch style: hair as
+// the dim mass, skin as the bright mass, and dark seams carrying the detail
+// (the closed eye, the mouth, the gaps between fingers).
 export function petPalette(accent: Accent, fade: number): Record<string, string> {
   const dim = (color: string): string => (fade === 0 ? color : mix(color, INK.bg, fade))
   return {
-    o: dim('#2a221c'), // outline
-    b: dim(accent.dim), // body
-    e: dim(INK.text), // eye
-    m: dim(accent.bright), // muzzle / belly
+    o: dim('#2a2620'), // outline
+    b: dim(accent.dim), // hair
+    e: dim(mix(INK.bg, accent.dim, 0.35)), // seams: eye, mouth, finger gaps
+    m: dim(accent.bright), // skin
   }
 }
 

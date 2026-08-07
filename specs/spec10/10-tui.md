@@ -418,8 +418,10 @@ only the client — one shutdown path.
   call; the feed contract is the same.)
 - **As built (2026-08-07, §6.1)**: the bar strip is the narrow composition;
   wide terminals re-render the SAME feed as the constellation mist —
-  braille-cell particles climbing from a floating baseline, density following
-  the bin level, a sparse fallout drifting below it. The sky paints on the
+  braille-cell particles climbing from an **arced floor** (high at the panel's
+  edges, dipping at the center, the figure floating in the hollow), density
+  following the bin level, jittered so cells stay fine-grained, fading out at
+  the panel's side walls, a sparse fallout drifting below. The sky paints on the
   client's own 12fps clock and viz frames only feed the smoother, so stars
   twinkle and the pet animates even when the engine is silent. All of it is
   client-side arithmetic (`tui/src/constellation.ts`); the feed contract is
@@ -615,7 +617,12 @@ the skin is `04-quiet-constellation`.** Its terms:
   (02 — per-scene hand art, cost without a daily payoff), the zine poster
   (03 — display type has no CJK form and no small-terminal degradation).
 
-Still open, still this session's property: the pet's **identity** (the
-whisper-figure logo motif and the stitched texture of concept 03 are the
-reference material; today's creature holds the slot), and the by-eye tuning
-of all of the above in a real terminal (issue #79).
+**The pet's identity is the murmur logo (decided 2026-08-07):** the
+whisper-figure in profile, rendered in the solid-fill cross-stitch reading —
+hair as the dim accent mass, skin as the bright mass, dark seams carrying
+the closed eye, mouth, and finger gaps. The committed sprites are generated
+over a downscale of `assets/murmur-logo.svg`; whisper sparkles and drifting
+notes are the pose overlays. Still open: the by-eye tuning of all of the
+above in a real terminal (issue #79) — mist arc/density/fade, star density,
+twinkle, figure size and placement, per-scene accents (sampled from the
+concept mockup; values in `tui/src/palette.ts`).

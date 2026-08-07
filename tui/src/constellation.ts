@@ -34,21 +34,25 @@ const DOT_BITS = [
 
 const BRAILLE_BASE = 0x28_00
 
-// The mist floats: its baseline hangs at this fraction of the panel's height,
-// dots climb from there and a thin fallout drifts below — glued to the panel
-// floor it reads as a bar chart, not a sky.
-const BASELINE = 0.78
+// The mist floor is an arc, not a flat line (§6.1): high at the panel's edges,
+// dipping at the center, the pet floating in the hollow. Fractions of the
+// panel's sub-pixel height, measured from the top.
+const ARC_EDGE = 0.5
+const ARC_DIP = 0.86
 
 // How much of the panel the mist may climb at full level, in sub-pixel rows.
-const MIST_CEILING = 0.55
+const MIST_CEILING = 0.45
 
 // Peak dot density — the mist is scattered squares with dark between them,
-// never a filled bar; density thins toward a column's top edge.
-const MIST_DENSITY = 0.32
+// never a filled bar; density thins toward a column's top edge, and every dot
+// is jittered a couple of sub-rows so cells rarely clump into heavy braille
+// blocks — isolated dots are what read as fine grain.
+const MIST_DENSITY = 0.62
+const JITTER_SUBROWS = 3
 
-// The sparse trail under the baseline.
-const FALLOUT_ROWS = 5
-const FALLOUT_DENSITY = 0.12
+// The sparse trail under the floor.
+const FALLOUT_ROWS = 6
+const FALLOUT_DENSITY = 0.18
 
 // Stars per cell, roughly — sparse enough to stay a sky, not a texture.
 const STAR_DENSITY = 0.03
@@ -77,10 +81,12 @@ function prng(seed: number): () => number {
 }
 
 // Deterministic per-dot jitter: same dot, same tick bucket, same verdict.
-function hash01(x: number, y: number, tick: number): number {
+// Exported for its regression test: the final XOR must be forced back to
+// unsigned, or half of all hashes come out negative and pass any threshold.
+export function hash01(x: number, y: number, tick: number): number {
   let mixed = (Math.imul(x, 374_761_393) + Math.imul(y, 668_265_263) + Math.imul(tick, 2_246_822_519)) >>> 0
   mixed = Math.imul(mixed ^ (mixed >>> 13), 1_274_126_177) >>> 0
-  return (mixed ^ (mixed >>> 16)) / 4_294_967_296
+  return ((mixed ^ (mixed >>> 16)) >>> 0) / 4_294_967_296
 }
 
 export class Constellation {
@@ -117,9 +123,8 @@ export class Constellation {
     const subRows = this.height * 4
     const bits = Array.from({ length: this.height }, () => Array.from({ length: this.width }, () => 0))
 
-    // The mist: scattered surviving dots per sub-pixel column, climbing from a
-    // floating baseline, with a thin fallout drifting below it.
-    const baseline = Math.floor(subRows * BASELINE)
+    // The mist: scattered surviving dots per sub-pixel column, climbing from
+    // the arced floor, with a thin fallout drifting below it.
     const bucket = Math.floor(tick / SHIMMER_DIVISOR)
     const dot = (sc: number, fromTop: number): void => {
       if (fromTop < 0 || fromTop >= subRows) return
@@ -129,13 +134,20 @@ export class Constellation {
       const level =
         levels.length === 0 ? 0 : clamp01(levels[Math.floor((sc / subCols) * levels.length)]!)
       if (level === 0) continue
+      // -1..1 across the panel; the floor bows from ARC_EDGE down to ARC_DIP,
+      // and the mist thins out before it can hit the panel's side walls.
+      const across = (2 * sc) / subCols - 1
+      const fade = Math.min(1, (1 - Math.abs(across)) / 0.25)
+      const floor = Math.floor(subRows * (ARC_DIP - (ARC_DIP - ARC_EDGE) * across * across))
       const target = level * subRows * MIST_CEILING
       for (let up = 0; up < target; up++) {
-        const density = MIST_DENSITY * (1 - (0.85 * up) / target)
-        if (hash01(sc, up, bucket) < density) dot(sc, baseline - up)
+        const density = fade * MIST_DENSITY * (1 - (0.85 * up) / target)
+        if (hash01(sc, up, bucket) >= density) continue
+        const jitter = Math.floor((hash01(sc, up + 1000, bucket) - 0.5) * JITTER_SUBROWS)
+        dot(sc, floor - up + jitter)
       }
       for (let down = 1; down <= FALLOUT_ROWS; down++) {
-        if (hash01(sc, -down, bucket) < FALLOUT_DENSITY * level) dot(sc, baseline + down)
+        if (hash01(sc, -down, bucket) < fade * FALLOUT_DENSITY * level) dot(sc, floor + down)
       }
     }
 
@@ -144,10 +156,9 @@ export class Constellation {
     const petRows = pet?.length ?? 0
     const petCols = petRows > 0 ? pet![0]!.length : 0
     const fits = petRows > 0 && petCols <= this.width && petRows <= this.height
-    // Centred in the cloud's own region, not the panel's: the creature drifts
-    // IN the mist, a little above the baseline.
+    // Centred in the arc's hollow: the figure floats where the floor dips.
     const petX = fits ? Math.floor((this.width - petCols) / 2) : 0
-    const petY = fits ? Math.max(Math.floor(this.height * 0.52) - Math.floor(petRows / 2), 0) : 0
+    const petY = fits ? Math.max(Math.floor(this.height * 0.4) - Math.floor(petRows / 2), 0) : 0
 
     const starAt = new Map<number, Star>()
     for (const star of this.stars) starAt.set(star.y * this.width + star.x, star)
