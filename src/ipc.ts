@@ -28,6 +28,50 @@ export const ProgramStateSchema = z.object({
 
 export type ProgramState = z.infer<typeof ProgramStateSchema>
 
+// The listener's knobs (spec 12 §1): exactly these eight, resolved — the live
+// values the engine's SettingsStore holds. The schema doubles as the per-key
+// validator for the settings FILE (spec 12 §2.1), so the file and the wire can
+// never disagree on what a legal value is.
+export const SettingsValuesSchema = z.object({
+  anchorsEnabled: z.boolean(),
+  musicEnabled: z.boolean(),
+  cadenceMode: z.enum(['every_n', 'random', 'brain']),
+  musicEveryN: z.number().int().positive(),
+  gapSeconds: z.number().min(0),
+  recentWindow: z.number().int().positive(),
+  voice: z.enum(['stub', 'hosted']),
+  tuiPet: z.boolean(),
+})
+
+export type Settings = z.infer<typeof SettingsValuesSchema>
+
+// A mutation (spec 12 §2.4/§3.4). `voice` is narrower than the value: a pane
+// (or agent) may MUTE ('stub') or CLEAR (null — back to the endpoint-derived
+// voice); 'hosted' is always derived, never written, so the schema cannot even
+// express it.
+export const SettingsPatchSchema = z.object({
+  anchorsEnabled: z.boolean().optional(),
+  musicEnabled: z.boolean().optional(),
+  cadenceMode: z.enum(['every_n', 'random', 'brain']).optional(),
+  musicEveryN: z.number().int().positive().optional(),
+  gapSeconds: z.number().min(0).optional(),
+  recentWindow: z.number().int().positive().optional(),
+  voice: z.union([z.literal('stub'), z.null()]).optional(),
+  tuiPet: z.boolean().optional(),
+})
+
+export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
+
+// The read-only facts that ride the settings snapshot (spec 12 §2.5): where
+// the home resolved, and whether the voice endpoint / music pipeline exist —
+// never the key, never the URL.
+export type SettingsSnapshot = {
+  values: Settings
+  home: string
+  voiceConfigured: boolean
+  musicAvailable: boolean
+}
+
 const v = z.literal(ENVELOPE)
 
 // --- engine -> tui --------------------------------------------------------- //
@@ -57,6 +101,20 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   }),
   z.object({ v, type: z.literal('info'), text: z.string() }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
+  // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
+  // after every settingsSet — the pane always renders truth, never local
+  // optimism. The read-only facts ride along; no key, no URL. `open` marks the
+  // one snapshot that answers a typed `/settings`, telling the client to show
+  // the pane rather than just refresh it.
+  z.object({
+    v,
+    type: z.literal('settings'),
+    values: SettingsValuesSchema,
+    home: z.string(),
+    voiceConfigured: z.boolean(),
+    musicAvailable: z.boolean(),
+    open: z.literal(true).optional(),
+  }),
   z.object({ v, type: z.literal('bye') }),
 ])
 
@@ -68,6 +126,7 @@ export const TuiMessageSchema = z.discriminatedUnion('type', [
   z.object({ v, type: z.literal('attach'), protocol: z.number().int() }),
   z.object({ v, type: z.literal('line'), text: z.string() }),
   z.object({ v, type: z.literal('vizSub'), on: z.boolean(), fps: z.number().positive().optional() }),
+  z.object({ v, type: z.literal('settingsSet'), patch: SettingsPatchSchema }),
 ])
 
 export type TuiMessage = z.infer<typeof TuiMessageSchema>

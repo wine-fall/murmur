@@ -54,3 +54,9 @@ export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {
 export function voiceConfigPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'voice.json')
 }
+
+// The listener's knobs (spec 12 §2.1): beside voice.json for the same reason —
+// re-obtainable configuration, not irreplaceable state.
+export function settingsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'settings.json')
+}

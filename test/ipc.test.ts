@@ -22,6 +22,41 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'state', state: { kind: 'talk' }, microcopy: 'on the air' },
   { v: 1, type: 'info', text: 'now playing: a song' },
   { v: 1, type: 'viz', bins: [0, 0.5, 1] },
+  {
+    v: 1,
+    type: 'settings',
+    values: {
+      anchorsEnabled: true,
+      musicEnabled: false,
+      cadenceMode: 'every_n',
+      musicEveryN: 2,
+      gapSeconds: 2,
+      recentWindow: 12,
+      voice: 'stub',
+      tuiPet: true,
+    },
+    home: '/home/someone/.murmur',
+    voiceConfigured: true,
+    musicAvailable: true,
+  },
+  {
+    v: 1,
+    type: 'settings',
+    values: {
+      anchorsEnabled: true,
+      musicEnabled: true,
+      cadenceMode: 'random',
+      musicEveryN: 4,
+      gapSeconds: 0,
+      recentWindow: 4,
+      voice: 'hosted',
+      tuiPet: false,
+    },
+    home: '/tmp/m',
+    voiceConfigured: false,
+    musicAvailable: false,
+    open: true,
+  },
   { v: 1, type: 'bye' },
 ]
 
@@ -30,6 +65,9 @@ const TUI_MESSAGES: TuiMessage[] = [
   { v: 1, type: 'line', text: '/quit' },
   { v: 1, type: 'vizSub', on: true, fps: 24 },
   { v: 1, type: 'vizSub', on: false },
+  { v: 1, type: 'settingsSet', patch: { musicEnabled: false, gapSeconds: 3.5 } },
+  { v: 1, type: 'settingsSet', patch: { voice: 'stub' } },
+  { v: 1, type: 'settingsSet', patch: { voice: null } },
 ]
 
 describe('the wire protocol (spec 10 §2.3)', () => {
@@ -64,6 +102,14 @@ describe('the wire protocol (spec 10 §2.3)', () => {
 
   it('rejects a foreign envelope version', () => {
     expect(decodeEngineMessage(JSON.stringify({ v: 2, type: 'bye' }))).toBeNull()
+  })
+
+  it('a settings patch can never name a voice the pane must not write', () => {
+    // spec 12 §3.4: the pane writes 'stub' (mute) or null (clear); 'hosted' is
+    // always derived, never set — the trust boundary enforces it.
+    expect(
+      decodeTuiMessage(JSON.stringify({ v: 1, type: 'settingsSet', patch: { voice: 'hosted' } })),
+    ).toBeNull()
   })
 
   it('does not confuse the two directions', () => {

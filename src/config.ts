@@ -12,8 +12,9 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { dataRoot, homeRoot, tuiSocketPath, voiceConfigPath } from './paths.ts'
+import { dataRoot, homeRoot, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
+import { readSettingsFile } from './settings.ts'
 import { readVoiceConfig, type VoiceConfig } from './voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
@@ -75,6 +76,11 @@ export const ConfigSchema = z.object({
   // module constants. Both off = pre-spec-07 behavior.
   anchorsEnabled: z.boolean().default(true),
   gatingEnabled: z.boolean().default(true),
+
+  // Whether the TUI shows the pixel pet (spec 12 §3.7). An engine field only so
+  // the settings layer can persist and serve it; the client env MURMUR_TUI_PET
+  // stays the local final override.
+  tuiPet: z.boolean().default(true),
 
   // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
   // The TUI is the face murmur shows by default (spec 10 §6): it spawns the
@@ -206,8 +212,16 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   const fromEnv = ttsFromEnv(env)
   const endpoint = (values['tts-url'] ?? fromEnv.ttsUrl ?? saved?.ttsUrl ?? '').trim()
   const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv }
+  // The listener's persisted knobs (spec 12 §2.2): the lowest layer, per knob.
+  // `voice` is pulled aside because it must land ABOVE the endpoint-derived
+  // default below — a file-set mute is an explicit choice, with the same
+  // provenance a typed --voice carries.
+  const { voice: settingsVoice, ...settingsRest } = readSettingsFile(settingsPath(env), (m) =>
+    console.warn(`warning: ${m}`),
+  )
 
   const config = ConfigSchema.parse({
+    ...settingsRest,
     ...tts,
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
@@ -217,6 +231,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     // written, validated, and then silently ignored because the knob still
     // said 'stub'. An explicit --voice below still wins, both ways.
     ...(endpoint !== '' && { voice: 'hosted' }),
+    ...(settingsVoice !== undefined && { voice: settingsVoice, voiceExplicit: true }),
     ...(values.brain !== undefined && { brain: values.brain }),
     ...(values.voice !== undefined && { voice: values.voice, voiceExplicit: true }),
     ...(values.model !== undefined && { model: values.model }),
