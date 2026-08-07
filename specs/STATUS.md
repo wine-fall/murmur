@@ -7,9 +7,9 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-07 (spec 07 invites retired: murmur is a radio and does
-not solicit interaction — the turn-to-you/slide-back chain is removed; typed
-talkback, anchors, gating, and the activity sensor stay)_
+_Last updated: 2026-08-07 (spec 12 settings layer built: settings.json + the
+engine-owned store + two additive wire messages + the TUI `/settings` pane;
+seven writable intents, everything hot)_
 
 ## Where we are
 
@@ -43,6 +43,10 @@ how it got there:
 - spec 11 agentic-steer — the reply turn runs the harness with
   `switch_music` (handover-on-resolve) / `end_broadcast` (confirm-first) /
   `submit_reply`; boundary automation stays local policy.
+- spec 12 settings — `$MURMUR_HOME/settings.json` merged under env/flags per
+  knob, the engine-owned single-writer `SettingsStore` with hot application,
+  `settings`/`settingsSet` on the wire, and the TUI `/settings` pane (seven
+  intents + read-only home/endpoint facts).
 
 ## Open
 

@@ -151,6 +151,20 @@ describe('bandLayout (spec 10 §3.3: the alive band, pet optional)', () => {
     expect(bandLayout({ MURMUR_TUI_PET: 'maybe' }).pet).toBe(true)
     expect(bandLayout({ MURMUR_TUI_PET: '' }).pet).toBe(true)
   })
+
+  // spec 12 §3.7: the knob lives in the settings layer now; the env survives as
+  // the client-local final override — set env beats setting, unset env defers.
+  it('defers to the live tuiPet setting when the env says nothing', () => {
+    expect(bandLayout({}, false).pet).toBe(false)
+    expect(bandLayout({}, false).vizPadLeft).toBe(0)
+    expect(bandLayout({}, true).pet).toBe(true)
+    expect(bandLayout({ MURMUR_TUI_PET: '' }, false).pet).toBe(false)
+  })
+
+  it('an explicitly set env still overrides the setting, both ways', () => {
+    expect(bandLayout({ MURMUR_TUI_PET: '0' }, true).pet).toBe(false)
+    expect(bandLayout({ MURMUR_TUI_PET: '1' }, false).pet).toBe(true)
+  })
 })
 
 describe('awayGreeting (spec 10 §3.7.3: alive across absence)', () => {

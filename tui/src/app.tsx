@@ -11,9 +11,10 @@ import { useEffect, useRef, useState } from 'react'
 import { useKeyboard, type InputProps } from '@opentui/react'
 import type { InputRenderable } from '@opentui/core'
 
-import type { EngineMessage, ProgramState } from '../../src/ipc.ts'
+import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
 import { accentFor, INK, mix, type Accent } from './palette.ts'
+import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
   bandLayout,
@@ -39,9 +40,9 @@ const POSES = loadPoses()
 // shown: the band is the bars' room, and it must not resize under a knob.
 const BAND_ROWS = POSES.idle[0]!.length / 2
 
-// Whether the creature is part of that band at all, and what the bars get when
-// it is not (§3.3, issue #95). Read once: it is an env knob, not a live setting.
-const BAND = bandLayout()
+// Whether the creature is part of that band is a live setting now (spec 12
+// §3.7), so its layout is computed per render inside App — the env override
+// stays, resolved in bandLayout itself.
 
 // Half-block: the upper pixel is the ink, the lower is the ground behind it.
 const HALF = '▀'
@@ -135,6 +136,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [state, setState] = useState<ProgramState | null>(null)
   // The DJ's line for the strip, authored engine-side (§3.7.4).
   const [microcopy, setMicrocopy] = useState<string | null>(null)
+  // The settings pane (spec 12 §3.6). The snapshot is engine truth; the pane
+  // renders it and sends patches, never local optimism. Mirrored into a ref so
+  // the keyboard handler always sees the current pane, not a stale closure.
+  const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
+  const [paneOpen, setPaneOpen] = useState(false)
+  const [paneAt, setPaneAt] = useState(0)
+  const pane = useRef({ open: false, at: 0, snap: null as SettingsSnapshot | null })
+  pane.current = { open: paneOpen, at: paneAt, snap: settings }
   // The absence the pet greets (§3.7.3). It stands until the program itself has
   // something to say, so the welcome is never cut short by a timer.
   const [greeting, setGreeting] = useState<string | null>(null)
@@ -165,6 +174,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           setMicrocopy(message.microcopy ?? null)
           setGreeting(null)
           break
+        case 'settings':
+          setSettings({
+            values: message.values,
+            home: message.home,
+            voiceConfigured: message.voiceConfigured,
+            musicAvailable: message.musicAvailable,
+          })
+          // Only the snapshot answering a typed /settings opens the pane; a
+          // broadcast refresh just keeps an open one true.
+          if (message.open === true) setPaneOpen(true)
+          break
         case 'viz':
           vizSink.current?.(message.bins)
           break
@@ -185,9 +205,22 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   }, [wire])
 
   // One shutdown path (§3.4): Ctrl-C is a /quit typed for you, so the engine
-  // and the voice go down in order instead of the face dying alone.
+  // and the voice go down in order instead of the face dying alone. While the
+  // settings pane is open, keys route to it (spec 12 §3.6 — the sanctioned
+  // exception to the input line's permanent focus): Esc returns, arrows move,
+  // space/enter/arrows adjust; every change goes over the wire immediately.
   useKeyboard((key) => {
-    if (key.ctrl && key.name === 'c') wire.line('/quit')
+    if (key.ctrl && key.name === 'c') return wire.line('/quit')
+    const { open, at, snap } = pane.current
+    if (!open || snap === null) return
+    if (key.name === 'escape') return setPaneOpen(false)
+    const items = paneItems(snap)
+    if (key.name === 'up') return setPaneAt(Math.max(0, at - 1))
+    if (key.name === 'down') return setPaneAt(Math.min(items.length - 1, at + 1))
+    if (['left', 'right', 'space', 'return'].includes(key.name)) {
+      const patch = adjust(snap, items[at]!.key, key.name === 'left' ? -1 : 1)
+      if (patch !== null) wire.send({ v: 1, type: 'settingsSet', patch })
+    }
   })
 
   const submit = (text: string): void => {
@@ -201,6 +234,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const strip = [greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
     .filter((part) => part !== undefined && part !== '')
     .join('  ♪ ')
+  // The alive band's composition follows the live pet setting (spec 12 §3.7),
+  // with the env override resolved inside bandLayout.
+  const band = bandLayout(process.env, settings?.values.tuiPet)
+  const items = paneOpen && settings !== null ? paneItems(settings) : null
 
   return (
     <box style={{ flexDirection: 'column', height: '100%', backgroundColor: INK.bg }}>
@@ -219,32 +256,61 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </text>
       </box>
 
-      <scrollbox
-        stickyScroll
-        stickyStart="bottom"
-        style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1, rootOptions: { backgroundColor: INK.bg } }}
-      >
-        {entries.map((entry) => (
-          <text
-            key={entry.id}
-            style={{
-              fg:
-                entry.kind === 'segment'
-                  ? accent.bright
-                  : entry.kind === 'user'
-                    ? INK.user
-                    : INK.notice,
-            }}
-          >
-            {MARKER[entry.kind]}
-            {entry.text}
-          </text>
-        ))}
-      </scrollbox>
+      {items !== null && settings !== null ? (
+        <box style={{ flexGrow: 1, flexDirection: 'column', paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
+          <text style={{ fg: accent.bright }}>settings</text>
+          <text style={{ fg: INK.dim }}> </text>
+          {items.map((item, index) => (
+            <box key={item.key} style={{ flexDirection: 'column' }}>
+              {item.advanced && items.findIndex((i) => i.advanced) === index && (
+                <text style={{ fg: INK.dim }}>{'  ── advanced ──'}</text>
+              )}
+              <text
+                style={{
+                  fg: index === paneAt ? accent.bright : item.enabled ? INK.text : INK.dim,
+                }}
+              >
+                {`${index === paneAt ? '▸ ' : '  '}${item.label.padEnd(24)}${item.value}`}
+              </text>
+            </box>
+          ))}
+          <text style={{ fg: INK.dim }}> </text>
+          {paneFacts(settings).map((fact) => (
+            <text key={fact.label} style={{ fg: INK.dim }}>
+              {`  ${fact.label.padEnd(24)}${fact.value}`}
+            </text>
+          ))}
+          <text style={{ fg: INK.dim }}> </text>
+          <text style={{ fg: INK.dim }}>{'  ↑↓ move · ←→/space adjust · esc back'}</text>
+        </box>
+      ) : (
+        <scrollbox
+          stickyScroll
+          stickyStart="bottom"
+          style={{ flexGrow: 1, paddingLeft: 1, paddingRight: 1, rootOptions: { backgroundColor: INK.bg } }}
+        >
+          {entries.map((entry) => (
+            <text
+              key={entry.id}
+              style={{
+                fg:
+                  entry.kind === 'segment'
+                    ? accent.bright
+                    : entry.kind === 'user'
+                      ? INK.user
+                      : INK.notice,
+              }}
+            >
+              {MARKER[entry.kind]}
+              {entry.text}
+            </text>
+          ))}
+        </scrollbox>
+      )}
 
       <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
-        {BAND.pet && <Pet pose={pose} accent={accent} />}
-        <box style={{ flexGrow: 1, paddingLeft: BAND.vizPadLeft }}>
+        {band.pet && <Pet pose={pose} accent={accent} />}
+        <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
           <Visualizer sink={vizSink} accent={accent} />
         </box>
       </box>
@@ -265,8 +331,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <text style={{ fg: accent.bright }}>{'> '}</text>
         <input
           ref={input}
-          focused
-          placeholder="type to talk back"
+          focused={!paneOpen}
+          placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back'}
           style={{
             flexGrow: 1,
             textColor: INK.text,
