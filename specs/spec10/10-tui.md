@@ -6,9 +6,12 @@
 > item, not a blocker: whether Enter pressed *during* an uncommitted composition
 > commits the candidate or submits the line (§5.1's note below). Slice 2
 > (engine FFT tap + `viz` feed, §3.6) and slice 3 (pet substrate + warmth kit,
-> §3.7) landed 2026-07-30; what remains open is sensory, not mechanical — the
-> §5.11 human pass and the §6.1 art-direction session, which restyles the
-> substrate without reopening these contracts.
+> §3.7) landed 2026-07-30. The §6.1 art-direction session chose and landed the
+> **quiet-constellation** composition (2026-08-07): the palette discipline,
+> the wide-terminal sky panel (§3.3), and the mist rendering of the viz feed
+> (§3.6) — contracts untouched. What remains open is sensory: the §5.11 human
+> pass and the by-eye tuning of the new skin (issue #79), plus the pet's
+> identity, which stays a §6.1 question.
 > **Part**: Front-end refinement — replaces the CLI Host's plain print/stdin
 > with a real TUI. The **single richer front-end murmur ever gets**: there is
 > no GUI, no menu-bar, no web surface (master [`../DESIGN.md`](../DESIGN.md)
@@ -344,6 +347,16 @@ Esc. The permanent-focus rule defends against *radio output* stealing focus
 mid-keystroke; a mode the listener opened is the listener spending their own
 focus, and the broadcast never pauses under it.
 
+**As built (2026-08-07, §6.1 quiet-constellation): composition has one
+breakpoint.** At ≥ 96 columns the alive band recomposes as a **sky panel**
+beside the log: the program log keeps the left with one blank line between
+entries, the panel takes the right — a seeded starfield, the visualizer's
+bins as a floating braille particle mist (§3.6), the pet drifting inside it,
+and now-playing as a dim `♪` line under the panel. Below 96 columns the
+classic bottom band stands unchanged, and now-playing stays in the status
+strip. Same four regions either way; only the composition moves, which is
+exactly the §6.1 licence.
+
 **As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
 (also `off` / `false` / `no`) drops the creature from the alive band, and the
 gutter that separated it from the bars goes with it — the spectrum spans the
@@ -403,6 +416,14 @@ only the client — one shutdown path.
   the same strip can render the voice's envelope — the radio visibly
   *speaks*; on the bed it breathes low. (What ships in v1 is a §6.1 styling
   call; the feed contract is the same.)
+- **As built (2026-08-07, §6.1)**: the bar strip is the narrow composition;
+  wide terminals re-render the SAME feed as the constellation mist —
+  braille-cell particles climbing from a floating baseline, density following
+  the bin level, a sparse fallout drifting below it. The sky paints on the
+  client's own 12fps clock and viz frames only feed the smoother, so stars
+  twinkle and the pet animates even when the engine is silent. All of it is
+  client-side arithmetic (`tui/src/constellation.ts`); the feed contract is
+  untouched.
 
 ### 3.7 The warmth kit (techniques adopted from the case research)
 
@@ -575,11 +596,26 @@ TUI work is built on the framework choice.
 - **Bun→Node exit**: revisit when OpenTUI's Node FFI support leaves
   experimental status.
 
-### 6.1 The creative session (deferred, unchanged in spirit)
+### 6.1 The creative session
 
-Art direction remains its own working session with the user: palette and
-overall warmth, the pet's identity and personality (what it is, how it
-reacts, what it does when you're gone), visualizer styling, whether typing
-deserves a steering affordance (§3.2-A), and how the four regions compose
-into something that feels alive. That session styles what this spec builds;
-it does not reopen the contracts above.
+Art direction is its own working track with the user; it styles what this
+spec builds and does not reopen the contracts above.
+
+**Decided (2026-08-07, concept session over `scratch/ui-concepts/logo-pet`):
+the skin is `04-quiet-constellation`.** Its terms:
+
+- **Palette discipline**: one shared deep blue-charcoal night ground; each
+  scene is a single near-monochrome accent family on it (dawn cream /
+  daylight sage / ember / moonlight) — the hour changes the warmth of the
+  light, never the room. Values live in `tui/src/palette.ts` and stay by-eye
+  knobs.
+- **Composition**: the one-breakpoint sky-panel layout (§3.3) and the mist
+  rendering of the viz feed (§3.6).
+- **Rejected**: the analog-radio dial chrome (01), the framed scene panel
+  (02 — per-scene hand art, cost without a daily payoff), the zine poster
+  (03 — display type has no CJK form and no small-terminal degradation).
+
+Still open, still this session's property: the pet's **identity** (the
+whisper-figure logo motif and the stitched texture of concept 03 are the
+reference material; today's creature holds the slot), and the by-eye tuning
+of all of the above in a real terminal (issue #79).

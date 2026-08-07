@@ -7,9 +7,10 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-07 (spec 12 settings layer built: settings.json + the
-engine-owned store + two additive wire messages + the TUI `/settings` pane;
-seven writable intents, everything hot)_
+_Last updated: 2026-08-07 (spec 10 §6.1 art direction landed: the
+quiet-constellation skin — night-ground palette, wide-terminal sky panel with
+braille mist + floating pet, narrow fallback unchanged; by-eye tuning stays
+issue #79)_
 
 ## Where we are
 
@@ -34,7 +35,8 @@ how it got there:
   retired 2026-08-07 — spec 07 status note).
 - spec 10 TUI — the wire + `IpcHost` + OpenTUI client (#71); the visualizer
   feed + pixel pet + warmth kit (#74). Redesign decisions: #70. The TUI is now
-  the DEFAULT front-end (spec 10 §6), falling back to plain without bun.
+  the DEFAULT front-end (spec 10 §6), falling back to plain without bun. The
+  §6.1 quiet-constellation skin landed 2026-08-07 (spec 10 §6.1 for its terms).
 - spec 03-03 §7 conversational onboarding — the shell preflight demoted to a
   reporter, one aggregated setup offer per boot with a ledger-recorded decline,
   and the guide-written voice endpoint (#88).
