@@ -333,7 +333,7 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       musicEveryN: 2,
       gapSeconds: 2,
       recentWindow: 12,
-      voice: 'hosted',
+      muted: false,
       tuiPet: true,
     }
 

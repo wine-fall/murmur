@@ -44,7 +44,10 @@ export function paneItems(snap: SettingsSnapshot): PaneItem[] {
     { key: 'music', label: 'music', value: onOff(v.musicEnabled), enabled: snap.musicAvailable, advanced: false },
     { key: 'gear', label: 'the mix', value: gearOf(v), enabled: musicOn, advanced: false },
     { key: 'gap', label: 'breathing room', value: `${v.gapSeconds.toFixed(1)}s`, enabled: true, advanced: false },
-    { key: 'voice', label: 'voice', value: v.voice === 'stub' ? 'muted' : 'on', enabled: snap.voiceConfigured, advanced: false },
+    // The mute works on any run with a speaker — it is the output gain, not a
+    // voice-endpoint feature, so it never greys. The endpoint fact below still
+    // explains "sound on but nobody speaks".
+    { key: 'voice', label: 'sound', value: v.muted ? 'muted' : 'on', enabled: true, advanced: false },
     { key: 'pet', label: 'pixel pet', value: onOff(v.tuiPet), enabled: true, advanced: false },
     { key: 'window', label: 'memory span', value: String(v.recentWindow), enabled: true, advanced: true },
   ]
@@ -83,9 +86,7 @@ export function adjust(snap: SettingsSnapshot, key: PaneItemKey, dir: -1 | 1): S
     case 'pet':
       return { tuiPet: !v.tuiPet }
     case 'voice':
-      // Mute writes 'stub'; unmute clears the key so the engine re-derives
-      // (spec 12 §3.4) — 'hosted' is never written from here.
-      return v.voice === 'stub' ? { voice: null } : { voice: 'stub' }
+      return { muted: !v.muted }
     case 'gear': {
       const current = GEARS.findIndex((gear) => gear.name === gearOf(v))
       // From custom, any press lands on balanced: selecting a gear overwrites.

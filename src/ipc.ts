@@ -39,16 +39,16 @@ export const SettingsValuesSchema = z.object({
   musicEveryN: z.number().int().positive(),
   gapSeconds: z.number().min(0),
   recentWindow: z.number().int().positive(),
-  voice: z.enum(['stub', 'hosted']),
+  // The listener's mute (spec 12 §3.4): the engine's master output gain. The
+  // program never notices — this is the radio's volume knob, not a provider
+  // swap (`--voice stub` remains the dev-surface knob for not synthesizing).
+  muted: z.boolean(),
   tuiPet: z.boolean(),
 })
 
 export type Settings = z.infer<typeof SettingsValuesSchema>
 
-// A mutation (spec 12 §2.4/§3.4). `voice` is narrower than the value: a pane
-// (or agent) may MUTE ('stub') or CLEAR (null — back to the endpoint-derived
-// voice); 'hosted' is always derived, never written, so the schema cannot even
-// express it.
+// A mutation (spec 12 §2.4): a partial over the same eight knobs.
 export const SettingsPatchSchema = z.object({
   anchorsEnabled: z.boolean().optional(),
   musicEnabled: z.boolean().optional(),
@@ -56,7 +56,7 @@ export const SettingsPatchSchema = z.object({
   musicEveryN: z.number().int().positive().optional(),
   gapSeconds: z.number().min(0).optional(),
   recentWindow: z.number().int().positive().optional(),
-  voice: z.union([z.literal('stub'), z.null()]).optional(),
+  muted: z.boolean().optional(),
   tuiPet: z.boolean().optional(),
 })
 

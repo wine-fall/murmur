@@ -15,7 +15,7 @@ const VALUES: Settings = {
   musicEveryN: 2,
   gapSeconds: 2,
   recentWindow: 12,
-  voice: 'hosted',
+  muted: false,
   tuiPet: true,
 }
 
@@ -45,10 +45,11 @@ describe('paneItems', () => {
     }
   })
 
-  it('greys the voice toggle when no endpoint is configured', () => {
-    const voice = (s: SettingsSnapshot) => paneItems(s).find((i) => i.key === 'voice')!
-    expect(voice(snap()).enabled).toBe(true)
-    expect(voice(snap({}, { voiceConfigured: false })).enabled).toBe(false)
+  it('the sound toggle never greys — the mute is the output gain, not an endpoint feature', () => {
+    const sound = (s: SettingsSnapshot) => paneItems(s).find((i) => i.key === 'voice')!
+    expect(sound(snap()).enabled).toBe(true)
+    expect(sound(snap({}, { voiceConfigured: false })).enabled).toBe(true)
+    expect(sound(snap({ muted: true })).value).toBe('muted')
   })
 
   it('greys music when unavailable, and the gear whenever music is off or unavailable', () => {
@@ -84,9 +85,9 @@ describe('adjust', () => {
     expect(adjust(snap(), 'pet', 1)).toEqual({ tuiPet: false })
   })
 
-  it('mutes with voice: stub and unmutes with the clearing null', () => {
-    expect(adjust(snap(), 'voice', 1)).toEqual({ voice: 'stub' })
-    expect(adjust(snap({ voice: 'stub' }), 'voice', 1)).toEqual({ voice: null })
+  it('the sound toggle flips the mute boolean', () => {
+    expect(adjust(snap(), 'voice', 1)).toEqual({ muted: true })
+    expect(adjust(snap({ muted: true }), 'voice', 1)).toEqual({ muted: false })
   })
 
   it('walks the gear presets without wrapping, writing both underlying knobs', () => {
@@ -118,7 +119,6 @@ describe('adjust', () => {
   })
 
   it('a greyed item adjusts to nothing', () => {
-    expect(adjust(snap({}, { voiceConfigured: false }), 'voice', 1)).toBeNull()
     expect(adjust(snap({ musicEnabled: false }), 'gear', 1)).toBeNull()
     expect(adjust(snap({}, { musicAvailable: false }), 'music', 1)).toBeNull()
   })

@@ -39,7 +39,7 @@
 | 2 | Music on/off (off = pure talk radio) | `musicEnabled` |
 | 3 | Mix gear: more-music ↔ more-talk | `cadenceMode` + `musicEveryN` (§3.5) |
 | 4 | Breathing room between segments | `gapSeconds` |
-| 5 | Voice on/off (mute keeps broadcasting) | `voice` (+ `voiceExplicit` provenance) |
+| 5 | Sound on/off (mute keeps broadcasting) | `muted` (§3.4 — the master output gain) |
 | 6 | Pixel pet on/off | `tuiPet` (§3.7) |
 | 7 | Memory span (advanced group) | `recentWindow` |
 
@@ -87,7 +87,7 @@ and the raw knob identifiers appear nowhere in the UI.
     musicEveryN?: number   // int, positive
     gapSeconds?: number    // >= 0
     recentWindow?: number  // int, positive
-    voice?: 'stub' | 'hosted'
+    muted?: boolean        // the listener's output mute (§3.4)
     tuiPet?: boolean
   }
   ```
@@ -110,10 +110,10 @@ Per knob, lowest first: **`settings.json` < env < CLI flags** — the
 settings layer is spread into `parseCli`'s merge below `ttsFromEnv` and the
 flag spreads.
 
-**Voice provenance**: a `voice` key *present* in the file is an explicit
-choice — it sets `voiceExplicit: true` exactly as a typed `--voice` does, so
-a file-sourced mute survives an endpoint arriving mid-boot (the `config.ts`
-provenance contract). An explicit `--voice` flag still beats the file.
+The settings layer never touches the `voice` provider knob: `muted` is the
+output gain (§3.4), while which provider synthesizes (`stub`/`hosted`,
+`voiceExplicit`) stays the env/flag/endpoint-derived dev surface it always
+was — a muted run keeps its warm hosted voice.
 
 ### 2.3 Runtime rule — the latest user intent wins
 
@@ -144,8 +144,7 @@ export interface SettingsStore {
   apply), applies to the live values, writes the file atomically, then
   notifies.
 - What `set()` persists: the knob values being set, merged over the file's
-  existing user-touched keys. Setting voice ON (un-mute) **deletes** the
-  `voice` key rather than writing `'hosted'` (§3.4).
+  existing user-touched keys.
 
 ### 2.5 The wire (additive; `PROTOCOL` stays 2)
 
@@ -186,7 +185,7 @@ Every knob targets hot. Mechanism per knob:
 | Knob | Mechanism | Effect boundary |
 |---|---|---|
 | `gapSeconds`, `recentWindow` | Director deps read the live store instead of captured scalars (`director.ts` already reads per loop) | next gap / next brain call |
-| `voice` (mute) | the speak path consults the store before synthesis; the provider is not torn down | next utterance — no mid-word cut, radios do not clip |
+| `muted` | one gain move on the engine's master bus (§3.4); nothing else in the program notices | **instant, mid-word** — it is the listener's volume knob, and unmute resumes the sentence in flight |
 | `anchorsEnabled` | the scheduler is **always constructed**; the fire site checks the live flag | next anchor check |
 | `cadenceMode` + `musicEveryN` | the cadence decision point reads the live store (rebuild-per-boundary or getter — implementation's pick) | next segment boundary |
 | `musicEnabled` | the music pipeline is **built whenever its dependencies exist** regardless of the flag; the Director's schedule-next-music site checks the live flag. **Off gates the spend, not just the airtime** (peer-review find): the prefetch paths consult the same flag, so a disabled session pays zero discovery calls. Toggle-on re-enters through the existing boundary cold path (the away-stream precedent) | next segment boundary |
@@ -201,23 +200,40 @@ entangled to build-when-disabled, `musicEnabled` falls back to
 
 ### 3.3 What hot application must NOT do
 
-- Never interrupt the segment on air (mute applies from the next utterance;
-  cadence from the next boundary).
+- Never interrupt the *program* on air (cadence changes land at the next
+  boundary; a live segment finishes its script). Muting is not an
+  interruption: the segment keeps rolling, only its sound is gated (§3.4).
 - Never tear down / rebuild providers mid-run (the store flips flags;
   construction stays a boot concern).
 - Never write the file except through `SettingsStore.set`.
 
-### 3.4 Mute semantics
+### 3.4 Mute semantics — the listener's output gain
 
-- Pane OFF → `set({ voice: 'stub' })` — file gains `"voice": "stub"`;
-  provenance = explicit (§2.2).
-- Pane ON → **delete** the `voice` key — the run returns to the derived rule
-  "endpoint configured ⇒ hosted" (`config.ts`). Writing `'hosted'` explicitly
-  is never done: on an endpoint-less machine it would demand a voice that
-  cannot exist (the config contract fails loudly on hosted-without-URL).
-- The read-only endpoint line beside the toggle explains the case "voice ON
-  but still silent": endpoint not configured — fix it via the setup
-  conversation, not here.
+> **Re-decided 2026-08-07 (user re-frame, supersedes the original
+> voice-provider mechanism).** The first build implemented mute as "route
+> synthesis to the silent stub" (`voice: 'stub'` + a clearing `null`). That
+> conflated two layers and produced an indefensible lag: the on-air clip and
+> the look-ahead's pre-synthesized beats kept speaking after the toggle — a
+> mute button that does not mute. The mechanism is retired; this section is
+> the contract.
+
+- **`muted` is the engine's master-bus gain** (`AudioEngine.setMuted`): one
+  ramp to 0/1, ~80ms, bus-wide — voice, music, and bed together. It is the
+  radio's volume knob, owned by the listener.
+- **The program never notices.** Synthesis, discovery, scheduling, pacing,
+  and the clips themselves all continue; text keeps landing in the log.
+  Unmute picks the sound back up mid-sentence, exactly like a real radio.
+  (The spend continues while muted — mute is a listening state, not a
+  budget lever; `--no-music` / `--voice stub` remain the spend knobs.)
+- **Instant both ways, mid-word.** No buffer to drain, no next-utterance
+  boundary.
+- The `voice` provider knob (`stub`/`hosted`, `voiceExplicit`) is untouched
+  by the settings layer — it stays the dev/env surface for whether murmur
+  synthesizes at all.
+- The visualizer taps the bus, so muted bars go honestly flat.
+- The pane's sound toggle never greys: mute works on any run with a speaker.
+  The read-only endpoint line still explains "sound on but nobody speaks"
+  (endpoint not configured — the setup conversation's job).
 
 ### 3.5 The mix gear (intent → fields)
 
@@ -281,16 +297,18 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
 
 - File layer: per-key salvage (bad key dropped, good keys survive,
   unparseable file → empty), atomic write, unknown-key drop.
-- Store: set→apply→persist→notify order; invalid patch = no-op; un-mute
-  deletes the key; initialization from merged Config (flag respected at
-  boot, overridden by a later `set`).
-- Config merge: settings < env < flags per knob; file-sourced `voice` sets
-  `voiceExplicit`.
+- Store: set→apply→persist→notify order; invalid patch = no-op;
+  initialization from merged Config (flag respected at boot, overridden by a
+  later `set`).
+- Config merge: settings < env < flags per knob; `muted` rides in without
+  touching the `voice` provider derivation.
 - Wire: round-trip zod on both new types; snapshot-after-set including the
   rejected-patch case; backlog exclusion.
+- Engine: `setMuted` silences the whole bus (voice + music) in an offline
+  render and restores it — gain choreography asserted on samples.
 - Hot paths: director picks up a changed `gapSeconds`/`recentWindow` without
-  reconstruction; mute silences the next utterance; anchors/cadence/music
-  flags consulted at their decision sites (fakes, no audio).
+  reconstruction; anchors/cadence/music flags consulted at their decision
+  sites (fakes, no audio).
 - Pane rendering is not frame-asserted (spec 10 §3.9); it gets the bounded
   client smoke plus the human pass (§5).
 
@@ -298,12 +316,13 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
 
 ## 4. Dependencies
 
-- **spec 01 / `config.ts`**: the merge chain, `voiceExplicit` provenance.
+- **spec 01 / `config.ts`**: the merge chain.
 - **spec 05 / `paths.ts`**: the single path authority gains `settingsPath()`.
 - **spec 10**: the wire (`ipc.ts`), the TUI client, the replay backlog rule;
   amended at §3.3 (pet) and §3.3-adjacent (focus exception noted from this
   spec).
-- **spec 03-02**: cadence + music scheduling decision sites.
+- **spec 03-02**: cadence + music scheduling decision sites; the engine's
+  master bus carries the mute (§3.4).
 - **spec 07**: the anchor fire site.
 
 ---
@@ -312,8 +331,8 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
 
 1. **File & merge**: a hand-written `settings.json` changes the running
    defaults; a broken key is dropped alone (dev-log line) while its siblings
-   apply; env and flags still beat the file per knob; a file-set `voice:
-   "stub"` survives an endpoint arriving mid-boot (explicit-mute provenance).
+   apply; env and flags still beat the file per knob; a file-set `muted:
+   true` boots the engine silent without touching the voice provider.
 2. **Single writer**: every mutation path lands in `SettingsStore.set`; the
    file on disk is byte-stable except through it; writes are atomic.
 3. **Wire**: attaching yields a `settings` snapshot after `hello`; every
@@ -326,11 +345,12 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
    field names); custom gear position renders when values match no preset;
    gear greys when music is off; Esc returns focus with the broadcast
    uninterrupted; ranges enforced as §3.6.
-5. **Hot effect, per knob** (fakes): gap and memory-span changes land without
-   reconstruction; mute silences from the next utterance and un-mute
-   restores the derived voice; anchors/cadence/music honor the live flag at
-   their next decision point — or, under the recorded fallback only,
-   `musicEnabled` is labeled restart-required in both directions.
+5. **Hot effect, per knob**: gap and memory-span changes land without
+   reconstruction (fakes); mute silences the whole output instantly and
+   unmute restores it mid-sentence (offline render, §3.8);
+   anchors/cadence/music honor the live flag at their next decision point —
+   or, under the recorded fallback only, `musicEnabled` is labeled
+   restart-required in both directions.
 6. **Isolation intact**: `test/front-end-isolation.test.ts` stays green —
    the client's only `src/` import remains `ipc.ts`; the plain path
    (`frontEnd: 'plain'`) gains no new cost beyond one file read at boot.

@@ -35,33 +35,3 @@ export class StubVoice implements VoiceProvider {
   }
 }
 
-export type MutableVoiceDeps = {
-  real: VoiceProvider
-  muted: () => boolean
-}
-
-// The live mute (spec 12 §3.2/§3.4): consulted per utterance at the synthesis
-// site, so muting lands at the next line and unmuting is just as instant — the
-// real provider is never torn down. Muted output is the stub's short silence:
-// the program (and its text) rolls on, only the sound is gone.
-export class MutableVoice implements VoiceProvider {
-  private silent = new StubVoice()
-  private deps: MutableVoiceDeps
-
-  constructor(deps: MutableVoiceDeps) {
-    this.deps = deps
-  }
-
-  start(): Promise<void> {
-    return this.deps.real.start()
-  }
-
-  synthesize(text: string): Promise<AudioClip> {
-    return this.deps.muted() ? this.silent.synthesize(text) : this.deps.real.synthesize(text)
-  }
-
-  async close(): Promise<void> {
-    await this.silent.close()
-    await this.deps.real.close()
-  }
-}

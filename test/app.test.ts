@@ -294,18 +294,15 @@ describe('settings store wiring (spec 12)', () => {
     expect(readSettingsFile(join(home, 'settings.json'))).toEqual({ gapSeconds: 5, tuiPet: false })
   })
 
-  it('unmuting derives the voice from the endpoint', () => {
+  it('a persisted mute seeds the store without touching the voice provider', () => {
     const home = emptyHome()
-    writeFileSync(join(home, 'settings.json'), JSON.stringify({ voice: 'stub' }))
-    const withEndpoint = config([], { MURMUR_HOME: home, MURMUR_TTS_URL: 'https://x' })
-    expect(withEndpoint.voice).toBe('stub') // the file's mute won the boot
-    const store = buildSettingsStore(withEndpoint)
-    store.set({ voice: null })
-    expect(store.current().voice).toBe('hosted')
-
-    const bare = buildSettingsStore(config([], { MURMUR_HOME: emptyHome() }))
-    bare.set({ voice: null })
-    expect(bare.current().voice).toBe('stub') // no endpoint: silence stays honest
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ muted: true }))
+    const c = config([], { MURMUR_HOME: home, MURMUR_TTS_URL: 'https://x' })
+    expect(c.voice).toBe('hosted') // the provider still derives from the endpoint
+    const store = buildSettingsStore(c)
+    expect(store.current().muted).toBe(true)
+    store.set({ muted: false })
+    expect(store.current().muted).toBe(false)
   })
 })
 

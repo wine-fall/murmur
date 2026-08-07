@@ -32,7 +32,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
       musicEveryN: 2,
       gapSeconds: 2,
       recentWindow: 12,
-      voice: 'stub',
+      muted: true,
       tuiPet: true,
     },
     home: '/home/someone/.murmur',
@@ -49,7 +49,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
       musicEveryN: 4,
       gapSeconds: 0,
       recentWindow: 4,
-      voice: 'hosted',
+      muted: false,
       tuiPet: false,
     },
     home: '/tmp/m',
@@ -66,8 +66,8 @@ const TUI_MESSAGES: TuiMessage[] = [
   { v: 1, type: 'vizSub', on: true, fps: 24 },
   { v: 1, type: 'vizSub', on: false },
   { v: 1, type: 'settingsSet', patch: { musicEnabled: false, gapSeconds: 3.5 } },
-  { v: 1, type: 'settingsSet', patch: { voice: 'stub' } },
-  { v: 1, type: 'settingsSet', patch: { voice: null } },
+  { v: 1, type: 'settingsSet', patch: { muted: true } },
+  { v: 1, type: 'settingsSet', patch: { muted: false } },
 ]
 
 describe('the wire protocol (spec 10 §2.3)', () => {
@@ -104,11 +104,12 @@ describe('the wire protocol (spec 10 §2.3)', () => {
     expect(decodeEngineMessage(JSON.stringify({ v: 2, type: 'bye' }))).toBeNull()
   })
 
-  it('a settings patch can never name a voice the pane must not write', () => {
-    // spec 12 §3.4: the pane writes 'stub' (mute) or null (clear); 'hosted' is
-    // always derived, never set — the trust boundary enforces it.
+  it('a settings patch with an illegal value is a malformed message (spec 12 §2.5)', () => {
     expect(
-      decodeTuiMessage(JSON.stringify({ v: 1, type: 'settingsSet', patch: { voice: 'hosted' } })),
+      decodeTuiMessage(JSON.stringify({ v: 1, type: 'settingsSet', patch: { gapSeconds: -1 } })),
+    ).toBeNull()
+    expect(
+      decodeTuiMessage(JSON.stringify({ v: 1, type: 'settingsSet', patch: { muted: 'yes' } })),
     ).toBeNull()
   })
 

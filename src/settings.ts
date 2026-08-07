@@ -63,10 +63,6 @@ export type SettingsStoreDeps = {
   // The file's keys at boot: what the user has explicitly set, and therefore
   // what set() persists around. Never grows a key the user did not touch.
   touched: Partial<Settings>
-  // What `voice` resolves to when the mute key is cleared (spec 12 §3.4):
-  // endpoint configured => hosted, else stub. A thunk because the endpoint can
-  // arrive mid-boot through the setup conversation.
-  derivedVoice: () => 'stub' | 'hosted'
   log?: Log
 }
 
@@ -102,12 +98,6 @@ export class SettingsStore {
     const entries = Object.entries(checked.data).filter(([, value]) => value !== undefined)
     if (entries.length === 0) return false
     for (const [key, value] of entries) {
-      if (key === 'voice' && value === null) {
-        // Unmute: back to the derived voice, and the file forgets the key.
-        delete this.touched.voice
-        this.live.voice = this.deps.derivedVoice()
-        continue
-      }
       Object.assign(this.live, { [key]: value })
       Object.assign(this.touched, { [key]: value })
     }

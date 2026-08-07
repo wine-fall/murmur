@@ -32,7 +32,7 @@ import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import { preflightBun } from './startup.ts'
 import { VizFeed } from './viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
-import { MutableVoice, StubVoice } from './voice.ts'
+import { StubVoice } from './voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
 // memoryDir; a stub run stays in-process so canned chatter never touches the
@@ -146,11 +146,10 @@ export function buildSettingsStore(
       musicEveryN: resolved.musicEveryN,
       gapSeconds: resolved.gapSeconds,
       recentWindow: resolved.recentWindow,
-      voice: resolved.voice,
+      muted: resolved.muted,
       tuiPet: resolved.tuiPet,
     },
     touched: readSettingsFile(path, log),
-    derivedVoice: () => (resolved.ttsUrl !== '' ? 'hosted' : 'stub'),
     log,
   })
 }
@@ -394,14 +393,12 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The live settings authority (spec 12 §2.4), seeded from the fully resolved
   // config: everything below reads it instead of captured scalars.
   const settings = buildSettingsStore(resolved, (m) => host.info(m))
-  // The unmuted provider for this run: hosted whenever an endpoint exists (a
-  // mute must not cost the warm connection), the honest degraded path when the
-  // listener explicitly asked for a hosted voice that has no endpoint.
-  const real = buildVoice(
-    { ...resolved, voice: resolved.ttsUrl === '' ? resolved.voice : 'hosted' },
-    (m) => host.info(m),
-  )
-  const voice = new MutableVoice({ real, muted: () => settings.current().voice === 'stub' })
+  const voice = buildVoice(resolved, (m) => host.info(m))
+  // The listener's mute is the engine's master gain (spec 12 §3.4): applied
+  // from the persisted state now and on every change — the program never
+  // notices, only the speakers do.
+  if (settings.current().muted) engine.setMuted(true)
+  settings.onChange((next) => engine.setMuted(next.muted))
 
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the

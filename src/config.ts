@@ -81,6 +81,10 @@ export const ConfigSchema = z.object({
   // the settings layer can persist and serve it; the client env MURMUR_TUI_PET
   // stays the local final override.
   tuiPet: z.boolean().default(true),
+  // The listener's mute (spec 12 §3.4): the engine's master output gain, a
+  // settings-layer knob. Distinct from `voice` above — muted keeps synthesizing
+  // and playing, just silently; `--voice stub` does not synthesize at all.
+  muted: z.boolean().default(false),
 
   // --- front-end (spec 10 §2.2/§3.5) -------------------------------------- //
   // The TUI is the face murmur shows by default (spec 10 §6): it spawns the
@@ -213,15 +217,10 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   const endpoint = (values['tts-url'] ?? fromEnv.ttsUrl ?? saved?.ttsUrl ?? '').trim()
   const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv }
   // The listener's persisted knobs (spec 12 §2.2): the lowest layer, per knob.
-  // `voice` is pulled aside because it must land ABOVE the endpoint-derived
-  // default below — a file-set mute is an explicit choice, with the same
-  // provenance a typed --voice carries.
-  const { voice: settingsVoice, ...settingsRest } = readSettingsFile(settingsPath(env), (m) =>
-    console.warn(`warning: ${m}`),
-  )
+  const fromSettings = readSettingsFile(settingsPath(env), (m) => console.warn(`warning: ${m}`))
 
   const config = ConfigSchema.parse({
-    ...settingsRest,
+    ...fromSettings,
     ...tts,
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
@@ -231,7 +230,6 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     // written, validated, and then silently ignored because the knob still
     // said 'stub'. An explicit --voice below still wins, both ways.
     ...(endpoint !== '' && { voice: 'hosted' }),
-    ...(settingsVoice !== undefined && { voice: settingsVoice, voiceExplicit: true }),
     ...(values.brain !== undefined && { brain: values.brain }),
     ...(values.voice !== undefined && { voice: values.voice, voiceExplicit: true }),
     ...(values.model !== undefined && { model: values.model }),

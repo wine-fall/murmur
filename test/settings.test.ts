@@ -17,7 +17,7 @@ const BASE: Settings = {
   musicEveryN: 2,
   gapSeconds: 2,
   recentWindow: 12,
-  voice: 'hosted',
+  muted: false,
   tuiPet: true,
 }
 
@@ -28,14 +28,12 @@ function store(over: {
   path?: string
   initial?: Partial<Settings>
   touched?: Partial<Settings>
-  derived?: 'stub' | 'hosted'
   log?: (message: string) => void
 }) {
   return new SettingsStore({
     path: over.path ?? fileIn(home()),
     initial: { ...BASE, ...over.initial },
     touched: over.touched ?? {},
-    derivedVoice: () => over.derived ?? 'hosted',
     ...(over.log !== undefined && { log: over.log }),
   })
 }
@@ -68,14 +66,14 @@ describe('the settings file (spec 12 §2.1)', () => {
       JSON.stringify({
         gapSeconds: -5, // broken (negative)
         recentWindow: 'many', // broken (not a number)
-        voice: 'stub', // fine
+        muted: true, // fine
         musicEveryN: 3, // fine
         somethingElse: true, // unknown -> dropped silently
       }),
     )
     const logged: string[] = []
     expect(readSettingsFile(path, (m) => logged.push(m))).toEqual({
-      voice: 'stub',
+      muted: true,
       musicEveryN: 3,
     })
     expect(logged.length).toBe(2) // one line per broken key
@@ -113,21 +111,15 @@ describe('SettingsStore (spec 12 §2.4)', () => {
     expect(readSettingsFile(path)).toEqual({ gapSeconds: 3, tuiPet: false })
   })
 
-  it('muting writes voice: stub; unmuting deletes the key and re-derives', () => {
+  it('mute is a plain persisted boolean, both ways', () => {
     const path = fileIn(home())
-    const s = store({ path, derived: 'hosted' })
-    s.set({ voice: 'stub' })
-    expect(s.current().voice).toBe('stub')
-    expect(readSettingsFile(path)).toEqual({ voice: 'stub' })
-    s.set({ voice: null })
-    expect(s.current().voice).toBe('hosted')
-    expect(readSettingsFile(path)).toEqual({})
-  })
-
-  it('unmuting with no endpoint derives stub (silence stays honest)', () => {
-    const s = store({ derived: 'stub', initial: { voice: 'stub' } })
-    s.set({ voice: null })
-    expect(s.current().voice).toBe('stub')
+    const s = store({ path })
+    s.set({ muted: true })
+    expect(s.current().muted).toBe(true)
+    expect(readSettingsFile(path)).toEqual({ muted: true })
+    s.set({ muted: false })
+    expect(s.current().muted).toBe(false)
+    expect(readSettingsFile(path)).toEqual({ muted: false })
   })
 
   it('an invalid patch is a no-op reported false', () => {

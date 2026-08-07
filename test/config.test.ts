@@ -339,17 +339,18 @@ describe('settings file layer (spec 12)', () => {
     expect(config.musicEveryN).toBe(4) // the un-flagged sibling still applies
   })
 
-  it('a file-set mute survives a configured endpoint (explicit provenance)', () => {
-    const env = home({ voice: 'stub' })
+  it('a file-set mute rides into the config without touching the voice knob', () => {
+    // spec 12 §3.4: muted is the output gain; the voice PROVIDER still derives
+    // from the endpoint exactly as before — a muted run keeps its warm voice.
+    const env = home({ muted: true })
     env.MURMUR_TTS_URL = 'https://env.example'
     const { config } = parseCli([], env)
-    expect(config.voice).toBe('stub')
-    expect(config.voiceExplicit).toBe(true)
+    expect(config.muted).toBe(true)
+    expect(config.voice).toBe('hosted')
   })
 
-  it('an explicit --voice flag beats the file', () => {
-    const { config } = parseCli(['--voice', 'hosted'], home({ voice: 'stub' }))
-    expect(config.voice).toBe('hosted')
+  it('defaults to unmuted', () => {
+    expect(parseCli([], NO_ENV).config.muted).toBe(false)
   })
 
   it('a broken key is dropped alone while its siblings apply', () => {

@@ -396,3 +396,30 @@ describe('visualizer tap (spec 10 §3.6)', () => {
     await Promise.all([quiet.engine.aclose(), watched.engine.aclose()])
   })
 })
+
+// spec 12 §3.4: the listener's mute is the master bus gain — instant, mid-word,
+// bus-wide (voice + music + bed). The program never notices: clips keep
+// rolling, only the output is silent, and unmute picks up mid-sentence.
+describe('master mute (spec 12)', () => {
+  it('setMuted(true) silences voice and music together', async () => {
+    const { context, engine } = build(2, dcChunks(0.5, 2))
+    const handle = await engine.playMusic(MUSIC)
+    await handle.waitStarted(1)
+    const played = engine.play(voiceClip)
+    await settle()
+    engine.setMuted(true)
+    const rendered = await context.startRendering()
+    await played
+    expect(level(rendered, 0.3, 1.9)).toBeLessThan(0.01) // everything silent post-ramp
+  })
+
+  it('setMuted(false) restores the full mix', async () => {
+    const { context, engine } = build(2, dcChunks(0.5, 2))
+    const handle = await engine.playMusic(MUSIC)
+    await handle.waitStarted(1)
+    engine.setMuted(true)
+    engine.setMuted(false)
+    const rendered = await context.startRendering()
+    expect(level(rendered, 1.0, 1.9)).toBeCloseTo(0.5, 1) // music back at full
+  })
+})
