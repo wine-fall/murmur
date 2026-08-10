@@ -7,10 +7,11 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-07 (spec 10 §6.1 refined per first by-eye feedback:
-the pet is now the logo whisper-figure, the mist floor is an arc with the
-figure in its hollow, and the palette is sampled from the concept mockup;
-remaining tuning stays issue #79)_
+_Last updated: 2026-08-07 (spec 10 §6.1 third by-eye round: octant sub-pixel
+canvas with ring starfield and radial wave, the whisper-figure machine-derived
+from the concept via proper-pixel-art and rendered as a kitty-graphics raster
+on capable terminals, full palette sampled from the mockup, centered max-width
+frame; remaining tuning stays issue #79)_
 
 ## Where we are
 

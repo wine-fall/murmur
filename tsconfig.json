@@ -21,5 +21,11 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["src/**/*.ts", "test/**/*.ts", "scripts/**/*.ts", ".github/scripts/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "scripts/**/*.ts",
+    ".github/scripts/**/*.ts",
+    "tui/src/**/*.d.ts"
+  ]
 }

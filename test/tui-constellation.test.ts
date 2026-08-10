@@ -1,57 +1,79 @@
-// The constellation panel's client half (spec 10 §3.6 / §6.1 quiet-constellation
-// art direction): a seeded starfield, the FFT bins re-rendered as a braille
-// particle mist, and the pet floating inside it.
+// The constellation panel's client half (spec 10 §3.6 / §6.1): the seeded
+// ring-biased starfield, the FFT bins as a radial wave of square blocks, and
+// the whisper figure at the circle's center.
 //
-// Like bars.ts, the module is free of OpenTUI and React on purpose: the frame a
-// terminal paints cannot be unit-asserted (§3.9), but "which dots for this
+// Like bars.ts, the module is free of OpenTUI and React on purpose: the frame
+// a terminal paints cannot be unit-asserted (§3.9), but "which pixels for this
 // level" can — and determinism (seeded stars, hashed jitter) is itself part of
 // the contract, because a resize must not reshuffle the sky.
 
 import { describe, expect, it } from 'vitest'
 
-import { Constellation, hash01, panelWidth, WIDE_MIN } from '../tui/src/constellation.ts'
-import { accentFor } from '../tui/src/palette.ts'
+import {
+  circleOf,
+  Constellation,
+  hash01,
+  OCTANTS,
+  panelWidth,
+  seedStars,
+  STAR_RINGS,
+  WIDE_MIN,
+} from '../tui/src/constellation.ts'
+import { accentFor, INK, WARM } from '../tui/src/palette.ts'
+import type { Run } from '../tui/src/constellation.ts'
 
 const ACCENT = accentFor('late-night')
 
-const BRAILLE_START = 0x28_00
-const BRAILLE_END = 0x28_ff
-
-function isBraille(char: string): boolean {
-  const code = char.codePointAt(0)!
-  return code >= BRAILLE_START && code <= BRAILLE_END
-}
-
-// Total lit sub-pixels in a frame: each braille cell carries its dots in the
-// low byte of the code point.
-function litDots(rows: { text: string }[][]): number {
-  let dots = 0
-  for (const row of rows) {
-    for (const run of row) {
-      for (const char of run.text) {
-        if (isBraille(char)) {
-          let bits = char.codePointAt(0)! - BRAILLE_START
-          while (bits > 0) {
-            dots += bits & 1
-            bits >>= 1
-          }
-        }
-      }
-    }
-  }
-  return dots
-}
-
-function rowText(row: { text: string }[]): string {
+function rowText(row: Run[]): string {
   return row.map((run) => run.text).join('')
 }
 
-describe('Constellation (§6.1: starfield + particle mist)', () => {
+// Cells carrying any ink (spaces are the empty ground).
+function litCells(rows: Run[][]): number {
+  let cells = 0
+  for (const row of rows) {
+    for (const run of row) {
+      cells += [...run.text].filter((ch) => ch !== ' ').length
+    }
+  }
+  return cells
+}
+
+// Per-column deepest lit cell row, over cells NOT present in the silence
+// frame — which isolates the wave from the stars.
+function waveDepth(rows: Run[][], silence: Run[][], fromCol: number, toCol: number): number {
+  let deepest = -1
+  rows.forEach((row, y) => {
+    const chars = [...rowText(row)]
+    const quiet = [...rowText(silence[y]!)]
+    for (let x = fromCol; x < toCol; x++) {
+      if (chars[x] !== ' ' && quiet[x] === ' ') deepest = Math.max(deepest, y)
+    }
+  })
+  return deepest
+}
+
+describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () => {
   it('renders exactly height rows of exactly width cells', () => {
     const sky = new Constellation(40, 12, 7)
     const rows = sky.frame([0.2, 0.8, 0.5], ACCENT, null)
     expect(rows).toHaveLength(12)
     for (const row of rows) expect([...rowText(row)]).toHaveLength(40)
+  })
+
+  it('paints with the octant pen by default — every glyph from the mosaic table', () => {
+    const allowed = new Set([...OCTANTS, ' '])
+    const rows = new Constellation(40, 12, 7).frame([1, 0.5, 1], ACCENT, null)
+    for (const char of rows.flatMap((row) => [...rowText(row)])) {
+      expect(allowed.has(char), char).toBe(true)
+    }
+  })
+
+  it('falls back to the universal half-block pen on request', () => {
+    const rows = new Constellation(40, 12, 7, 'half').frame([1, 0.5, 1], ACCENT, null)
+    for (const char of rows.flatMap((row) => [...rowText(row)])) {
+      expect([' ', '▀']).toContain(char)
+    }
   })
 
   it('draws the same sky for the same seed — a resize must not reshuffle it', () => {
@@ -66,56 +88,52 @@ describe('Constellation (§6.1: starfield + particle mist)', () => {
     expect(a).not.toEqual(b)
   })
 
-  it('has stars but no particles in silence', () => {
-    const sky = new Constellation(40, 12, 7)
-    const rows = sky.frame([0, 0, 0], ACCENT, null)
-    expect(litDots(rows)).toBe(0)
-    const glyphs = rows.flatMap((row) => [...rowText(row)]).filter((char) => char !== ' ')
-    expect(glyphs.length).toBeGreaterThan(0)
-  })
-
-  it('lights more dots the louder the frame — the mist follows the music', () => {
-    const quiet = litDots(new Constellation(40, 12, 7).frame([0.2, 0.2, 0.2], ACCENT, null))
-    const loud = litDots(new Constellation(40, 12, 7).frame([1, 1, 1], ACCENT, null))
-    expect(quiet).toBeGreaterThan(0)
+  it('lights more pixels the louder the frame — the wave follows the music', () => {
+    const silence = litCells(new Constellation(48, 20, 7).frame([], ACCENT, null))
+    const quiet = litCells(new Constellation(48, 20, 7).frame([0.3, 0.3, 0.3], ACCENT, null))
+    const loud = litCells(new Constellation(48, 20, 7).frame([1, 1, 1], ACCENT, null))
+    expect(quiet).toBeGreaterThan(silence)
     expect(loud).toBeGreaterThan(quiet)
   })
 
-  it('keeps every particle braille and every star a known glyph', () => {
-    const sky = new Constellation(40, 12, 7)
-    const rows = sky.frame([1, 0.5, 1], ACCENT, null)
-    for (const char of rows.flatMap((row) => [...rowText(row)])) {
-      expect(isBraille(char) || [' ', '·', '+', '✦'].includes(char)).toBe(true)
-    }
+  it('rides the circle: center columns bottom out deeper than the arms', () => {
+    const levels = Array.from({ length: 24 }, () => 0.7)
+    const silence = new Constellation(48, 24, 7).frame([], ACCENT, null)
+    const rows = new Constellation(48, 24, 7).frame(levels, ACCENT, null)
+    const arms = Math.max(
+      waveDepth(rows, silence, 4, 10),
+      waveDepth(rows, silence, 38, 44),
+    )
+    const center = waveDepth(rows, silence, 20, 28)
+    expect(center).toBeGreaterThan(arms)
   })
 
-  it('blits the pet into the middle of the sky, background and all', () => {
-    const pet = [
-      [
-        { fg: '#111111', bg: '#222222' },
-        { fg: '#111111', bg: '#222222' },
-      ],
-    ]
-    const rows = new Constellation(40, 12, 7).frame([], ACCENT, pet)
-    const withPet = rows.flat().filter((run) => run.bg === '#222222')
-    expect(withPet.length).toBeGreaterThan(0)
+  it('draws the figure at the center in cream ink', () => {
+    const figure = ['xx', 'xx']
+    const rows = new Constellation(40, 12, 7).frame([], ACCENT, figure)
+    const cream = rows.flat().filter((run) => run.fg === INK.text && run.text.trim() !== '')
+    expect(cream.length).toBeGreaterThan(0)
   })
 
-  it('bows the mist floor into an arc — edge columns bottom out higher than center ones', () => {
-    const rows = new Constellation(48, 20, 7).frame(Array.from({ length: 24 }, () => 0.6), ACCENT, null)
-    const deepestBraille = (fromCol: number, toCol: number): number => {
-      let deepest = -1
-      rows.forEach((row, y) => {
-        const chars = [...rowText(row)]
-        for (let x = fromCol; x < toCol; x++) {
-          if (isBraille(chars[x] ?? ' ')) deepest = Math.max(deepest, y)
-        }
-      })
-      return deepest
-    }
-    const edge = Math.max(deepestBraille(0, 6), deepestBraille(42, 48))
-    const center = deepestBraille(21, 27)
-    expect(center).toBeGreaterThan(edge)
+  it('gives a fully-covered two-tone cell both inks: one on the glyph, one behind', () => {
+    // 2 sub-cols x 4 sub-rows per cell: an 'xw' column pair over 4 rows fills a
+    // cell with two colors and no gaps — the fold must not flatten it to one.
+    const figure = Array.from({ length: 8 }, () => 'xwxw')
+    const rows = new Constellation(40, 12, 7).frame([], ACCENT, figure)
+    const twoTone = rows
+      .flat()
+      .filter((run) => run.fg === INK.text && run.bg === WARM && run.text.trim() !== '')
+    expect(twoTone.length).toBeGreaterThan(0)
+  })
+
+  it('fades a dozing figure toward the room instead of swapping assets', () => {
+    const figure = ['xx', 'xx']
+    const awake = new Constellation(40, 12, 7).frame([], ACCENT, figure, 0)
+    const dozing = new Constellation(40, 12, 7).frame([], ACCENT, figure, 0.5)
+    const creamCells = (rows: Run[][]): number =>
+      rows.flat().filter((run) => run.fg === INK.text && run.text.trim() !== '').length
+    expect(creamCells(awake)).toBeGreaterThan(0)
+    expect(creamCells(dozing)).toBe(0)
   })
 
   it('survives hostile bins and degenerate panels', () => {
@@ -125,6 +143,38 @@ describe('Constellation (§6.1: starfield + particle mist)', () => {
       expect(rows).toHaveLength(2)
       for (const row of rows) expect([...rowText(row)]).toHaveLength(2)
     }
+  })
+})
+
+describe('seedStars (§6.1: ripple rings of stars + a loose free scatter)', () => {
+  const subCols = 200
+  const subRows = 240
+  const stars = seedStars(subCols, subRows, 7)
+  const { cx, cy, radius } = circleOf(subCols, subRows)
+  const offRing = (star: { x: number; y: number }): number =>
+    Math.min(...STAR_RINGS.map((frac) => Math.abs(Math.hypot(star.x - cx, star.y - cy) - radius * frac)))
+
+  it('is deterministic per seed', () => {
+    expect(seedStars(subCols, subRows, 7)).toEqual(stars)
+    expect(seedStars(subCols, subRows, 8)).not.toEqual(stars)
+  })
+
+  it('lays the majority of stars along the concentric rings', () => {
+    const onRings = stars.filter((star) => offRing(star) <= 4).length
+    expect(onRings / stars.length).toBeGreaterThan(0.55)
+  })
+
+  it('spreads each ring around the circle instead of clumping', () => {
+    const octants = new Set(
+      stars
+        .filter((star) => offRing(star) <= 4)
+        .map((star) => Math.floor(((Math.atan2(star.y - cy, star.x - cx) + Math.PI) / (2 * Math.PI)) * 8)),
+    )
+    expect(octants.size).toBeGreaterThanOrEqual(6)
+  })
+
+  it('keeps a free scatter clear of the rings — order AND looseness', () => {
+    expect(stars.filter((star) => offRing(star) > 6).length).toBeGreaterThan(5)
   })
 })
 
@@ -150,6 +200,6 @@ describe('panelWidth (the one §6.1 breakpoint)', () => {
     const atMin = panelWidth(WIDE_MIN)
     expect(atMin).not.toBeNull()
     expect(atMin!).toBeGreaterThanOrEqual(30)
-    expect(panelWidth(400)!).toBeLessThanOrEqual(64)
+    expect(panelWidth(400)!).toBeLessThanOrEqual(110)
   })
 })
