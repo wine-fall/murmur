@@ -22,6 +22,7 @@ import {
   figureScale,
   placeFigure,
 } from './figure-image.ts'
+import { encodeWavePng, waveGeomFor, WAVE_FPS } from './wave-image.ts'
 import { accentFor, EMBER, INK, mix, PERIWINKLE, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
@@ -167,6 +168,7 @@ function SkyPanel({
   accent,
   pose,
   showPet,
+  charWave,
   width,
   rows,
 }: {
@@ -174,6 +176,9 @@ function SkyPanel({
   accent: Accent
   pose: PoseName
   showPet: boolean
+  // The block wave yields to the raster ripple when the graphics channel
+  // carries the spectrum instead; the stars and the sprite stay either way.
+  charWave: boolean
   width: number
   rows: number
 }): React.ReactNode {
@@ -195,7 +200,7 @@ function SkyPanel({
       const at = Math.floor(tick.current / (SKY_FPS / POSE_FPS[pose])) % frames.length
       setPainted(
         sky.current!.frame(
-          bars.current.levels(),
+          charWave ? bars.current.levels() : [],
           accent,
           showPet ? frames[at]! : null,
           pose === 'doze' ? DOZE_FADE : 0,
@@ -203,7 +208,7 @@ function SkyPanel({
       )
     }, 1000 / SKY_FPS)
     return () => clearInterval(timer)
-  }, [accent, pose, frames, showPet])
+  }, [accent, pose, frames, showPet, charWave])
 
   return (
     <box style={{ flexDirection: 'column' }}>
@@ -240,6 +245,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const input = useRef<InputRenderable>(null)
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
+  // The ripple's own smoother: the raster wave paints on its own clock in an
+  // effect, so it cannot share the SkyPanel's per-component Bars.
+  const waveBars = useRef(new Bars())
 
   useEffect(() => {
     const append = (kind: Entry['kind'], text: string): void =>
@@ -277,6 +285,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           break
         case 'viz':
           vizSink.current?.(message.bins)
+          waveBars.current.push(message.bins)
           break
         case 'bye':
           // Shutdown is main.tsx's business: it owns the renderer, and the
@@ -424,6 +433,49 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     }
   }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, renderer, dims.width, dims.height])
 
+  // The grain-ripple wave (§6.1): on a kitty-graphics terminal the spectrum
+  // rides the same channel as the figure — stardust ripples in device pixels
+  // over the whole panel (image id 2, under the figure's z). Silence
+  // transmits one transparent frame and then stays quiet.
+  const accentRef = useRef(accent)
+  accentRef.current = accent
+  // The block wave holds the panel until the ripple proves it can run: a
+  // terminal that will not report its cell pixel size cannot be given a
+  // full-panel raster (a guessed cell size paints the wrong area at the wrong
+  // scale), so it keeps the character wave instead.
+  const [rasterWave, setRasterWave] = useState(false)
+  useEffect(() => {
+    if (skyWidth === null || figMode !== 'image') return
+    let loop: ReturnType<typeof setInterval> | undefined
+    let tick = 0
+    let wasSilent = false
+    const settle = setTimeout(() => {
+      const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
+      if (cell === null) return
+      setRasterWave(true)
+      const geom = waveGeomFor(skyWidth - 1, skyRows, cell)
+      const col = gutter + cols - skyWidth + 1
+      const row = 3
+      const paint = (): void => {
+        const levels = waveBars.current.levels()
+        const silent = levels.every((level) => level === 0)
+        if (silent && wasSilent) return
+        wasSilent = silent
+        rawOut.writeOut(placeFigure(encodeWavePng(levels, tick++, geom, accentRef.current.bright), row, col, 2, 0))
+      }
+      paint()
+      loop = setInterval(paint, 1000 / WAVE_FPS)
+    }, 600)
+    return () => {
+      clearTimeout(settle)
+      clearInterval(loop)
+      setRasterWave(false)
+      // d=A also drops the figure; its own effect shares these deps and
+      // repaints, and a stray delete self-heals within one 12fps beat.
+      rawOut.writeOut(deleteFigures())
+    }
+  }, [skyWidth, cols, gutter, skyRows, figMode, renderer, dims.width, dims.height])
+
   return (
     <box
       style={{
@@ -535,6 +587,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             accent={accent}
             pose={pose}
             showPet={band.pet && figMode === 'sprite'}
+            charWave={!rasterWave}
             width={skyWidth - 1}
             rows={skyRows}
           />

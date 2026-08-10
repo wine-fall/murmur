@@ -33,7 +33,7 @@ const RGBA: Record<string, [number, number, number, number]> = {
   s: [0xea, 0xb4, 0x8c, 255],
 }
 
-function crc32(bytes: Buffer): number {
+export function crc32(bytes: Buffer): number {
   let crc = 0xff_ff_ff_ff
   for (const byte of bytes) {
     crc ^= byte
@@ -80,6 +80,13 @@ export function encodeFigurePng(sprite: Sprite, scale: number, fade = 0): Buffer
       if (ink !== undefined) raw.set(ink, at + x * 4)
     }
   }
+  return packPng(width, height, raw)
+}
+
+// RGBA scanlines (each prefixed with a filter-0 byte) into a finished PNG.
+// Level-1 deflate: these frames stream at animation rate, and speed beats
+// the last few KB.
+export function packPng(width: number, height: number, raw: Buffer): Buffer {
   const ihdr = Buffer.alloc(13)
   ihdr.writeUInt32BE(width, 0)
   ihdr.writeUInt32BE(height, 4)
@@ -87,7 +94,7 @@ export function encodeFigurePng(sprite: Sprite, scale: number, fade = 0): Buffer
   return Buffer.concat([
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
+    chunk('IDAT', deflateSync(raw, { level: 1 })),
     chunk('IEND', Buffer.alloc(0)),
   ])
 }
@@ -107,13 +114,13 @@ const CHUNK = 4096
 // the PNG (f=100) as transmit-and-display (a=T) without disturbing the cursor
 // (C=1), quietly (q=2), above the sky's text cells (z=1), then restore. The
 // terminal keeps the image until it is deleted; text repaints do not touch it.
-export function placeFigure(png: Buffer, row: number, col: number, id: number): string {
+export function placeFigure(png: Buffer, row: number, col: number, id: number, z = 1): string {
   const b64 = png.toString('base64')
   const parts: string[] = []
   for (let at = 0; at < b64.length; at += CHUNK) parts.push(b64.slice(at, at + CHUNK))
   const seq = parts
     .map((part, index) => {
-      const head = index === 0 ? `f=100,a=T,C=1,q=2,z=1,i=${id},` : ''
+      const head = index === 0 ? `f=100,a=T,C=1,q=2,z=${z},i=${id},` : ''
       const more = index === parts.length - 1 ? 'm=0' : 'm=1'
       return `\x1b_G${head}${more};${part}\x1b\\`
     })
