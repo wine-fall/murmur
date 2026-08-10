@@ -456,6 +456,20 @@ provides them):
    the tty's real cell pixel size, pose frames streamed under one image id,
    doze fading the inks toward the ground. Character terminals and the
    narrow band keep the text-sprite path unchanged.
+   **The wave joined it (2026-08-10)**: on the same channel the spectrum
+   renders as the **grain ripple** (`tui/src/wave-image.ts`) — concentric
+   ripples of stardust breathing outward from the figure, inner rings
+   carrying the bass (warm, dense), outer rings the treble (cool, sparse),
+   each ripple drifting a slot outward per `WAVE_CYCLE` and fading in at the
+   hollow and out at the rim. A ring hears a centered WINDOW of bins, not one
+   bin, so a coarse feed still speaks; its ink runs a continuous floor →
+   accent → ember ramp rather than the character wave's three tiers, because
+   a flat quiet grey at low alpha is invisible on the night ground. Image id
+   2 under the figure's z; silence transmits one transparent frame and then
+   stays quiet. **A terminal that will not report its cell pixel size keeps
+   the character wave** — a guessed cell size paints the wrong area at the
+   wrong scale. Density, ring count and fps are by-eye constants at the head
+   of the module (measured: ~6% CPU mean at 12fps on a 83x45 panel).
 2. **Content-derived tinting** (kew's signature): when a track starts, derive
    a small accent palette and tint the UI with it — the interface breathes
    with the music. v1 may fall back to scene-based tinting (spec 04's
