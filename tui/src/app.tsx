@@ -369,35 +369,60 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const figMode = figurePen(process.env)
   const renderer = useRenderer()
   const rawOut = renderer as unknown as { writeOut(data: string): void }
+  // The pose rides a ref so a pose change swaps the NEXT transmitted frame in
+  // place (same image id) instead of tearing the effect down: delete + resettle
+  // blanked the figure for over half a second on every state change — the
+  // start-of-broadcast flash. Only a real relayout re-runs the effect.
+  const poseRef = useRef(pose)
+  poseRef.current = pose
   useEffect(() => {
     if (skyWidth === null || figMode !== 'image' || !band.pet) return
     let loop: ReturnType<typeof setInterval> | undefined
     const settle = setTimeout(() => {
       const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
-      const frames = POSES[pose]
-      const spriteCols = frames[0]![0]!.length
+      const spriteCols = POSES.idle[0]![0]!.length
       const scale = figureScale(cell?.width ?? 0, spriteCols)
-      const fade = pose === 'doze' ? DOZE_FADE : 0
-      const pngs = frames.map((frame) => encodeFigurePng(frame, scale, fade))
+      // Every pose shares the sprite grid, so geometry is computed once and a
+      // pose's PNGs are encoded on first use.
+      const pngCache = new Map<PoseName, Buffer[]>()
+      const pngsFor = (name: PoseName): Buffer[] => {
+        let pngs = pngCache.get(name)
+        if (pngs === undefined) {
+          const fade = name === 'doze' ? DOZE_FADE : 0
+          pngs = POSES[name].map((frame) => encodeFigurePng(frame, scale, fade))
+          pngCache.set(name, pngs)
+        }
+        return pngs
+      }
       const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
-      const imgRows = Math.ceil((frames[0]!.length * scale) / (cell?.height ?? 16))
+      const imgRows = Math.ceil((POSES.idle[0]!.length * scale) / (cell?.height ?? 16))
       const centerRow = 2 + circleOf((skyWidth - 1) * 2, skyRows * 4).cy / 4
       const panelLeft = gutter + cols - skyWidth
       const col = Math.max(1, Math.round(panelLeft + (skyWidth - 1) / 2 - imgCols / 2) + 1)
       const row = Math.max(1, Math.round(centerRow - imgRows / 2) + 1)
       // Retransmitting under one id replaces the frame in place — the pose
-      // loop is a stream of tiny PNGs at the pose's own rate.
-      let at = 0
-      const paint = (): void => rawOut.writeOut(placeFigure(pngs[at++ % pngs.length]!, row, col, 1))
+      // loop is a stream of tiny PNGs, each pose advancing at its own rate
+      // against one shared clock.
+      const started = performance.now()
+      let shown = ''
+      const paint = (): void => {
+        const name = poseRef.current
+        const pngs = pngsFor(name)
+        const at = Math.floor(((performance.now() - started) / 1000) * POSE_FPS[name])
+        const key = `${name}:${at % pngs.length}`
+        if (key === shown) return
+        shown = key
+        rawOut.writeOut(placeFigure(pngs[at % pngs.length]!, row, col, 1))
+      }
       paint()
-      if (pngs.length > 1) loop = setInterval(paint, 1000 / POSE_FPS[pose])
+      loop = setInterval(paint, 1000 / Math.max(...Object.values(POSE_FPS)))
     }, 600)
     return () => {
       clearTimeout(settle)
       clearInterval(loop)
       rawOut.writeOut(deleteFigures())
     }
-  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, pose, renderer, dims.width, dims.height])
+  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, renderer, dims.width, dims.height])
 
   return (
     <box
