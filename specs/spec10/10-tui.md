@@ -457,19 +457,27 @@ provides them):
    doze fading the inks toward the ground. Character terminals and the
    narrow band keep the text-sprite path unchanged.
    **The wave joined it (2026-08-10)**: on the same channel the spectrum
-   renders as the **grain ripple** (`tui/src/wave-image.ts`) — concentric
-   ripples of stardust breathing outward from the figure, inner rings
-   carrying the bass (warm, dense), outer rings the treble (cool, sparse),
-   each ripple drifting a slot outward per `WAVE_CYCLE` and fading in at the
-   hollow and out at the rim. A ring hears a centered WINDOW of bins, not one
-   bin, so a coarse feed still speaks; its ink runs a continuous floor →
-   accent → ember ramp rather than the character wave's three tiers, because
-   a flat quiet grey at low alpha is invisible on the night ground. Image id
-   2 under the figure's z; silence transmits one transparent frame and then
-   stays quiet. **A terminal that will not report its cell pixel size keeps
-   the character wave** — a guessed cell size paints the wrong area at the
-   wrong scale. Density, ring count and fps are by-eye constants at the head
-   of the module (measured: ~6% CPU mean at 12fps on a 83x45 panel).
+   renders as **stardust** (`tui/src/wave-image.ts`) — grains blown outward
+   from the figure, each direction around the circle carrying one band (bass
+   straight down, treble sweeping up both sides, mirrored left to right) and
+   streaming as far and as thick as that band is loud, thinning as it flies.
+   A direction hears a centered WINDOW of bins, not one bin, so a coarse feed
+   still speaks. Ink and alpha ride the window's lifted level (a flat quiet
+   grey at low alpha is invisible on the night ground), but DENSITY rides the
+   raw energy — lifting that too flattens the burst into an even donut.
+   Image id 2 under the figure's z; silence transmits one transparent frame
+   and then stays quiet. **A terminal that will not report its cell pixel
+   size keeps the character wave** — a guessed cell size paints the wrong
+   area at the wrong scale.
+
+   **Every placement MUST be named** (`p=`, one per image id). The kitty
+   protocol creates a NEW placement for each display that omits one, so an
+   animation loop leaves the terminal compositing every frame it has ever
+   drawn: the shipped 12fps wave leaked ~900 placements a minute and slowed
+   the whole machine down the longer it ran. Measured after the fix, at
+   8fps on a 83x45 panel: 0 leaked, ~490 KB/s of graphics on the wire,
+   ~6% CPU in the client. Density, sector count and fps are by-eye constants
+   at the head of the module; fps is the first lever if a terminal struggles.
 2. **Content-derived tinting** (kew's signature): when a track starts, derive
    a small accent palette and tint the UI with it — the interface breathes
    with the music. v1 may fall back to scene-based tinting (spec 04's

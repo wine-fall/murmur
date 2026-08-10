@@ -46,6 +46,16 @@ describe('placeFigure (kitty graphics APC framing)', () => {
     expect(seq).toContain(png.toString('base64'))
   })
 
+  it('names its placement, so a retransmission replaces instead of piling up', () => {
+    // Without a placement id the protocol creates a NEW placement per display:
+    // an animation loop then leaks placements for as long as it runs, and the
+    // terminal composites every one of them. Same image id AND placement id is
+    // what makes the second transmission replace the first.
+    expect(placeFigure(png, 1, 1, 3)).toMatch(/p=\d/)
+    expect(placeFigure(png, 1, 1, 3)).toContain('i=3,p=3')
+    expect(placeFigure(png, 1, 1, 2)).toContain('i=2,p=2')
+  })
+
   it('chunks a large payload and chains the continuations', () => {
     const big = Buffer.alloc(9000, 7)
     const seq = placeFigure(big, 1, 1, 1)

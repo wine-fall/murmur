@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { INK } from '../tui/src/palette.ts'
-import { encodeWavePng, ringLevel, waveGeomFor, waveRgba, WAVE_CYCLE } from '../tui/src/wave-image.ts'
+import { bandAt, encodeWavePng, ringLevel, waveGeomFor, waveRgba, WAVE_CYCLE } from '../tui/src/wave-image.ts'
 
 // The user's real panel: 83x45 cells at 9x25 device px.
 const GEOM = waveGeomFor(83, 45, { width: 9, height: 25 })
@@ -73,7 +73,53 @@ describe('waveRgba (the grains themselves)', () => {
   })
 })
 
-describe('ringLevel (a ripple reads a slice of the spectrum, not one bin)', () => {
+describe('bandAt (which direction carries which band)', () => {
+  it('mirrors left and right, so the wave blooms outward instead of marching', () => {
+    for (const theta of [0.3, 1.1, 2.4]) {
+      expect(bandAt(-theta, 12)).toBe(bandAt(theta, 12))
+    }
+  })
+
+  it('puts the bass under the figure and the treble overhead', () => {
+    expect(bandAt(0, 12)).toBe(0)
+    expect(bandAt(Math.PI, 12)).toBe(11)
+  })
+})
+
+describe('the burst streams outward', () => {
+  const bassy = Array.from({ length: 24 }, (_, i) => Math.exp(-i / 6) * 0.7)
+
+  it('is denser near the hollow than out at the rim — grains thin as they fly', () => {
+    const rgba = waveRgba(bassy, 3, GEOM, ACCENT)
+    let near = 0
+    let far = 0
+    for (let i = 3; i < rgba.length; i += 4) {
+      if (rgba[i]! === 0) continue
+      const px = ((i - 3) / 4) % GEOM.width
+      const py = Math.floor((i - 3) / 4 / GEOM.width)
+      const dist = Math.hypot(px - GEOM.cx, py - GEOM.cy)
+      if (dist < GEOM.radius * 0.55) near++
+      else far++
+    }
+    expect(near).toBeGreaterThan(far)
+  })
+
+  it('sends a bass-only frame downward, not sideways or up', () => {
+    const bassOnly = Array.from({ length: 24 }, (_, i) => (i < 2 ? 1 : 0))
+    const rgba = waveRgba(bassOnly, 3, GEOM, ACCENT)
+    let below = 0
+    let above = 0
+    for (let i = 3; i < rgba.length; i += 4) {
+      if (rgba[i]! === 0) continue
+      const py = Math.floor((i - 3) / 4 / GEOM.width)
+      if (py > GEOM.cy) below++
+      else above++
+    }
+    expect(below).toBeGreaterThan(above * 3)
+  })
+})
+
+describe('ringLevel (a direction reads a slice of the spectrum, not one bin)', () => {
   it('averages its slice, so one dead bin does not blank a ring', () => {
     const spiky = [1, 0, 1, 0, 1, 0, 1, 0]
     for (let ring = 0; ring < 6; ring++) expect(ringLevel(spiky, ring, 6)).toBeGreaterThan(0.2)
