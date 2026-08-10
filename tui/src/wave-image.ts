@@ -1,12 +1,13 @@
-// The grain-ripple wave (spec 10 §6.1): the spectrum spoken as stardust —
-// concentric ripples of small square grains breathing out from the figure,
-// inner rings carrying the bass (warm, dense), outer rings the treble (cool,
-// sparse). Drawn in device pixels and streamed over the kitty graphics
+// The stardust wave (spec 10 §6.1): the spectrum spoken as grains blown
+// outward from the figure. Each direction around the circle carries one band —
+// bass straight down, treble sweeping up both sides, mirrored left to right —
+// and its grains stream out as far and as thick as that band is loud, thinning
+// as they go. Drawn in device pixels and streamed over the kitty graphics
 // channel; character terminals keep the constellation's block wave instead.
 //
 // No OpenTUI and no React in here (same reasoning as constellation.ts): the
 // painted frame cannot be unit-asserted, the pixel decisions can. Everything
-// random is hashed from stable ids — a ripple keeps its grains as it drifts.
+// random is hashed from stable ids, so a grain keeps its lane while it flies.
 
 import { circleOf, hash01 } from './constellation.ts'
 import { packPng } from './figure-image.ts'
@@ -22,18 +23,20 @@ export type WaveGeom = {
   halo: number
 }
 
-// The ripple's clock: frames per second, and how many ticks one ripple takes
-// to drift a whole slot outward (8 seconds — a breath, not a strobe).
-export const WAVE_FPS = 12
-export const WAVE_CYCLE = 96
+// The wave's clock. Every frame is a full-panel image the terminal must decode
+// and composite, so the rate is deliberately below the sky's: this is drifting
+// dust, and 8fps reads the same as 12 while costing a third less.
+export const WAVE_FPS = 8
+// Ticks for a grain to travel its whole flight, out and respawned at the
+// hollow — 6 seconds, a drift rather than a pulse.
+export const WAVE_CYCLE = 48
 
-// The ripple field, tuned by eye on the design previews (h2-dense).
-const RINGS = 6
-const FRAC_MIN = 0.26
-const FRAC_MAX = 0.92
-const GAP = (FRAC_MAX - FRAC_MIN) / (RINGS - 1)
-const GRAIN_STEP = 7
-const DENSITY = 1.6
+// The burst field, tuned by eye on the design preview (v2-particle-burst).
+const SECTORS = 180
+const GRAINS_MAX = 26
+const INNER = 0.3
+// How much of a band's energy the grains spend on reach vs on staying near.
+const REACH = 0.75
 // The ripple's ink runs as a continuous ramp rather than the character wave's
 // three tiers: a hard low tier paints the quiet grey flat on the night, where
 // small grains simply vanish (seen in a real capture). The ramp keeps a warm
@@ -76,16 +79,25 @@ function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0
 }
 
-// What one ripple hears. A ring owns a SLICE of the spectrum rather than a
-// single bin — one dead bin must not blank a whole ripple — and the mean is
+// Which band a direction carries. theta is measured from straight DOWN, so the
+// bass sits under the figure and the treble sweeps up both sides; left and
+// right mirror each other, which is why the wave blooms outward rather than
+// marching across.
+export function bandAt(theta: number, bands: number): number {
+  const wrapped = Math.abs(((theta + Math.PI) % (2 * Math.PI)) - Math.PI) / Math.PI
+  return Math.min(Math.floor(wrapped * bands), bands - 1)
+}
+
+// What one direction hears. A band owns a SLICE of the spectrum rather than a
+// single bin — one dead bin must not blank a whole sector — and the mean is
 // curved upward, because a real smoothed frame puts almost all its energy in
-// the low bins and the outer rings would otherwise paint dead grey on the
+// the low bins and the outer bands would otherwise paint dead grey on the
 // night. Silence stays silence: the curve lifts quiet, never nothing.
 export function ringLevel(levels: readonly number[], ring: number, rings: number): number {
   if (levels.length === 0) return 0
-  // The window is centered on the ring and always at least three bins wide,
-  // so neighbouring ripples overlap and a coarse feed (fewer bins than rings)
-  // still gives every ring something to hear.
+  // The window is centered on the band and always at least three bins wide,
+  // so neighbouring sectors overlap and a coarse feed (fewer bins than bands)
+  // still gives every direction something to hear.
   const center = ((ring + 0.5) / rings) * levels.length
   const half = Math.max(1, levels.length / (2 * rings))
   let from = Math.max(0, Math.round(center - half))
@@ -121,8 +133,6 @@ export function waveRgba(
     rgbOf(
       lv < 0.4 ? mix(FLOOR, accentBright, lv / 0.4) : mix(accentBright, EMBER, (lv - 0.4) / 0.6),
     )
-  const span = FRAC_MAX + GAP - FRAC_MIN
-  const lap = Math.floor(tick / WAVE_CYCLE)
   const phase = (tick % WAVE_CYCLE) / WAVE_CYCLE
   const grain = (x: number, y: number, size: number, ink: Rgb, alpha: number): void => {
     for (let yy = Math.round(y); yy < Math.round(y) + size; yy++) {
@@ -142,41 +152,32 @@ export function waveRgba(
       }
     }
   }
-  for (let ri = 0; ri < RINGS; ri++) {
-    // A ripple keeps one identity while it drifts outward across cycle
-    // boundaries; the ripple born at the center each cycle draws fresh dice.
-    const rippleId = (((ri - lap) % 8192) + 8192) % 8192
-    const frac0 = FRAC_MIN + (ri + phase) * GAP
-    const frac = frac0 > FRAC_MAX + GAP / 2 ? frac0 - span : frac0
-    const pos = (frac - FRAC_MIN) / span
-    const band = ringLevel(levels, Math.min(Math.floor(clamp01(pos) * RINGS), RINGS - 1), RINGS)
+  const inner = geom.radius * INNER
+  for (let sector = 0; sector < SECTORS; sector++) {
+    const theta = (sector / SECTORS) * 2 * Math.PI - Math.PI
+    const band = ringLevel(levels, bandAt(theta, SECTORS / 6), SECTORS / 6)
     if (band < 0.02) continue
-    // Born at the hollow, gone at the rim: fade both ends of the drift.
-    const edge = 0.35 + 0.65 * (Math.min(pos, 1 - pos, 0.2) / 0.2)
-    const baseR = geom.radius * frac * (0.94 + 0.12 * band)
-    const grains = Math.round(((2 * Math.PI * baseR) / GRAIN_STEP) * DENSITY * (0.25 + 0.75 * band))
-    const twinkleBucket = Math.floor(tick / 4)
-    for (let g = 0; g < grains; g++) {
-      const theta = hash01(rippleId * 977 + g, 1, 1) * 2 * Math.PI
-      const wobble =
-        1 +
-        0.05 * Math.sin(theta * 3 + hash01(rippleId, 2, 2) * 6.28) +
-        0.03 * Math.sin(theta * 5 + hash01(rippleId, 3, 3) * 6.28)
-      // Grains hug their ripple: a wide scatter smears the ring into haze and
-      // loses most of its alpha to the falloff — the arc has to read as an arc.
-      const spread = (hash01(rippleId * 977 + g, 4, 4) - 0.5) * (5 + 15 * band)
-      const dist = baseR * wobble + spread
+    // Ink and alpha ride the lifted level so a quiet direction still reads,
+    // but DENSITY rides the raw energy — lifting that too flattens the burst
+    // into an even donut and loses the loud directions entirely.
+    const raw = band * band
+    const count = Math.round(1 + raw * GRAINS_MAX)
+    for (let g = 0; g < count; g++) {
+      // Every grain owns a lane and a starting place in the flight; the phase
+      // carries it outward and wraps it back to the hollow, so the dust
+      // streams continuously instead of pulsing as one body.
+      const along = ((hash01(sector, g, 11) + phase) % 1) ** 0.7
+      const dist = inner + along * (geom.radius - inner) * (0.25 + REACH * raw)
       if (dist < geom.halo) continue
-      const x = geom.cx + Math.sin(theta) * dist
-      const y = geom.cy + Math.cos(theta) * dist * 0.98
-      const off = Math.abs(spread) / (5 + 16 * band)
-      const twinkle = 0.78 + 0.22 * hash01(rippleId * 7919 + g, 9, twinkleBucket)
-      const alpha = (0.46 + 0.54 * band) * Math.exp(-off * off) * edge * twinkle
+      const lane = theta + (hash01(sector, g, 23) - 0.5) * 0.09
+      const x = geom.cx + Math.sin(lane) * dist
+      const y = geom.cy + Math.cos(lane) * dist
+      // Thinning as it flies: a grain spends its light on the distance.
+      const alpha = (1 - along) * (0.45 + 0.55 * band)
       if (alpha < 0.02) continue
-      const sizeRoll = hash01(rippleId * 977 + g, 5, 5)
-      const size = sizeRoll < 0.12 * band ? 4 : sizeRoll < 0.45 ? 3 : 2
-      const tone = band * (0.75 + 0.5 * hash01(rippleId * 977 + g, 6, 6))
-      grain(x, y, size, heat(clamp01(tone)), alpha)
+      const sizeRoll = hash01(sector, g, 31)
+      const size = sizeRoll < 0.15 * band ? 4 : sizeRoll < 0.5 ? 3 : 2
+      grain(x, y, size, heat(clamp01(band * (1 - along * 0.5))), alpha)
     }
   }
   return rgba

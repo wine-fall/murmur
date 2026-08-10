@@ -114,13 +114,18 @@ const CHUNK = 4096
 // the PNG (f=100) as transmit-and-display (a=T) without disturbing the cursor
 // (C=1), quietly (q=2), above the sky's text cells (z=1), then restore. The
 // terminal keeps the image until it is deleted; text repaints do not touch it.
+//
+// The placement is NAMED (p=, one per image id). A display without one creates
+// a fresh placement every time, so an animation loop leaves the terminal
+// compositing thousands of stale placements — the whole machine slows down.
+// Same image id + same placement id means the next frame replaces this one.
 export function placeFigure(png: Buffer, row: number, col: number, id: number, z = 1): string {
   const b64 = png.toString('base64')
   const parts: string[] = []
   for (let at = 0; at < b64.length; at += CHUNK) parts.push(b64.slice(at, at + CHUNK))
   const seq = parts
     .map((part, index) => {
-      const head = index === 0 ? `f=100,a=T,C=1,q=2,z=${z},i=${id},` : ''
+      const head = index === 0 ? `f=100,a=T,C=1,q=2,z=${z},i=${id},p=${id},` : ''
       const more = index === parts.length - 1 ? 'm=0' : 'm=1'
       return `\x1b_G${head}${more};${part}\x1b\\`
     })
