@@ -17,6 +17,7 @@ import {
   panelWidth,
   seedStars,
   STAR_RINGS,
+  waveBinAt,
   WIDE_MIN,
 } from '../tui/src/constellation.ts'
 import { accentFor, INK, WARM } from '../tui/src/palette.ts'
@@ -94,6 +95,28 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
     const loud = litCells(new Constellation(48, 20, 7).frame([1, 1, 1], ACCENT, null))
     expect(quiet).toBeGreaterThan(silence)
     expect(loud).toBeGreaterThan(quiet)
+  })
+
+  it('mirrors the spectrum from the center out — bass at the middle, treble at the arms', () => {
+    expect(waveBinAt(0, 8)).toBe(0)
+    expect(waveBinAt(0.99, 8)).toBe(7)
+    expect(waveBinAt(-0.99, 8)).toBe(7)
+    for (const span of [0.2, 0.5, 0.8]) {
+      expect(waveBinAt(-span, 8)).toBe(waveBinAt(span, 8))
+    }
+  })
+
+  it('lights both arms alike on a bass-only frame — the wave grows outward, not left-first', () => {
+    const silence = new Constellation(48, 24, 7).frame([], ACCENT, null)
+    // Bass alone: only the center of the arc may rise; the left arm must not
+    // light up ahead of the right the way an edge-anchored mapping does.
+    const rows = new Constellation(48, 24, 7).frame([1, 0, 0, 0, 0, 0, 0, 0], ACCENT, null)
+    const left = waveDepth(rows, silence, 2, 12)
+    const right = waveDepth(rows, silence, 36, 46)
+    const center = waveDepth(rows, silence, 20, 28)
+    expect(center).toBeGreaterThan(-1)
+    expect(left).toBe(-1)
+    expect(right).toBe(-1)
   })
 
   it('rides the circle: center columns bottom out deeper than the arms', () => {

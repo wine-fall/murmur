@@ -147,6 +147,13 @@ function clamp01(value: number): number {
   return Number.isFinite(value) ? Math.min(Math.max(value, 0), 1) : 0
 }
 
+// The spectrum mirrored from the center out: bin 0 (bass, almost always
+// breathing) rises at the arc's middle and the treble frays toward both arms —
+// the wave blooms outward instead of marching left-to-right.
+export function waveBinAt(span: number, count: number): number {
+  return Math.min(Math.floor(Math.abs(span) * count), count - 1)
+}
+
 // mulberry32 — one small seeded PRNG so the field is stable per seed.
 function prng(seed: number): () => number {
   let state = seed >>> 0
@@ -228,7 +235,7 @@ export class Constellation {
     for (let x = 0; x < this.subCols; x += 2) {
       const span = (x - cx) / radius
       if (Math.abs(span) > 0.98 || levels.length === 0) continue
-      const level = clamp01(levels[Math.floor(((span + 1) / 2) * levels.length)]!)
+      const level = clamp01(levels[waveBinAt(span, levels.length)]!)
       if (level === 0) continue
       const base = cy + Math.sqrt(Math.max(radius * radius - (x - cx) * (x - cx), 0))
       const climb = level * (base - cy) * CLIMB
