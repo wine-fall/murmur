@@ -315,9 +315,24 @@ export class IpcHost implements Host {
   }
 }
 
+// What the engine writes to bring the terminal back when the front-end dies
+// without restoring it: pop the kitty keyboard flags, bracketed paste and
+// focus reporting off, leave the alternate screen, reset colors, show the
+// cursor. Everything here is a no-op on a terminal already restored.
+export const TERMINAL_RESTORE = '\x1b[<u\x1b[?2004l\x1b[?1004l\x1b[?1049l\x1b[0m\x1b[?25h'
+
+// The slice of the tty the restore touches, injectable for tests.
+type Tty = {
+  out: { isTTY?: boolean; write: (data: string) => boolean }
+  stdin: { isTTY?: boolean; setRawMode?: (on: boolean) => unknown }
+}
+
 // Launch the front-end (spec 10 §2.2: Bun is a provisioned binary, not a stack
 // migration — nothing about it reaches the engine's own toolchain). The client
-// inherits stdio: it OWNS the terminal from here on.
+// inherits stdio: it OWNS the terminal from here on — which is why an abnormal
+// exit (a crash skipped OpenTUI's own restore) makes the engine hand the
+// terminal back itself: without this, the tty stays in raw mode on the
+// alternate screen with nobody reading keys, and even Ctrl-C is dead.
 export function spawnTuiClient(opts: {
   bunCmd: string
   entry: string
@@ -325,6 +340,7 @@ export function spawnTuiClient(opts: {
   // Called once when the client is gone for any reason — a clean exit, a crash,
   // or a spawn that never got off the ground.
   onGone?: (reason: string) => void
+  tty?: Tty
 }): ChildProcess {
   const child = spawn(opts.bunCmd, [opts.entry, opts.socketPath], { stdio: 'inherit' })
   let reported = false
@@ -335,6 +351,13 @@ export function spawnTuiClient(opts: {
   }
   // An unhandled 'error' would take the engine down with the face.
   child.on('error', (err) => gone(`front-end failed to start: ${String(err)}`))
-  child.on('exit', (code) => gone(`front-end exited (code ${String(code)})`))
+  child.on('exit', (code) => {
+    if (code !== 0) {
+      const { out, stdin } = opts.tty ?? { out: process.stdout, stdin: process.stdin }
+      if (out.isTTY === true) out.write(TERMINAL_RESTORE)
+      if (stdin.isTTY === true) stdin.setRawMode?.(false)
+    }
+    gone(`front-end exited (code ${String(code)})`)
+  })
   return child
 }
