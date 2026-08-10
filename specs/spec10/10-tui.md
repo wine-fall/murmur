@@ -614,9 +614,14 @@ TUI work is built on the framework choice.
 - **Visualizer during talk** (§3.6): voice envelope vs quiet strip — by ear.
 - **opentui#92** (graphics-protocol bitmaps): when it lands, evaluate album
   art behind the same substrate. **Partly superseded (2026-08-07)**: the
-  figure already ships as a kitty-graphics raster via direct escape emission
-  (§3.7) without waiting for OpenTUI support; opentui#92 remains relevant
-  only if album art wants renderer-managed images.
+  figure already ships as a kitty-graphics raster (§3.7) without waiting for
+  OpenTUI support; opentui#92 remains relevant only if album art wants
+  renderer-managed images. The escape bytes MUST go through the renderer's
+  `writeOut` channel (serialized with the render thread) — OpenTUI intercepts
+  `process.stdout.write` in its capture-stdout mode, so writing there feeds
+  the payload back into the renderer as text and panics the native layer
+  (the 2026-08-10 SIGTRAP crash). Cell pixel size likewise comes from the
+  renderer's `resolution` report, not an ioctl of our own.
 - **Bun→Node exit**: revisit when OpenTUI's Node FFI support leaves
   experimental status.
 

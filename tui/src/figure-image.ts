@@ -8,6 +8,10 @@ import { deflateSync } from 'node:zlib'
 
 import type { Sprite } from './pet.ts'
 
+// Structurally @opentui/core's PixelResolution — declared here so the engine's
+// tsc pass, which follows the tests into this file, needs no tui dependency.
+type PixelResolution = { width: number; height: number }
+
 export type FigurePen = 'image' | 'sprite'
 
 // MURMUR_TUI_FIGURE=image|sprite overrides; otherwise kitty-graphics
@@ -122,22 +126,17 @@ export function deleteFigures(): string {
   return '\x1b_Ga=d,d=A,q=2\x1b\\'
 }
 
-// Device pixels per terminal cell, from the kernel's window size (Ghostty
-// fills ws_xpixel/ws_ypixel on the tty). Bun-only FFI behind a guard: any
-// runtime or platform that cannot answer gets null and the caller's fallback.
-export async function cellPixels(): Promise<{ width: number; height: number } | null> {
-  try {
-    const { dlopen, FFIType, ptr } = await import('bun:ffi')
-    const libc = dlopen(process.platform === 'darwin' ? '/usr/lib/libSystem.B.dylib' : 'libc.so.6', {
-      ioctl: { args: [FFIType.i32, FFIType.u64, FFIType.ptr], returns: FFIType.i32 },
-    })
-    const TIOCGWINSZ = process.platform === 'darwin' ? 0x40_08_74_68 : 0x54_13
-    const winsize = new Uint16Array(4)
-    if (libc.symbols.ioctl(1, TIOCGWINSZ, ptr(winsize)) !== 0) return null
-    const [rows, cols, xPixels, yPixels] = winsize
-    if (!rows || !cols || !xPixels || !yPixels) return null
-    return { width: Math.floor(xPixels / cols), height: Math.floor(yPixels / rows) }
-  } catch {
-    return null
-  }
+// Device pixels per terminal cell, from the renderer's own capability query
+// (kitty-graphics terminals answer the window-pixel report OpenTUI sends at
+// startup). A terminal that never answered gets null and the caller's fallback.
+export function cellSizeFrom(
+  resolution: PixelResolution | null,
+  cols: number,
+  rows: number,
+): { width: number; height: number } | null {
+  if (resolution === null || cols <= 0 || rows <= 0) return null
+  const width = Math.floor(resolution.width / cols)
+  const height = Math.floor(resolution.height / rows)
+  if (width <= 0 || height <= 0) return null
+  return { width, height }
 }

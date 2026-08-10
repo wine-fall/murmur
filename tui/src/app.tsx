@@ -8,14 +8,14 @@
 // the art direction session (§6.1) can restyle murmur without touching logic.
 
 import { useEffect, useRef, useState } from 'react'
-import { useKeyboard, useTerminalDimensions, type InputProps } from '@opentui/react'
+import { useKeyboard, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
 import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
 import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
 import {
-  cellPixels,
+  cellSizeFrom,
   deleteFigures,
   encodeFigurePng,
   figurePen,
@@ -358,44 +358,46 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   // The raster figure (§6.1): a kitty-graphics terminal draws the whisper-girl
   // as a real PNG at the design's own pixel pitch — the sky stays characters,
-  // only the figure earns pixels. Scale comes from the terminal's actual cell
-  // size; placement re-runs on any relayout, after the text frame settles.
+  // only the figure earns pixels. Scale comes from the renderer's own pixel
+  // report; placement re-runs on any relayout, after the text frame settles.
+  //
+  // Every escape byte goes through the renderer's writeOut — the ONE channel
+  // serialized with the render thread. OpenTUI intercepts process.stdout.write
+  // (capture-stdout mode), so writing there would feed the payload back into
+  // the renderer as text. writeOut is typed private upstream pending a public
+  // graphics API (opentui#92); this is the sanctioned narrow reach around it.
   const figMode = figurePen(process.env)
+  const renderer = useRenderer()
+  const rawOut = renderer as unknown as { writeOut(data: string): void }
   useEffect(() => {
     if (skyWidth === null || figMode !== 'image' || !band.pet) return
-    let cancelled = false
     let loop: ReturnType<typeof setInterval> | undefined
     const settle = setTimeout(() => {
-      void (async () => {
-        const cell = await cellPixels()
-        if (cancelled) return
-        const frames = POSES[pose]
-        const spriteCols = frames[0]![0]!.length
-        const scale = figureScale(cell?.width ?? 0, spriteCols)
-        const fade = pose === 'doze' ? DOZE_FADE : 0
-        const pngs = frames.map((frame) => encodeFigurePng(frame, scale, fade))
-        const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
-        const imgRows = Math.ceil((frames[0]!.length * scale) / (cell?.height ?? 16))
-        const centerRow = 2 + circleOf((skyWidth - 1) * 2, skyRows * 4).cy / 4
-        const panelLeft = gutter + cols - skyWidth
-        const col = Math.max(1, Math.round(panelLeft + (skyWidth - 1) / 2 - imgCols / 2) + 1)
-        const row = Math.max(1, Math.round(centerRow - imgRows / 2) + 1)
-        // Retransmitting under one id replaces the frame in place — the pose
-        // loop is a stream of tiny PNGs at the pose's own rate.
-        let at = 0
-        const paint = (): void =>
-          void process.stdout.write(placeFigure(pngs[at++ % pngs.length]!, row, col, 1))
-        paint()
-        if (pngs.length > 1) loop = setInterval(paint, 1000 / POSE_FPS[pose])
-      })()
+      const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
+      const frames = POSES[pose]
+      const spriteCols = frames[0]![0]!.length
+      const scale = figureScale(cell?.width ?? 0, spriteCols)
+      const fade = pose === 'doze' ? DOZE_FADE : 0
+      const pngs = frames.map((frame) => encodeFigurePng(frame, scale, fade))
+      const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
+      const imgRows = Math.ceil((frames[0]!.length * scale) / (cell?.height ?? 16))
+      const centerRow = 2 + circleOf((skyWidth - 1) * 2, skyRows * 4).cy / 4
+      const panelLeft = gutter + cols - skyWidth
+      const col = Math.max(1, Math.round(panelLeft + (skyWidth - 1) / 2 - imgCols / 2) + 1)
+      const row = Math.max(1, Math.round(centerRow - imgRows / 2) + 1)
+      // Retransmitting under one id replaces the frame in place — the pose
+      // loop is a stream of tiny PNGs at the pose's own rate.
+      let at = 0
+      const paint = (): void => rawOut.writeOut(placeFigure(pngs[at++ % pngs.length]!, row, col, 1))
+      paint()
+      if (pngs.length > 1) loop = setInterval(paint, 1000 / POSE_FPS[pose])
     }, 600)
     return () => {
-      cancelled = true
       clearTimeout(settle)
       clearInterval(loop)
-      process.stdout.write(deleteFigures())
+      rawOut.writeOut(deleteFigures())
     }
-  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, pose])
+  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, pose, renderer, dims.width, dims.height])
 
   return (
     <box

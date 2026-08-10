@@ -6,6 +6,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  cellSizeFrom,
   deleteFigures,
   encodeFigurePng,
   figurePen,
@@ -80,6 +81,21 @@ describe('encodeFigurePng fade (the dozer dims toward the room)', () => {
     const dozing = encodeFigurePng(['xw', 'ws'], 2, 0.5)
     expect(dozing.readUInt32BE(16)).toBe(awake.readUInt32BE(16))
     expect(dozing.equals(awake)).toBe(false)
+  })
+})
+
+describe('cellSizeFrom (cell pixels out of the window resolution)', () => {
+  it('divides the window resolution across the cell grid', () => {
+    expect(cellSizeFrom({ width: 1800, height: 1250 }, 200, 50)).toEqual({ width: 9, height: 25 })
+  })
+
+  it('returns null when the terminal never answered', () => {
+    expect(cellSizeFrom(null, 200, 50)).toBeNull()
+  })
+
+  it('returns null on a degenerate grid or resolution', () => {
+    expect(cellSizeFrom({ width: 1800, height: 1250 }, 0, 50)).toBeNull()
+    expect(cellSizeFrom({ width: 0, height: 0 }, 200, 50)).toBeNull()
   })
 })
 

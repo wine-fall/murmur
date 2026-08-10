@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { IpcHost } from '../src/ipc-host.ts'
+import { IpcHost, spawnTuiClient, TERMINAL_RESTORE } from '../src/ipc-host.ts'
 import {
   PROTOCOL,
   decodeEngineMessage,
@@ -445,5 +445,79 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     await c.settle()
     expect(c.types()).toEqual(['hello'])
     await fresh.close()
+  })
+})
+
+describe('spawnTuiClient (the terminal handed back when the face dies badly)', () => {
+  const tty = (): {
+    out: { isTTY: boolean; writes: string[]; write: (s: string) => boolean }
+    stdin: { isTTY: boolean; raw: boolean[]; setRawMode: (on: boolean) => void }
+  } => {
+    const out = {
+      isTTY: true,
+      writes: [] as string[],
+      write(s: string): boolean {
+        out.writes.push(s)
+        return true
+      },
+    }
+    const stdin = {
+      isTTY: true,
+      raw: [] as boolean[],
+      setRawMode(on: boolean): void {
+        stdin.raw.push(on)
+      },
+    }
+    return { out, stdin }
+  }
+
+  it('restores the terminal when the client exits abnormally', async () => {
+    const { out, stdin } = tty()
+    const gone = new Promise<string>((resolve) =>
+      spawnTuiClient({
+        bunCmd: 'node',
+        entry: '-e',
+        socketPath: 'process.exit(3)',
+        onGone: resolve,
+        tty: { out, stdin },
+      }),
+    )
+    expect(await gone).toContain('code 3')
+    expect(out.writes.join('')).toBe(TERMINAL_RESTORE)
+    expect(stdin.raw).toEqual([false])
+  })
+
+  it('leaves a cleanly exited client to its own restore', async () => {
+    const { out, stdin } = tty()
+    const gone = new Promise<string>((resolve) =>
+      spawnTuiClient({
+        bunCmd: 'node',
+        entry: '-e',
+        socketPath: 'process.exit(0)',
+        onGone: resolve,
+        tty: { out, stdin },
+      }),
+    )
+    expect(await gone).toContain('code 0')
+    expect(out.writes).toEqual([])
+    expect(stdin.raw).toEqual([])
+  })
+
+  it('does not write escapes at a non-tty', async () => {
+    const { out, stdin } = tty()
+    out.isTTY = false
+    stdin.isTTY = false
+    const gone = new Promise<string>((resolve) =>
+      spawnTuiClient({
+        bunCmd: 'node',
+        entry: '-e',
+        socketPath: 'process.exit(3)',
+        onGone: resolve,
+        tty: { out, stdin },
+      }),
+    )
+    expect(await gone).toContain('code 3')
+    expect(out.writes).toEqual([])
+    expect(stdin.raw).toEqual([])
   })
 })
