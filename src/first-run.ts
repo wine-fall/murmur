@@ -16,7 +16,7 @@ import { join } from 'node:path'
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from './contracts.ts'
 import { isYes, lineReader, type ReadLine } from './guide.ts'
-import type { Host } from './host.ts'
+import { ask, type Host } from './host.ts'
 import { claudeCodeRoot } from './paths.ts'
 import {
   BOOTSTRAP_OFFER,
@@ -93,7 +93,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   host.info(FIRST_RUN_INTRO)
   const answers: SeedAnswer[] = []
   for (const question of SEED_QUESTIONS) {
-    host.info(question)
+    ask(host, question, 'question')
     answers.push({ question, answer: (await read()).trim() })
   }
 
@@ -140,7 +140,9 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
 async function offerBootstrap(deps: FirstRunDeps, read: ReadLine): Promise<void> {
   const { harness } = deps
   if (harness === undefined) return // no real brain: nothing to run the task on
-  for (const line of BOOTSTRAP_OFFER) deps.host.info(line)
+  // One multi-line ask: the question leads, the framing rides as card notes
+  // (ref B2); the plain host prints the same lines in the same order.
+  ask(deps.host, BOOTSTRAP_OFFER.join('\n'), 'consent')
   if (!isYes(await read())) {
     deps.host.info('skipped — murmur will get to know you as it goes.')
     return

@@ -21,6 +21,8 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'state', state: { kind: 'gap' } },
   { v: 1, type: 'state', state: { kind: 'talk' }, microcopy: 'on the air' },
   { v: 1, type: 'info', text: 'now playing: a song' },
+  { v: 1, type: 'ask', text: 'what should I call you?', kind: 'question' },
+  { v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' },
   { v: 1, type: 'viz', bins: [0, 0.5, 1] },
   {
     v: 1,

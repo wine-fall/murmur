@@ -39,6 +39,19 @@ export const WARM = '#b07849'
 // the room's one cold accent.
 export const PERIWINKLE = '#a4aede'
 
+// The spotlight card's ground (§3.2-B as built): a step above the night, so
+// the card reads as the one lit thing while the room is hushed. CHIP is the
+// raised ground of the card's default choice.
+export const CARD = '#0c1526'
+export const CHIP = '#1a2540'
+
+// The spotlight dim (§3.2-B as built): while a question is on the card, the
+// whole room steps down one notch — same hue, less light. One function so the
+// palette stays the single point of color truth.
+export function hush(color: string): string {
+  return mix(color, INK.bg, 0.55)
+}
+
 const DEFAULT_ACCENT: Accent = { dim: '#6e665a', bright: '#c9bda8' }
 
 // Scene keys are spec 04's (`morning` | `afternoon` | `evening` | `late-night`),

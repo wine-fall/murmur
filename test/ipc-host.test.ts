@@ -145,6 +145,71 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(c.received.some((m) => m.type === 'segment' && m.text.includes('depth'))).toBe(false)
   })
 
+  it('carries a question to the client, and replays one asked before the attach', async () => {
+    // The first-run seeds are asked while the TUI is still booting (§3.2-B):
+    // a PENDING ask must reach a late-attaching client, or the dock opens
+    // empty on the question that started the whole flow.
+    host.ask('what should I call you?', 'question')
+    const c = await client()
+    c.attach()
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({
+      v: 1,
+      type: 'ask',
+      text: 'what should I call you?',
+      kind: 'question',
+    })
+    host.ask('allow? [y/N]', 'consent')
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({ v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' })
+  })
+
+  it('replays concurrently-pending asks in the order they were asked', async () => {
+    // Two SDK permission requests can be in flight at once; lineReader answers
+    // them in ask order, so the client must queue them in the same order
+    // (codex review: a single-slot dock let an answer authorize the WRONG one).
+    host.ask('run [Bash]: brew install yt-dlp\nallow? [y/N]', 'consent')
+    host.ask('run [Bash]: brew install ffmpeg\nallow? [y/N]', 'consent')
+    const c = await client()
+    c.attach()
+    await c.settle()
+    const asks = c.received.filter((m) => m.type === 'ask').map((m) => m.text)
+    expect(asks[0]).toContain('yt-dlp')
+    expect(asks[1]).toContain('ffmpeg')
+  })
+
+  it('does not replay an answered ask — the dock must not reopen a settled question', async () => {
+    // codex review: asks rode the general replay backlog with no clear event,
+    // so a client attaching later re-docked questions from earlier in the run.
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.ask('what should I call you? (Enter skips)', 'question')
+    first.line('call me smoke')
+    await first.settle()
+    expect(host.takeLine()).toBe('call me smoke')
+    // A takeover attach (no detach in between): the answered question is gone.
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.some((m) => m.type === 'ask')).toBe(false)
+  })
+
+  it('clears pending asks when the front-end dies — its readers all declined at EOF', async () => {
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.ask('paste your key:', 'question')
+    first.close()
+    await host.eof()
+    const second = await client()
+    second.attach()
+    await second.settle()
+    // The guide declined at EOF; re-docking the paste prompt would present a
+    // dead question as live.
+    expect(second.received.some((m) => m.type === 'ask')).toBe(false)
+  })
+
   it('feeds a submitted line into the same queue the CLI host uses', async () => {
     const c = await client()
     c.attach()

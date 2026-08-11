@@ -17,7 +17,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { devLogMirror, LineQueue, type Host } from './host.ts'
+import { devLogMirror, LineQueue, type AskKind, type Host } from './host.ts'
 import {
   decodeTuiMessage,
   encode,
@@ -60,6 +60,7 @@ export class IpcHost implements Host {
   private client: Socket | null = null
   private sockets = new Set<Socket>()
   private replay: EngineMessage[] = []
+  private pendingAsks: Extract<EngineMessage, { type: 'ask' }>[] = []
   private persona = ''
   private away: number | undefined
   private opts: IpcHostOptions
@@ -121,7 +122,12 @@ export class IpcHost implements Host {
       // Everything before a valid attach is noise from a peer we have not
       // agreed a protocol with.
       if (!attached) return
-      if (message.type === 'line') this.queue.push(message.text)
+      if (message.type === 'line') {
+        // The oldest pending ask is what this line answers, if any is —
+        // lineReader consumes in exactly this order.
+        this.pendingAsks.shift()
+        this.queue.push(message.text)
+      }
       if (message.type === 'vizSub') this.wantViz(message.on, message.fps)
       if (message.type === 'settingsSet') {
         // A successful set is broadcast by the store's own change event (the
@@ -145,6 +151,8 @@ export class IpcHost implements Host {
       // No more input will come from a front-end that is gone: a consuming
       // reader (guide / first run) declines instead of wedging, exactly as it
       // does on stdin EOF. A later attach re-opens input; eof is one-shot.
+      // Every pending question just got declined with it — nothing to replay.
+      this.pendingAsks = []
       this.markEof()
     })
   }
@@ -154,6 +162,8 @@ export class IpcHost implements Host {
     this.client = socket
     this.write(socket, { v: 1, type: 'hello', ...this.greeting() })
     for (const message of this.replay) this.write(socket, message)
+    // Only the questions still awaiting an answer, oldest first (§3.2-B).
+    for (const message of this.pendingAsks) this.write(socket, message)
     // Every attach gets a fresh snapshot (spec 12 §2.5) — which is exactly why
     // snapshots stay out of the replay backlog above.
     this.sendSettings()
@@ -267,6 +277,19 @@ export class IpcHost implements Host {
     this.mirror('host', message)
   }
 
+  // A marked question (spec 10 §3.2-B). Deliberately NOT through send(): the
+  // general replay backlog has no notion of "answered", and replaying a
+  // settled question would reopen the dock on it (codex review). Pending asks
+  // live in their own queue — a typed line answers the oldest (mirroring
+  // lineReader's serialized order), detach clears them all (every reader
+  // declined at EOF) — and an attach is handed only what is still pending.
+  ask(text: string, kind: AskKind): void {
+    const message = { v: 1, type: 'ask', text, kind } as const
+    this.pendingAsks.push(message)
+    if (this.client !== null) this.write(this.client, message)
+    this.mirror('host', text)
+  }
+
   onState(state: ProgramState): void {
     // The strip's words ride along with the state that earns them (§3.7.4).
     this.send({ v: 1, type: 'state', state, microcopy: statusMicrocopy(state) })
@@ -284,6 +307,7 @@ export class IpcHost implements Host {
   // than wait forever on a listener who cannot answer.
   frontEndGone(reason: string): void {
     this.mirror('tui', reason)
+    this.pendingAsks = []
     this.markEof()
   }
 

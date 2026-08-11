@@ -9,11 +9,12 @@ import {
   detectGaps,
   runSetup,
   SETUP_DECLINED,
+  setupOfferText,
   type SetupLedger,
   type SetupTargets,
   validateEndpoint,
 } from '../src/guide.ts'
-import type { Host } from '../src/host.ts'
+import type { AskKind, Host } from '../src/host.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import type { PreflightResult } from '../src/startup.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice-config.ts'
@@ -23,8 +24,12 @@ const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }
 const NO_BUN: PreflightResult = { ok: false, reason: "bun binary not found: 'bun'" }
 
-function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; infos: string[] } {
+function fakeHost(
+  lines: string[] = [],
+  { atEof = false, docked = false } = {},
+): { host: Host; infos: string[]; asks: { text: string; kind: AskKind }[] } {
   const infos: string[] = []
+  const asks: { text: string; kind: AskKind }[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
@@ -35,7 +40,8 @@ function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; i
     info: (m) => void infos.push(m),
     banner: () => {},
   }
-  return { host, infos }
+  if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
+  return { host, infos, asks }
 }
 
 function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
@@ -164,6 +170,58 @@ describe('runSetup — the once-per-boot offer', () => {
     // The shipped path keeps the SDK's per-action confirm (spec 03-03 §5.4).
     expect(req.permissionMode).toBeUndefined()
     expect(infos.join('\n')).toContain('yt-dlp')
+  })
+
+  it('docks the WHOLE pre-broadcast checklist as one consent ask (spec 10 §3.2-B spotlight)', async () => {
+    // Diagnosis and invitation share one card: ready rows, gap rows, then the
+    // y/N — the modal renders it whole, the plain host prints the same text.
+    const { host, infos, asks } = fakeHost(['y'], { docked: true })
+    const { guide } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger: fakeLedger(),
+      probes,
+    })
+    expect(asks).toHaveLength(1)
+    expect(asks[0]!.kind).toBe('consent')
+    expect(asks[0]!.text).toContain("type 'y'")
+    expect(asks[0]!.text).toContain('-- music')
+    // The probe detail is diagnostics, not card copy — it goes to the dev log.
+    expect(infos.join('\n')).not.toContain("type 'y'")
+  })
+
+  describe('setupOfferText — the checklist card copy', () => {
+    const gaps = [{ kind: 'voice', reason: 'no endpoint configured' } as const]
+
+    it('leads with the summary, lists ready rows before gap rows, ends with the y/N line', () => {
+      const lines = setupOfferText(targets(), gaps).split('\n')
+      expect(lines[0]).toContain("aren't set up")
+      const okAt = lines.findIndex((l) => l.startsWith('ok '))
+      const gapAt = lines.findIndex((l) => l.startsWith('-- '))
+      expect(okAt).toBeGreaterThan(0)
+      expect(gapAt).toBeGreaterThan(okAt)
+      expect(lines.at(-1)).toContain("type 'y'")
+    })
+
+    it('always credits the brain, and names each gap with its consequence', () => {
+      const text = setupOfferText(targets(), gaps)
+      expect(text).toContain('ok brain')
+      expect(text).toContain('-- voice')
+      expect(text).toContain('shown instead of spoken')
+    })
+
+    it('keeps the card ASCII-safe: no ambiguous-width symbols (probe finding)', () => {
+      // East-Asian-Ambiguous glyphs shift borders on some terminals; the card
+      // is immune only if its copy stays ASCII + CJK + box lines.
+      expect(setupOfferText(targets(), gaps)).toMatch(/^[\x20-\x7e\n]*$/)
+    })
+
+    it('lists only what this session wants: no bun row either way when bun is unwanted', () => {
+      const text = setupOfferText(targets({ wantsBun: false }), gaps)
+      expect(text).not.toContain('bun')
+    })
   })
 
   it('covers bun and the voice endpoint in the SAME conversation as music', async () => {
@@ -402,6 +460,32 @@ describe('runSetup — the voice endpoint conversation (issue #96)', () => {
     expect(readVoiceConfig(join(home, 'voice.json'))?.apiKey).toBe(secret)
     // Everything murmur printed — the ask included — carries no credential.
     expect(infos.join('\n')).not.toContain(secret)
+  })
+
+  it('docks the paste prompt as a question, still without the credential', async () => {
+    const secret = 'sk-not-a-real-key'
+    const { host, infos, asks } = fakeHost(['y', secret], { docked: true })
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        await req.tools?.[0]?.handler(
+          { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', needsApiKey: true },
+          {},
+        )
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, home }),
+      probes,
+      validateVoice: async () => {},
+    })
+    const paste = asks.find((a) => a.text.includes('paste'))
+    expect(paste?.kind).toBe('question')
+    const everything = [...infos, ...asks.map((a) => a.text)].join('\n')
+    expect(everything).not.toContain(secret)
   })
 })
 

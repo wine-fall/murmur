@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest'
 
 import { cliConversation, cliPermission, lineReader } from '../src/guide.ts'
-import type { Host } from '../src/host.ts'
+import type { AskKind, Host } from '../src/host.ts'
 
 // A host with scripted keyboard lines (the same stdin the Director uses).
 // atEof simulates a closed stdin (non-interactive run): no lines, ever.
-function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; infos: string[] } {
+// `docked` gives it a question surface (the TUI dock, spec 10 §3.2-B); without
+// one, questions fall back to info like the plain host.
+function fakeHost(
+  lines: string[] = [],
+  { atEof = false, docked = false } = {},
+): { host: Host; infos: string[]; asks: { text: string; kind: AskKind }[] } {
   const infos: string[] = []
+  const asks: { text: string; kind: AskKind }[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
@@ -17,7 +23,8 @@ function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; i
     info: (m) => void infos.push(m),
     banner: () => {},
   }
-  return { host, infos }
+  if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
+  return { host, infos, asks }
 }
 
 const askOptions = {
@@ -61,6 +68,21 @@ describe('cliPermission (spec 03-03 §2 — route the ask, never own the semanti
     const result = await ask('Write', { file_path: '/etc/hosts' }, askOptions)
     expect(result).toMatchObject({ behavior: 'deny' })
   })
+
+  it('docks the whole consent — tool, command, and the y/N — as ONE ask', async () => {
+    // The dock replaces the log's adjacency, so the question it pins must be
+    // self-contained: an "allow?" with the command left behind in the log
+    // would ask the user to approve something they cannot see.
+    const { host, asks, infos } = fakeHost(['y'], { docked: true })
+    const ask = cliPermission(host, lineReader(host))
+    await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
+    expect(asks).toHaveLength(1)
+    expect(asks[0]!.kind).toBe('consent')
+    expect(asks[0]!.text).toContain('Bash')
+    expect(asks[0]!.text).toContain('brew install yt-dlp')
+    expect(asks[0]!.text).toContain('[y/N]')
+    expect(infos).toEqual([])
+  })
 })
 
 describe('cliConversation', () => {
@@ -71,5 +93,12 @@ describe('cliConversation', () => {
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
+  })
+
+  it('docks the reply prompt as a question', async () => {
+    const { host, asks } = fakeHost(['sure'], { docked: true })
+    const next = cliConversation(host, lineReader(host))
+    await next()
+    expect(asks).toEqual([{ text: expect.stringContaining('/done'), kind: 'question' }])
   })
 })

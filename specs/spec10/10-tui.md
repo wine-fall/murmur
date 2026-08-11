@@ -189,7 +189,8 @@ Engine → TUI:
 | `segment` | `{ text }` | `onRadioSegment` |
 | `userLine` | `{ text }` | `onUserLine` echo |
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
-| `info` | `{ text }` | host info lines — including every guide/first-run prompt (§3.2-B) |
+| `info` | `{ text }` | host info lines — context, notices, and everything that is not a question (§3.2-B) |
+| `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
 | `viz` | `{ bins: number[] }` | one FFT frame (§3.6); highest-frequency message |
 | `bye` | `{}` | engine is shutting down |
 
@@ -298,13 +299,72 @@ two shipped flows temporarily repurpose the input line as an answer field:
   permission prompts ("setup assistant wants to run [tool]: … allow?
   [y/N]"), and free natural-language replies with `/done` to finish.
 
-On the wire these are ordinary `info` (the question) + `line` (the answer) —
+~~On the wire these are ordinary `info` (the question) + `line` (the answer) —
 **no new message type and no engine change**; the consuming-reader semantics
 live entirely engine-side. The TUI's obligation is rendering: the latest
 `info` prompt must be visually adjacent to the input line (not lost in the
 scrolling log) while a Q&A flow is active. A dedicated question-highlight
 affordance is an open question (§6); v1 may rely on recency + log order,
-which is exactly what the plain host relies on today.
+which is exactly what the plain host relies on today.~~
+
+**Superseded (2026-08-11): questions are marked, and the TUI docks them.**
+Recency-adjacency proved too weak once the log breathes (§6.1 spacing) — a
+question is indistinguishable from a notice. The seam grew one optional
+method, `Host.ask(text, kind)` with `kind: 'question' | 'consent'`, routed
+through the `ask()` helper in `src/host.ts` so a bare host falls back to
+`info` (the plain front-end's behavior is unchanged). Every consuming-read
+call site sends its question through it: the three first-run seeds and the
+CC-bootstrap y/N (`src/first-run.ts`), the setup entry consent, the per-tool
+permission prompts (one self-contained ask carrying the command AND the y/N),
+the secret paste prompt, and the free-reply prompt (`src/guide.ts`). Context
+lines (gap lists, offer framing) stay `info`. On the wire this is the
+additive `ask` message (§2.3). Pending asks are their own engine-side queue,
+NOT the general replay backlog: an attach is handed only the questions still
+awaiting an answer (oldest first), a typed `line` settles the oldest (the
+exact order `lineReader` consumes in), and a detach clears the queue — every
+reader just declined at EOF — so a reattach never re-docks a settled or dead
+question. The client mirrors that queue and pins its HEAD in a bordered
+**question dock** directly above the input line — titled by kind, wrapped to
+width (`tui/src/dock.ts`), the same text also appended to the log for the
+record. Head, not latest: two SDK permission asks can be in flight at once,
+and a single-slot dock could show command B while the typed `y` authorizes
+command A. Submit answers the head and reveals the next; while any question
+is docked, EVERY submitted line is an answer, the empty line included
+(before the dock, the client dropped empty lines wholesale, which made spec
+06's "Enter to skip" impossible in the TUI — `outbound()` in `dock.ts` now
+owns that decision). The consuming-reader semantics still live entirely
+engine-side; the dock is presentation, never a second grammar.
+
+**Spotlight form (2026-08-11, user-decided — concept B of the design
+exploration).** The dock's presentation is a modal moment: while any ask is
+pending, the whole room steps down one notch (`hush()` in `palette.ts` — the
+single color point — applied to strip, log, sky accents, and now-playing;
+the kitty raster layer is deleted outright and repainted when the card
+clears, because it composites ABOVE text cells) and the head ask renders as
+a centered rounded card (~2/3 content width) on the `CARD` ground in the
+dock's slot above the input, which keeps its full light as the answer field.
+Kind picks the frame: warm/ember for a question (with a client-side `#n`
+counter in the title), periwinkle for a consent (` · optional` in the title)
+— the listener's color, because the decision is theirs; a consent card
+closes with a two-option row whose default (`> N - not now (Enter)`) sits on
+a raised `CHIP`, while a checklist card titles itself ` pre-broadcast
+check ` and swaps the chip for the quiet two-exit row (fix now / start the
+radio). The opening line splits at its first `? ` — lead sentence bright,
+detail quiet (design ref B1) — and the CC-bootstrap offer ships as one
+multi-line consent ask (question first, the why-lines as card notes, ref
+B2). Card text carries
+its hierarchy in-band (`cardLines()`): first line bright, later lines
+quieter, and ASCII role markers — `ok ` (sage) / `-- ` (notice) — mark the
+pre-broadcast checklist that the setup offer now ships as ONE ask
+(`setupOfferText()` in `src/guide.ts`: summary, ready rows, gap rows, then
+the y/N; probe detail demoted to the dev log), with a divider drawn between
+the facts and the closing invite. Card copy is ASCII + CJK + box lines ONLY:
+East-Asian-Ambiguous glyphs (`✦ ◉ ✓ ○ …`) shift box borders on terminals
+that render them double-width, so decorative symbols stay in the log
+(border-vs-CJK alignment itself was probed clean on both `widthMethod`s).
+Deliberately deferred, additive when wanted: an `ask` hint field for
+placeholder examples and per-flow option copy, and step metadata for a real
+`n/total` — the counter and the generic option row cost zero wire changes.
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode). The engine parses
 all of them from the same line stream; the TUI never grows its own command
@@ -628,9 +688,11 @@ TUI work is built on the framework choice.
 - **Reconciler**: React chosen (§3.1); if gate 1 or early build friction
   implicates React specifically, Solid is the drop-in alternative (opencode's
   production path).
-- **Q&A affordance** (§3.2-B): is recency-adjacency enough for guide/first-run
+- ~~**Q&A affordance** (§3.2-B): is recency-adjacency enough for guide/first-run
   prompts, or does the input line deserve a question-mode hint (placeholder
-  text, prompt pinned above input)? Decide during the build, by feel.
+  text, prompt pinned above input)? Decide during the build, by feel.~~
+  **Resolved (2026-08-11)**: both — the question dock pins the marked ask
+  above the input and the placeholder flips to answer mode (§3.2-B as built).
 - **Per-track palette source** (§3.7.2): thumbnails vs metadata-derived vs
   scene-only for v1 — decide when the tinting mechanism lands.
 - **Visualizer during talk** (§3.6): voice envelope vs quiet strip — by ear.

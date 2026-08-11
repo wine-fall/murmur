@@ -100,6 +100,11 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     microcopy: z.string().optional(),
   }),
   z.object({ v, type: z.literal('info'), text: z.string() }),
+  // A question pinned beside the input (spec 10 §3.2-B): the guide's consents
+  // and the first-run seeds, marked so the front-end can dock them instead of
+  // guessing which info line wants an answer. Additive — an older client drops
+  // it and keeps the info-line adjacency it already relies on.
+  z.object({ v, type: z.literal('ask'), text: z.string(), kind: z.enum(['question', 'consent']) }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
   // after every settingsSet — the pane always renders truth, never local

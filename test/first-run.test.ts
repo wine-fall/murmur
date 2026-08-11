@@ -88,7 +88,11 @@ describe('onboarding (criterion 2)', () => {
     expect(path).toBe(home)
     expect(readFileSync(home, 'utf-8')).toBe(GENERATED.trim())
     expect(readFileSync(home, 'utf-8')).not.toBe(SEED_TEXT)
-    for (const q of SEED_QUESTIONS) expect(host.infos).toContain(q)
+    // Seeds are marked questions (spec 10 §3.2-B): the TUI docks them, the
+    // plain host prints them — FakeHost has the surface, so they land there.
+    for (const q of SEED_QUESTIONS) {
+      expect(host.asks).toContainEqual({ text: q, kind: 'question' })
+    }
     expect(brain.calls[0]!.map((a) => a.answer)).toEqual([
       'call me Zach',
       'company while I work',
@@ -209,16 +213,35 @@ describe('slice B consent gate (criterion 6)', () => {
     const host = scriptedHost([], { eof: true })
     await runFirstRun(deps({ host, harness, memoryDir, fallbackSeedPath: seed }))
     expect(harness.calls).toBe(0)
-    expect(host.infos.join('\n')).not.toContain('Claude Code history')
+    expect(everythingSaid(host)).not.toContain('Claude Code history')
   })
 
   it('no harness (no real brain) means the offer is never made', async () => {
     const { memoryDir, seed } = workspace()
     const host = scriptedHost([...answered(), 'y'])
     await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed }))
+    expect(everythingSaid(host)).not.toContain('Claude Code history')
+  })
+
+  it('ships the offer as ONE consent ask: question first, the why-lines riding as card notes', async () => {
+    // Ref B2: the question leads, "why murmur dares to ask" and "skipping is
+    // fine" live INSIDE the card as quiet notes — one ask, no separate infos.
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'n'])
+    await runFirstRun(deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed }))
+    const consent = host.asks.find((a) => a.kind === 'consent')
+    const lines = consent?.text.split('\n') ?? []
+    expect(lines[0]).toContain('Claude Code history')
+    expect(lines[0]).toContain('[y/N]')
+    expect(consent?.text).toContain('stay on this machine')
     expect(host.infos.join('\n')).not.toContain('Claude Code history')
   })
 })
+
+// Everything the user saw, wherever the front-end put it.
+function everythingSaid(host: FakeHost): string {
+  return [...host.infos, ...host.asks.map((a) => a.text)].join('\n')
+}
 
 describe('slice B execution (criteria 8 and 9)', () => {
   const bootstrapDeps = (over: Partial<Parameters<typeof runProfileBootstrap>[0]>) => ({

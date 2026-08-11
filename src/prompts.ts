@@ -457,14 +457,15 @@ Return ONLY the persona text. No preamble, no commentary, no code fences.
 
 // The slice-B offer (spec 06 §3.4). Stated plainly: what is read, what crosses
 // the already-sanctioned Claude hop, and that skipping costs nothing.
+// One consent ask (spec 10 §3.2-B spotlight, ref B2): the question leads, the
+// why-lines ride as quiet card notes. ASCII + the card-copy discipline.
 export const BOOTSTRAP_OFFER = [
-  'One optional shortcut: murmur can read your local Claude Code history to ' +
-    'get a first sense of who you are, so it does not start from nothing.',
-  'The transcripts stay on this machine, but the excerpts it chooses to read ' +
-    'are sent to Claude as part of the analysis — the same hop every beat of ' +
-    'the program already uses. It runs once, in the background.',
-  'Skipping is completely fine: murmur just gets to know you as it goes. ' +
-    'Read your Claude Code history? [y/N]',
+  'Read your local Claude Code history to get a first sense of you? [y/N]',
+  'Why murmur dares to ask - the transcripts stay on this machine; the ' +
+    'excerpts it chooses to read are sent to Claude as part of the analysis, ' +
+    'the same hop every beat of the program already uses; it runs once, in ' +
+    'the background.',
+  'Skipping is completely fine: murmur just gets to know you as it goes.',
 ] as const
 
 export const BOOTSTRAP_PROFILE_SYSTEM_PROMPT =
