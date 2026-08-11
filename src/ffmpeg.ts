@@ -3,7 +3,7 @@
 // everything (stream URLs, cached bed files, local fixtures) arrives as
 // interleaved float32 PCM at the mix rate.
 
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { once } from 'node:events'
 
 export const MIX_RATE = 48_000
@@ -44,6 +44,22 @@ export type DecodeOptions = {
   // Abort kills the decoder promptly (the engine's stop path) — treated as a
   // deliberate end, not a decode failure.
   signal?: AbortSignal
+  // Start decoding this many seconds in (the bed resume, spec 03-04). Seeking
+  // past the end yields an empty stream, which callers treat as a track miss.
+  startS?: number
+}
+
+// The decoder invocation, exposed for tests: `-ss` sits BEFORE `-i` (input-side
+// seek — near-instant on local files) so resume never stalls the audio path.
+export function decodeArgs(source: string, startS?: number): string[] {
+  // prettier-ignore
+  return [
+    '-nostdin', '-hide_banner', '-loglevel', 'error',
+    ...(startS ? ['-ss', String(startS)] : []),
+    '-i', source,
+    '-f', 'f32le', '-ar', String(MIX_RATE), '-ac', String(MIX_CHANNELS),
+    'pipe:1',
+  ]
 }
 
 // Decode any source ffmpeg reads (stream URL, local file) into mix-format PCM
@@ -53,20 +69,10 @@ export type DecodeOptions = {
 // Ending the iteration early (break / return) kills the decoder; no orphans.
 export async function* ffmpegDecode(
   source: string,
-  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal }: DecodeOptions = {},
+  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal, startS }: DecodeOptions = {},
 ): AsyncGenerator<Float32Array> {
   if (signal?.aborted) return
-  const proc = spawn(
-    ffmpegCmd,
-    // prettier-ignore
-    [
-      '-nostdin', '-hide_banner', '-loglevel', 'error',
-      '-i', source,
-      '-f', 'f32le', '-ar', String(MIX_RATE), '-ac', String(MIX_CHANNELS),
-      'pipe:1',
-    ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  )
+  const proc = spawn(ffmpegCmd, decodeArgs(source, startS), { stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''
   proc.stderr.on('data', (c: Buffer) => (stderr = (stderr + c.toString()).slice(-2000)))
   const onAbort = () => proc.kill('SIGKILL')
@@ -92,6 +98,27 @@ export async function* ffmpegDecode(
     signal?.removeEventListener('abort', onAbort)
     if (!finished && proc.exitCode === null) proc.kill('SIGKILL')
   }
+}
+
+// A local file's duration in seconds (the bed resume's bound check): the seek
+// offset must never point past the real end. Fails closed — a missing ffprobe,
+// a hung probe (killed at the deadline), or unparseable output is null, and the
+// caller starts from the top instead.
+// ponytail: ffprobe ships beside every ffmpeg install; a config knob for its
+// path can arrive with the first user whose ffprobe lives elsewhere.
+export function probeDurationS(source: string, ffprobeCmd = 'ffprobe', timeoutMs = 15_000): Promise<number | null> {
+  return new Promise((resolve) => {
+    execFile(
+      ffprobeCmd,
+      ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', source],
+      { timeout: timeoutMs },
+      (err, stdout) => {
+        if (err) return resolve(null)
+        const seconds = Number.parseFloat(stdout.trim())
+        resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : null)
+      },
+    )
+  })
 }
 
 // Pull-time playability probe (spec 03-01 §2.3 seam, owned here with the rest of
