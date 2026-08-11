@@ -31,6 +31,24 @@
 > Python cache layout and sha256[:16] key, so an existing warm cache is reused
 > as-is. Gains remain module constants (`BED_GAIN` 0.5 / `BED_XFADE_S` 1.5 s,
 > the Python as-built values); config/CLI carry only `--no-bed`.
+> **Resume (2026-08-11)**: the bed picks up where the last run left off instead
+> of replaying the first track's opening every boot — the always-on-the-air
+> illusion. `stopBed` freezes the audible track + offset (`engine.bedPosition()`);
+> clean shutdown persists it to `<cache>/bed/.position.json` (track **basename**
+> + offset, atomic temp-file + rename, hidden so it never lists as a track); the
+> next boot's `startBed(bed, resume)` rotates the track list to the saved track
+> and hands the decoder the offset (`ffmpeg -ss` before `-i`, input-side seek).
+> With nothing (validly) saved — first boot, damaged file, vanished track, or a
+> stale offset past the track's real end (`ffprobe`-checked at loading time) —
+> the bed opens on a **random track at a random in-bounds offset** (never inside
+> the final crossfade tail), so no two fresh boots start on the same bars.
+> Degradation: no ffprobe / unreadable duration degrades the random pick to the
+> track top; a seek past EOF yields an empty stream, which the existing miss
+> logic skips — and a track that never makes a sound is never recorded as the
+> position, so a bad offset cannot repeat its own failure across boots. A kill
+> without clean shutdown loses only that run's position. State lives beside the
+> cache it points into — wiping the cache wipes the position, and it is not a
+> settings.json knob.
 > **Part**: An extension of the [`03-02`](03-02-ducking.md) mixing engine. 03-02
 > plays a **featured song** and ducks it under voice, but during pure talk there
 > is **no music at all** — silence under the host. This spec adds a continuous,

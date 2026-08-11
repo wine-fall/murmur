@@ -3,12 +3,21 @@
 // process, shut down cleanly. The engine is the sole audio authority — the
 // interim subprocess player is gone.
 
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
 
 import { IdleSensor, osIdleProbe } from './activity.ts'
-import { CachedBedSource, DEFAULT_MANIFEST, defaultBedCacheDir, pullBed, ytdlpDownload } from './bed.ts'
+import {
+  CachedBedSource,
+  DEFAULT_MANIFEST,
+  defaultBedCacheDir,
+  initialBedPosition,
+  pullBed,
+  readBedPosition,
+  writeBedPosition,
+  ytdlpDownload,
+} from './bed.ts'
 import { ClaudeBrain, StubBrain } from './brain.ts'
 import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
@@ -16,7 +25,7 @@ import type { Config } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
 import { Director, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
-import { ffmpegDecode, MIX_RATE, probeStream } from './ffmpeg.ts'
+import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
 import { CliHost, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
@@ -345,7 +354,12 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const context = new AudioContext({ sampleRate: MIX_RATE, latencyHint: 'playback' })
   const engine = new AudioEngine({
     context,
-    decode: (source, signal) => ffmpegDecode(source, { ffmpegCmd: config.ffmpegCmd, signal }),
+    decode: (source, signal, startS) =>
+      ffmpegDecode(source, {
+        ffmpegCmd: config.ffmpegCmd,
+        signal,
+        ...(startS !== undefined && { startS }),
+      }),
     log: (m) => host.info(m),
   })
 
@@ -403,15 +417,22 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the
   // music check — a warm cache needs no yt-dlp, so talk-only sessions keep it.
+  const bedCacheDir = defaultBedCacheDir()
   if (config.bedEnabled) {
-    const cacheDir = defaultBedCacheDir()
     await pullBed({
       manifest: DEFAULT_MANIFEST,
-      cacheDir,
+      cacheDir: bedCacheDir,
       download: (ref, destBase) => ytdlpDownload(ref, destBase, config.ytdlpCmd),
       log: (m) => host.info(m),
     })
-    await engine.startBed(new CachedBedSource(cacheDir))
+    const bed = new CachedBedSource(bedCacheDir)
+    // Pick up where the last run left off (spec 03-04 resume); nothing saved
+    // (or a stale/vanished position) starts a random track at a random
+    // in-bounds offset, so no two fresh boots open on the same bars.
+    await engine.startBed(
+      bed,
+      await initialBedPosition(bed.tracks(), readBedPosition(bedCacheDir), (t) => probeDurationS(t)),
+    )
   }
 
   const music =
@@ -483,6 +504,16 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // Frames stop before the graph they read does.
     viz?.stop()
     await engine.aclose()
+    // Remember where the bed was (spec 03-04 resume) — stopBed froze it inside
+    // aclose. Best-effort: an fs failure costs only next boot's continuity.
+    const bedPos = engine.bedPosition()
+    if (bedPos !== null) {
+      try {
+        writeBedPosition(bedCacheDir, { track: basename(bedPos.track), offsetS: bedPos.offsetS })
+      } catch {
+        // never mask the shutdown
+      }
+    }
     await voice.close()
     // Final compaction flush (spec 05 §3.6): fold any remaining backlog so a
     // long session's tail lands in the profile. Best-effort and time-boxed by

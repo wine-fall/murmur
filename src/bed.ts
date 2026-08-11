@@ -6,12 +6,14 @@
 
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { mkdir, readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import type { BedSource } from './contracts.ts'
+import { z } from 'zod'
+
+import type { BedPosition, BedSource } from './contracts.ts'
 import { cacheRoot } from './paths.ts'
 
 // fileURLToPath, not URL.pathname: pathname keeps %-escapes (a checkout path
@@ -46,6 +48,77 @@ function cachedFiles(cacheDir: string): string[] {
     .filter((name) => !name.startsWith('.') && !SKIP_SUFFIXES.some((s) => name.endsWith(s)))
     .sort()
     .map((name) => join(cacheDir, name))
+}
+
+// Where the bed left off, beside the tracks it points into (spec 03-04 resume):
+// wiping the cache wipes the position with it, which is the right semantic. The
+// leading dot keeps it out of cachedFiles' track listing. `track` is a basename,
+// so the position survives a relocated MURMUR_HOME.
+const POSITION_FILE = '.position.json'
+
+const BedPositionSchema = z.object({ track: z.string().min(1), offsetS: z.number().nonnegative() })
+
+// A missing, damaged, or hand-mangled file is simply "no position" — the bed
+// starts from the top, never a boot failure.
+export function readBedPosition(cacheDir: string): BedPosition | null {
+  let raw: string
+  try {
+    raw = readFileSync(join(cacheDir, POSITION_FILE), 'utf8')
+  } catch {
+    return null
+  }
+  try {
+    const checked = BedPositionSchema.safeParse(JSON.parse(raw))
+    return checked.success ? checked.data : null
+  } catch {
+    return null
+  }
+}
+
+// Temp-file + rename (the settings discipline) so a reader never sees a torn file.
+export function writeBedPosition(cacheDir: string, position: BedPosition): void {
+  mkdirSync(cacheDir, { recursive: true })
+  const path = join(cacheDir, POSITION_FILE)
+  writeFileSync(`${path}.tmp`, `${JSON.stringify(position)}\n`, 'utf8')
+  renameSync(`${path}.tmp`, path)
+}
+
+// Map a saved basename back onto the cached track list. undefined = no resume
+// (nothing saved, or the track has left the cache) — start from the top.
+export function resumeFrom(tracks: string[], saved: BedPosition | null): BedPosition | undefined {
+  if (saved === null) return undefined
+  const track = tracks.find((t) => basename(t) === saved.track)
+  return track === undefined ? undefined : { track, offsetS: saved.offsetS }
+}
+
+// The tail we never aim a seek into: landing inside the final crossfade plays a
+// blink of audio and rolls over — start earlier (or from the top) instead.
+const RESUME_TAIL_S = 10
+
+// The boot-time start decision (spec 03-04 resume). A saved position whose
+// offset fits inside the track's real duration wins. Everything else — first
+// boot, a vanished track, a stale offset past the end — lands on a RANDOM track
+// at a RANDOM in-bounds offset, so no two fresh boots open on the same bars.
+// `durationOf` returning null (no ffprobe, unreadable file) degrades the pick
+// to offset 0 and keeps a saved offset as-is: the engine's miss handling owns
+// whatever the probe could not rule out.
+export async function initialBedPosition(
+  tracks: string[],
+  saved: BedPosition | null,
+  durationOf: (track: string) => Promise<number | null>,
+  random: () => number = Math.random,
+): Promise<BedPosition | undefined> {
+  const resumed = resumeFrom(tracks, saved)
+  if (resumed !== undefined) {
+    const duration = await durationOf(resumed.track)
+    if (duration === null || resumed.offsetS < Math.max(0, duration - RESUME_TAIL_S)) return resumed
+    // stale offset: fall through to a fresh random start
+  }
+  if (tracks.length === 0) return undefined
+  const track = tracks[Math.floor(random() * tracks.length) % tracks.length]!
+  const duration = await durationOf(track)
+  if (duration === null || duration <= RESUME_TAIL_S) return { track, offsetS: 0 }
+  return { track, offsetS: random() * (duration - RESUME_TAIL_S) }
 }
 
 // The runtime BedSource (spec 03-04 §2.2): local cached files, stable order.

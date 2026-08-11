@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { framedChunks, ffmpegDecode, probeStream } from '../src/ffmpeg.ts'
+import { decodeArgs, framedChunks, ffmpegDecode, probeDurationS, probeStream } from '../src/ffmpeg.ts'
 
 async function* bytes(...chunks: Buffer[]): AsyncGenerator<Buffer> {
   for (const c of chunks) yield c
@@ -40,6 +40,21 @@ describe('framedChunks', () => {
   })
 })
 
+describe('decodeArgs', () => {
+  it('seeks before the input when startS is set (input-side -ss, the fast path)', () => {
+    const args = decodeArgs('song.m4a', 42.5)
+    const ss = args.indexOf('-ss')
+    expect(ss).toBeGreaterThanOrEqual(0)
+    expect(args[ss + 1]).toBe('42.5')
+    expect(ss).toBeLessThan(args.indexOf('-i'))
+  })
+
+  it('omits the seek when unset or zero', () => {
+    expect(decodeArgs('song.m4a')).not.toContain('-ss')
+    expect(decodeArgs('song.m4a', 0)).not.toContain('-ss')
+  })
+})
+
 describe('ffmpegDecode', () => {
   it('raises when the decoder cannot be spawned', async () => {
     const stream = ffmpegDecode('anything', { ffmpegCmd: '/nonexistent/ffmpeg-binary' })
@@ -56,5 +71,20 @@ describe('probeStream', () => {
 
   it('reports false for a probe binary that cannot spawn', async () => {
     expect(await probeStream('src', '/nonexistent/ffmpeg-binary')).toBe(false)
+  })
+})
+
+describe('probeDurationS', () => {
+  it('is null for a probe binary that cannot spawn', async () => {
+    expect(await probeDurationS('src', '/nonexistent/ffprobe-binary')).toBeNull()
+  })
+
+  it('kills a hung probe at the deadline and reports null', async () => {
+    expect(await probeDurationS('src', 'yes', 300)).toBeNull()
+  })
+
+  it('is null for output that is not a positive duration', async () => {
+    // `echo` prints the args, not a number — the parse must fail closed.
+    expect(await probeDurationS('src', 'echo')).toBeNull()
   })
 })

@@ -92,6 +92,12 @@ export interface BedSource {
   tracks(): string[]
 }
 
+// Where the bed left off (spec 03-04 resume): the audible track and the offset
+// within it, captured at clean shutdown and replayed on the next boot. `track`
+// is whatever string the BedSource listed (a path in the engine, a basename in
+// the persisted file).
+export type BedPosition = { track: string; offsetS: number }
+
 // 'anchor' keys one aired time anchor (spec 07 §2.4), so a restart inside the
 // window does not re-fire it. 'setup' keys the onboarding offer's standing
 // answer (spec 03-03 §7.1): a recorded decline is what turns later boots with

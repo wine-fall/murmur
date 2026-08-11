@@ -313,6 +313,92 @@ describe('background bed (spec 03-04)', () => {
   })
 })
 
+// The bed remembers where it stopped (spec 03-04 resume): stopBed freezes the
+// audible track + offset, and the next startBed replays from there.
+describe('bed resume (spec 03-04)', () => {
+  const bedOf = (...tracks: string[]) => ({ tracks: () => tracks })
+
+  it('starts at the resumed track, handing decode the offset, then wraps in list order', async () => {
+    const calls: [string, number | undefined][] = []
+    const decode: Decode = (source, signal, startS) => {
+      calls.push([source, startS])
+      return dcChunks(0.4, 1)(source, signal)
+    }
+    const { context, engine } = build(2.5, decode, { bedGain: 0.5, bedXfadeS: 0.2 })
+    await engine.startBed(bedOf('bed://a', 'bed://b'), { track: 'bed://b', offsetS: 3 })
+    await settle()
+    await context.startRendering()
+    await settle()
+    expect(calls[0]).toEqual(['bed://b', 3])
+    expect(calls[1]?.[0]).toBe('bed://a')
+    expect(calls[1]?.[1]).toBeUndefined() // the offset applies to the resumed track alone
+    await engine.aclose()
+  })
+
+  it('ignores a resume track that is no longer cached', async () => {
+    const calls: [string, number | undefined][] = []
+    const decode: Decode = (source, signal, startS) => {
+      calls.push([source, startS])
+      return dcChunks(0.4, 30)(source, signal)
+    }
+    const { engine } = build(1, decode, { bedGain: 0.5 })
+    await engine.startBed(bedOf('bed://a'), { track: 'bed://gone', offsetS: 9 })
+    await settle()
+    expect(calls[0]).toEqual(['bed://a', undefined])
+    await engine.aclose()
+  })
+
+  it('bedPosition() reports the live track and elapsed offset from the resume point', async () => {
+    const { context, engine } = build(2, dcChunks(0.4, 30), { bedGain: 0.5, bedXfadeS: 0.2 })
+    await engine.startBed(bedOf('bed://a'), { track: 'bed://a', offsetS: 3 })
+    await settle()
+    await context.startRendering() // the offline clock ends at t=2
+    const pos = engine.bedPosition()
+    expect(pos?.track).toBe('bed://a')
+    expect(pos?.offsetS).toBeCloseTo(5, 0) // 3 saved + 2 rendered
+    await engine.aclose()
+  })
+
+  it('stopBed freezes the position so shutdown can persist it after aclose', async () => {
+    const { context, engine } = build(2, dcChunks(0.4, 30), { bedGain: 0.5 })
+    await engine.startBed(bedOf('bed://a'))
+    await settle()
+    await context.startRendering()
+    await engine.aclose()
+    const pos = engine.bedPosition()
+    expect(pos?.track).toBe('bed://a')
+    expect(pos?.offsetS).toBeCloseTo(2, 0)
+  })
+
+  it('is null when no bed ever ran', async () => {
+    const { engine } = build(1, dcChunks(0, 0))
+    expect(engine.bedPosition()).toBeNull()
+    await engine.aclose()
+    expect(engine.bedPosition()).toBeNull()
+  })
+
+  it('a track that never makes a sound is never the position (nothing stale persists)', async () => {
+    const { engine } = build(1, deadStream, { bedGain: 0.5 })
+    await engine.startBed(bedOf('bed://a'), { track: 'bed://a', offsetS: 9999 })
+    await settle()
+    await engine.aclose()
+    expect(engine.bedPosition()).toBeNull() // shutdown has nothing to write back
+  })
+
+  it('after a dead track the position reports the live one that followed', async () => {
+    const streams: Record<string, Decode> = {
+      'bed://dead': deadStream,
+      'bed://live': dcChunks(0.4, 30),
+    }
+    const decode: Decode = (source, signal) => streams[source]!(source, signal)
+    const { engine } = build(1, decode, { bedGain: 0.5 })
+    await engine.startBed(bedOf('bed://dead', 'bed://live'))
+    await settle()
+    expect(engine.bedPosition()?.track).toBe('bed://live')
+    await engine.aclose()
+  })
+})
+
 describe('teardown', () => {
   it('a closed engine takes no new clip (no dead-sink wait)', async () => {
     const { engine } = build(1, dcChunks(0, 0))

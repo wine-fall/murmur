@@ -18,7 +18,7 @@
 
 import { readFile } from 'node:fs/promises'
 
-import type { AudioClip, BedSource, MixingPlayer, MusicHandle } from './contracts.ts'
+import type { AudioClip, BedPosition, BedSource, MixingPlayer, MusicHandle } from './contracts.ts'
 
 // Starting values tuned by ear on the Python engine (spec 03-02 §6 / 03-04 §3.3).
 export const FULL_GAIN = 1.0
@@ -46,7 +46,9 @@ const MUTE_RAMP_S = 0.08
 const FFT_SIZE = 1024
 const VIZ_SMOOTHING = 0.5
 
-export type Decode = (source: string, signal: AbortSignal) => AsyncIterable<Float32Array>
+// `startS` asks the decoder to begin that many seconds in (the bed resume);
+// implementations without a seek are free to ignore it.
+export type Decode = (source: string, signal: AbortSignal, startS?: number) => AsyncIterable<Float32Array>
 
 function sleepUnref(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms).unref())
@@ -264,6 +266,10 @@ export class AudioEngine implements MixingPlayer {
   private bedAbort: AbortController | null = null
   private bedStreams = new Set<StreamedSource>()
   private bedTask: Promise<void> | null = null
+  // The playing track's bookkeeping for bedPosition(): where it began on the
+  // context clock and how far into the file that instant already was.
+  private bedNow: { track: string; startedAt: number; baseS: number } | null = null
+  private bedLast: BedPosition | null = null // frozen by stopBed for shutdown to read
 
   constructor(deps: AudioEngineDeps) {
     this.ctx = deps.context
@@ -436,7 +442,10 @@ export class AudioEngine implements MixingPlayer {
 
   // -- background bed (spec 03-04) ------------------------------------------ //
 
-  async startBed(bed: BedSource): Promise<void> {
+  // `resume` replays a saved position (spec 03-04 resume): the named track goes
+  // first with its offset, then the rotation continues in list order. A track
+  // no longer in the list quietly starts the bed from the top instead.
+  async startBed(bed: BedSource, resume?: BedPosition): Promise<void> {
     if (this.bedMaster !== null) return
     const tracks = bed.tracks()
     if (tracks.length === 0) return // no cache -> no bed, radio still runs
@@ -445,15 +454,37 @@ export class AudioEngine implements MixingPlayer {
     master.connect(this.bus)
     this.bedMaster = master
     this.bedAbort = new AbortController()
+    this.bedLast = null
     ramp(master.gain, this.bedGain, this.ctx.currentTime, this.bedXfadeS)
-    this.bedTask = this.runBed(tracks, master, this.bedAbort.signal)
+    const at = resume !== undefined ? tracks.indexOf(resume.track) : -1
+    const startIdx = at >= 0 ? at : 0
+    const resumeS = at >= 0 && resume !== undefined ? resume.offsetS : 0
+    this.bedTask = this.runBed(tracks, master, this.bedAbort.signal, startIdx, resumeS)
+  }
+
+  // Where the bed is on the air right now — or, once stopBed has run, where it
+  // was when it stopped (so shutdown can persist it after aclose). A track the
+  // loop has scheduled but not yet started reports offset 0: resuming it from
+  // its top is what would have happened moments later anyway.
+  bedPosition(): BedPosition | null {
+    if (this.bedLast !== null) return this.bedLast
+    if (this.bedNow === null) return null
+    const { track, startedAt, baseS } = this.bedNow
+    return { track, offsetS: Math.max(0, baseS + this.ctx.currentTime - startedAt) }
   }
 
   // The bed loop: stream each cached track in turn, crossfading track-to-track
   // (and wrapping the list) so the backdrop never gaps. Scheduling paces itself:
   // eof lands only when playback is within the lead of a track's end.
-  private async runBed(tracks: string[], master: GainNode, signal: AbortSignal): Promise<void> {
-    let idx = 0
+  private async runBed(
+    tracks: string[],
+    master: GainNode,
+    signal: AbortSignal,
+    startIdx: number,
+    resumeS: number,
+  ): Promise<void> {
+    let idx = startIdx
+    let offsetS = resumeS
     let misses = 0
     let startAt = 0
     while (!signal.aborted) {
@@ -461,10 +492,23 @@ export class AudioEngine implements MixingPlayer {
       idx += 1
       const trackGain = this.ctx.createGain()
       trackGain.connect(master)
-      const stream = scheduleStream(this.ctx, trackGain, this.decode(source, signal), {
-        leadS: this.leadS,
-        startAt,
+      const stream = scheduleStream(
+        this.ctx,
+        trackGain,
+        this.decode(source, signal, offsetS > 0 ? offsetS : undefined),
+        {
+          leadS: this.leadS,
+          startAt,
+        },
+      )
+      // Bookkeeping waits for real audio: a stream that dies (or a seek past
+      // EOF) must never become the position shutdown writes back — a stale
+      // saved offset would otherwise repeat its own failure every boot.
+      const now = { track: source, startedAt: Math.max(startAt, this.ctx.currentTime), baseS: offsetS }
+      void stream.started.then((ok) => {
+        if (ok) this.bedNow = now
       })
+      offsetS = 0 // the saved offset belongs to the resumed track alone
       this.bedStreams.add(stream)
       void stream.done.then(() => this.bedStreams.delete(stream))
       if (startAt > 0) {
@@ -495,6 +539,7 @@ export class AudioEngine implements MixingPlayer {
   async stopBed(): Promise<void> {
     const master = this.bedMaster
     if (master === null) return
+    this.bedLast = this.bedPosition() // freeze where we were before tearing down
     this.bedMaster = null
     this.bedAbort?.abort()
     for (const stream of this.bedStreams) stream.stop()
