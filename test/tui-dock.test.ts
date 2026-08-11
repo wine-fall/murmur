@@ -1,11 +1,11 @@
-// The question dock's pure logic (spec 10 §3.2-B): the title names what kind
-// of answer the question wants, and the text wraps to the terminal instead of
-// vanishing off the right edge. Rendering stays untested (spec 10 §3.9); this
-// is the shaping the client renders.
+// The spotlight card's pure logic (spec 10 §3.2-B as built): the title names
+// the kind of answer (with a light question counter), each card line carries a
+// role the renderer colors by, and outbound() decides what a submitted line
+// becomes. Rendering itself stays untested (spec 10 §3.9).
 
 import { describe, expect, it } from 'vitest'
 
-import { dockLines, dockTitle, outbound } from '../tui/src/dock.ts'
+import { cardLines, dockTitle, outbound } from '../tui/src/dock.ts'
 
 describe('outbound', () => {
   it('forwards the empty line while a question is docked — Enter IS the skip (spec 06 §2.1)', () => {
@@ -21,38 +21,29 @@ describe('outbound', () => {
 })
 
 describe('dockTitle', () => {
-  it('names the kind of answer the question wants', () => {
-    expect(dockTitle('question')).toBe(' murmur is asking ')
-    expect(dockTitle('consent')).toBe(' murmur needs a yes ')
+  it('names the kind, and counts the questions so a run of them reads as progress', () => {
+    expect(dockTitle('question', 3)).toBe(' murmur is asking · #3 ')
+    expect(dockTitle('consent', 5)).toBe(' murmur needs a yes ')
   })
 })
 
-describe('dockLines', () => {
-  it('keeps a short line whole', () => {
-    expect(dockLines('allow? [y/N]', 40)).toEqual(['allow? [y/N]'])
-  })
-
-  it('honors the newline a multi-part ask arrives with', () => {
-    expect(dockLines('run [Bash]: brew install yt-dlp\nallow? [y/N]', 40)).toEqual([
-      'run [Bash]: brew install yt-dlp',
-      'allow? [y/N]',
+describe('cardLines', () => {
+  it('the first line is the main sentence; later plain lines are notes', () => {
+    expect(cardLines('who is listening?\nanswer in one line.')).toEqual([
+      { text: 'who is listening?', role: 'main' },
+      { text: 'answer in one line.', role: 'note' },
     ])
   })
 
-  it('wraps at word boundaries to the given width', () => {
-    const lines = dockLines('what do you want on the air, mostly music or late-night talk?', 24)
-    expect(lines.length).toBeGreaterThan(1)
-    for (const line of lines) expect(line.length).toBeLessThanOrEqual(24)
-    expect(lines.join(' ')).toBe('what do you want on the air, mostly music or late-night talk?')
+  it('checklist rows keep their marker roles, and the closing invite reads bright', () => {
+    const lines = cardLines("summary.\nok brain - on the air\n-- voice - silent\ntype 'y':")
+    expect(lines.map((l) => l.role)).toEqual(['main', 'ready', 'gap', 'main'])
+    // The ASCII markers are role carriers, not copy — the renderer drops them.
+    expect(lines[1]!.text).toBe('brain - on the air')
+    expect(lines[2]!.text).toBe('voice - silent')
   })
 
-  it('hard-splits a word longer than the width instead of overflowing', () => {
-    const lines = dockLines('https://api.fish.audio/some/very/long/endpoint/path', 16)
-    for (const line of lines) expect(line.length).toBeLessThanOrEqual(16)
-    expect(lines.join('')).toBe('https://api.fish.audio/some/very/long/endpoint/path')
-  })
-
-  it('survives a degenerate width', () => {
-    expect(dockLines('hi', 0)).toEqual(['h', 'i'])
+  it('blank lines vanish instead of rendering empty card rows', () => {
+    expect(cardLines('a\n\nb').map((l) => l.text)).toEqual(['a', 'b'])
   })
 })

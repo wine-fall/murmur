@@ -13,7 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { dockLines, dockTitle, outbound, type Ask } from './dock.ts'
+import { cardLines, dockTitle, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -24,7 +24,7 @@ import {
   placeFigure,
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, WAVE_FPS } from './wave-image.ts'
-import { accentFor, EMBER, INK, mix, PERIWINKLE, WARM, type Accent } from './palette.ts'
+import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
@@ -244,10 +244,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // something to say, so the welcome is never cut short by a timer.
   const [greeting, setGreeting] = useState<string | null>(null)
   // The pending questions (§3.2-B), oldest first: the engine marked them, so
-  // they do not scroll away with the log. The dock shows the head — the one
+  // they do not scroll away with the log. The card shows the head — the one
   // the next typed line answers (lineReader consumes in ask order; a
   // single-slot dock could show B while the answer lands on A, codex review).
-  const [asks, setAsks] = useState<Ask[]>([])
+  // Questions carry a client-side ordinal for the card title's light counter.
+  const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
+  const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
@@ -274,10 +276,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           append('info', message.text)
           break
         case 'ask':
-          // The log keeps the record (the dock clears on answer); the dock
+          // The log keeps the record (the card clears on answer); the card
           // carries the affordance.
           append('info', message.text)
-          setAsks((queue) => [...queue, message])
+          setAsks((queue) => [
+            ...queue,
+            message.kind === 'question' ? { ...message, no: ++questionNo.current } : message,
+          ])
           break
         case 'state':
           setState(message.state)
@@ -344,6 +349,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   // The hour's accent, swapped whenever the engine reports a new scene (§3.7.2).
   const accent = accentFor(state?.scene)
+  // The spotlight dim (§3.2-B as built): while a question is on the card, the
+  // room steps down one notch — the card and the answer field keep the light.
+  const hushed = asks.length > 0
+  const lit = (color: string): string => (hushed ? hush(color) : color)
+  const roomAccent: Accent = hushed
+    ? { dim: hush(accent.dim), bright: hush(accent.bright) }
+    : accent
+  // The raster layer sits ABOVE text cells; while the card is up, the figure
+  // and the ripple leave the stage entirely (spec 10 §3.2-B as built).
+  const hushRef = useRef(hushed)
+  hushRef.current = hushed
   const pose = greeting !== null ? 'wake' : poseFor(state)
   // The §6.1 breakpoint: wide terminals compose the alive band as a sky panel
   // beside the log; narrow ones keep the classic bottom band. Same four
@@ -430,6 +446,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const started = performance.now()
       let shown = ''
       const paint = (): void => {
+        if (hushRef.current) {
+          if (shown !== '') {
+            shown = ''
+            rawOut.writeOut(deleteFigures())
+          }
+          return
+        }
         const name = poseRef.current
         const pngs = pngsFor(name)
         const at = Math.floor(((performance.now() - started) / 1000) * POSE_FPS[name])
@@ -471,7 +494,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const geom = waveGeomFor(skyWidth - 1, skyRows, cell)
       const col = gutter + cols - skyWidth + 1
       const row = 3
+      let hidden = false
       const paint = (): void => {
+        if (hushRef.current) {
+          if (!hidden) {
+            hidden = true
+            rawOut.writeOut(deleteFigures())
+          }
+          wasSilent = false
+          return
+        }
+        hidden = false
         const levels = waveBars.current.levels()
         const silent = levels.every((level) => level === 0)
         if (silent && wasSilent) return
@@ -511,17 +544,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             backgroundColor: INK.bg,
           }}
         >
-          <text style={{ fg: accent.bright }}>{strip}</text>
-          <text style={{ fg: INK.dim }}>
+          <text style={{ fg: roomAccent.bright }}>{strip}</text>
+          <text style={{ fg: lit(INK.dim) }}>
             {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
           </text>
         </box>
       ) : (
         <box style={{ flexDirection: 'column' }}>
           <box style={{ flexDirection: 'row', justifyContent: 'center', height: 1 }}>
-            <text style={{ fg: accent.bright }}>{strip}</text>
+            <text style={{ fg: roomAccent.bright }}>{strip}</text>
           </box>
-          <text style={{ fg: mix(INK.dim, INK.bg, 0.45) }}>{'─'.repeat(cols)}</text>
+          <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
         </box>
       )}
 
@@ -572,12 +605,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             <box key={entry.id} style={{ marginBottom: skyWidth === null ? 0 : 1 }}>
               <text
                 style={{
-                  fg:
+                  fg: lit(
                     entry.kind === 'segment'
                       ? accent.bright
                       : entry.kind === 'user'
                         ? INK.user
                         : INK.notice,
+                  ),
                 }}
               >
                 {skyWidth === null
@@ -599,7 +633,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <SkyPanel
             key={`${skyWidth}x${skyRows}`}
             sink={vizSink}
-            accent={accent}
+            accent={roomAccent}
             pose={pose}
             showPet={band.pet && figMode === 'sprite'}
             charWave={!rasterWave}
@@ -614,15 +648,15 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 const split = splitNowPlaying(state.nowPlaying)
                 return (
                   <text>
-                    <span fg={PERIWINKLE}>{'♪ '}</span>
+                    <span fg={lit(PERIWINKLE)}>{'♪ '}</span>
                     {split !== null ? (
                       <>
-                        <span fg={EMBER}>{split.head}</span>
-                        <span fg={INK.dim}>{' —— '}</span>
-                        <span fg={INK.notice}>{split.rest}</span>
+                        <span fg={lit(EMBER)}>{split.head}</span>
+                        <span fg={lit(INK.dim)}>{' —— '}</span>
+                        <span fg={lit(INK.notice)}>{split.rest}</span>
                       </>
                     ) : (
-                      <span fg={INK.notice}>{state.nowPlaying}</span>
+                      <span fg={lit(INK.notice)}>{state.nowPlaying}</span>
                     )}
                   </text>
                 )
@@ -639,7 +673,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
           {band.pet && <Pet pose={pose} />}
           <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
-            <Visualizer sink={vizSink} accent={accent} />
+            <Visualizer sink={vizSink} accent={roomAccent} />
           </box>
         </box>
       )}
@@ -647,37 +681,76 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       {/* Persona rides the identity line: the wide strip is the program's
           words, but WHO is on air must survive in the status region (§3.3). */}
       <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
-        <text style={{ fg: INK.dim }}>
+        <text style={{ fg: lit(INK.dim) }}>
           {[identity.persona, identity.brain, identity.voice].filter(Boolean).join(' · ')}
         </text>
       </box>
 
-      {/* The question dock (§3.2-B): the oldest pending ask, pinned against
-          the input it wants answered into, in the hour's accent — murmur is
-          the one asking, so it speaks in the broadcast's color. */}
-      {asks.length > 0 && (
-        <box
-          title={dockTitle(asks[0]!.kind)}
-          style={{
-            border: true,
-            borderStyle: 'rounded',
-            borderColor: accent.bright,
-            titleColor: accent.bright,
-            flexDirection: 'column',
-            marginLeft: 1,
-            marginRight: 1,
-            paddingLeft: 1,
-            paddingRight: 1,
-            backgroundColor: INK.bg,
-          }}
-        >
-          {dockLines(asks[0]!.text, cols - 8).map((line, at) => (
-            <text key={at} style={{ fg: INK.text }}>
-              {line}
-            </text>
-          ))}
-        </box>
-      )}
+      {/* The spotlight card (§3.2-B as built): the oldest pending ask grows
+          into a centered rounded card while the room around it is hushed.
+          Kind picks the frame: warm for a question, periwinkle for a consent —
+          the listener's color, because the decision is theirs. */}
+      {asks.length > 0 &&
+        (() => {
+          const head = asks[0]!
+          const consent = head.kind === 'consent'
+          const frame = consent ? PERIWINKLE : WARM
+          const lines = cardLines(head.text)
+          const facts = lines.some((l) => l.role === 'ready' || l.role === 'gap')
+          const width = Math.min(Math.floor((cols * 2) / 3), cols - 4)
+          const ROLE_FG = {
+            main: INK.text,
+            note: INK.notice,
+            ready: INK.user,
+            gap: INK.notice,
+          } as const
+          return (
+            <box
+              title={dockTitle(head.kind, head.no ?? 0)}
+              style={{
+                border: true,
+                borderStyle: 'rounded',
+                borderColor: frame,
+                titleColor: consent ? PERIWINKLE : EMBER,
+                flexDirection: 'column',
+                alignSelf: 'center',
+                width,
+                paddingLeft: 2,
+                paddingRight: 2,
+                paddingTop: 1,
+                paddingBottom: 1,
+                marginBottom: 1,
+                backgroundColor: CARD,
+              }}
+            >
+              {lines.map((line, at) => (
+                <box key={at} style={{ flexDirection: 'column' }}>
+                  {/* Facts above, the decision below — the divider says so. */}
+                  {facts && at === lines.length - 1 && (
+                    <text style={{ fg: hush(INK.dim) }}>{'─'.repeat(Math.max(width - 6, 1))}</text>
+                  )}
+                  <text style={{ fg: ROLE_FG[line.role] }}>
+                    {line.role === 'ready' ? 'ok  ' : line.role === 'gap' ? '--  ' : ''}
+                    {line.text}
+                  </text>
+                </box>
+              ))}
+              {consent ? (
+                <box style={{ marginTop: 1 }}>
+                  <text>
+                    <span fg={INK.notice}>{'y - go ahead'}</span>
+                    <span fg={INK.notice}>{'   '}</span>
+                    <span fg={INK.text} bg={CHIP}>{' > Enter - not now '}</span>
+                  </text>
+                </box>
+              ) : (
+                <box style={{ marginTop: 1 }}>
+                  <text style={{ fg: QUIET }}>{'Enter skips'}</text>
+                </box>
+              )}
+            </box>
+          )
+        })()}
 
       <box
         style={{
@@ -717,7 +790,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         />
         {skyWidth !== null && (
           <box style={{ flexGrow: 1, paddingLeft: 1 }}>
-            <text style={{ fg: mix(INK.dim, INK.bg, 0.45) }}>{'─'.repeat(cols)}</text>
+            <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
           </box>
         )}
       </box>

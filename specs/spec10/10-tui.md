@@ -335,6 +335,31 @@ is docked, EVERY submitted line is an answer, the empty line included
 owns that decision). The consuming-reader semantics still live entirely
 engine-side; the dock is presentation, never a second grammar.
 
+**Spotlight form (2026-08-11, user-decided — concept B of the design
+exploration).** The dock's presentation is a modal moment: while any ask is
+pending, the whole room steps down one notch (`hush()` in `palette.ts` — the
+single color point — applied to strip, log, sky accents, and now-playing;
+the kitty raster layer is deleted outright and repainted when the card
+clears, because it composites ABOVE text cells) and the head ask renders as
+a centered rounded card (~2/3 content width) on the `CARD` ground in the
+dock's slot above the input, which keeps its full light as the answer field.
+Kind picks the frame: warm/ember for a question (with a client-side `#n`
+counter in the title), periwinkle for a consent — the listener's color,
+because the decision is theirs; a consent card closes with a two-option row
+whose default (`Enter - not now`) sits on a raised `CHIP`. Card text carries
+its hierarchy in-band (`cardLines()`): first line bright, later lines
+quieter, and ASCII role markers — `ok ` (sage) / `-- ` (notice) — mark the
+pre-broadcast checklist that the setup offer now ships as ONE ask
+(`setupOfferText()` in `src/guide.ts`: summary, ready rows, gap rows, then
+the y/N; probe detail demoted to the dev log), with a divider drawn between
+the facts and the closing invite. Card copy is ASCII + CJK + box lines ONLY:
+East-Asian-Ambiguous glyphs (`✦ ◉ ✓ ○ …`) shift box borders on terminals
+that render them double-width, so decorative symbols stay in the log
+(border-vs-CJK alignment itself was probed clean on both `widthMethod`s).
+Deliberately deferred, additive when wanted: an `ask` hint field for
+placeholder examples and per-flow option copy, and step metadata for a real
+`n/total` — the counter and the generic option row cost zero wire changes.
+
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode). The engine parses
 all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.

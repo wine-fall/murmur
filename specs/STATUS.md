@@ -7,9 +7,10 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-11 (spec 10 §3.2-B question dock: engine-marked `ask`
-on the Host seam + wire, the TUI pins guide/first-run questions above the
-input; empty-line skip now works in the TUI)_
+_Last updated: 2026-08-11 (spec 10 §3.2-B onboarding surface: engine-marked
+`ask` on the Host seam + wire, presented as the spotlight card — room hushed,
+centered modal, checklist-card setup offer; empty-line skip now works in the
+TUI)_
 
 ## Where we are
 

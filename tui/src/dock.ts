@@ -1,39 +1,38 @@
-// The question dock's pure logic (spec 10 §3.2-B): when the engine marks a
-// question (`ask` on the wire), the client pins it beside the input instead of
-// letting it scroll away with the log. This module shapes the pinned text; the
-// component in app.tsx renders it.
+// The spotlight card's pure logic (spec 10 §3.2-B as built): when the engine
+// marks a question (`ask` on the wire), the client dims the room and pins the
+// queue head in a centered card above the input. This module shapes the card's
+// text; app.tsx renders it (wrapping is <text>'s own — no hand-rolled folding).
 
 import type { EngineMessage } from '../../src/ipc.ts'
 
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
 
-// The border title, padded so the frame breathes around it. 'consent' wants a
-// y/N; 'question' wants a free line — the title is how the dock says which.
-export function dockTitle(kind: AskKind): string {
-  return kind === 'consent' ? ' murmur needs a yes ' : ' murmur is asking '
+// The border title, padded so the frame breathes around it. Questions carry a
+// light counter — a run of seeds reads as progress; consents stand alone.
+export function dockTitle(kind: AskKind, count: number): string {
+  return kind === 'consent' ? ' murmur needs a yes ' : ` murmur is asking · #${String(count)} `
 }
 
-// Greedy word wrap to the dock's inner width. Engine asks arrive with their
-// own newlines (a consent carries the command on one line, the y/N on the
-// next); those breaks are kept, and an unbroken run longer than the width is
-// hard-split rather than overflowing the frame.
-export function dockLines(text: string, width: number): string[] {
-  const max = Math.max(width, 1)
-  const lines: string[] = []
-  for (const paragraph of text.split('\n')) {
-    let line = ''
-    for (const word of paragraph.split(' ')) {
-      for (const piece of hardSplit(word, max)) {
-        if (line === '') line = piece
-        else if (line.length + 1 + piece.length <= max) line += ` ${piece}`
-        else {
-          lines.push(line)
-          line = piece
-        }
-      }
-    }
-    lines.push(line)
+export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' }
+
+// Card hierarchy from the ask text alone (zero wire additions): the first
+// line is the sentence being asked, checklist rows carry ASCII role markers
+// ('ok ' ready / '-- ' gap) the renderer colors and drops, and everything
+// else is a quieter note.
+export function cardLines(text: string): CardLine[] {
+  const lines: CardLine[] = []
+  for (const raw of text.split('\n')) {
+    if (raw.trim() === '') continue
+    if (raw.startsWith('ok ')) lines.push({ text: raw.slice(3), role: 'ready' })
+    else if (raw.startsWith('-- ')) lines.push({ text: raw.slice(3), role: 'gap' })
+    else lines.push({ text: raw, role: lines.length === 0 ? 'main' : 'note' })
+  }
+  // A checklist card ends on the invitation — facts above, the decision below
+  // (the renderer draws the divider); the invite reads at full brightness.
+  const last = lines.at(-1)
+  if (last?.role === 'note' && lines.some((l) => l.role === 'ready' || l.role === 'gap')) {
+    last.role = 'main'
   }
   return lines
 }
@@ -43,11 +42,4 @@ export function dockLines(text: string, width: number): string[] {
 // question) — is its answer; idle empty lines stay local noise, as before.
 export function outbound(text: string, askActive: boolean): string | null {
   return askActive || text.trim() !== '' ? text : null
-}
-
-function hardSplit(word: string, max: number): string[] {
-  if (word.length <= max) return [word]
-  const pieces: string[] = []
-  for (let at = 0; at < word.length; at += max) pieces.push(word.slice(at, at + max))
-  return pieces
 }

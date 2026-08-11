@@ -9,6 +9,7 @@ import {
   detectGaps,
   runSetup,
   SETUP_DECLINED,
+  setupOfferText,
   type SetupLedger,
   type SetupTargets,
   validateEndpoint,
@@ -171,9 +172,9 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(infos.join('\n')).toContain('yt-dlp')
   })
 
-  it('docks the entry consent on a front-end with a question surface; gaps stay in the log', async () => {
-    // The gap list is context; the y/N is the question. Only the question is
-    // pinned — the dock is an answer field, not a second log.
+  it('docks the WHOLE pre-broadcast checklist as one consent ask (spec 10 §3.2-B spotlight)', async () => {
+    // Diagnosis and invitation share one card: ready rows, gap rows, then the
+    // y/N — the modal renders it whole, the plain host prints the same text.
     const { host, infos, asks } = fakeHost(['y'], { docked: true })
     const { guide } = fakeGuide()
     await runSetup({
@@ -186,9 +187,41 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(asks).toHaveLength(1)
     expect(asks[0]!.kind).toBe('consent')
     expect(asks[0]!.text).toContain("type 'y'")
-    // The named gaps still land in the log, before the docked question.
-    expect(infos.join('\n')).toContain('yt-dlp')
+    expect(asks[0]!.text).toContain('-- music')
+    // The probe detail is diagnostics, not card copy — it goes to the dev log.
     expect(infos.join('\n')).not.toContain("type 'y'")
+  })
+
+  describe('setupOfferText — the checklist card copy', () => {
+    const gaps = [{ kind: 'voice', reason: 'no endpoint configured' } as const]
+
+    it('leads with the summary, lists ready rows before gap rows, ends with the y/N line', () => {
+      const lines = setupOfferText(targets(), gaps).split('\n')
+      expect(lines[0]).toContain("aren't set up")
+      const okAt = lines.findIndex((l) => l.startsWith('ok '))
+      const gapAt = lines.findIndex((l) => l.startsWith('-- '))
+      expect(okAt).toBeGreaterThan(0)
+      expect(gapAt).toBeGreaterThan(okAt)
+      expect(lines.at(-1)).toContain("type 'y'")
+    })
+
+    it('always credits the brain, and names each gap with its consequence', () => {
+      const text = setupOfferText(targets(), gaps)
+      expect(text).toContain('ok brain')
+      expect(text).toContain('-- voice')
+      expect(text).toContain('shown instead of spoken')
+    })
+
+    it('keeps the card ASCII-safe: no ambiguous-width symbols (probe finding)', () => {
+      // East-Asian-Ambiguous glyphs shift borders on some terminals; the card
+      // is immune only if its copy stays ASCII + CJK + box lines.
+      expect(setupOfferText(targets(), gaps)).toMatch(/^[\x20-\x7e\n]*$/)
+    })
+
+    it('lists only what this session wants: no bun row either way when bun is unwanted', () => {
+      const text = setupOfferText(targets({ wantsBun: false }), gaps)
+      expect(text).not.toContain('bun')
+    })
   })
 
   it('covers bun and the voice endpoint in the SAME conversation as music', async () => {

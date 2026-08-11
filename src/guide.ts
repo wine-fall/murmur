@@ -172,6 +172,37 @@ const PLAIN_ENGLISH: Record<GapKind, string> = {
   voice: 'there is no voice endpoint yet, so lines are shown instead of spoken',
 }
 
+const READY: Record<GapKind, string> = {
+  music: 'yt-dlp and ffmpeg are working',
+  bun: 'the terminal front-end runtime is ready',
+  voice: 'the voice endpoint is configured',
+}
+
+// The pre-broadcast checklist card (spec 10 §3.2-B spotlight): summary, ready
+// rows ('ok '), gap rows ('-- ', each a consequence, not a stack trace), then
+// the y/N — diagnosis and invitation share one ask, so the modal shows them
+// as one card and the plain host prints the same text. ASCII-only markers:
+// ambiguous-width glyphs shift box borders on some terminals.
+export function setupOfferText(targets: SetupTargets, gaps: Gap[]): string {
+  const has = (kind: GapKind): boolean => gaps.some((gap) => gap.kind === kind)
+  const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
+  const rows: string[] = ['ok brain - claude is on the air']
+  const wanted: [GapKind, boolean][] = [
+    ['music', targets.wantsMusic],
+    ['bun', targets.wantsBun],
+    ['voice', targets.wantsVoice],
+  ]
+  for (const [kind, wants] of wanted) {
+    if (wants && !has(kind)) rows.push(`ok ${kind} - ${READY[kind]}`)
+  }
+  for (const gap of gaps) rows.push(`-- ${gap.kind} - ${PLAIN_ENGLISH[gap.kind]}`)
+  return [
+    `a couple of things aren't set up on this machine: ${named}.`,
+    ...rows,
+    "type 'y' and I'll walk you through fixing them right now (anything else skips):",
+  ].join('\n')
+}
+
 function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
   const has = (kind: GapKind): boolean => gaps.some((g) => g.kind === kind)
   return {
@@ -205,9 +236,10 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   // (idempotent — the Director starts it too).
   host.start()
   const read = lineReader(host)
-  host.info(`a couple of things aren't set up on this machine: ${named}.`)
-  for (const gap of gaps) host.info(`  · ${gap.kind}: ${gap.reason}`)
-  ask(host, "type 'y' and I'll walk you through fixing them right now (anything else skips):", 'consent')
+  // Probe detail (the raw reason) is diagnostics, not card copy: the guide
+  // gets it via its prompt, the dev log keeps it for humans.
+  for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
+  ask(host, setupOfferText(targets, gaps), 'consent')
 
   if (!isYes(await read())) {
     // Only the boot-time offer records the standing answer: backing out of an
