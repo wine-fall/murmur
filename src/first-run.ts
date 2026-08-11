@@ -100,6 +100,11 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
     answers.push({ question, answer: (await read()).trim() })
   }
 
+  // Leaving is not answering (codex review): a /quit run keeps the bundled
+  // seed for THIS boot but writes no persona marker — the next boot asks
+  // again from the top.
+  if (deps.quit?.requested === true) return deps.fallbackSeedPath
+
   if (answers.every((a) => a.answer === '')) {
     host.info('no answers — starting with the default voice; you can edit it later.')
     return useBundledSeed(deps)

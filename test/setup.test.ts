@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { GuideCapable, GuideRequest, LedgerKind } from '../src/contracts.ts'
 import {
   detectGaps,
+  quitLatch,
   runSetup,
   SETUP_DECLINED,
   setupOfferText,
@@ -494,6 +495,24 @@ describe('runSetup — the voice endpoint conversation (issue #96)', () => {
 
 describe('runSetup — declining, and what a decline costs later', () => {
   const probes = { music: async () => NO_YTDLP, bun: async () => OK }
+
+  it('/quit at the offer leaves NO standing decline — leaving is not answering (codex review)', async () => {
+    const ledger = fakeLedger()
+    const { host, infos } = fakeHost(['/quit'])
+    const { guide } = fakeGuide()
+    const quit = quitLatch()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger,
+      probes,
+      quit,
+    })
+    expect(quit.requested).toBe(true)
+    expect(ledger.events).toEqual([])
+    expect(infos.join('\n')).not.toContain("won't ask again")
+  })
 
   it('a decline writes the tier-3 setup.declined record and degrades the session', async () => {
     const { host, infos } = fakeHost(['n'])

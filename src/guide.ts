@@ -286,6 +286,9 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   ask(host, setupOfferText(targets, gaps), 'consent')
 
   if (!isYes(await read())) {
+    // Leaving is not answering (codex review): a /quit mid-offer must not
+    // become a standing decline that silences every later boot.
+    if (run.quit?.requested === true) return outcomeFrom(targets, gaps)
     // Only the boot-time offer records the standing answer: backing out of an
     // explicit `make setup` is not "stop asking me".
     if (!explicit) {

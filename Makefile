@@ -109,10 +109,10 @@ dev: install
 	@# torn down when the app exits. Its crash can never take murmur down;
 	@# stderr lands in mem.log so a fatal crash is recorded, not swallowed.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
-	  node -e "" || { \
+	  node -e "if (Number(process.versions.node.split('.')[0]) < 24) process.exit(1)" || { \
 	    echo ""; \
-	    echo "make dev stopped — node is not runnable here."; \
-	    echo "install Node >= 24 and try again; everything else murmur fixes by talking."; \
+	    echo "make dev stopped — Node >= 24 is required to run murmur's TypeScript entrypoints."; \
+	    echo "install/upgrade Node and try again; everything else murmur fixes by talking."; \
 	    exit 1; \
 	  }; \
 	  mkdir -p .dev && : > $(DEV_LOG) && : > $(MEM_LOG); \

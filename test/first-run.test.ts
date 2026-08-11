@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ProfileBootstrap } from '../src/cc-tools.ts'
 import type { Brain, SeedAnswer, Task } from '../src/contracts.ts'
+import { quitLatch } from '../src/guide.ts'
 import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/first-run.ts'
 import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts.ts'
 import { callTool, FakeHarness, FakeHost } from './fakes.ts'
@@ -242,6 +243,22 @@ describe('slice B consent gate (criterion 6)', () => {
 function everythingSaid(host: FakeHost): string {
   return [...host.infos, ...host.asks.map((a) => a.text)].join('\n')
 }
+
+describe('/quit during first-run (codex review: leaving is not answering)', () => {
+  it('writes NO persona marker, so the next boot asks again', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost(['/quit'])
+    const brain = new FakeSeeder()
+    const quit = quitLatch()
+    const path = await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed, quit }))
+    expect(quit.requested).toBe(true)
+    // The bundled seed is USED this run but never copied home: persona.md
+    // absent = first-run still pending.
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+    expect(brain.calls).toHaveLength(0)
+  })
+})
 
 describe('slice B execution (criteria 8 and 9)', () => {
   const bootstrapDeps = (over: Partial<Parameters<typeof runProfileBootstrap>[0]>) => ({
