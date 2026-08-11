@@ -344,9 +344,15 @@ clears, because it composites ABOVE text cells) and the head ask renders as
 a centered rounded card (~2/3 content width) on the `CARD` ground in the
 dock's slot above the input, which keeps its full light as the answer field.
 Kind picks the frame: warm/ember for a question (with a client-side `#n`
-counter in the title), periwinkle for a consent — the listener's color,
-because the decision is theirs; a consent card closes with a two-option row
-whose default (`Enter - not now`) sits on a raised `CHIP`. Card text carries
+counter in the title), periwinkle for a consent (` · optional` in the title)
+— the listener's color, because the decision is theirs; a consent card
+closes with a two-option row whose default (`> N - not now (Enter)`) sits on
+a raised `CHIP`, while a checklist card titles itself ` pre-broadcast
+check ` and swaps the chip for the quiet two-exit row (fix now / start the
+radio). The opening line splits at its first `? ` — lead sentence bright,
+detail quiet (design ref B1) — and the CC-bootstrap offer ships as one
+multi-line consent ask (question first, the why-lines as card notes, ref
+B2). Card text carries
 its hierarchy in-band (`cardLines()`): first line bright, later lines
 quieter, and ASCII role markers — `ok ` (sage) / `-- ` (notice) — mark the
 pre-broadcast checklist that the setup offer now ships as ONE ask

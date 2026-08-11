@@ -9,9 +9,14 @@ export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
 
 // The border title, padded so the frame breathes around it. Questions carry a
-// light counter — a run of seeds reads as progress; consents stand alone.
-export function dockTitle(kind: AskKind, count: number): string {
-  return kind === 'consent' ? ' murmur needs a yes ' : ` murmur is asking · #${String(count)} `
+// light counter — a run of seeds reads as progress; a consent names its
+// skippability; a card carrying the checklist is the pre-broadcast check
+// (ref B3), whatever kind delivered it.
+export function cardTitle(kind: AskKind, count: number, checklist: boolean): string {
+  if (checklist) return ' pre-broadcast check '
+  return kind === 'consent'
+    ? ' murmur needs a yes · optional '
+    : ` murmur is asking · #${String(count)} `
 }
 
 export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' }
@@ -26,7 +31,15 @@ export function cardLines(text: string): CardLine[] {
     if (raw.trim() === '') continue
     if (raw.startsWith('ok ')) lines.push({ text: raw.slice(3), role: 'ready' })
     else if (raw.startsWith('-- ')) lines.push({ text: raw.slice(3), role: 'gap' })
-    else lines.push({ text: raw, role: lines.length === 0 ? 'main' : 'note' })
+    else if (lines.length === 0) {
+      // The opening line splits at its first question mark (ref B1): the lead
+      // sentence carries the light, the detail after it steps back.
+      const cut = raw.indexOf('? ')
+      if (cut !== -1 && cut < raw.length - 2) {
+        lines.push({ text: raw.slice(0, cut + 1), role: 'main' })
+        lines.push({ text: raw.slice(cut + 2), role: 'note' })
+      } else lines.push({ text: raw, role: 'main' })
+    } else lines.push({ text: raw, role: 'note' })
   }
   // A checklist card ends on the invitation — facts above, the decision below
   // (the renderer draws the divider); the invite reads at full brightness.

@@ -140,9 +140,9 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
 async function offerBootstrap(deps: FirstRunDeps, read: ReadLine): Promise<void> {
   const { harness } = deps
   if (harness === undefined) return // no real brain: nothing to run the task on
-  // The framing is context for the log; only the closing y/N is the question.
-  for (const line of BOOTSTRAP_OFFER.slice(0, -1)) deps.host.info(line)
-  ask(deps.host, BOOTSTRAP_OFFER.at(-1)!, 'consent')
+  // One multi-line ask: the question leads, the framing rides as card notes
+  // (ref B2); the plain host prints the same lines in the same order.
+  ask(deps.host, BOOTSTRAP_OFFER.join('\n'), 'consent')
   if (!isYes(await read())) {
     deps.host.info('skipped — murmur will get to know you as it goes.')
     return

@@ -13,7 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { cardLines, dockTitle, outbound, type Ask } from './dock.ts'
+import { cardLines, cardTitle, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -697,7 +697,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           const frame = consent ? PERIWINKLE : WARM
           const lines = cardLines(head.text)
           const facts = lines.some((l) => l.role === 'ready' || l.role === 'gap')
-          const width = Math.min(Math.floor((cols * 2) / 3), cols - 4)
+          const width = Math.min(Math.floor(cols * 0.55), cols - 4)
           const ROLE_FG = {
             main: INK.text,
             note: INK.notice,
@@ -706,7 +706,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           } as const
           return (
             <box
-              title={dockTitle(head.kind, head.no ?? 0)}
+              title={cardTitle(head.kind, head.no ?? 0, facts)}
               style={{
                 border: true,
                 borderStyle: 'rounded',
@@ -737,11 +737,19 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               ))}
               {consent ? (
                 <box style={{ marginTop: 1 }}>
-                  <text>
-                    <span fg={INK.notice}>{'y - go ahead'}</span>
-                    <span fg={INK.notice}>{'   '}</span>
-                    <span fg={INK.text} bg={CHIP}>{' > Enter - not now '}</span>
-                  </text>
+                  {facts ? (
+                    <text>
+                      <span fg={INK.text}>{'y - fix them now'}</span>
+                      <span fg={QUIET}>{'    Enter - start the radio; make setup returns here'}</span>
+                    </text>
+                  ) : (
+                    <text>
+                      <span fg={INK.notice}>{'y - go ahead'}</span>
+                      <span fg={INK.notice}>{'   '}</span>
+                      <span fg={INK.text} bg={CHIP}>{' > N - not now '}</span>
+                      <span fg={INK.notice}>{' (Enter)'}</span>
+                    </text>
+                  )}
                 </box>
               ) : (
                 <box style={{ marginTop: 1 }}>
@@ -771,7 +779,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             paneOpen
               ? 'settings open — esc to return'
               : asks.length > 0
-                ? 'your answer — enter sends'
+                ? asks[0]!.kind === 'consent'
+                  ? 'y or Enter — one key decides'
+                  : 'your answer — enter sends'
                 : 'type to talk back'
           }
           style={{

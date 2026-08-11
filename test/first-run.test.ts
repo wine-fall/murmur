@@ -223,14 +223,18 @@ describe('slice B consent gate (criterion 6)', () => {
     expect(everythingSaid(host)).not.toContain('Claude Code history')
   })
 
-  it('docks only the y/N line of the offer; the context stays in the log', async () => {
+  it('ships the offer as ONE consent ask: question first, the why-lines riding as card notes', async () => {
+    // Ref B2: the question leads, "why murmur dares to ask" and "skipping is
+    // fine" live INSIDE the card as quiet notes — one ask, no separate infos.
     const { memoryDir, seed } = workspace()
     const host = scriptedHost([...answered(), 'n'])
     await runFirstRun(deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed }))
     const consent = host.asks.find((a) => a.kind === 'consent')
-    expect(consent?.text).toContain('[y/N]')
-    // The two framing lines are context, not questions.
-    expect(host.infos.join('\n')).toContain('Claude Code history')
+    const lines = consent?.text.split('\n') ?? []
+    expect(lines[0]).toContain('Claude Code history')
+    expect(lines[0]).toContain('[y/N]')
+    expect(consent?.text).toContain('stay on this machine')
+    expect(host.infos.join('\n')).not.toContain('Claude Code history')
   })
 })
 
