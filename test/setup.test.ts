@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import type { GuideCapable, GuideRequest, LedgerKind } from '../src/contracts.ts'
 import {
   detectGaps,
+  quitLatch,
   runSetup,
   SETUP_DECLINED,
   setupOfferText,
@@ -305,7 +306,9 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(outcome).toEqual({ musicOk: false, bunOk: false, voiceOk: false })
   })
 
-  it('no gaps = no offer, no conversation, not a word', async () => {
+  it('no gaps = no offer, no conversation — only the checking notice', async () => {
+    // The probes take real seconds (yt-dlp is a network search): the one line
+    // before them is the loading signal the front-end shows while they run.
     const { host, infos } = fakeHost()
     const { guide, requests } = fakeGuide()
     const outcome = await runSetup({
@@ -316,7 +319,8 @@ describe('runSetup — the once-per-boot offer', () => {
       probes: { music: async () => OK, bun: async () => OK },
     })
     expect(requests).toEqual([])
-    expect(infos).toEqual([])
+    expect(infos).toHaveLength(1)
+    expect(infos[0]).toContain('checking')
     expect(outcome).toEqual({ musicOk: true, bunOk: true, voiceOk: true })
   })
 
@@ -492,6 +496,24 @@ describe('runSetup — the voice endpoint conversation (issue #96)', () => {
 describe('runSetup — declining, and what a decline costs later', () => {
   const probes = { music: async () => NO_YTDLP, bun: async () => OK }
 
+  it('/quit at the offer leaves NO standing decline — leaving is not answering (codex review)', async () => {
+    const ledger = fakeLedger()
+    const { host, infos } = fakeHost(['/quit'])
+    const { guide } = fakeGuide()
+    const quit = quitLatch()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger,
+      probes,
+      quit,
+    })
+    expect(quit.requested).toBe(true)
+    expect(ledger.events).toEqual([])
+    expect(infos.join('\n')).not.toContain("won't ask again")
+  })
+
   it('a decline writes the tier-3 setup.declined record and degrades the session', async () => {
     const { host, infos } = fakeHost(['n'])
     const { guide, requests } = fakeGuide()
@@ -546,8 +568,10 @@ describe('runSetup — declining, and what a decline costs later', () => {
     })
     expect(requests).toEqual([])
     expect(outcome.musicOk).toBe(false)
-    expect(infos).toHaveLength(1)
-    expect(infos[0]).toContain('make setup')
+    // The checking notice (the probes still run), then exactly one pointer.
+    expect(infos).toHaveLength(2)
+    expect(infos[0]).toContain('checking')
+    expect(infos[1]).toContain('make setup')
     // The record is not re-written on every quiet boot.
     expect(ledger.events).toEqual([])
   })

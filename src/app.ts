@@ -35,7 +35,7 @@ import { MusicProgrammer } from './music-programmer.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona, personaLine } from './persona.ts'
-import { runSetup, type SetupTargets } from './guide.ts'
+import { quitLatch, runSetup, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import { preflightBun } from './startup.ts'
@@ -369,6 +369,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // First run (spec 06 §2.1): before the banner and the first segment — the
   // radio must not talk over the questions. Total: it always returns a loadable
   // persona path, so the radio always boots.
+  // The listener can leave DURING onboarding (spec 01 §3.6 extended): a typed
+  // /quit — which is also what Ctrl-C in the TUI sends — fires this latch,
+  // every pending Q&A read declines instantly, and the run shuts down instead
+  // of going on the air.
+  const quit = quitLatch()
   let personaPath = resolvePersonaPath(config, persistent)
   if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
     personaPath = await runFirstRun({
@@ -378,6 +383,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       memoryDir: config.memoryDir,
       fallbackSeedPath: config.personaPath,
       model: config.model,
+      quit,
       // No harness (a stub run) = slice B is never offered.
       ...(claude !== null && { harness: claude }),
     })
@@ -391,14 +397,22 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // launches either way; the gaps only decide how degraded it starts.
   const targets = setupTargets(config)
   let setupMusicOk = false
-  if (claude !== null) {
+  if (claude !== null && !quit.requested) {
     const outcome = await runSetup({
       host,
       guide: claude,
       targets,
+      quit,
       ...(memory instanceof PersistentMemoryStore && { ledger: memory }),
     })
     setupMusicOk = outcome.musicOk
+  }
+  if (quit.requested) {
+    host.info('stopped before the broadcast.')
+    viz?.stop()
+    await engine.aclose()
+    await closeFrontEnd()
+    return
   }
   // Resolved after the conversation, so an endpoint saved during it is heard
   // THIS boot rather than the next one — and so the banner reports the voice

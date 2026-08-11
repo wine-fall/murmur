@@ -15,7 +15,7 @@ import { join } from 'node:path'
 
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from './contracts.ts'
-import { isYes, lineReader, type ReadLine } from './guide.ts'
+import { isYes, lineReader, type QuitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from './host.ts'
 import { claudeCodeRoot } from './paths.ts'
 import {
@@ -47,6 +47,9 @@ export type FirstRunDeps = {
   memoryDir: string
   fallbackSeedPath: string // config.personaPath — the bundled seed
   model: string // the good tier: this runs once per install (§3.3)
+  // Fired by a typed /quit (Ctrl-C in the TUI): reads decline through and the
+  // app shuts down instead of broadcasting.
+  quit?: QuitLatch
   ccRoot?: string // slice B's data root; defaults to the resolver in paths.ts
 }
 
@@ -88,7 +91,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // The reader is the guide's (spec 03-03): serialized, and EOF resolves '' so
   // a piped run declines every question instead of wedging startup.
   host.start()
-  const read = lineReader(host)
+  const read = lineReader(host, deps.quit)
 
   host.info(FIRST_RUN_INTRO)
   const answers: SeedAnswer[] = []
@@ -96,6 +99,11 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
     ask(host, question, 'question')
     answers.push({ question, answer: (await read()).trim() })
   }
+
+  // Leaving is not answering (codex review): a /quit run keeps the bundled
+  // seed for THIS boot but writes no persona marker — the next boot asks
+  // again from the top.
+  if (deps.quit?.requested === true) return deps.fallbackSeedPath
 
   if (answers.every((a) => a.answer === '')) {
     host.info('no answers — starting with the default voice; you can edit it later.')

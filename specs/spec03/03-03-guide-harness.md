@@ -102,7 +102,19 @@
    it still prints per-dependency findings with fixes, but exits non-zero only
    when `node` itself is unusable — the one gap that leaves nothing to
    converse with. `make dev` therefore always reaches `src/main.ts`; the app
-   owns onboarding from there.
+   owns onboarding from there. **Amended (2026-08-11, user decision)**: the
+   reporter no longer runs in `make dev`'s path at all — its yt-dlp probe is
+   a live network search that held the front-end back for seconds. `make dev`
+   gates only on `node -e ""` and launches immediately; the probes run
+   in-session (runSetup announces `checking the gear on this machine...`
+   first, the front-end's loading signal), and `make preflight` remains the
+   standalone no-launch reporter.
+   **Leaving mid-onboarding works (2026-08-11)**: a typed `/quit` — which is
+   what Ctrl-C in the TUI sends — fires a quit latch inside the consuming
+   reader (`quitLatch`/`lineReader`, `src/guide.ts`) instead of being
+   swallowed as an answer: every later read declines instantly and the app
+   shuts down before the broadcast starts (spec 01 §3.6 extended to the Q&A
+   flows).
 2. **The guide's coverage grows** from the music binaries to the full
    onboarding surface:
    - `yt-dlp` + `ffmpeg` — as built (§1-§5). **Install channel (decided

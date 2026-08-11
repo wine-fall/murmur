@@ -341,8 +341,11 @@ pending, the whole room steps down one notch (`hush()` in `palette.ts` — the
 single color point — applied to strip, log, sky accents, and now-playing;
 the kitty raster layer is deleted outright and repainted when the card
 clears, because it composites ABOVE text cells) and the head ask renders as
-a centered rounded card (~2/3 content width) on the `CARD` ground in the
-dock's slot above the input, which keeps its full light as the answer field.
+a centered rounded card (refs' ~55% content width) on the `CARD` ground in
+the dock's slot — and the answer field moves INTO the card (user decision,
+2026-08-11): the same single input, permanent focus intact, renders as the
+card's last row while a question is open, and the bottom row keeps only its
+quiet rule. The card is where you read AND where you answer.
 Kind picks the frame: warm/ember for a question (with a client-side `#n`
 counter in the title), periwinkle for a consent (` · optional` in the title)
 — the listener's color, because the decision is theirs; a consent card
@@ -406,6 +409,10 @@ line owns focus permanently. **One sanctioned exception (2026-08-07, spec 12
 Esc. The permanent-focus rule defends against *radio output* stealing focus
 mid-keystroke; a mode the listener opened is the listener spending their own
 focus, and the broadcast never pauses under it.
+
+**Station ident (2026-08-11, user-asked):** the murmur wordmark
+(`tui/src/logo.ts`, half-block letters + tagline) opens every program log —
+the first thing a boot shows, scrolled away by the program itself.
 
 **As built (2026-08-07, §6.1 quiet-constellation): composition has one
 breakpoint, and one max width.** At ≥ 96 columns the alive band recomposes

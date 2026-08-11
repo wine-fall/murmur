@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { cliConversation, cliPermission, lineReader } from '../src/guide.ts'
+import { cliConversation, cliPermission, lineReader, quitLatch } from '../src/guide.ts'
 import type { AskKind, Host } from '../src/host.ts'
 
 // A host with scripted keyboard lines (the same stdin the Director uses).
@@ -49,6 +49,25 @@ describe('lineReader (codex-review regressions)', () => {
     const [first, second] = await Promise.all([read(), read()])
     expect(first).toBe('y')
     expect(second).toBe('n')
+  })
+
+  it('/quit mid-onboarding fires the latch and fast-forwards every later read (the exit that was impossible)', async () => {
+    // Ctrl-C in the TUI arrives as a typed /quit; the consuming reader used
+    // to swallow it as an ANSWER, locking the user inside onboarding.
+    const { host } = fakeHost(['/quit'])
+    const quit = quitLatch()
+    const read = lineReader(host, quit)
+    expect(await read()).toBe('')
+    expect(quit.requested).toBe(true)
+    // No more scripted lines: without the latch this read would hang forever.
+    expect(await read()).toBe('')
+  })
+
+  it('a quit latch already fired resolves reads instantly, like EOF', async () => {
+    const { host } = fakeHost([])
+    const quit = quitLatch()
+    quit.fire()
+    expect(await lineReader(host, quit)()).toBe('')
   })
 })
 
