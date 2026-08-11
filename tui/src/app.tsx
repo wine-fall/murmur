@@ -13,6 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
+import { dockLines, dockTitle, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -242,6 +243,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // The absence the pet greets (§3.7.3). It stands until the program itself has
   // something to say, so the welcome is never cut short by a timer.
   const [greeting, setGreeting] = useState<string | null>(null)
+  // The pending questions (§3.2-B), oldest first: the engine marked them, so
+  // they do not scroll away with the log. The dock shows the head — the one
+  // the next typed line answers (lineReader consumes in ask order; a
+  // single-slot dock could show B while the answer lands on A, codex review).
+  const [asks, setAsks] = useState<Ask[]>([])
   const input = useRef<InputRenderable>(null)
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
@@ -266,6 +272,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           break
         case 'info':
           append('info', message.text)
+          break
+        case 'ask':
+          // The log keeps the record (the dock clears on answer); the dock
+          // carries the affordance.
+          append('info', message.text)
+          setAsks((queue) => [...queue, message])
           break
         case 'state':
           setState(message.state)
@@ -324,7 +336,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
-    if (text.trim() !== '') wire.line(text)
+    const line = outbound(text, asks.length > 0)
+    if (line === null) return
+    setAsks((queue) => queue.slice(1))
+    wire.line(line)
   }
 
   // The hour's accent, swapped whenever the engine reports a new scene (§3.7.2).
@@ -637,6 +652,33 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </text>
       </box>
 
+      {/* The question dock (§3.2-B): the oldest pending ask, pinned against
+          the input it wants answered into, in the hour's accent — murmur is
+          the one asking, so it speaks in the broadcast's color. */}
+      {asks.length > 0 && (
+        <box
+          title={dockTitle(asks[0]!.kind)}
+          style={{
+            border: true,
+            borderStyle: 'rounded',
+            borderColor: accent.bright,
+            titleColor: accent.bright,
+            flexDirection: 'column',
+            marginLeft: 1,
+            marginRight: 1,
+            paddingLeft: 1,
+            paddingRight: 1,
+            backgroundColor: INK.bg,
+          }}
+        >
+          {dockLines(asks[0]!.text, cols - 8).map((line, at) => (
+            <text key={at} style={{ fg: INK.text }}>
+              {line}
+            </text>
+          ))}
+        </box>
+      )}
+
       <box
         style={{
           flexDirection: 'row',
@@ -652,7 +694,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <input
           ref={input}
           focused={!paneOpen}
-          placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back'}
+          placeholder={
+            paneOpen
+              ? 'settings open — esc to return'
+              : asks.length > 0
+                ? 'your answer — enter sends'
+                : 'type to talk back'
+          }
           style={{
             // The sky composition bounds the field and lets a quiet rule carry
             // the rest of the row (concept 04's input line); long input scrolls

@@ -23,7 +23,7 @@ import type {
   Turn,
 } from '../src/contracts.ts'
 import type { DirectorSettings } from '../src/director.ts'
-import type { Host } from '../src/host.ts'
+import type { AskKind, Host } from '../src/host.ts'
 import type { ProgramState } from '../src/ipc.ts'
 import { LineQueue } from '../src/host.ts'
 
@@ -269,6 +269,7 @@ export class FakeHost implements Host {
   radio: string[] = []
   user: string[] = []
   infos: string[] = []
+  asks: { text: string; kind: AskKind }[] = []
   debugs: string[] = []
   states: ProgramState[] = []
   banners: { personaFirstLine: string; brain: string; voice: string }[] = []
@@ -310,6 +311,10 @@ export class FakeHost implements Host {
 
   info(message: string): void {
     this.infos.push(message)
+  }
+
+  ask(text: string, kind: AskKind): void {
+    this.asks.push({ text, kind })
   }
 
   debug(message: string): void {

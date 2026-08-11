@@ -16,7 +16,7 @@
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 
 import type { GuideCapable, LedgerKind } from './contracts.ts'
-import type { Host } from './host.ts'
+import { ask, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { buildSetupPrompt, GUIDE_PERSONA } from './prompts.ts'
 import { preflightBun, preflightMusic, type PreflightResult } from './startup.ts'
@@ -62,8 +62,9 @@ export function lineReader(host: Host): ReadLine {
 export function cliPermission(host: Host, read: ReadLine): CanUseTool {
   return async (toolName, input) => {
     const detail = typeof input.command === 'string' ? input.command : JSON.stringify(input)
-    host.info(`setup assistant wants to run [${toolName}]: ${detail}`)
-    host.info('allow? [y/N]')
+    // One self-contained ask: a docked "allow?" with the command left behind
+    // in the log would ask the user to approve something they cannot see.
+    ask(host, `setup assistant wants to run [${toolName}]: ${detail}\nallow? [y/N]`, 'consent')
     if (isYes(await read())) return { behavior: 'allow' }
     return { behavior: 'deny', message: 'user declined' }
   }
@@ -73,7 +74,7 @@ export function cliPermission(host: Host, read: ReadLine): CanUseTool {
 // line or /done|/quit|q ends the conversation (returns null).
 export function cliConversation(host: Host, read: ReadLine): () => Promise<string | null> {
   return async () => {
-    host.info('your reply (natural language; empty or /done to finish):')
+    ask(host, 'your reply (natural language; empty or /done to finish):', 'question')
     const line = (await read()).trim()
     return END.has(line.toLowerCase()) ? null : line
   }
@@ -206,7 +207,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const read = lineReader(host)
   host.info(`a couple of things aren't set up on this machine: ${named}.`)
   for (const gap of gaps) host.info(`  · ${gap.kind}: ${gap.reason}`)
-  host.info("type 'y' and I'll walk you through fixing them right now (anything else skips):")
+  ask(host, "type 'y' and I'll walk you through fixing them right now (anything else skips):", 'consent')
 
   if (!isYes(await read())) {
     // Only the boot-time offer records the standing answer: backing out of an
@@ -230,7 +231,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
           // keeps it. It never becomes a message, so it never reaches the API
           // or the session transcript the SDK keeps (spec 03-03 §7.2).
           promptSecret: async (label) => {
-            host.info(`paste your ${label} and press enter (murmur reads it directly):`)
+            ask(host, `paste your ${label} and press enter (murmur reads it directly):`, 'question')
             return await read()
           },
           // The URL is public knowledge; the key is not. Print only this.

@@ -25,6 +25,11 @@ export interface Host {
   onRadioSegment(text: string): void
   onUserLine(text: string): void
   info(message: string): void
+  // A question that wants the user's next line (spec 10 §3.2-B): the guide's
+  // consents, the first-run seeds, the free-reply prompt. A front-end with a
+  // question surface pins it beside the input; absent, callers fall back to
+  // info (the plain host's recency-adjacency). Route through ask() below.
+  ask?(text: string, kind: AskKind): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void
@@ -38,6 +43,18 @@ export interface Host {
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
+}
+
+// 'consent' wants a y/N; 'question' wants a free line. The distinction is
+// presentational (the dock's title), not semantic — the reader treats both as
+// one line either way.
+export type AskKind = 'question' | 'consent'
+
+// Every question the engine asks goes through here: hosts with a question
+// surface get the marked ask, bare ones get the same text as info.
+export function ask(host: Host, text: string, kind: AskKind): void {
+  if (host.ask !== undefined) host.ask(text, kind)
+  else host.info(text)
 }
 
 // Mirror a program line into the dev log (`make logs` tails it in a second

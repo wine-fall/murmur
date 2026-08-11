@@ -13,7 +13,7 @@ import {
   type SetupTargets,
   validateEndpoint,
 } from '../src/guide.ts'
-import type { Host } from '../src/host.ts'
+import type { AskKind, Host } from '../src/host.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import type { PreflightResult } from '../src/startup.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice-config.ts'
@@ -23,8 +23,12 @@ const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }
 const NO_BUN: PreflightResult = { ok: false, reason: "bun binary not found: 'bun'" }
 
-function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; infos: string[] } {
+function fakeHost(
+  lines: string[] = [],
+  { atEof = false, docked = false } = {},
+): { host: Host; infos: string[]; asks: { text: string; kind: AskKind }[] } {
   const infos: string[] = []
+  const asks: { text: string; kind: AskKind }[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
@@ -35,7 +39,8 @@ function fakeHost(lines: string[] = [], { atEof = false } = {}): { host: Host; i
     info: (m) => void infos.push(m),
     banner: () => {},
   }
-  return { host, infos }
+  if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
+  return { host, infos, asks }
 }
 
 function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
@@ -164,6 +169,26 @@ describe('runSetup — the once-per-boot offer', () => {
     // The shipped path keeps the SDK's per-action confirm (spec 03-03 §5.4).
     expect(req.permissionMode).toBeUndefined()
     expect(infos.join('\n')).toContain('yt-dlp')
+  })
+
+  it('docks the entry consent on a front-end with a question surface; gaps stay in the log', async () => {
+    // The gap list is context; the y/N is the question. Only the question is
+    // pinned — the dock is an answer field, not a second log.
+    const { host, infos, asks } = fakeHost(['y'], { docked: true })
+    const { guide } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger: fakeLedger(),
+      probes,
+    })
+    expect(asks).toHaveLength(1)
+    expect(asks[0]!.kind).toBe('consent')
+    expect(asks[0]!.text).toContain("type 'y'")
+    // The named gaps still land in the log, before the docked question.
+    expect(infos.join('\n')).toContain('yt-dlp')
+    expect(infos.join('\n')).not.toContain("type 'y'")
   })
 
   it('covers bun and the voice endpoint in the SAME conversation as music', async () => {
@@ -402,6 +427,32 @@ describe('runSetup — the voice endpoint conversation (issue #96)', () => {
     expect(readVoiceConfig(join(home, 'voice.json'))?.apiKey).toBe(secret)
     // Everything murmur printed — the ask included — carries no credential.
     expect(infos.join('\n')).not.toContain(secret)
+  })
+
+  it('docks the paste prompt as a question, still without the credential', async () => {
+    const secret = 'sk-not-a-real-key'
+    const { host, infos, asks } = fakeHost(['y', secret], { docked: true })
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        await req.tools?.[0]?.handler(
+          { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', needsApiKey: true },
+          {},
+        )
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, home }),
+      probes,
+      validateVoice: async () => {},
+    })
+    const paste = asks.find((a) => a.text.includes('paste'))
+    expect(paste?.kind).toBe('question')
+    const everything = [...infos, ...asks.map((a) => a.text)].join('\n')
+    expect(everything).not.toContain(secret)
   })
 })
 

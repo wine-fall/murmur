@@ -7,11 +7,9 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-07 (spec 10 §6.1 third by-eye round: octant sub-pixel
-canvas with ring starfield and radial wave, the whisper-figure machine-derived
-from the concept via proper-pixel-art and rendered as a kitty-graphics raster
-on capable terminals, full palette sampled from the mockup, centered max-width
-frame; remaining tuning stays issue #79)_
+_Last updated: 2026-08-11 (spec 10 §3.2-B question dock: engine-marked `ask`
+on the Host seam + wire, the TUI pins guide/first-run questions above the
+input; empty-line skip now works in the TUI)_
 
 ## Where we are
 
@@ -40,7 +38,8 @@ how it got there:
   §6.1 quiet-constellation skin landed 2026-08-07 (spec 10 §6.1 for its terms).
 - spec 03-03 §7 conversational onboarding — the shell preflight demoted to a
   reporter, one aggregated setup offer per boot with a ledger-recorded decline,
-  and the guide-written voice endpoint (#88).
+  and the guide-written voice endpoint (#88). The TUI question dock (spec 10
+  §3.2-B as built) pins those questions above the input.
 - Spec restructure — persona stays stable, 06 rescoped, 07 extended, 08 and 09
   retired (#65).
 - spec 11 agentic-steer — the reply turn runs the harness with

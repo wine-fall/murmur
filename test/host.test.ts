@@ -5,7 +5,7 @@ import { PassThrough } from 'node:stream'
 
 import { describe, expect, it } from 'vitest'
 
-import { CliHost, LineQueue } from '../src/host.ts'
+import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host.ts'
 
 describe('LineQueue', () => {
   it('peek does not consume; take does', async () => {
@@ -46,6 +46,37 @@ describe('LineQueue', () => {
     const q = new LineQueue()
     const first = q.peek()
     for (let i = 0; i < 100; i++) expect(q.peek()).toBe(first)
+  })
+})
+
+describe('ask', () => {
+  function bareHost(): Host & { infos: string[] } {
+    const infos: string[] = []
+    return {
+      infos,
+      start: () => {},
+      peekLine: () => new Promise(() => {}),
+      takeLine: () => undefined,
+      onRadioSegment: () => {},
+      onUserLine: () => {},
+      info: (m) => void infos.push(m),
+      banner: () => {},
+    }
+  }
+
+  it('routes to host.ask when the front-end has a question surface', () => {
+    const asks: { text: string; kind: AskKind }[] = []
+    const host = bareHost()
+    host.ask = (text, kind) => void asks.push({ text, kind })
+    ask(host, 'allow? [y/N]', 'consent')
+    expect(asks).toEqual([{ text: 'allow? [y/N]', kind: 'consent' }])
+    expect(host.infos).toEqual([])
+  })
+
+  it('falls back to info on a host without one (plain front-end)', () => {
+    const host = bareHost()
+    ask(host, 'what should I call you?', 'question')
+    expect(host.infos).toEqual(['what should I call you?'])
   })
 })
 
