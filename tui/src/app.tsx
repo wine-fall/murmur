@@ -24,6 +24,7 @@ import {
   placeFigure,
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, WAVE_FPS } from './wave-image.ts'
+import { TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
@@ -597,6 +598,25 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             rootOptions: { backgroundColor: INK.bg },
           }}
         >
+          {/* The station ident (§3.3 as built): the wordmark opens every log —
+              first thing every boot, scrolled away by the program itself. */}
+          <box
+            style={{
+              flexDirection: 'column',
+              alignItems: 'center',
+              marginTop: 1,
+              marginBottom: 2,
+            }}
+          >
+            {WORDMARK.map((row, at) => (
+              <text key={at} style={{ fg: lit(INK.text) }}>
+                {row}
+              </text>
+            ))}
+            <box style={{ marginTop: 1 }}>
+              <text style={{ fg: lit(INK.dim) }}>{TAGLINE}</text>
+            </box>
+          </box>
           {entries.map((entry) => (
             // The sky composition lets the log breathe — one blank line between
             // entries, the poem spacing of §6.1, no icon markers (the speaker
@@ -756,54 +776,72 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   <text style={{ fg: QUIET }}>{'Enter skips'}</text>
                 </box>
               )}
+              {/* The answer is typed INTO the card (user decision, 2026-08-11):
+                  same single input, permanent focus — it just sits where the
+                  question is while one is open. */}
+              <box style={{ flexDirection: 'row', marginTop: 1 }}>
+                <text style={{ fg: PERIWINKLE }}>{'> '}</text>
+                <input
+                  ref={input}
+                  focused={!paneOpen}
+                  placeholder={consent ? 'y or Enter - one key decides' : 'your answer - enter sends'}
+                  style={{
+                    flexGrow: 1,
+                    textColor: PERIWINKLE,
+                    placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+                    backgroundColor: CARD,
+                  }}
+                  onSubmit={submit as InputProps['onSubmit']}
+                />
+              </box>
             </box>
           )
         })()}
 
-      <box
-        style={{
-          flexDirection: 'row',
-          height: 1,
-          paddingLeft: 1,
-          paddingRight: 1,
-          backgroundColor: INK.bg,
-        }}
-      >
-        {/* The listener's channel is periwinkle — the room's one cold accent
-            (§6.1): prompt, typed text, and the resting invitation alike. */}
-        <text style={{ fg: PERIWINKLE }}>{'> '}</text>
-        <input
-          ref={input}
-          focused={!paneOpen}
-          placeholder={
-            paneOpen
-              ? 'settings open — esc to return'
-              : asks.length > 0
-                ? asks[0]!.kind === 'consent'
-                  ? 'y or Enter — one key decides'
-                  : 'your answer — enter sends'
-                : 'type to talk back'
-          }
+      {/* While a question is open, the answer field lives in the card; the
+          bottom row keeps only its quiet rule so the frame stays closed. */}
+      {asks.length === 0 ? (
+        <box
           style={{
-            // The sky composition bounds the field and lets a quiet rule carry
-            // the rest of the row (concept 04's input line); long input scrolls
-            // inside the field. The band composition keeps the full width.
-            ...(skyWidth === null ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
-            textColor: PERIWINKLE,
-            placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+            flexDirection: 'row',
+            height: 1,
+            paddingLeft: 1,
+            paddingRight: 1,
             backgroundColor: INK.bg,
           }}
-          // The reconciler wires an input's onSubmit to the ENTER event, which
-          // carries the submitted string; the declared prop type inherits
-          // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
-          onSubmit={submit as InputProps['onSubmit']}
-        />
-        {skyWidth !== null && (
-          <box style={{ flexGrow: 1, paddingLeft: 1 }}>
-            <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
-          </box>
-        )}
-      </box>
+        >
+          {/* The listener's channel is periwinkle — the room's one cold accent
+              (§6.1): prompt, typed text, and the resting invitation alike. */}
+          <text style={{ fg: PERIWINKLE }}>{'> '}</text>
+          <input
+            ref={input}
+            focused={!paneOpen}
+            placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back'}
+            style={{
+              // The sky composition bounds the field and lets a quiet rule carry
+              // the rest of the row (concept 04's input line); long input scrolls
+              // inside the field. The band composition keeps the full width.
+              ...(skyWidth === null ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
+              textColor: PERIWINKLE,
+              placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+              backgroundColor: INK.bg,
+            }}
+            // The reconciler wires an input's onSubmit to the ENTER event, which
+            // carries the submitted string; the declared prop type inherits
+            // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
+            onSubmit={submit as InputProps['onSubmit']}
+          />
+          {skyWidth !== null && (
+            <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+              <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+            </box>
+          )}
+        </box>
+      ) : (
+        <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
+          <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+        </box>
+      )}
     </box>
   )
 }

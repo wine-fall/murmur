@@ -99,19 +99,19 @@ dev-opuslab: sync-env
 	@$(MAKE) dev
 
 dev: install
-	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) for the preflight
-	@# and the run, REPORT what is missing, then launch either way — the app
-	@# owns onboarding from here (spec 03-03 §7.1) and repairs its own gaps by
-	@# talking. The only thing that still stops us is a node that cannot run the
-	@# reporter at all: without it there is nothing to converse with (§7.3
-	@# criterion 8). Then launch with a side-car memory recorder (external,
+	@# Load the gitignored .env (MURMUR_TTS_URL / _SEED / …) and launch the app
+	@# IMMEDIATELY — the front-end comes up first, and the app owns the whole
+	@# onboarding surface in-session (spec 03-03 §7.1): probes, report, loading
+	@# notice, and the repair conversation. The shell's only gate is a node that
+	@# cannot run at all (§7.3 criterion 8); `make preflight` remains the
+	@# no-launch reporter. Then launch with a side-car memory recorder (external,
 	@# app-agnostic): it samples the process tree into mem.log for the whole run,
 	@# torn down when the app exits. Its crash can never take murmur down;
 	@# stderr lands in mem.log so a fatal crash is recorded, not swallowed.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
-	  node scripts/dev-preflight.ts $(PREFLIGHT_ARGS) || { \
+	  node -e "" || { \
 	    echo ""; \
-	    echo "make dev stopped — node could not run the preflight."; \
+	    echo "make dev stopped — node is not runnable here."; \
 	    echo "install Node >= 24 and try again; everything else murmur fixes by talking."; \
 	    exit 1; \
 	  }; \

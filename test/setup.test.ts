@@ -305,7 +305,9 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(outcome).toEqual({ musicOk: false, bunOk: false, voiceOk: false })
   })
 
-  it('no gaps = no offer, no conversation, not a word', async () => {
+  it('no gaps = no offer, no conversation — only the checking notice', async () => {
+    // The probes take real seconds (yt-dlp is a network search): the one line
+    // before them is the loading signal the front-end shows while they run.
     const { host, infos } = fakeHost()
     const { guide, requests } = fakeGuide()
     const outcome = await runSetup({
@@ -316,7 +318,8 @@ describe('runSetup — the once-per-boot offer', () => {
       probes: { music: async () => OK, bun: async () => OK },
     })
     expect(requests).toEqual([])
-    expect(infos).toEqual([])
+    expect(infos).toHaveLength(1)
+    expect(infos[0]).toContain('checking')
     expect(outcome).toEqual({ musicOk: true, bunOk: true, voiceOk: true })
   })
 
@@ -546,8 +549,10 @@ describe('runSetup — declining, and what a decline costs later', () => {
     })
     expect(requests).toEqual([])
     expect(outcome.musicOk).toBe(false)
-    expect(infos).toHaveLength(1)
-    expect(infos[0]).toContain('make setup')
+    // The checking notice (the probes still run), then exactly one pointer.
+    expect(infos).toHaveLength(2)
+    expect(infos[0]).toContain('checking')
+    expect(infos[1]).toContain('make setup')
     // The record is not re-written on every quiet boot.
     expect(ledger.events).toEqual([])
   })

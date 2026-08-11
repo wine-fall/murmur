@@ -7,10 +7,10 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-11 (spec 10 §3.2-B onboarding surface: engine-marked
-`ask` on the Host seam + wire, presented as the spotlight card — room hushed,
-centered modal, checklist-card setup offer; empty-line skip now works in the
-TUI)_
+_Last updated: 2026-08-11 (onboarding polish from the first real run: the
+answer field moves into the spotlight card, the wordmark ident opens every
+log, `make dev` enters the TUI immediately with in-session probes + loading
+notice, and /quit / Ctrl-C works mid-onboarding via the quit latch)_
 
 ## Where we are
 

@@ -45,12 +45,49 @@ export function isYes(line: string): boolean {
 // already treats as decline/skip/end.
 export type ReadLine = () => Promise<string>
 
-export function lineReader(host: Host): ReadLine {
+// The listener's way OUT of a Q&A flow (spec 01 §3.6 extended to onboarding):
+// Ctrl-C in the TUI arrives as a typed /quit, and a consuming reader must not
+// swallow it as an answer. Once fired, every later read resolves '' instantly
+// (the EOF fast-forward), the flows decline through, and the app checks
+// `requested` to shut down instead of starting the broadcast.
+export type QuitLatch = { requested: boolean; fire(): void; seen: Promise<string> }
+
+export function quitLatch(): QuitLatch {
+  let fire!: () => void
+  const seen = new Promise<string>((resolve) => {
+    fire = () => resolve('')
+  })
+  const latch: QuitLatch = {
+    requested: false,
+    seen,
+    fire() {
+      latch.requested = true
+      fire()
+    },
+  }
+  return latch
+}
+
+const QUIT = '/quit'
+
+export function lineReader(host: Host, quit?: QuitLatch): ReadLine {
   const eof: Promise<string> = host.eof?.().then(() => '') ?? new Promise<string>(() => {})
+  const out: Promise<string> = quit?.seen ?? new Promise<string>(() => {})
   let chain: Promise<unknown> = Promise.resolve()
   return () => {
     const read = chain.then(() =>
-      Promise.race([host.peekLine().then(() => host.takeLine() ?? ''), eof]),
+      Promise.race([
+        host.peekLine().then(() => {
+          const line = host.takeLine() ?? ''
+          if (line.trim() === QUIT) {
+            quit?.fire()
+            return ''
+          }
+          return line
+        }),
+        eof,
+        out,
+      ]),
     )
     chain = read
     return read
@@ -164,6 +201,8 @@ export type SetupRun = {
   // An explicit entry (--setup / --setup-music): always converse, never consult
   // or write the standing decline.
   explicit?: boolean
+  // Fired by a typed /quit mid-conversation; reads decline through instantly.
+  quit?: QuitLatch
 }
 
 const PLAIN_ENGLISH: Record<GapKind, string> = {
@@ -223,6 +262,9 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
 export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const { host, guide, targets } = run
   const explicit = run.explicit === true
+  // The probes take real seconds (yt-dlp is a live network search): say so
+  // first, so the front-end has a loading signal instead of a silent stall.
+  host.info('checking the gear on this machine...')
   const gaps = await detectGaps(targets, run.probes ?? {})
   if (gaps.length === 0) return outcomeFrom(targets, gaps)
 
@@ -237,7 +279,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   // The offer and the guide both read the keyboard; make sure the reader is up
   // (idempotent — the Director starts it too).
   host.start()
-  const read = lineReader(host)
+  const read = lineReader(host, run.quit)
   // Probe detail (the raw reason) is diagnostics, not card copy: the guide
   // gets it via its prompt, the dev log keeps it for humans.
   for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
