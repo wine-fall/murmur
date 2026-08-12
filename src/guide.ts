@@ -99,11 +99,77 @@ export function lineReader(host: Host, quit?: QuitLatch): ReadLine {
   }
 }
 
+// Builtins that can only look, never touch. Write/Edit stay out on purpose.
+const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep'])
+
+// Where credentials live (spec 03-03 §7.2: voice.json holds the api key,
+// .env* the remote-voice creds). A "read" of these puts a secret into the SDK
+// transcript, so it is never auto-allowed, whatever the tool (codex review).
+const SECRET_BEARING = /\.env|voice\.json/i
+
+// The read-only shapes the guide's diagnosis actually uses. Whole-segment
+// anchors rather than command heads where the head alone is not enough:
+// `yt-dlp --version` reads, `yt-dlp <url>` downloads.
+const READONLY_SEGMENT = [
+  /^which(\s|$)/,
+  /^type\s/,
+  /^command -v\s/,
+  /^ls(\s|$)/,
+  /^echo(\s|$)/,
+  /^printf\s/,
+  /^pwd$/,
+  /^uname(\s|$)/,
+  /^head(\s|$)/,
+  /^tail(\s|$)/,
+  /^wc(\s|$)/,
+  /^yt-dlp --version$/,
+  /^ffmpeg -version$/,
+  /^bun --version$/,
+  /^node --version$/,
+  // `brew outdated` is NOT here: default Homebrew auto-updates its own
+  // metadata before answering it, which mutates state (codex review).
+  /^brew (info|list|config|doctor|--version|--prefix)(\s|$)/,
+  /^uv (--version$|tool list)/,
+  /^pipx (list|--version)/,
+]
+
+// A conservative classifier: is this Bash command incapable of changing the
+// machine? Redirects and backticks disqualify outright; the rest is split at
+// every separator (;, &&, ||, |, &, newline) AND around $(...) so each
+// executable segment is judged on its own — one unknown head poisons the
+// whole command. False negatives just fall back to asking; a false positive
+// would execute silently, so every rule leans strict.
+export function isReadOnlyCommand(command: string): boolean {
+  if (/[><`]/.test(command)) return false
+  // Parameter/env expansion can surface a credential into the transcript
+  // (`echo $MURMUR_TTS_API_KEY`), so `$` is allowed only as `$?` or a `$(...)`
+  // whose inner command is judged like any other segment (codex review).
+  if (/\$(?![?(])/.test(command)) return false
+  if (SECRET_BEARING.test(command)) return false
+  const segments = command
+    .split(/\|\||&&|[;&|\n]|\$\(|\)/)
+    .map((piece) => piece.trim().replace(/^["']+|["']+$/g, '').trim())
+    .filter((piece) => piece !== '')
+  if (segments.length === 0) return false
+  return segments.every((segment) => READONLY_SEGMENT.some((rule) => rule.test(segment)))
+}
+
 // Ask the user via the CLI Host before each tool the guide wants to run, and
 // return the SDK's allow/deny result. Anything but an explicit yes denies.
+// One carve-out (spec 03-03 §7.1): the card's 'y' already covered LOOKING, so
+// pure reads flow without another ask and the per-action consent lands on the
+// CHANGES — a wall of y/N for `which` and `--version` buries the one confirm
+// that matters. The dev log keeps a record of what was auto-allowed.
 export function cliPermission(host: Host, read: ReadLine): CanUseTool {
   return async (toolName, input) => {
     const detail = typeof input.command === 'string' ? input.command : JSON.stringify(input)
+    if (
+      (READONLY_TOOLS.has(toolName) && !SECRET_BEARING.test(JSON.stringify(input))) ||
+      (toolName === 'Bash' && typeof input.command === 'string' && isReadOnlyCommand(input.command))
+    ) {
+      host.debug?.(`guide auto-allowed read-only [${toolName}]: ${detail}`)
+      return { behavior: 'allow' }
+    }
     // One self-contained ask: a docked "allow?" with the command left behind
     // in the log would ask the user to approve something they cannot see.
     ask(host, `setup assistant wants to run [${toolName}]: ${detail}\nallow? [y/N]`, 'consent')
