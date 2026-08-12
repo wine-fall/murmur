@@ -410,12 +410,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const { scene: sceneRows } = sceneSplit(Math.max(dims.height - 5, 10))
   const sceneWidth = cols - 2
   // Whether the scene band holds the stage. The settings pane always reclaims
-  // its rows (a mode the listener opened is their own full attention); a
-  // spotlight card keeps the sky dimmed beside it (§3.2-B: a sky going dark
-  // under every consent reads as broken) unless the terminal is too short to
-  // host both — the card's own top row, from the renderer's math, is the
-  // judge. The paint loops read this through a ref, like the card row.
-  const sceneShown = wide && !paneOpen && (cardTop === null || cardTop > 3 + sceneRows)
+  // its rows (a mode the listener opened is their own full attention). The
+  // spotlight card takes none: it floats over the room (§3.2-B), so the sky
+  // stays on stage dimmed beneath it — only the raster layers yield, and only
+  // where the card's own rows reach (stagePlan / waveRowsFor via the refs).
+  const sceneShown = wide && !paneOpen
   const sceneShownRef = useRef(sceneShown)
   sceneShownRef.current = sceneShown
   // The newest broadcast line carries the bullet (concept 04); older lines
@@ -761,8 +760,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
       {/* The spotlight card (§3.2-B as built): the oldest pending ask grows
           into a centered rounded card while the room around it is hushed.
-          Kind picks the frame: warm for a question, periwinkle for a consent —
-          the listener's color, because the decision is theirs. */}
+          It FLOATS — absolutely positioned over the log, one gap row above
+          the bottom rule, taking no rows from the layout: the room behind it
+          dims but never rearranges. Kind picks the frame: warm for a
+          question, periwinkle for a consent — the listener's color, because
+          the decision is theirs. */}
       {asks.length > 0 &&
         (() => {
           const head = asks[0]!
@@ -786,13 +788,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 borderColor: frame,
                 titleColor: consent ? PERIWINKLE : EMBER,
                 flexDirection: 'column',
-                alignSelf: 'center',
+                position: 'absolute',
+                // Yoga anchors absolute insets to the parent's border box, so
+                // the ultrawide gutter must be added back to stay centered.
+                left: gutter + Math.floor((cols - width) / 2),
+                bottom: 2,
+                zIndex: 100,
                 width,
                 paddingLeft: 2,
                 paddingRight: 2,
                 paddingTop: 1,
                 paddingBottom: 1,
-                marginBottom: 1,
                 backgroundColor: CARD,
               }}
             >

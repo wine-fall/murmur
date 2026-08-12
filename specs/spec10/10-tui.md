@@ -348,11 +348,14 @@ clipped to end above the card (`waveRowsFor`), and either raster is deleted
 only when the card's own rows would collide with it (`stagePlan`,
 `cardTopRow` in `dock.ts` replaying the renderer's width/chrome math),
 because kitty images composite ABOVE text cells) and the head ask renders as
-a centered rounded card (refs' ~55% content width) on the `CARD` ground in
-the dock's slot — and the answer field moves INTO the card (user decision,
-2026-08-11): the same single input, permanent focus intact, renders as the
-card's last row while a question is open, and the bottom row keeps only its
-quiet rule. The card is where you read AND where you answer.
+a centered rounded card (refs' ~55% content width) on the `CARD` ground,
+**floating over the room** (amended 2026-08-12, with §3.3's overlay
+amendment): the card is absolutely positioned a gap row above the bottom
+rule and takes no rows from the layout, so nothing behind it moves — the
+room dims, it never rearranges — and the answer field moves INTO the card
+(user decision, 2026-08-11): the same single input, permanent focus intact,
+renders as the card's last row while a question is open, and the bottom row
+keeps only its quiet rule. The card is where you read AND where you answer.
 Kind picks the frame: warm/ember for a question (with a client-side `#n`
 counter in the title), periwinkle for a consent (` · optional` in the title)
 — the listener's color, because the decision is theirs; a consent card
@@ -438,9 +441,16 @@ now-playing stays in the status strip. Same four regions either way; only
 the composition moves, which is exactly the §6.1 licence. **Overlays and the
 band**: the settings pane reclaims the band's rows outright (a mode the
 listener opened is their own full attention); a spotlight card keeps the sky
-on stage dimmed per §3.2-B, and the band steps off only when the card's top
-row (the renderer's own math, `cardTopRow`) would climb into the scene — the
-short-terminal case where both cannot fit. **The starfield is
+on stage dimmed per §3.2-B ~~, and the band steps off only when the card's
+top row (the renderer's own math, `cardTopRow`) would climb into the scene —
+the short-terminal case where both cannot fit~~ — **amended 2026-08-12 (user
+report: the card is a mask, not a sibling — a checklist card tall enough to
+trip the yield collapsed the whole scene and threw the wordmark to the top
+of the frame): the card floats (yoga absolute, above the text layer), takes
+no rows from the composition, and the band never steps off while the pane is
+closed; only the raster layers yield, per-rectangle, where the card's own
+rows reach (`stagePlan` / `waveRowsFor` against `cardTopRow`), because kitty
+images composite above text cells and would otherwise cover the card. **The starfield is
 retired** (2026-08-12 design session): at character resolution the scatter
 read as noise, so the night behind the wave and the figure stays empty and
 the scene's texture budget goes to the wave alone.
