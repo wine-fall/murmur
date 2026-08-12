@@ -1,22 +1,21 @@
-// The constellation panel's client half (spec 10 §3.6 / §6.1): the seeded
-// ring-biased starfield, the FFT bins as a radial wave of square blocks, and
-// the whisper figure at the circle's center.
+// The constellation panel's client half (spec 10 §3.6 / §6.1): the FFT bins
+// as a radial wave of square blocks riding the implied circle, and the whisper
+// figure at the circle's center. The night behind them is empty on purpose —
+// character-cell scatter reads as noise, so the sky is the wave and the
+// figure alone.
 //
 // Like bars.ts, the module is free of OpenTUI and React on purpose: the frame
 // a terminal paints cannot be unit-asserted (§3.9), but "which pixels for this
-// level" can — and determinism (seeded stars, hashed jitter) is itself part of
-// the contract, because a resize must not reshuffle the sky.
+// level" can — and determinism (hashed jitter only) is itself part of the
+// contract, because a re-render must not reshuffle the frame.
 
 import { describe, expect, it } from 'vitest'
 
 import {
-  circleOf,
   Constellation,
   hash01,
   OCTANTS,
-  panelWidth,
-  seedStars,
-  STAR_RINGS,
+  sceneSplit,
   waveBinAt,
   WIDE_MIN,
 } from '../tui/src/constellation.ts'
@@ -41,7 +40,7 @@ function litCells(rows: Run[][]): number {
 }
 
 // Per-column deepest lit cell row, over cells NOT present in the silence
-// frame — which isolates the wave from the stars.
+// frame (blank on a starless night; kept as a guard).
 function waveDepth(rows: Run[][], silence: Run[][], fromCol: number, toCol: number): number {
   let deepest = -1
   rows.forEach((row, y) => {
@@ -54,9 +53,9 @@ function waveDepth(rows: Run[][], silence: Run[][], fromCol: number, toCol: numb
   return deepest
 }
 
-describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () => {
+describe('Constellation (§6.1: radial wave and figure over an empty night)', () => {
   it('renders exactly height rows of exactly width cells', () => {
-    const sky = new Constellation(40, 12, 7)
+    const sky = new Constellation(40, 12)
     const rows = sky.frame([0.2, 0.8, 0.5], ACCENT, null)
     expect(rows).toHaveLength(12)
     for (const row of rows) expect([...rowText(row)]).toHaveLength(40)
@@ -64,35 +63,35 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
 
   it('paints with the octant pen by default — every glyph from the mosaic table', () => {
     const allowed = new Set([...OCTANTS, ' '])
-    const rows = new Constellation(40, 12, 7).frame([1, 0.5, 1], ACCENT, null)
+    const rows = new Constellation(40, 12).frame([1, 0.5, 1], ACCENT, null)
     for (const char of rows.flatMap((row) => [...rowText(row)])) {
       expect(allowed.has(char), char).toBe(true)
     }
   })
 
   it('falls back to the universal half-block pen on request', () => {
-    const rows = new Constellation(40, 12, 7, 'half').frame([1, 0.5, 1], ACCENT, null)
+    const rows = new Constellation(40, 12, 'half').frame([1, 0.5, 1], ACCENT, null)
     for (const char of rows.flatMap((row) => [...rowText(row)])) {
       expect([' ', '▀']).toContain(char)
     }
   })
 
-  it('draws the same sky for the same seed — a resize must not reshuffle it', () => {
-    const a = new Constellation(40, 12, 7).frame([], ACCENT, null)
-    const b = new Constellation(40, 12, 7).frame([], ACCENT, null)
+  it('paints the same frame twice for the same inputs — a re-render must not reshuffle', () => {
+    const a = new Constellation(40, 12).frame([], ACCENT, null)
+    const b = new Constellation(40, 12).frame([], ACCENT, null)
     expect(a).toEqual(b)
   })
 
-  it('draws a different sky for a different seed', () => {
-    const a = new Constellation(40, 12, 1).frame([], ACCENT, null)
-    const b = new Constellation(40, 12, 2).frame([], ACCENT, null)
-    expect(a).not.toEqual(b)
+  it('paints an empty night on silence with no figure — no starfield', () => {
+    const rows = new Constellation(48, 20).frame([], ACCENT, null)
+    expect(litCells(rows)).toBe(0)
   })
 
   it('lights more pixels the louder the frame — the wave follows the music', () => {
-    const silence = litCells(new Constellation(48, 20, 7).frame([], ACCENT, null))
-    const quiet = litCells(new Constellation(48, 20, 7).frame([0.3, 0.3, 0.3], ACCENT, null))
-    const loud = litCells(new Constellation(48, 20, 7).frame([1, 1, 1], ACCENT, null))
+    const silence = litCells(new Constellation(48, 20).frame([], ACCENT, null))
+    const quiet = litCells(new Constellation(48, 20).frame([0.3, 0.3, 0.3], ACCENT, null))
+    const loud = litCells(new Constellation(48, 20).frame([1, 1, 1], ACCENT, null))
+    expect(silence).toBe(0)
     expect(quiet).toBeGreaterThan(silence)
     expect(loud).toBeGreaterThan(quiet)
   })
@@ -107,10 +106,10 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
   })
 
   it('lights both arms alike on a bass-only frame — the wave grows outward, not left-first', () => {
-    const silence = new Constellation(48, 24, 7).frame([], ACCENT, null)
+    const silence = new Constellation(48, 24).frame([], ACCENT, null)
     // Bass alone: only the center of the arc may rise; the left arm must not
     // light up ahead of the right the way an edge-anchored mapping does.
-    const rows = new Constellation(48, 24, 7).frame([1, 0, 0, 0, 0, 0, 0, 0], ACCENT, null)
+    const rows = new Constellation(48, 24).frame([1, 0, 0, 0, 0, 0, 0, 0], ACCENT, null)
     const left = waveDepth(rows, silence, 2, 12)
     const right = waveDepth(rows, silence, 36, 46)
     const center = waveDepth(rows, silence, 20, 28)
@@ -121,8 +120,8 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
 
   it('rides the circle: center columns bottom out deeper than the arms', () => {
     const levels = Array.from({ length: 24 }, () => 0.7)
-    const silence = new Constellation(48, 24, 7).frame([], ACCENT, null)
-    const rows = new Constellation(48, 24, 7).frame(levels, ACCENT, null)
+    const silence = new Constellation(48, 24).frame([], ACCENT, null)
+    const rows = new Constellation(48, 24).frame(levels, ACCENT, null)
     const arms = Math.max(
       waveDepth(rows, silence, 4, 10),
       waveDepth(rows, silence, 38, 44),
@@ -133,7 +132,7 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
 
   it('draws the figure at the center in cream ink', () => {
     const figure = ['xx', 'xx']
-    const rows = new Constellation(40, 12, 7).frame([], ACCENT, figure)
+    const rows = new Constellation(40, 12).frame([], ACCENT, figure)
     const cream = rows.flat().filter((run) => run.fg === INK.text && run.text.trim() !== '')
     expect(cream.length).toBeGreaterThan(0)
   })
@@ -142,7 +141,7 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
     // 2 sub-cols x 4 sub-rows per cell: an 'xw' column pair over 4 rows fills a
     // cell with two colors and no gaps — the fold must not flatten it to one.
     const figure = Array.from({ length: 8 }, () => 'xwxw')
-    const rows = new Constellation(40, 12, 7).frame([], ACCENT, figure)
+    const rows = new Constellation(40, 12).frame([], ACCENT, figure)
     const twoTone = rows
       .flat()
       .filter((run) => run.fg === INK.text && run.bg === WARM && run.text.trim() !== '')
@@ -151,8 +150,8 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
 
   it('fades a dozing figure toward the room instead of swapping assets', () => {
     const figure = ['xx', 'xx']
-    const awake = new Constellation(40, 12, 7).frame([], ACCENT, figure, 0)
-    const dozing = new Constellation(40, 12, 7).frame([], ACCENT, figure, 0.5)
+    const awake = new Constellation(40, 12).frame([], ACCENT, figure, 0)
+    const dozing = new Constellation(40, 12).frame([], ACCENT, figure, 0.5)
     const creamCells = (rows: Run[][]): number =>
       rows.flat().filter((run) => run.fg === INK.text && run.text.trim() !== '').length
     expect(creamCells(awake)).toBeGreaterThan(0)
@@ -160,44 +159,12 @@ describe('Constellation (§6.1: ring of stars, radial wave, square pixels)', () 
   })
 
   it('survives hostile bins and degenerate panels', () => {
-    const sky = new Constellation(2, 2, 7)
+    const sky = new Constellation(2, 2)
     for (const frame of [[], [Number.NaN], [2, -1], [0.5]]) {
       const rows = sky.frame(frame, ACCENT, null)
       expect(rows).toHaveLength(2)
       for (const row of rows) expect([...rowText(row)]).toHaveLength(2)
     }
-  })
-})
-
-describe('seedStars (§6.1: ripple rings of stars + a loose free scatter)', () => {
-  const subCols = 200
-  const subRows = 240
-  const stars = seedStars(subCols, subRows, 7)
-  const { cx, cy, radius } = circleOf(subCols, subRows)
-  const offRing = (star: { x: number; y: number }): number =>
-    Math.min(...STAR_RINGS.map((frac) => Math.abs(Math.hypot(star.x - cx, star.y - cy) - radius * frac)))
-
-  it('is deterministic per seed', () => {
-    expect(seedStars(subCols, subRows, 7)).toEqual(stars)
-    expect(seedStars(subCols, subRows, 8)).not.toEqual(stars)
-  })
-
-  it('lays the majority of stars along the concentric rings', () => {
-    const onRings = stars.filter((star) => offRing(star) <= 4).length
-    expect(onRings / stars.length).toBeGreaterThan(0.55)
-  })
-
-  it('spreads each ring around the circle instead of clumping', () => {
-    const octants = new Set(
-      stars
-        .filter((star) => offRing(star) <= 4)
-        .map((star) => Math.floor(((Math.atan2(star.y - cy, star.x - cx) + Math.PI) / (2 * Math.PI)) * 8)),
-    )
-    expect(octants.size).toBeGreaterThanOrEqual(6)
-  })
-
-  it('keeps a free scatter clear of the rings — order AND looseness', () => {
-    expect(stars.filter((star) => offRing(star) > 6).length).toBeGreaterThan(5)
   })
 })
 
@@ -213,16 +180,23 @@ describe('hash01 (the survival dice behind every density knob)', () => {
   })
 })
 
-describe('panelWidth (the one §6.1 breakpoint)', () => {
-  it('declines a panel below the wide minimum', () => {
-    expect(panelWidth(WIDE_MIN - 1)).toBeNull()
-    expect(panelWidth(20)).toBeNull()
+describe('sceneSplit (the stacked composition: scene over log, 2:1)', () => {
+  it('gives the scene about two thirds and the log the rest, summing exactly', () => {
+    for (const rows of [19, 24, 45, 60]) {
+      const { scene, log } = sceneSplit(rows)
+      expect(scene + log).toBe(rows)
+      expect(scene / log).toBeGreaterThanOrEqual(1.8)
+      expect(scene / log).toBeLessThanOrEqual(2.4)
+    }
   })
 
-  it('grants a panel from the minimum up, clamped to a readable band', () => {
-    const atMin = panelWidth(WIDE_MIN)
-    expect(atMin).not.toBeNull()
-    expect(atMin!).toBeGreaterThanOrEqual(30)
-    expect(panelWidth(400)!).toBeLessThanOrEqual(110)
+  it('keeps the log readable on short terminals — never below six rows', () => {
+    for (const rows of [14, 16, 19]) {
+      expect(sceneSplit(rows).log).toBeGreaterThanOrEqual(6)
+    }
+  })
+
+  it('keeps the breakpoint: WIDE_MIN still gates the wide composition', () => {
+    expect(WIDE_MIN).toBe(96)
   })
 })
