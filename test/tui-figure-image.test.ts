@@ -12,6 +12,7 @@ import {
   figurePen,
   figureScale,
   placeFigure,
+  stagePlan,
 } from '../tui/src/figure-image.ts'
 
 describe('figurePen (who can hold a raster at all)', () => {
@@ -127,5 +128,19 @@ describe('figureScale (device pixels per sprite pixel)', () => {
 
   it('falls back when the terminal will not say', () => {
     expect(figureScale(0, 42)).toBe(3)
+  })
+})
+
+// The figure under the spotlight (§3.2-B amended): while a question is on the
+// card the sky stays, hushed like the room — the raster yields only when the
+// card climbs into its rows, because a kitty image sits ABOVE text cells and
+// would cover it.
+describe('stagePlan (whether the figure keeps the stage while the card is up)', () => {
+  it('normal without a hush; hushed above the card; off when the card reaches it', () => {
+    expect(stagePlan(false, null, 5, 8)).toBe('normal')
+    expect(stagePlan(true, null, 5, 8)).toBe('hushed')
+    expect(stagePlan(true, 20, 5, 8)).toBe('hushed') // bottom row 13 clears row 20
+    expect(stagePlan(true, 12, 5, 8)).toBe('off') // 13 >= 12 would cover the card
+    expect(stagePlan(true, 5, 5, 8)).toBe('off')
   })
 })

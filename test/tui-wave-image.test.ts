@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { INK } from '../tui/src/palette.ts'
-import { bandAt, encodeWavePng, ringLevel, waveGeomFor, waveRgba, WAVE_CYCLE } from '../tui/src/wave-image.ts'
+import { bandAt, encodeWavePng, ringLevel, waveGeomFor, waveRgba, waveRowsFor, WAVE_CYCLE } from '../tui/src/wave-image.ts'
 
 // The user's real panel: 83x45 cells at 9x25 device px.
 const GEOM = waveGeomFor(83, 45, { width: 9, height: 25 })
@@ -200,5 +200,18 @@ describe('encodeWavePng (the wire format)', () => {
     expect([...png.subarray(0, 8)]).toEqual([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     expect(png.readUInt32BE(16)).toBe(GEOM.width)
     expect(png.readUInt32BE(20)).toBe(GEOM.height)
+  })
+})
+
+// The ripple under the spotlight (§3.2-B amended): it keeps the sky while a
+// question is up, clipped so the raster ends above the card; too little sky
+// left and it yields entirely.
+describe('waveRowsFor (the ripple clips above the card)', () => {
+  it('full panel without a card; clipped above one; zero when the sliver is too thin', () => {
+    expect(waveRowsFor(false, null, 3, 40)).toBe(40)
+    expect(waveRowsFor(true, null, 3, 40)).toBe(40)
+    expect(waveRowsFor(false, 30, 3, 40)).toBe(40) // no hush, no clip
+    expect(waveRowsFor(true, 30, 3, 40)).toBe(26) // ends above row 30
+    expect(waveRowsFor(true, 6, 3, 40)).toBe(0) // a 2-row sliver is not a sky
   })
 })

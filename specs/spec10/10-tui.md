@@ -339,8 +339,14 @@ engine-side; the dock is presentation, never a second grammar.
 exploration).** The dock's presentation is a modal moment: while any ask is
 pending, the whole room steps down one notch (`hush()` in `palette.ts` — the
 single color point — applied to strip, log, sky accents, and now-playing;
-the kitty raster layer is deleted outright and repainted when the card
-clears, because it composites ABOVE text cells) and the head ask renders as
+the kitty raster layer steps down WITH the room rather than leaving —
+**amended 2026-08-12, user report: a sky going dark under every consent read
+as the interface breaking** — the figure repaints faded by the same 0.55
+(`HUSH_FADE`), the ripple repaints in the hushed accent with its height
+clipped to end above the card (`waveRowsFor`), and either raster is deleted
+only when the card's own rows would collide with it (`stagePlan`,
+`cardTopRow` in `dock.ts` replaying the renderer's width/chrome math),
+because kitty images composite ABOVE text cells) and the head ask renders as
 a centered rounded card (refs' ~55% content width) on the `CARD` ground in
 the dock's slot — and the answer field moves INTO the card (user decision,
 2026-08-11): the same single input, permanent focus intact, renders as the
