@@ -14,7 +14,7 @@ import type { InputRenderable } from '@opentui/core'
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
 import { cardLines, cardTitle, cardTopRow, outbound, type Ask } from './dock.ts'
-import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
+import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
   deleteFigures,
@@ -164,9 +164,9 @@ function Pet({ pose }: { pose: PoseName }): React.ReactNode {
   return <box style={{ flexDirection: 'column' }}>{rows}</box>
 }
 
-// The wide-terminal sky (§6.1 quiet-constellation): starfield, particle mist,
-// and the pet floating in it. Painted on its own clock — viz frames only feed
-// the smoother, so the sky breathes (stars twinkle, the pet animates) even when
+// The wide-terminal sky (§6.1 quiet-constellation): the radial wave and the
+// pet floating over the empty night. Painted on its own clock — viz frames
+// only feed the smoother, so the sky breathes (the pet animates) even when
 // the engine has nothing to say. Constellation is per-mount; the parent keys
 // this component on its size, so a resize builds a fresh sky.
 const SKY_FPS = 12
@@ -185,7 +185,7 @@ function SkyPanel({
   pose: PoseName
   showPet: boolean
   // The block wave yields to the raster ripple when the graphics channel
-  // carries the spectrum instead; the stars and the sprite stay either way.
+  // carries the spectrum instead; the sprite stays either way.
   charWave: boolean
   width: number
   rows: number
@@ -194,7 +194,7 @@ function SkyPanel({
   const sky = useRef<Constellation | null>(null)
   const tick = useRef(0)
   const [painted, setPainted] = useState<Run[][]>([])
-  if (sky.current === null) sky.current = new Constellation(width, rows, 1, penFor(process.env))
+  if (sky.current === null) sky.current = new Constellation(width, rows, penFor(process.env))
 
   useEffect(() => {
     sink.current = (bins) => bars.current.push(bins)
@@ -370,25 +370,26 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const hushRef = useRef(hushed)
   hushRef.current = hushed
   const pose = greeting !== null ? 'wake' : poseFor(state)
-  // The §6.1 breakpoint: wide terminals compose the alive band as a sky panel
-  // beside the log; narrow ones keep the classic bottom band. Same four
+  // The §6.1 breakpoint: wide terminals stack the sky as a full-width scene
+  // band over the log (scene:log ≈ 2:1 — the listener is here for the radio,
+  // not the transcript); narrow ones keep the classic bottom band. Same four
   // regions either way (§3.3) — only the composition moves.
   const dims = useTerminalDimensions()
   // The composition has a max width: past it, a wide terminal gets symmetric
-  // margins instead of a log pinned to the left edge and a stretched sky.
+  // margins instead of a stretched scene.
   const cols = Math.min(dims.width, MAX_COLS)
   const gutter = Math.floor((dims.width - cols) / 2)
-  const skyWidth = panelWidth(cols)
+  const wide = cols >= WIDE_MIN
   // Where the spotlight card begins, for the raster paint loops: they keep
   // the stage hushed above this row and yield it below (null = no card).
   const cardTop = asks.length > 0 ? cardTopRow(asks[0]!.text, cols, dims.height) : null
   const cardTopRef = useRef(cardTop)
   cardTopRef.current = cardTop
   // In the sky composition the strip is one centred line over a full-width
-  // rule (concept 04), and now-playing lives under the panel; in the band
+  // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.
   const strip =
-    skyWidth === null
+    !wide
       ? [greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
           .filter((part) => part !== undefined && part !== '')
           .join('  ♪ ')
@@ -403,9 +404,20 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // with the env override resolved inside bandLayout.
   const band = bandLayout(process.env, settings?.values.tuiPet)
   const items = paneOpen && settings !== null ? paneItems(settings) : null
-  // Rows left for the sky once the strip, its rule, identity, input, and
-  // now-playing take theirs.
-  const skyRows = Math.max(dims.height - 5, 4)
+  // Rows left once the strip, its rule, now-playing, identity, and input take
+  // theirs, split scene-over-log at 2:1. The scene spans the frame minus its
+  // one-cell side padding.
+  const { scene: sceneRows } = sceneSplit(Math.max(dims.height - 5, 10))
+  const sceneWidth = cols - 2
+  // Whether the scene band holds the stage. The settings pane always reclaims
+  // its rows (a mode the listener opened is their own full attention); a
+  // spotlight card keeps the sky dimmed beside it (§3.2-B: a sky going dark
+  // under every consent reads as broken) unless the terminal is too short to
+  // host both — the card's own top row, from the renderer's math, is the
+  // judge. The paint loops read this through a ref, like the card row.
+  const sceneShown = wide && !paneOpen && (cardTop === null || cardTop > 3 + sceneRows)
+  const sceneShownRef = useRef(sceneShown)
+  sceneShownRef.current = sceneShown
   // The newest broadcast line carries the bullet (concept 04); older lines
   // stand back.
   const latestSegment = entries.findLast((entry) => entry.kind === 'segment')?.id
@@ -430,7 +442,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const poseRef = useRef(pose)
   poseRef.current = pose
   useEffect(() => {
-    if (skyWidth === null || figMode !== 'image' || !band.pet) return
+    if (!wide || figMode !== 'image' || !band.pet) return
     let loop: ReturnType<typeof setInterval> | undefined
     const settle = setTimeout(() => {
       const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
@@ -451,9 +463,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       }
       const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
       const imgRows = Math.ceil((POSES.idle[0]!.length * scale) / (cell?.height ?? 16))
-      const centerRow = 2 + circleOf((skyWidth - 1) * 2, skyRows * 4).cy / 4
-      const panelLeft = gutter + cols - skyWidth
-      const col = Math.max(1, Math.round(panelLeft + (skyWidth - 1) / 2 - imgCols / 2) + 1)
+      const centerRow = 2 + circleOf(sceneWidth * 2, sceneRows * 4).cy / 4
+      const sceneLeft = gutter + 1
+      const col = Math.max(1, Math.round(sceneLeft + sceneWidth / 2 - imgCols / 2) + 1)
       const row = Math.max(1, Math.round(centerRow - imgRows / 2) + 1)
       // Retransmitting under one id replaces the frame in place — the pose
       // loop is a stream of tiny PNGs, each pose advancing at its own rate
@@ -461,7 +473,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const started = performance.now()
       let shown = ''
       const paint = (): void => {
-        const plan = stagePlan(hushRef.current, cardTopRef.current, row, imgRows)
+        const plan = sceneShownRef.current
+          ? stagePlan(hushRef.current, cardTopRef.current, row, imgRows)
+          : 'off'
         if (plan === 'off') {
           if (shown !== '') {
             shown = ''
@@ -485,7 +499,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       clearInterval(loop)
       rawOut.writeOut(deleteFigures())
     }
-  }, [skyWidth, cols, gutter, skyRows, figMode, band.pet, renderer, dims.width, dims.height])
+  }, [wide, cols, gutter, sceneRows, sceneWidth, figMode, band.pet, renderer, dims.width, dims.height])
 
   // The grain-ripple wave (§6.1): on a kitty-graphics terminal the spectrum
   // rides the same channel as the figure — stardust ripples in device pixels
@@ -499,7 +513,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // scale), so it keeps the character wave instead.
   const [rasterWave, setRasterWave] = useState(false)
   useEffect(() => {
-    if (skyWidth === null || figMode !== 'image') return
+    if (!wide || figMode !== 'image') return
     let loop: ReturnType<typeof setInterval> | undefined
     let tick = 0
     let wasSilent = false
@@ -507,13 +521,15 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
       if (cell === null) return
       setRasterWave(true)
-      const geom = waveGeomFor(skyWidth - 1, skyRows, cell)
-      const col = gutter + cols - skyWidth + 1
+      const geom = waveGeomFor(sceneWidth, sceneRows, cell)
+      const col = gutter + 2
       const row = 3
       let hidden = false
       const paint = (): void => {
         const hushedNow = hushRef.current
-        const rows = waveRowsFor(hushedNow, cardTopRef.current, row, skyRows)
+        const rows = sceneShownRef.current
+          ? waveRowsFor(hushedNow, cardTopRef.current, row, sceneRows)
+          : 0
         if (rows === 0) {
           if (!hidden) {
             hidden = true
@@ -530,7 +546,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         wasSilent = silent
         // The clipped geometry ends the raster above the card; the hushed
         // color is the room's own step down, so the ripple dims with it.
-        const g = rows === skyRows ? geom : waveGeomFor(skyWidth - 1, rows, cell)
+        const g = rows === sceneRows ? geom : waveGeomFor(sceneWidth, rows, cell)
         const bright = hushedNow ? hush(accentRef.current.bright) : accentRef.current.bright
         rawOut.writeOut(placeFigure(encodeWavePng(levels, tick++, g, bright), row, col, 2, 0))
       }
@@ -545,7 +561,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       // repaints, and a stray delete self-heals within one 12fps beat.
       rawOut.writeOut(deleteFigures())
     }
-  }, [skyWidth, cols, gutter, skyRows, figMode, renderer, dims.width, dims.height])
+  }, [wide, cols, gutter, sceneRows, sceneWidth, figMode, renderer, dims.width, dims.height])
 
   return (
     <box
@@ -557,7 +573,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         paddingRight: gutter,
       }}
     >
-      {skyWidth === null ? (
+      {!wide ? (
         <box
           style={{
             flexDirection: 'row',
@@ -578,6 +594,60 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             <text style={{ fg: roomAccent.bright }}>{strip}</text>
           </box>
           <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+        </box>
+      )}
+
+      {/* The scene band (§3.3 stacked): the sky spans the frame with the log
+          beneath it — the radio's face first, its words second. Now-playing
+          sits under the scene as the §6.1 centred tricolor line. The band
+          steps off the stage only when sceneShown says its rows belong to an
+          overlay instead. */}
+      {sceneShown && (
+        <box
+          style={{
+            flexDirection: 'column',
+            paddingLeft: 1,
+            paddingRight: 1,
+            // The scene owns its rows outright: without a fixed height the
+            // log's content pushes yoga to shrink the band from under the
+            // raster anchors, which are computed from sceneRows.
+            height: sceneRows + 1,
+            flexShrink: 0,
+          }}
+        >
+          <SkyPanel
+            key={`${sceneWidth}x${sceneRows}`}
+            sink={vizSink}
+            accent={roomAccent}
+            pose={pose}
+            showPet={band.pet && figMode === 'sprite'}
+            charWave={!rasterWave}
+            width={sceneWidth}
+            rows={sceneRows}
+          />
+          <box style={{ flexDirection: 'row', justifyContent: 'center' }}>
+            {state?.nowPlaying !== undefined && state.nowPlaying !== '' ? (
+              (() => {
+                const split = splitNowPlaying(state.nowPlaying)
+                return (
+                  <text>
+                    <span fg={lit(PERIWINKLE)}>{'♪ '}</span>
+                    {split !== null ? (
+                      <>
+                        <span fg={lit(EMBER)}>{split.head}</span>
+                        <span fg={lit(INK.dim)}>{' —— '}</span>
+                        <span fg={lit(INK.notice)}>{split.rest}</span>
+                      </>
+                    ) : (
+                      <span fg={lit(INK.notice)}>{state.nowPlaying}</span>
+                    )}
+                  </text>
+                )
+              })()
+            ) : (
+              <text> </text>
+            )}
+          </box>
         </box>
       )}
 
@@ -615,7 +685,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           stickyStart="bottom"
           style={{
             flexGrow: 1,
-            paddingLeft: skyWidth === null ? 1 : 2,
+            paddingLeft: !wide ? 1 : 2,
             paddingRight: 1,
             rootOptions: { backgroundColor: INK.bg },
           }}
@@ -644,7 +714,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             // entries, the poem spacing of §6.1, no icon markers (the speaker
             // lives in the color), the newest broadcast line carrying a bullet.
             // The band composition stays dense with its marker column.
-            <box key={entry.id} style={{ marginBottom: skyWidth === null ? 0 : 1 }}>
+            <box key={entry.id} style={{ marginBottom: !wide ? 0 : 1 }}>
               <text
                 style={{
                   fg: lit(
@@ -656,7 +726,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   ),
                 }}
               >
-                {skyWidth === null
+                {!wide
                   ? MARKER[entry.kind]
                   : entry.id === latestSegment
                     ? '● '
@@ -670,48 +740,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </scrollbox>
       )}
 
-      {skyWidth !== null && (
-        <box style={{ width: skyWidth, flexDirection: 'column', paddingRight: 1 }}>
-          <SkyPanel
-            key={`${skyWidth}x${skyRows}`}
-            sink={vizSink}
-            accent={roomAccent}
-            pose={pose}
-            showPet={band.pet && figMode === 'sprite'}
-            charWave={!rasterWave}
-            width={skyWidth - 1}
-            rows={skyRows}
-          />
-          {/* Centred, in the concept's colors: violet note, ember artist,
-              cool title. A title without a dash stays one cool phrase. */}
-          <box style={{ flexDirection: 'row', justifyContent: 'center' }}>
-            {state?.nowPlaying !== undefined && state.nowPlaying !== '' ? (
-              (() => {
-                const split = splitNowPlaying(state.nowPlaying)
-                return (
-                  <text>
-                    <span fg={lit(PERIWINKLE)}>{'♪ '}</span>
-                    {split !== null ? (
-                      <>
-                        <span fg={lit(EMBER)}>{split.head}</span>
-                        <span fg={lit(INK.dim)}>{' —— '}</span>
-                        <span fg={lit(INK.notice)}>{split.rest}</span>
-                      </>
-                    ) : (
-                      <span fg={lit(INK.notice)}>{state.nowPlaying}</span>
-                    )}
-                  </text>
-                )
-              })()
-            ) : (
-              <text> </text>
-            )}
-          </box>
-        </box>
-      )}
       </box>
 
-      {skyWidth === null && (
+      {!wide && (
         <box style={{ flexDirection: 'row', paddingLeft: 1, paddingRight: 1, height: BAND_ROWS }}>
           {band.pet && <Pet pose={pose} />}
           <box style={{ flexGrow: 1, paddingLeft: band.vizPadLeft }}>
@@ -843,7 +874,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               // The sky composition bounds the field and lets a quiet rule carry
               // the rest of the row (concept 04's input line); long input scrolls
               // inside the field. The band composition keeps the full width.
-              ...(skyWidth === null ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
+              ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
               textColor: PERIWINKLE,
               placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
               backgroundColor: INK.bg,
@@ -853,7 +884,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
             onSubmit={submit as InputProps['onSubmit']}
           />
-          {skyWidth !== null && (
+          {wide && (
             <box style={{ flexGrow: 1, paddingLeft: 1 }}>
               <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
             </box>

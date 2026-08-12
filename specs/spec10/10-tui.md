@@ -8,7 +8,8 @@
 > (engine FFT tap + `viz` feed, §3.6) and slice 3 (pet substrate + warmth kit,
 > §3.7) landed 2026-07-30. The §6.1 art-direction session chose and landed the
 > **quiet-constellation** composition (2026-08-07): the sampled palette, the
-> centered wide-terminal sky panel (§3.3), the octant sub-pixel rendering of
+> centered wide-terminal sky (§3.3 — recomposed 2026-08-12 as a stacked
+> scene-over-log frame, starfield retired), the octant sub-pixel rendering of
 > the viz feed (§3.6), and the raster whisper-figure (§3.7) — contracts
 > untouched. What remains open is sensory: the §5.11 human pass and the
 > by-eye tuning of the new skin (issue #79).
@@ -420,18 +421,29 @@ focus, and the broadcast never pauses under it.
 (`tui/src/logo.ts`, half-block letters + tagline) opens every program log —
 the first thing a boot shows, scrolled away by the program itself.
 
-**As built (2026-08-07, §6.1 quiet-constellation): composition has one
-breakpoint, and one max width.** At ≥ 96 columns the alive band recomposes
-as a **sky panel** beside the log: the program log keeps the left with one
-blank line between entries and the newest broadcast line carrying a bullet,
-the panel takes the right — a seeded ring-biased starfield, the visualizer's
-bins as a radial wave riding an implied circle (§3.6), the whisper-figure at
-the circle's center (§3.7), and now-playing as a centered tricolor `♪` line
-under the panel. The strip becomes one centered line over a full-width rule.
+**As built (2026-08-12, stacked recomposition — supersedes the 2026-08-07
+side-panel): composition has one breakpoint, one max width, and one vertical
+split.** At ≥ 96 columns the alive band recomposes as a full-width **scene
+band over the log**: the sky spans the frame's top — the visualizer's bins as
+a radial wave riding an implied circle (§3.6) with the whisper-figure at the
+circle's center (§3.7) over an otherwise empty night — with now-playing as a
+centered tricolor `♪` line under the band, and the program log beneath at
+scene:log ≈ 2:1 (`sceneSplit`: the log takes a third of the usable rows,
+floored at six — the listener is here for the radio, not the transcript).
+The log keeps one blank line between entries and the newest broadcast line
+carrying a bullet. The strip is one centered line over a full-width rule.
 Past 184 columns the whole frame centers with symmetric margins instead of
 stretching. Below 96 columns the classic bottom band stands unchanged, and
 now-playing stays in the status strip. Same four regions either way; only
-the composition moves, which is exactly the §6.1 licence.
+the composition moves, which is exactly the §6.1 licence. **Overlays and the
+band**: the settings pane reclaims the band's rows outright (a mode the
+listener opened is their own full attention); a spotlight card keeps the sky
+on stage dimmed per §3.2-B, and the band steps off only when the card's top
+row (the renderer's own math, `cardTopRow`) would climb into the scene — the
+short-terminal case where both cannot fit. **The starfield is
+retired** (2026-08-12 design session): at character resolution the scatter
+read as noise, so the night behind the wave and the figure stays empty and
+the scene's texture budget goes to the wave alone.
 
 **As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
 (also `off` / `false` / `no`) drops the creature from the alive band, and the
@@ -501,14 +513,14 @@ only the client — one shutdown path.
   wave is dashed columns of square blocks whose **bases ride the lower arc of
   one implied circle** (deep at the center, shallow at the arms), three
   temperatures by level (peach-ember peaks / cream mids / warm-grey quiet),
-  fraying tips, ghost echoes past the tip. The starfield is concentric
-  **ripple rings** off the same circle — quasi-regular arc spacing, jittered,
-  gap-broken, near-dark — under a thin free scatter with rare warm accents.
-  A near-covered cell holding exactly two inks keeps both (majority ink on
-  the glyph, the other behind it). The sky paints on the client's own 12fps
-  clock and viz frames only feed the smoother, so stars twinkle and the
-  figure animates even when the engine is silent. All of it is client-side
-  arithmetic (`tui/src/constellation.ts`); the feed contract is untouched.
+  fraying tips, ghost echoes past the tip — over an otherwise **empty night**
+  (the 2026-08-12 stacked recomposition retired the starfield: character-cell
+  scatter read as noise, §3.3). A near-covered cell holding exactly two inks
+  keeps both (majority ink on the glyph, the other behind it). The sky paints
+  on the client's own 12fps clock and viz frames only feed the smoother, so
+  the figure animates even when the engine is silent. All of it is
+  client-side arithmetic (`tui/src/constellation.ts`); the feed contract is
+  untouched.
 
 ### 3.7 The warmth kit (techniques adopted from the case research)
 
