@@ -33,8 +33,18 @@ describe('placeFigure (kitty graphics APC framing)', () => {
 
   it('saves the cursor, moves to the cell, transmits, and restores', () => {
     const seq = placeFigure(png, 5, 40, 1)
-    expect(seq.startsWith('\x1b7\x1b[5;40H')).toBe(true)
-    expect(seq.endsWith('\x1b8')).toBe(true)
+    expect(seq).toContain('\x1b7\x1b[5;40H')
+    expect(seq).toContain('\x1b8')
+  })
+
+  it('wraps the whole placement in a synchronized update, so the parked cursor never shows', () => {
+    // The renderer's frames end with the hardware cursor VISIBLE on the input
+    // line. This write happens between frames: without the 2026 guard the
+    // terminal displays the cursor sitting on the anchor cell for the whole
+    // base64 stream — a phantom cursor blinking at the image corner.
+    const seq = placeFigure(png, 5, 40, 1)
+    expect(seq.startsWith('\x1b[?2026h\x1b7\x1b[5;40H')).toBe(true)
+    expect(seq.endsWith('\x1b8\x1b[?2026l')).toBe(true)
   })
 
   it('declares PNG transmit-and-display without moving the cursor', () => {

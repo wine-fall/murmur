@@ -119,6 +119,11 @@ const CHUNK = 4096
 // a fresh placement every time, so an animation loop leaves the terminal
 // compositing thousands of stale placements — the whole machine slows down.
 // Same image id + same placement id means the next frame replaces this one.
+//
+// The whole write rides inside a synchronized update (?2026): it lands BETWEEN
+// renderer frames, which end with the hardware cursor visible on the input
+// line — without the guard the terminal displays that cursor parked on the
+// anchor cell for the whole base64 stream, a phantom blink at the image corner.
 export function placeFigure(png: Buffer, row: number, col: number, id: number, z = 1): string {
   const b64 = png.toString('base64')
   const parts: string[] = []
@@ -130,7 +135,7 @@ export function placeFigure(png: Buffer, row: number, col: number, id: number, z
       return `\x1b_G${head}${more};${part}\x1b\\`
     })
     .join('')
-  return `\x1b7\x1b[${row};${col}H${seq}\x1b8`
+  return `\x1b[?2026h\x1b7\x1b[${row};${col}H${seq}\x1b8\x1b[?2026l`
 }
 
 // Drop every image placement — resize repaints and shutdown both route here.
