@@ -16,7 +16,12 @@
 import { parseArgs } from 'node:util'
 
 import { voiceConfigPath } from '../src/paths.ts'
-import { preflightBun, preflightFfmpeg, preflightYtdlp } from '../src/startup.ts'
+import {
+  preflightBun,
+  preflightFfmpeg,
+  preflightYtdlp,
+  preflightYtdlpFreshness,
+} from '../src/startup.ts'
 import { readVoiceConfig } from '../src/voice-config.ts'
 
 const OK = '\x1b[32m✓\x1b[0m'
@@ -40,7 +45,11 @@ console.log('preflight:')
 const gaps: string[] = []
 
 if (values['no-music'] !== true) {
-  const [yt, ff] = await Promise.all([preflightYtdlp(), preflightFfmpeg()])
+  const [yt, ff, fresh] = await Promise.all([
+    preflightYtdlp(),
+    preflightFfmpeg(),
+    preflightYtdlpFreshness(),
+  ])
   const broken: string[] = []
   for (const [name, result] of [
     ['yt-dlp', yt],
@@ -53,6 +62,12 @@ if (values['no-music'] !== true) {
     }
   }
   if (broken.length > 0) gaps.push(`music needs ${broken.join(' + ')} — the session will be talk-only`)
+  else if (!fresh.ok) {
+    // The binaries work — this is a freshness warning, not a degradation:
+    // music keeps playing, but extractors rot (Bilibili breaks first).
+    console.log(`  ${NO} yt-dlp freshness: ${fresh.reason}`)
+    gaps.push('yt-dlp is stale (Bilibili breaks first as sites change) — an upgrade fixes it')
+  }
 }
 
 if (wantsTui) {

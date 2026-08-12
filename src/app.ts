@@ -325,7 +325,7 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
   // Complete means every piece this entry actually covered, bun included: with
   // the TUI the default front-end, an unrepaired bun is a real gap, not a note.
   const ok =
-    (!targets.wantsMusic || outcome.musicOk) &&
+    (!targets.wantsMusic || (outcome.musicOk && outcome.ytdlpFresh)) &&
     (!targets.wantsBun || outcome.bunOk) &&
     (!targets.wantsVoice || outcome.voiceOk)
   host.info(ok ? 'setup is complete.' : 'some pieces are still not set up.')

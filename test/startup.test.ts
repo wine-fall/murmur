@@ -9,6 +9,7 @@ import {
   preflightFfmpeg,
   preflightMusic,
   preflightYtdlp,
+  preflightYtdlpFreshness,
 } from '../src/startup.ts'
 
 // Stand-in binaries (spec 03-03 §5 testing): tiny executable scripts standing
@@ -100,5 +101,40 @@ describe('preflightBun', () => {
 
   it('fails on a binary that exits 0 saying nothing', async () => {
     expect((await preflightBun(standIn('exit 0'))).ok).toBe(false)
+  })
+})
+
+// The yt-dlp freshness probe (spec 03-03 §2): releases are dated, extractors
+// rot as sites change (Bilibili breaks first), so an old release date is the
+// staleness signal. Local and deterministic — the live Bilibili endpoints
+// answer probabilistically, so a functional probe would flicker.
+describe('preflightYtdlpFreshness', () => {
+  const now = new Date('2026-08-12')
+
+  it('a release inside the rot window is fresh', async () => {
+    expect((await preflightYtdlpFreshness(standIn('echo 2026.07.04'), now)).ok).toBe(true)
+  })
+
+  it('an old release fails, naming the version, its age, and the remedy', async () => {
+    const r = await preflightYtdlpFreshness(standIn('echo 2026.03.01'), now)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('2026.03.01')
+    // The exact count can shift by one across timezones; the shape is what
+    // matters — an age in days, and the remedy.
+    expect(r.reason).toMatch(/16\d days old/)
+    expect(r.reason.toLowerCase()).toContain('upgrade')
+  })
+
+  it('a nightly build (extra version segment) is judged by its date prefix', async () => {
+    const r = await preflightYtdlpFreshness(standIn('echo 2026.03.01.123456'), now)
+    expect(r.ok).toBe(false)
+    expect(r.reason).toContain('2026.03.01')
+  })
+
+  it('freshness is advisory: unreadable versions and missing binaries are never stale', async () => {
+    // Liveness is the OTHER probe's business; this one only ever says "old".
+    expect((await preflightYtdlpFreshness(standIn('echo weird-build'), now)).ok).toBe(true)
+    expect((await preflightYtdlpFreshness(standIn('exit 1'), now)).ok).toBe(true)
+    expect((await preflightYtdlpFreshness('/nonexistent/yt-dlp', now)).ok).toBe(true)
   })
 })

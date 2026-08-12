@@ -1,4 +1,6 @@
 import { execFile } from 'node:child_process'
+import { mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 
@@ -63,5 +65,24 @@ describe('dev-preflight (reporter, not gatekeeper)', () => {
     // there is no combination of absent dependencies that blocks the shell.
     const { code } = await preflight(['--no-music', '--voice', 'hosted'], { MURMUR_TTS_URL: '' })
     expect(code).toBe(0)
+  })
+
+  it('a working but stale yt-dlp is a freshness warning, not a talk-only gap', async () => {
+    // Stand-in binaries on PATH: yt-dlp answers the fetch probe but reports an
+    // ancient release date — the rotted-binary shape. ffmpeg is healthy.
+    const bin = mkdtempSync(join(tmpdir(), 'murmur-preflight-'))
+    writeFileSync(
+      join(bin, 'yt-dlp'),
+      '#!/bin/sh\ncase "$*" in *--version*) echo "2020.01.01";; *) echo "{}";; esac\n',
+      { mode: 0o755 },
+    )
+    writeFileSync(join(bin, 'ffmpeg'), '#!/bin/sh\nexit 0\n', { mode: 0o755 })
+    const { code, stdout } = await preflight(['--voice', 'stub', '--plain'], {
+      PATH: `${bin}:${BARE_PATH}`,
+    })
+    expect(code).toBe(0)
+    expect(stdout).toContain('2020.01.01')
+    expect(stdout.toLowerCase()).toContain('upgrade')
+    expect(stdout).not.toContain('talk-only')
   })
 })

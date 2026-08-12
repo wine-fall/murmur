@@ -124,6 +124,20 @@
      (`uv tool` / `pipx`) for `yt-dlp` is the fallback, used only when Homebrew
      is unavailable or cannot provide it. The remedy is still never prescribed
      beyond this channel preference; the cause remains the agent's to diagnose;
+   - **yt-dlp freshness (added 2026-08-12)**: releases are dated
+     (`YYYY.MM.DD`) and extractors rot as sites move their APIs and anti-bot
+     checks — Bilibili breaks first (its search/page endpoints 412 stale
+     clients). `preflightYtdlpFreshness` (`src/startup.ts`) reads `--version`
+     locally and flags a release older than 60 days as a `ytdlp` gap. The
+     probe is deliberately **not** a live Bilibili fetch: those endpoints
+     answer probabilistically (smoke-measured 412 flicker on identical
+     back-to-back requests), so a functional probe would misreport in both
+     directions, while the release date is deterministic and free. The gap
+     rides behind a WORKING music pair (a broken install is the music gap's
+     business, and its repair — an install — already lands the current
+     release) and never degrades the session: music keeps playing, the offer
+     proposes an upgrade on the channel that owns the binary, verified by
+     re-reading the release date;
    - `bun` — the spec-10 front-end runtime (pays off spec 10 §5.10): the guide
      offers the official installer with per-action consent and verifies with
      `preflightBun`; until then the front-end has fallen back to plain
