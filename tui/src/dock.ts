@@ -50,6 +50,34 @@ export function cardLines(text: string): CardLine[] {
   return lines
 }
 
+// How many terminal rows the spotlight card stands on — the renderer's own
+// width and chrome math replayed as a number. The raster layer needs it: a
+// kitty image sits ABOVE text cells, so while the card is up the sky's images
+// may keep the stage (dimmed) only where the card cannot reach.
+export function cardRows(text: string, cols: number): number {
+  const width = Math.min(Math.floor(cols * 0.55), cols - 4)
+  const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
+  const lines = cardLines(text)
+  const facts = lines.some((line) => line.role === 'ready' || line.role === 'gap')
+  let rows = 0
+  for (const line of lines) {
+    const marker = line.role === 'ready' || line.role === 'gap' ? 4 : 0
+    rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
+  }
+  if (facts) rows += 1 // the divider above the invitation
+  rows += 2 // the action row (its top margin + the line)
+  rows += 2 // the in-card answer field (its top margin + the input)
+  rows += 4 // border (2) + vertical padding (2)
+  rows += 1 // the card's bottom margin
+  return rows
+}
+
+// The first terminal row the card can touch: it stands on the window's bottom
+// row (the quiet rule that keeps the frame closed). Rasters end above this.
+export function cardTopRow(text: string, cols: number, height: number): number {
+  return Math.max(1, height - 1 - cardRows(text, cols))
+}
+
 // What a submitted line becomes on the wire. While a question is docked,
 // EVERY line — the empty skip included (spec 06 §2.1: Enter skips a seed
 // question) — is its answer; idle empty lines stay local noise, as before.

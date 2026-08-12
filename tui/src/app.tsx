@@ -13,7 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { cardLines, cardTitle, outbound, type Ask } from './dock.ts'
+import { cardLines, cardTitle, cardTopRow, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, panelWidth, penFor, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -22,8 +22,9 @@ import {
   figurePen,
   figureScale,
   placeFigure,
+  stagePlan,
 } from './figure-image.ts'
-import { encodeWavePng, waveGeomFor, WAVE_FPS } from './wave-image.ts'
+import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
@@ -71,6 +72,11 @@ const BAND_ROWS = BAND_POSES.idle[0]!.length / 2
 
 // How far the pet's ink fades toward the room while it sleeps.
 const DOZE_FADE = 0.45
+
+// The raster layer's copy of palette.hush(): while a question is on the card
+// the figure and the ripple step down the same 0.55 toward the night as every
+// text cell, instead of leaving the stage.
+const HUSH_FADE = 0.55
 
 type Entry = { id: number; kind: 'segment' | 'user' | 'info'; text: string }
 
@@ -358,7 +364,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     ? { dim: hush(accent.dim), bright: hush(accent.bright) }
     : accent
   // The raster layer sits ABOVE text cells; while the card is up, the figure
-  // and the ripple leave the stage entirely (spec 10 §3.2-B as built).
+  // and the ripple stay on stage hushed like the room — a sky that goes dark
+  // under every consent reads as the interface breaking — yielding only the
+  // rows the card itself needs (spec 10 §3.2-B).
   const hushRef = useRef(hushed)
   hushRef.current = hushed
   const pose = greeting !== null ? 'wake' : poseFor(state)
@@ -371,6 +379,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const cols = Math.min(dims.width, MAX_COLS)
   const gutter = Math.floor((dims.width - cols) / 2)
   const skyWidth = panelWidth(cols)
+  // Where the spotlight card begins, for the raster paint loops: they keep
+  // the stage hushed above this row and yield it below (null = no card).
+  const cardTop = asks.length > 0 ? cardTopRow(asks[0]!.text, cols, dims.height) : null
+  const cardTopRef = useRef(cardTop)
+  cardTopRef.current = cardTop
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the panel; in the band
   // composition the strip stays two-sided and carries now-playing itself.
@@ -425,13 +438,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const scale = figureScale(cell?.width ?? 0, spriteCols)
       // Every pose shares the sprite grid, so geometry is computed once and a
       // pose's PNGs are encoded on first use.
-      const pngCache = new Map<PoseName, Buffer[]>()
-      const pngsFor = (name: PoseName): Buffer[] => {
-        let pngs = pngCache.get(name)
+      const pngCache = new Map<string, Buffer[]>()
+      const pngsFor = (name: PoseName, hushedNow: boolean): Buffer[] => {
+        const key = hushedNow ? `${name}:hushed` : name
+        let pngs = pngCache.get(key)
         if (pngs === undefined) {
-          const fade = name === 'doze' ? DOZE_FADE : 0
+          const fade = Math.max(name === 'doze' ? DOZE_FADE : 0, hushedNow ? HUSH_FADE : 0)
           pngs = POSES[name].map((frame) => encodeFigurePng(frame, scale, fade))
-          pngCache.set(name, pngs)
+          pngCache.set(key, pngs)
         }
         return pngs
       }
@@ -447,7 +461,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const started = performance.now()
       let shown = ''
       const paint = (): void => {
-        if (hushRef.current) {
+        const plan = stagePlan(hushRef.current, cardTopRef.current, row, imgRows)
+        if (plan === 'off') {
           if (shown !== '') {
             shown = ''
             rawOut.writeOut(deleteFigures())
@@ -455,9 +470,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           return
         }
         const name = poseRef.current
-        const pngs = pngsFor(name)
+        const pngs = pngsFor(name, plan === 'hushed')
         const at = Math.floor(((performance.now() - started) / 1000) * POSE_FPS[name])
-        const key = `${name}:${at % pngs.length}`
+        const key = `${name}:${at % pngs.length}:${plan}`
         if (key === shown) return
         shown = key
         rawOut.writeOut(placeFigure(pngs[at % pngs.length]!, row, col, 1))
@@ -497,9 +512,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const row = 3
       let hidden = false
       const paint = (): void => {
-        if (hushRef.current) {
+        const hushedNow = hushRef.current
+        const rows = waveRowsFor(hushedNow, cardTopRef.current, row, skyRows)
+        if (rows === 0) {
           if (!hidden) {
             hidden = true
+            // d=A drops the figure too; its own loop self-heals in one beat.
             rawOut.writeOut(deleteFigures())
           }
           wasSilent = false
@@ -510,7 +528,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         const silent = levels.every((level) => level === 0)
         if (silent && wasSilent) return
         wasSilent = silent
-        rawOut.writeOut(placeFigure(encodeWavePng(levels, tick++, geom, accentRef.current.bright), row, col, 2, 0))
+        // The clipped geometry ends the raster above the card; the hushed
+        // color is the room's own step down, so the ripple dims with it.
+        const g = rows === skyRows ? geom : waveGeomFor(skyWidth - 1, rows, cell)
+        const bright = hushedNow ? hush(accentRef.current.bright) : accentRef.current.bright
+        rawOut.writeOut(placeFigure(encodeWavePng(levels, tick++, g, bright), row, col, 2, 0))
       }
       paint()
       loop = setInterval(paint, 1000 / WAVE_FPS)

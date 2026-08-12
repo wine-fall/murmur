@@ -143,6 +143,23 @@ export function deleteFigures(): string {
   return '\x1b_Ga=d,d=A,q=2\x1b\\'
 }
 
+// Whether the figure keeps the stage while the spotlight card is up (§3.2-B):
+// it stays, hushed like the room, unless the card climbs into its rows — a
+// kitty image sits ABOVE text cells and would cover the card. `cardTop` is
+// the card's first row (null when no card), `top`/`rows` the image's extent.
+export type StagePlan = 'normal' | 'hushed' | 'off'
+
+export function stagePlan(
+  hushed: boolean,
+  cardTop: number | null,
+  top: number,
+  rows: number,
+): StagePlan {
+  if (!hushed) return 'normal'
+  if (cardTop !== null && top + rows >= cardTop) return 'off'
+  return 'hushed'
+}
+
 // Device pixels per terminal cell, from the renderer's own capability query
 // (kitty-graphics terminals answer the window-pixel report OpenTUI sends at
 // startup). A terminal that never answered gets null and the caller's fallback.

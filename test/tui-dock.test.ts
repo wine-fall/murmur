@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { cardLines, cardTitle, outbound } from '../tui/src/dock.ts'
+import { cardLines, cardRows, cardTitle, cardTopRow, outbound } from '../tui/src/dock.ts'
 
 describe('outbound', () => {
   it('forwards the empty line while a question is docked — Enter IS the skip (spec 06 §2.1)', () => {
@@ -62,5 +62,36 @@ describe('cardLines', () => {
 
   it('blank lines vanish instead of rendering empty card rows', () => {
     expect(cardLines('a\n\nb').map((l) => l.text)).toEqual(['a', 'b'])
+  })
+})
+
+// Where the card stands, for the raster layer: a kitty image sits ABOVE text
+// cells, so while the card is up the sky's images keep the stage (dimmed)
+// only where the card cannot reach. This is the renderer's own width/height
+// math replayed as a number.
+describe('cardRows / cardTopRow', () => {
+  const CONSENT =
+    'setup assistant wants to run [Bash]: brew outdated yt-dlp; echo "---"\nallow? [y/N]'
+
+  it('counts content, chrome, and the in-card answer field', () => {
+    // 2 unwrapped content rows + action row (2) + answer field (2)
+    // + border and padding (4) + the bottom margin (1).
+    expect(cardRows(CONSENT, 200)).toBe(11)
+  })
+
+  it('wrapped lines take their real height, so a long command still clears the card', () => {
+    const long = `setup assistant wants to run [Bash]: ${'x'.repeat(300)}\nallow? [y/N]`
+    expect(cardRows(long, 120)).toBeGreaterThan(cardRows(CONSENT, 120))
+  })
+
+  it('a checklist card adds its divider row', () => {
+    const checklist = "summary.\nok brain - on the air\n-- voice - silent\ntype 'y':"
+    // 4 content rows + the divider + action (2) + field (2) + chrome (4) + margin (1).
+    expect(cardRows(checklist, 200)).toBe(14)
+  })
+
+  it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
+    expect(cardTopRow(CONSENT, 200, 50)).toBe(50 - 1 - cardRows(CONSENT, 200))
+    expect(cardTopRow(CONSENT, 200, 8)).toBe(1)
   })
 })

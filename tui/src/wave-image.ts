@@ -45,6 +45,21 @@ const FLOOR = mix(QUIET, INK.text, 0.35)
 
 // Panel cells + the terminal's cell pixel size -> the ripple's device-pixel
 // frame, centered on the same implied circle the character sky uses.
+// How many panel rows the ripple may cover while the spotlight card is up
+// (§3.2-B): the full panel normally; clipped so the raster ends above the
+// card while hushed (a kitty image sits ABOVE text cells); zero — yield the
+// stage — when the remaining sliver is too thin to read as sky.
+export function waveRowsFor(
+  hushed: boolean,
+  cardTop: number | null,
+  top: number,
+  skyRows: number,
+): number {
+  if (!hushed || cardTop === null) return skyRows
+  const rows = Math.min(skyRows, cardTop - top - 1)
+  return rows < 4 ? 0 : rows
+}
+
 export function waveGeomFor(
   cols: number,
   rows: number,
