@@ -239,7 +239,7 @@ Please:
 
 // One gap the deterministic probes found, in the shape the prompt renders.
 export type SetupGapInput = {
-  readonly kind: 'music' | 'bun' | 'voice'
+  readonly kind: 'music' | 'ytdlp' | 'bun' | 'voice'
   readonly reason: string
 }
 
@@ -248,6 +248,28 @@ export type SetupPromptInput = {
   readonly ytdlp: string
   readonly ffmpeg: string
   readonly bunCmd: string
+}
+
+// A stale yt-dlp is a different task from a broken install: the binary is
+// alive (the liveness probe passed), so the remedy is an upgrade on whichever
+// channel already owns it, verified by re-reading the release date — the
+// deterministic signal the freshness probe itself trusts.
+function staleYtdlpSection(ytdlp: string, reason: string): string {
+  return `**\`${ytdlp}\` works, but it is getting stale.**
+A quick automated check reported:
+  ${reason}
+
+yt-dlp is a moving target: the sites it fetches from change their APIs and
+anti-bot checks continuously — Bilibili breaks first, YouTube eventually — and
+the project ships fixes as dated releases, so staying current IS the
+maintenance. Explain that in plain language, propose the upgrade on whichever
+channel owns the binary — \`brew upgrade yt-dlp\` when Homebrew installed it,
+otherwise the matching \`uv tool upgrade yt-dlp\` / \`pipx upgrade yt-dlp\` —
+then ASK me to confirm and WAIT for the go-ahead before changing anything.
+
+Verify by reading \`${ytdlp} --version\` afterwards: it prints a release date,
+which should now be recent. If the channel has no newer release than what is
+already installed, say so plainly and leave it — nothing more to do here.`
 }
 
 function bunSection(bunCmd: string, reason: string): string {
@@ -322,6 +344,8 @@ export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd }: SetupPromptInp
     switch (gap.kind) {
       case 'music':
         return buildFixMusicPrompt({ ytdlp, ffmpeg, reason: gap.reason })
+      case 'ytdlp':
+        return staleYtdlpSection(ytdlp, gap.reason)
       case 'bun':
         return bunSection(bunCmd, gap.reason)
       case 'voice':

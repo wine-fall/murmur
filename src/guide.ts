@@ -19,7 +19,12 @@ import type { GuideCapable, LedgerKind } from './contracts.ts'
 import { ask, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { buildSetupPrompt, GUIDE_PERSONA } from './prompts.ts'
-import { preflightBun, preflightMusic, type PreflightResult } from './startup.ts'
+import {
+  preflightBun,
+  preflightMusic,
+  preflightYtdlpFreshness,
+  type PreflightResult,
+} from './startup.ts'
 import { type VoiceConfig, VOICE_PROBE_LINE, writeVoiceConfigTool } from './voice-config.ts'
 
 // Repair is judgment-heavy and occasional; the token cost amortizes (spec
@@ -119,7 +124,7 @@ export function cliConversation(host: Host, read: ReadLine): () => Promise<strin
 
 // --- conversational onboarding (spec 03-03 §7) ---------------------------- //
 
-export type GapKind = 'music' | 'bun' | 'voice'
+export type GapKind = 'music' | 'ytdlp' | 'bun' | 'voice'
 export type Gap = { readonly kind: GapKind; readonly reason: string }
 
 // The tier-3 ledger key for the onboarding offer's standing answer. A decline
@@ -152,10 +157,15 @@ export type SetupTargets = {
 
 export type SetupProbes = {
   music: (binaries: { ytdlp: string; ffmpeg: string }) => Promise<PreflightResult>
+  ytdlpFresh: (binary: string) => Promise<PreflightResult>
   bun: (binary: string) => Promise<PreflightResult>
 }
 
-const DEFAULT_PROBES: SetupProbes = { music: preflightMusic, bun: preflightBun }
+const DEFAULT_PROBES: SetupProbes = {
+  music: preflightMusic,
+  ytdlpFresh: (binary) => preflightYtdlpFreshness(binary),
+  bun: preflightBun,
+}
 
 // The deterministic half (master §7 pillar 1 — local probes, 0 tokens). Nothing
 // the session does not want is probed at all: --no-music costs no yt-dlp search.
@@ -170,8 +180,16 @@ export async function detectGaps(
       : Promise.resolve({ ok: true, reason: '' }),
     targets.wantsBun ? probe.bun(targets.bunCmd) : Promise.resolve({ ok: true, reason: '' }),
   ])
+  // Freshness rides BEHIND a working music pair: a broken install is the
+  // music gap's business (its repair is an install, not an upgrade), and the
+  // version of a missing binary is not a fact.
+  const fresh =
+    targets.wantsMusic && music.ok
+      ? await probe.ytdlpFresh(targets.ytdlp)
+      : { ok: true, reason: '' }
   const gaps: Gap[] = []
   if (!music.ok) gaps.push({ kind: 'music', reason: music.reason })
+  if (!fresh.ok) gaps.push({ kind: 'ytdlp', reason: fresh.reason })
   if (!bun.ok) gaps.push({ kind: 'bun', reason: bun.reason })
   if (targets.wantsVoice && targets.voiceUrl().trim() === '') {
     gaps.push({ kind: 'voice', reason: 'no endpoint configured' })
@@ -184,6 +202,10 @@ export async function detectGaps(
 // gap missing here would silently read as "done".
 export type SetupOutcome = {
   readonly musicOk: boolean
+  // Freshness reports separately from musicOk: a stale binary still plays
+  // (never degrading), but an explicit `--setup` must not claim completion
+  // over a staleness gap it just re-detected.
+  readonly ytdlpFresh: boolean
   readonly bunOk: boolean
   readonly voiceOk: boolean
 }
@@ -207,12 +229,14 @@ export type SetupRun = {
 
 const PLAIN_ENGLISH: Record<GapKind, string> = {
   music: 'music needs yt-dlp and ffmpeg, so the program is talk-only for now',
+  ytdlp: 'yt-dlp is getting stale, so fetching songs (Bilibili first) may fail until it is upgraded',
   bun: 'the terminal interface needs bun, so this is the plain text version',
   voice: 'there is no voice endpoint yet, so lines are shown instead of spoken',
 }
 
 const READY: Record<GapKind, string> = {
   music: 'yt-dlp and ffmpeg are working',
+  ytdlp: 'yt-dlp is current',
   bun: 'the terminal front-end runtime is ready',
   voice: 'the voice endpoint is configured',
 }
@@ -248,6 +272,7 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
   const has = (kind: GapKind): boolean => gaps.some((g) => g.kind === kind)
   return {
     musicOk: targets.wantsMusic && !has('music'),
+    ytdlpFresh: targets.wantsMusic && !has('ytdlp'),
     bunOk: targets.wantsBun && !has('bun'),
     voiceOk: targets.wantsVoice && !has('voice'),
   }

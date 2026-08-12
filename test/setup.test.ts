@@ -24,6 +24,10 @@ import { encodeWav } from '../src/wav.ts'
 const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }
 const NO_BUN: PreflightResult = { ok: false, reason: "bun binary not found: 'bun'" }
+const STALE_YTDLP: PreflightResult = {
+  ok: false,
+  reason: 'yt-dlp 2026.03.01 is 164 days old — an upgrade is recommended',
+}
 
 function fakeHost(
   lines: string[] = [],
@@ -116,6 +120,7 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
     const gaps = await detectGaps(targets({ voiceUrl: () => 'https://tts.example' }), {
       music: async () => OK,
       bun: async () => OK,
+      ytdlpFresh: async () => OK,
     })
     expect(gaps).toEqual([])
   })
@@ -124,7 +129,7 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
   // present or absent. `voiceUrl` is the one seam that collapses them, so the
   // gap must follow it and nothing else.
   it('names the voice gap only when neither layer supplies an endpoint', async () => {
-    const probes = { music: async () => OK, bun: async () => OK }
+    const probes = { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => OK }
     const voiceGaps = async (url: string): Promise<string[]> =>
       (await detectGaps(targets({ voiceUrl: () => url }), probes)).map((g) => g.kind)
 
@@ -141,6 +146,77 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
       bun: async () => NO_BUN,
     })
     expect(gaps.map((g) => g.kind)).toEqual(['music', 'bun', 'voice'])
+  })
+})
+
+// A yt-dlp alive today still rots: the sites it fetches from move their APIs
+// and anti-bot checks (Bilibili breaks first), and releases are dated. An old
+// release is its OWN gap: the repair is an upgrade conversation, and music
+// keeps working rather than degrading to talk-only.
+describe('detectGaps — the yt-dlp freshness probe', () => {
+  it('working music + a stale release = a ytdlp gap, not a music gap', async () => {
+    const gaps = await detectGaps(targets({ wantsBun: false, wantsVoice: false }), {
+      music: async () => OK,
+      bun: async () => OK,
+      ytdlpFresh: async () => STALE_YTDLP,
+    })
+    expect(gaps).toEqual([{ kind: 'ytdlp', reason: STALE_YTDLP.reason }])
+  })
+
+  it('broken music swallows the freshness finding: that repair is an install, so age is not probed', async () => {
+    let probed = 0
+    const gaps = await detectGaps(targets({ wantsBun: false, wantsVoice: false }), {
+      music: async () => NO_YTDLP,
+      ytdlpFresh: async () => {
+        probed++
+        return STALE_YTDLP
+      },
+    })
+    expect(gaps.map((g) => g.kind)).toEqual(['music'])
+    expect(probed).toBe(0)
+  })
+
+  it('a session without music never probes freshness', async () => {
+    let probed = 0
+    const gaps = await detectGaps(
+      targets({ wantsMusic: false, wantsBun: false, wantsVoice: false }),
+      {
+        ytdlpFresh: async () => {
+          probed++
+          return OK
+        },
+      },
+    )
+    expect(gaps).toEqual([])
+    expect(probed).toBe(0)
+  })
+
+  it('staleness never degrades the session, but the outcome reports it honestly', async () => {
+    // musicOk stays true (the radio keeps playing) — while ytdlpFresh says the
+    // one thing this entry did not fix, so `--setup` cannot claim completion
+    // over a gap it just re-detected (codex review).
+    const { host } = fakeHost(['n'])
+    const { guide } = fakeGuide()
+    const outcome = await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      ledger: fakeLedger(),
+      probes: { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => STALE_YTDLP },
+    })
+    expect(outcome.musicOk).toBe(true)
+    expect(outcome.ytdlpFresh).toBe(false)
+  })
+
+  it('the card shows music as ready and names the ytdlp gap with its consequence', () => {
+    const text = setupOfferText(targets({ wantsBun: false, wantsVoice: false }), [
+      { kind: 'ytdlp', reason: STALE_YTDLP.reason },
+    ])
+    expect(text).toContain('ok music')
+    expect(text).toContain('-- ytdlp')
+    expect(text.toLowerCase()).toContain('upgrade')
+    // The card stays ASCII-safe (same bar as the other rows).
+    expect(text).toMatch(/^[\x20-\x7e\n]*$/)
   })
 })
 
@@ -288,9 +364,9 @@ describe('runSetup — the once-per-boot offer', () => {
       guide,
       targets: targets({ voiceUrl: () => 'https://tts.example' }),
       ledger: fakeLedger(),
-      probes: { music: async () => OK, bun: async () => NO_BUN },
+      probes: { music: async () => OK, bun: async () => NO_BUN, ytdlpFresh: async () => OK },
     })
-    expect(outcome).toEqual({ musicOk: true, bunOk: false, voiceOk: true })
+    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: true })
   })
 
   it('a gap the session does not want is not reported as ok', async () => {
@@ -303,7 +379,7 @@ describe('runSetup — the once-per-boot offer', () => {
       ledger: fakeLedger(),
       probes: { music: async () => OK, bun: async () => OK },
     })
-    expect(outcome).toEqual({ musicOk: false, bunOk: false, voiceOk: false })
+    expect(outcome).toEqual({ musicOk: false, ytdlpFresh: false, bunOk: false, voiceOk: false })
   })
 
   it('no gaps = no offer, no conversation — only the checking notice', async () => {
@@ -316,12 +392,12 @@ describe('runSetup — the once-per-boot offer', () => {
       guide,
       targets: targets({ voiceUrl: () => 'https://tts.example' }),
       ledger: fakeLedger(),
-      probes: { music: async () => OK, bun: async () => OK },
+      probes: { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => OK },
     })
     expect(requests).toEqual([])
     expect(infos).toHaveLength(1)
     expect(infos[0]).toContain('checking')
-    expect(outcome).toEqual({ musicOk: true, bunOk: true, voiceOk: true })
+    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: true })
   })
 
   it('streams the guide text to the host as it arrives', async () => {
@@ -359,7 +435,7 @@ describe('runSetup — the once-per-boot offer', () => {
       guide,
       targets: targets({ wantsBun: false, wantsVoice: false }),
       ledger: fakeLedger(),
-      probes: { music: async () => results.shift()!, bun: async () => OK },
+      probes: { music: async () => results.shift()!, bun: async () => OK, ytdlpFresh: async () => OK },
     })
     expect(outcome.musicOk).toBe(true)
   })

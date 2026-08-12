@@ -375,3 +375,26 @@ describe('the voice-endpoint walkthrough (spec 03-03 §7.2)', () => {
     )
   })
 })
+
+// A stale yt-dlp is a different task from a broken install: the binary works,
+// so the remedy is an upgrade on whichever channel already owns it, verified
+// by re-reading the release date the freshness probe trusts.
+describe('the stale-ytdlp task (spec 03-03 §7.1)', () => {
+  it('gets an upgrade task: owning channel first, verified by the release date', () => {
+    const text = buildSetupPrompt({
+      gaps: [{ kind: 'ytdlp', reason: 'yt-dlp 2026.03.01 is 164 days old' }],
+      ytdlp: 'yt-dlp',
+      ffmpeg: 'ffmpeg',
+      bunCmd: 'bun',
+    })
+    // The probe finding seeds the diagnosis, like every other gap.
+    expect(text).toContain('164 days old')
+    // brew first — the same channel preference the music section states.
+    expect(text).toContain('brew upgrade yt-dlp')
+    const brewAt = text.indexOf('brew upgrade yt-dlp')
+    const uvAt = text.search(/\buv\b|pipx/)
+    expect(uvAt).toBeGreaterThan(brewAt)
+    // Verified deterministically — the dated release, not a flaky live fetch.
+    expect(text).toContain('--version')
+  })
+})
