@@ -9,9 +9,10 @@ import type { AudioClip, Harness, MusicContext, MusicProvider, TrackCandidate, T
 import { musicTools, type StreamProbe } from './music-tools.ts'
 import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER } from './prompts.ts'
 
-// Enough turns for search -> (maybe refine) -> judge -> submit, and a couple of
-// pick-agains if a ref will not resolve.
-const DEFAULT_MAX_TURNS = 6
+// Enough turns for several searches -> judge -> submit, and a couple of
+// pick-agains if a ref will not resolve: a real pick can spend 5 searches
+// before submitting, so the budget leaves headroom beyond that.
+const DEFAULT_MAX_TURNS = 8
 
 // Context insertion (spec 03-01 §2.5), the one place a MusicContext becomes
 // prompt text: the stable persona goes to the system prompt so repeated calls hit

@@ -140,6 +140,9 @@ reason.
 Guidance:
 - Prefer official audio / studio versions; avoid hour-long loops, low-quality
   re-uploads, and live or cover versions unless they clearly fit the moment.
+- Pick a song with vocals — someone singing. Avoid instrumental-only tracks
+  (light/background music, lofi beats, piano versions) unless the listener
+  explicitly asked for instrumental.
 - Match the listener's taste and language as expressed by the persona.
 - Do not repeat something already noted as recently played.
 - If your pick fails to resolve, pick another candidate and submit again.

@@ -74,7 +74,9 @@ describe('MusicProgrammer.nextTrack', () => {
     expect(task.systemPrompt).toBe(ctx.persona)
     expect(task.prompt).toContain('FIND-MUSIC-INSTRUCTION')
     expect(task.prompt).toContain(ctx.situation)
-    expect(task.maxTurns).toBeGreaterThan(1) // room for search -> judge -> submit
+    // Room for several searches -> judge -> submit: a real pick can spend 5
+    // searches before submitting, so the default must leave headroom.
+    expect(task.maxTurns).toBeGreaterThanOrEqual(8)
   })
 
   it('exposes exactly the two music tools and nothing else', async () => {

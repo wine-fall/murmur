@@ -62,6 +62,7 @@ describe('music prompts', () => {
     expect(FIND_MUSIC_INSTRUCTION).toContain('search_music')
     expect(FIND_MUSIC_INSTRUCTION).toContain('submit_pick')
     expect(FIND_MUSIC_INSTRUCTION).toContain('announce')
+    expect(FIND_MUSIC_INSTRUCTION).toContain('vocals')
   })
 
   it('renders the recent turns and the music-break intent', () => {
