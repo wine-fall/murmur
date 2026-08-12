@@ -68,12 +68,13 @@ export function cardRows(text: string, cols: number): number {
   rows += 2 // the action row (its top margin + the line)
   rows += 2 // the in-card answer field (its top margin + the input)
   rows += 4 // border (2) + vertical padding (2)
-  rows += 1 // the card's bottom margin
+  rows += 1 // the gap row between the floating card and the bottom rule
   return rows
 }
 
-// The first terminal row the card can touch: it stands on the window's bottom
-// row (the quiet rule that keeps the frame closed). Rasters end above this.
+// The first terminal row the card can touch: the card floats anchored to the
+// window's bottom rule (the quiet line that keeps the frame closed), so its
+// top is the window height minus its own rows. Rasters end above this.
 export function cardTopRow(text: string, cols: number, height: number): number {
   return Math.max(1, height - 1 - cardRows(text, cols))
 }
