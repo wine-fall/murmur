@@ -235,7 +235,9 @@ export class Director {
         this.talksSinceMusic++
       } else if ((await this.wantsMusic()) && (await this.musicSegment())) {
         this.talksSinceMusic = 0
-      } else {
+      } else if (!this.quit) {
+        // A quit that won inside music prep reads as "music failed" to this
+        // branch — it must not buy one more talk segment (codex review).
         await this.talkSegment()
         this.talksSinceMusic++
       }
@@ -281,16 +283,60 @@ export class Director {
     return steerFromLine(line)
   }
 
+  // Commands are commands, not conversation: they must never wait out a
+  // compose or a spinning stream (user report — a /quit typed while a pick was
+  // resolving sat unread for its whole tail). Every line-blind segment-prep
+  // await runs through here: /quit (typed or Ctrl-C's requestQuit) wins the
+  // race and stops the loop, /settings shows the pane and keeps waiting, and a
+  // talk-back line stays QUEUED — the on-air race owns it, exactly as before.
+  // Null = quit won (this.quit is set); callers bail without touching the air.
+  private async steerable<T>(work: Promise<T>): Promise<T | null> {
+    // Rejection rides as a value so an abandoned racer can never become an
+    // unhandled rejection; it rethrows only when the work actually wins.
+    const tagged = work.then(
+      (value) => ({ kind: 'work' as const, value }),
+      (err: unknown) => ({ kind: 'fail' as const, err }),
+    )
+    while (true) {
+      const winner = await Promise.race([
+        tagged,
+        this.deps.host.peekLine().then((line) => ({ kind: 'line' as const, line })),
+        this.quitting.then(() => ({ kind: 'quit' as const })),
+      ])
+      if (winner.kind === 'fail') throw winner.err
+      if (winner.kind === 'work') return winner.value
+      if (winner.kind === 'quit') {
+        this.quit = true
+        return null
+      }
+      const intent = steerFromLine(winner.line).intent
+      if (intent === 'talkback') return work // queued for the on-air race
+      const steer = this.takeSteer()
+      if (steer.intent === 'quit') {
+        this.quit = true
+        return null
+      }
+      if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
+      else this.deps.host.info('settings live in settings.json under the murmur home.')
+    }
+  }
+
   // One anchor beat, inserted AHEAD of the look-ahead buffer: the buffered beat
   // airs at the following boundary, nothing is discarded or regenerated
   // (§3.4/§3.9). Ledgered at air time, so a degraded generation leaves the
   // anchor due at the next boundary instead of silently consuming the day's
   // occurrence.
   private async anchorSegment(id: AnchorId): Promise<void> {
-    const [beat] = await this.generateTalks(1, [], `anchor:${id}`)
-    if (beat === undefined) return
-    const clip = await this.synthesizeOrSkip(beat.text)
-    if (clip === null) return
+    const prepared = await this.steerable(
+      (async () => {
+        const [beat] = await this.generateTalks(1, [], `anchor:${id}`)
+        if (beat === undefined) return null
+        const clip = await this.synthesizeOrSkip(beat.text)
+        return clip === null ? null : { beat, clip }
+      })(),
+    )
+    if (prepared === null) return
+    const { beat, clip } = prepared
     this.airBeat(beat)
     this.deps.pacing!.scheduler!.markFired(id, this.now)
     this.deps.host.debug?.(`anchor ${id} aired`)
@@ -356,8 +402,8 @@ export class Director {
   }
 
   private async talkSegment(): Promise<void> {
-    const aired = await this.nextTalkClip()
-    if (aired === null) return // generation/synthesis degraded; the loop keeps broadcasting
+    const aired = await this.steerable(this.nextTalkClip())
+    if (aired === null) return // quit won, or generation/synthesis degraded; the loop decides
     this.airBeat(aired.beat)
     // Refill AFTER recording, so the top-up's context already carries this
     // just-aired beat and its Brain+synth overlap the playback below.
@@ -526,7 +572,8 @@ export class Director {
       // refill's Brain+synth, so the post-song talk airs warm.
       this.prefetchTalk()
       for (let attempt = 0; attempt < MUSIC_START_ATTEMPTS && !this.quit; attempt++) {
-        const pick = await this.takePick()
+        const pick = await this.steerable(this.takePick())
+        if (this.quit) return false
         if (pick === null) {
           if (this.switchDue) {
             this.switchDue = false
@@ -535,7 +582,8 @@ export class Director {
           this.deps.host.info('music: nothing suitable found; back to talk.')
           return false
         }
-        const started = await this.startTrack(pick)
+        const started = await this.steerableStart(pick)
+        if (this.quit) return false
         if (started === null) continue
         this.switchDue = false
         await this.runVoice(started.voice, started.handle)
@@ -551,6 +599,25 @@ export class Director {
     }
   }
 
+  // startTrack raced against the keyboard. When quit wins mid-start, the
+  // abandoned start cannot be cancelled — a live track (and its announce clip)
+  // may still land after the loop is gone, so it is cut on arrival.
+  private async steerableStart(pick: TrackPick): Promise<{ handle: MusicHandle; voice: OnAir | null } | null> {
+    const starting = this.startTrack(pick)
+    const started = await this.steerable(starting)
+    if (this.quit) {
+      void starting
+        .then(async (s) => {
+          if (s !== null) {
+            await this.deps.player.stop()
+            await s.handle.stop()
+          }
+        })
+        .catch(() => {})
+    }
+    return started
+  }
+
   // Start a pick on the engine and confirm real audio before anything is said
   // about it (spec 03-02 §3.5): the intro synthesizes WHILE the stream spins
   // up, but the announce commits only once audio is confirmed — the narration
@@ -561,7 +628,9 @@ export class Director {
     const music = this.deps.music!
     const handle = await music.engine.playMusic(pick.clip)
     const announced = pick.announce === undefined ? null : this.synthesizeOrSkip(pick.announce)
-    if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S))) {
+    // A quit typed while the stream spun up: the start is void — no announce,
+    // no "now playing", no ledger entry for a song nobody heard (codex review).
+    if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S)) || this.quit) {
       await announced?.then(
         () => {},
         () => {},
@@ -591,13 +660,15 @@ export class Director {
   // — `handle` is the new one, or undefined when the new stream died after the
   // cut (rare; the segment continues voice-only and ends at the boundary).
   private async handoverTrack(): Promise<{ handle?: MusicHandle; voice: OnAir | null } | null> {
-    const pick = await this.takePick()
+    const pick = await this.steerable(this.takePick())
     this.switchDue = false
+    if (this.quit) return null // runVoice's loop exits; its finally cuts the air
     if (pick === null) {
       this.deps.host.debug?.('music.switch failed')
       return null
     }
-    const started = await this.startTrack(pick)
+    const started = await this.steerableStart(pick)
+    if (this.quit) return null
     if (started === null) {
       this.deps.host.debug?.('music.switch failed')
       return { voice: null }
