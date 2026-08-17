@@ -14,6 +14,11 @@ import { ACTIVITIES } from './activity.ts'
 // Bumped only by a breaking change; additive message types do not touch it.
 export const PROTOCOL = 2
 
+// The slash commands the engine parses from the line stream (spec 10 §3.2-C:
+// one grammar, engine-owned). The Director's parser and the front-ends' hints
+// both read THIS list, so a new command lands everywhere at once.
+export const COMMANDS = ['/quit', '/settings'] as const
+
 const ENVELOPE = 1
 
 // The engine's view of the program, pushed at segment boundaries and when a

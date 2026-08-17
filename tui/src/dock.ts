@@ -3,7 +3,7 @@
 // queue head in a centered card above the input. This module shapes the card's
 // text; app.tsx renders it (wrapping is <text>'s own — no hand-rolled folding).
 
-import type { EngineMessage } from '../../src/ipc.ts'
+import { COMMANDS, type EngineMessage } from '../../src/ipc.ts'
 
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
@@ -84,4 +84,19 @@ export function cardTopRow(text: string, cols: number, height: number): number {
 // question) — is its answer; idle empty lines stay local noise, as before.
 export function outbound(text: string, askActive: boolean): string | null {
   return askActive || text.trim() !== '' ? text : null
+}
+
+// The slash-command affordance (spec 10 §3.2-C: the engine owns the grammar;
+// the client only surfaces the shared COMMANDS list). A line opening with `/`
+// hints the commands it could still become; once it IS one, the hint drops —
+// the input's ink change carries the confirmation instead.
+export function commandHint(typed: string): string | null {
+  const line = typed.trim()
+  if (!line.startsWith('/') || isCommand(line)) return null
+  const matches = COMMANDS.filter((command) => command.startsWith(line))
+  return matches.length === 0 ? null : matches.join('  ')
+}
+
+export function isCommand(typed: string): boolean {
+  return (COMMANDS as readonly string[]).includes(typed.trim())
 }

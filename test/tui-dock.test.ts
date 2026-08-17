@@ -5,7 +5,16 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { cardLines, cardRows, cardTitle, cardTopRow, outbound } from '../tui/src/dock.ts'
+import { COMMANDS } from '../src/ipc.ts'
+import {
+  cardLines,
+  cardRows,
+  cardTitle,
+  cardTopRow,
+  commandHint,
+  isCommand,
+  outbound,
+} from '../tui/src/dock.ts'
 
 describe('outbound', () => {
   it('forwards the empty line while a question is docked — Enter IS the skip (spec 06 §2.1)', () => {
@@ -17,6 +26,42 @@ describe('outbound', () => {
     expect(outbound('', false)).toBeNull()
     expect(outbound('   ', false)).toBeNull()
     expect(outbound('hello', false)).toBe('hello')
+  })
+})
+
+describe('commandHint', () => {
+  it('a bare slash surfaces every command the engine parses', () => {
+    expect(commandHint('/')).toBe(COMMANDS.join('  '))
+  })
+
+  it('a typed prefix narrows the hint to what the line could still become', () => {
+    expect(commandHint('/q')).toBe('/quit')
+    expect(commandHint('/s')).toBe('/settings')
+  })
+
+  it('ordinary talk-back gets no hint — the affordance never crowds a sentence', () => {
+    expect(commandHint('')).toBeNull()
+    expect(commandHint('hello there')).toBeNull()
+    expect(commandHint('what /quit does')).toBeNull()
+  })
+
+  it('a slash line no command starts with goes quiet rather than shouting a menu', () => {
+    expect(commandHint('/nope')).toBeNull()
+  })
+
+  it('an exact command drops the hint — the ink change carries the confirmation', () => {
+    expect(commandHint('/quit')).toBeNull()
+    expect(commandHint('/settings')).toBeNull()
+  })
+})
+
+describe('isCommand', () => {
+  it('recognizes exactly the engine-parsed commands, whitespace-tolerant', () => {
+    expect(isCommand('/quit')).toBe(true)
+    expect(isCommand('  /settings  ')).toBe(true)
+    expect(isCommand('/q')).toBe(false)
+    expect(isCommand('/quit now')).toBe(false)
+    expect(isCommand('quit')).toBe(false)
   })
 })
 

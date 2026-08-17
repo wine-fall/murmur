@@ -6,7 +6,8 @@ import { describe, expect, it } from 'vitest'
 
 import { EveryNCadence } from '../src/cadence.ts'
 import type { ContextPack, SteerActions, SteerBrain } from '../src/contracts.ts'
-import { Director, type DirectorDeps } from '../src/director.ts'
+import { Director, type DirectorDeps, steerFromLine } from '../src/director.ts'
+import { COMMANDS } from '../src/ipc.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import {
   directorSettings,
@@ -59,6 +60,21 @@ function build(steer: SteerBrain, opts: { music?: boolean } = {}) {
   }
   return { deps, brain, voice, player, host, source, memory, director: new Director(deps) }
 }
+
+describe('the command grammar', () => {
+  it('every entry of the shared COMMANDS list parses as a command, not talk-back', () => {
+    // COMMANDS is what the front-ends hint from (spec 10 §3.2-C): a list entry
+    // the parser would hand to the Brain as a sentence is a lie on screen.
+    for (const command of COMMANDS) {
+      expect(steerFromLine(command).intent, command).not.toBe('talkback')
+    }
+  })
+
+  it('each command keeps its own meaning regardless of list order (codex review)', () => {
+    expect(steerFromLine('/quit').intent).toBe('quit')
+    expect(steerFromLine('/settings').intent).toBe('settings')
+  })
+})
 
 describe('the agentic reply path', () => {
   it('airs the steer task reply; the tool-less respond stays cold', async () => {
