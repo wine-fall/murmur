@@ -861,7 +861,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             note: INK.notice,
             ready: INK.user,
             gap: INK.notice,
+            option: INK.notice,
           } as const
+          // The divider stands between the facts and the choices: above the
+          // first option row when the card carries its own, else above the
+          // closing invite (legacy checklist shape).
+          const divideAt = lines.some((l) => l.role === 'option')
+            ? lines.findIndex((l) => l.role === 'option')
+            : lines.length - 1
           return (
             <box
               title={cardTitle(head.kind, head.no ?? 0, facts)}
@@ -888,31 +895,35 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               {lines.map((line, at) => (
                 <box key={at} style={{ flexDirection: 'column' }}>
                   {/* Facts above, the decision below — the divider says so. */}
-                  {facts && at === lines.length - 1 && (
+                  {facts && at === divideAt && (
                     <text style={{ fg: hush(INK.dim) }}>{'─'.repeat(Math.max(width - 6, 1))}</text>
                   )}
-                  <text style={{ fg: ROLE_FG[line.role] }}>
-                    {line.role === 'ready' ? 'ok  ' : line.role === 'gap' ? '--  ' : ''}
-                    {line.text}
-                  </text>
+                  {line.role === 'option' ? (
+                    // One choice per line, its key on a chip — each answer key
+                    // must read as an option, Enter never as a silent default.
+                    <text>
+                      <span fg={INK.text} bg={CHIP}>{` ${line.text.split(' - ')[0]} `}</span>
+                      <span fg={ROLE_FG.option}>{`  ${line.text.split(' - ').slice(1).join(' - ')}`}</span>
+                    </text>
+                  ) : (
+                    <text style={{ fg: ROLE_FG[line.role] }}>
+                      {line.role === 'ready' ? 'ok  ' : line.role === 'gap' ? '--  ' : ''}
+                      {line.text}
+                    </text>
+                  )}
                 </box>
               ))}
               {consent ? (
-                <box style={{ marginTop: 1 }}>
-                  {facts ? (
-                    <text>
-                      <span fg={INK.text}>{'y - fix them now'}</span>
-                      <span fg={QUIET}>{'    Enter - start the radio; make setup returns here'}</span>
-                    </text>
-                  ) : (
+                facts ? null : (
+                  <box style={{ marginTop: 1 }}>
                     <text>
                       <span fg={INK.notice}>{'y - go ahead'}</span>
                       <span fg={INK.notice}>{'   '}</span>
                       <span fg={INK.text} bg={CHIP}>{' > N - not now '}</span>
                       <span fg={INK.notice}>{' (Enter)'}</span>
                     </text>
-                  )}
-                </box>
+                  </box>
+                )
               ) : (
                 <box style={{ marginTop: 1 }}>
                   <text style={{ fg: QUIET }}>{'Enter skips'}</text>
@@ -926,7 +937,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 <input
                   ref={input}
                   focused={!paneOpen}
-                  placeholder={consent ? 'y or Enter - one key decides' : 'your answer - enter sends'}
+                  placeholder={
+                    consent
+                      ? facts
+                        ? 'y / Enter / n - the options above'
+                        : 'y or Enter - one key decides'
+                      : 'your answer - enter sends'
+                  }
                   style={{
                     flexGrow: 1,
                     textColor: PERIWINKLE,
