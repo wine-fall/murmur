@@ -650,7 +650,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         </box>
       )}
 
-      <box style={{ flexGrow: 1, flexDirection: 'row' }}>
+      {/* flexBasis 0: the log's rows are whatever the column has LEFT, never
+          its content height — a content-sized basis overflows the column once
+          the log outgrows its viewport, and yoga then shaves the strip block
+          above the scene band. The band shifts up one row while the raster
+          layers stay anchored to absolute rows, and the wave's rectangle lands
+          on the band's last text row — slicing the wordmark / now-playing. */}
+      <box style={{ flexGrow: 1, flexBasis: 0, flexDirection: 'row' }}>
       {items !== null && settings !== null ? (
         <box style={{ flexGrow: 1, flexDirection: 'column', paddingLeft: 2, paddingRight: 2, paddingTop: 1 }}>
           <text style={{ fg: accent.bright }}>settings</text>
