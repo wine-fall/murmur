@@ -210,7 +210,9 @@ describe('waveRowsFor (the ripple clips above the card)', () => {
   it('full panel without a card; clipped above one; zero when the sliver is too thin', () => {
     expect(waveRowsFor(false, null, 3, 40)).toBe(40)
     expect(waveRowsFor(true, null, 3, 40)).toBe(40)
-    expect(waveRowsFor(false, 30, 3, 40)).toBe(40) // no hush, no clip
+    // The clip follows the floating panel, hush or not — the undimmed command
+    // menu must not be painted over either (codex review).
+    expect(waveRowsFor(false, 30, 3, 40)).toBe(26)
     expect(waveRowsFor(true, 30, 3, 40)).toBe(26) // ends above row 30
     expect(waveRowsFor(true, 6, 3, 40)).toBe(0) // a 2-row sliver is not a sky
   })

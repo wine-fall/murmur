@@ -66,7 +66,7 @@ describe('the command grammar', () => {
     // COMMANDS is what the front-ends hint from (spec 10 §3.2-C): a list entry
     // the parser would hand to the Brain as a sentence is a lie on screen.
     for (const command of COMMANDS) {
-      expect(steerFromLine(command).intent, command).not.toBe('talkback')
+      expect(steerFromLine(command.name).intent, command.name).not.toBe('talkback')
     }
   })
 

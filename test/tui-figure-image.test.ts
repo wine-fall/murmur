@@ -143,4 +143,9 @@ describe('stagePlan (whether the figure keeps the stage while the card is up)', 
     expect(stagePlan(true, 12, 5, 8)).toBe('off') // 13 >= 12 would cover the card
     expect(stagePlan(true, 5, 5, 8)).toBe('off')
   })
+
+  it('the occluded rows yield even without a hush — the command menu floats undimmed (codex review)', () => {
+    expect(stagePlan(false, 12, 5, 8)).toBe('off') // a raster composites above the menu
+    expect(stagePlan(false, 20, 5, 8)).toBe('normal') // clear of it: full light
+  })
 })

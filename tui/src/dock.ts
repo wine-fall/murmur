@@ -86,17 +86,19 @@ export function outbound(text: string, askActive: boolean): string | null {
   return askActive || text.trim() !== '' ? text : null
 }
 
-// The slash-command affordance (spec 10 §3.2-C: the engine owns the grammar;
+export type Command = (typeof COMMANDS)[number]
+
+// The slash-command menu's rows (spec 10 §3.2-C: the engine owns the grammar;
 // the client only surfaces the shared COMMANDS list). A line opening with `/`
-// hints the commands it could still become; once it IS one, the hint drops —
-// the input's ink change carries the confirmation instead.
-export function commandHint(typed: string): string | null {
+// could still become any of these; once it IS one the menu closes — the
+// input's ink change carries the confirmation instead.
+export function commandMatches(typed: string): readonly Command[] {
   const line = typed.trim()
-  if (!line.startsWith('/') || isCommand(line)) return null
-  const matches = COMMANDS.filter((command) => command.startsWith(line))
-  return matches.length === 0 ? null : matches.join('  ')
+  if (!line.startsWith('/') || isCommand(line)) return []
+  return COMMANDS.filter((command) => command.name.startsWith(line))
 }
 
 export function isCommand(typed: string): boolean {
-  return (COMMANDS as readonly string[]).includes(typed.trim())
+  const line = typed.trim()
+  return COMMANDS.some((command) => command.name === line)
 }
