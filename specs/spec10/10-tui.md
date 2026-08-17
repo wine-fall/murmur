@@ -383,6 +383,14 @@ placeholder examples and per-flow option copy, and step metadata for a real
 all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
+As built: the radio commands live in one exported list (`COMMANDS` in
+`src/ipc.ts`) that the Director's parser and the TUI both read. The TUI's
+affordance is presentation only: a typed line opening with `/` shows a dim
+hint of the commands it could still become beside the input, and a line that
+IS a command warms the input ink from periwinkle to ember. Adding an entry to
+the list lands it in the parser and the hint at once; the guide-mode grammar
+(`/done`) stays the guide's own.
+
 **D. Display-state inventory** (everything the engine can tell the TUI, and
 where it lands):
 

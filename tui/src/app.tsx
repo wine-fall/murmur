@@ -13,7 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { cardLines, cardTitle, cardTopRow, outbound, type Ask } from './dock.ts'
+import { cardLines, cardTitle, cardTopRow, commandHint, isCommand, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -258,6 +258,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
   const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
+  // The line being typed, mirrored for the slash-command affordance (§3.2-C):
+  // a `/` prefix hints the engine's commands, an exact command warms the ink.
+  const [typed, setTyped] = useState('')
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
   // The ripple's own smoother: the raster wave paints on its own clock in an
@@ -348,6 +351,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
+    setTyped('')
     const line = outbound(text, asks.length > 0)
     if (line === null) return
     setAsks((queue) => queue.slice(1))
@@ -853,8 +857,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   style={{
                     flexGrow: 1,
                     textColor: PERIWINKLE,
+                    focusedTextColor: PERIWINKLE,
                     placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
                     backgroundColor: CARD,
+                    focusedBackgroundColor: CARD,
                   }}
                   onSubmit={submit as InputProps['onSubmit']}
                 />
@@ -876,7 +882,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           }}
         >
           {/* The listener's channel is periwinkle — the room's one cold accent
-              (§6.1): prompt, typed text, and the resting invitation alike. */}
+              (§6.1): prompt, typed text, and the resting invitation alike. A
+              line the engine will take as a command warms to ember instead. */}
           <text style={{ fg: PERIWINKLE }}>{'> '}</text>
           <input
             ref={input}
@@ -887,19 +894,32 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               // the rest of the row (concept 04's input line); long input scrolls
               // inside the field. The band composition keeps the full width.
               ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
-              textColor: PERIWINKLE,
+              // The field is permanently focused (§3.2), so the focused pair is
+              // the ink that actually paints; the base pair keeps them honest.
+              textColor: isCommand(typed) ? EMBER : PERIWINKLE,
+              focusedTextColor: isCommand(typed) ? EMBER : PERIWINKLE,
               placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
               backgroundColor: INK.bg,
+              focusedBackgroundColor: INK.bg,
             }}
+            onInput={setTyped}
             // The reconciler wires an input's onSubmit to the ENTER event, which
             // carries the submitted string; the declared prop type inherits
             // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
             onSubmit={submit as InputProps['onSubmit']}
           />
-          {wide && (
-            <box style={{ flexGrow: 1, paddingLeft: 1 }}>
-              <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+          {/* The slash hint rides the same row where the rule (or nothing)
+              would sit — the commands the typed `/` could still become. */}
+          {commandHint(typed) !== null ? (
+            <box style={{ paddingLeft: 1, flexShrink: 0 }}>
+              <text style={{ fg: mix(PERIWINKLE, INK.bg, 0.4) }}>{commandHint(typed)}</text>
             </box>
+          ) : (
+            wide && (
+              <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+                <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+              </box>
+            )
           )}
         </box>
       ) : (

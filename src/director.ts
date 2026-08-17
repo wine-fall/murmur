@@ -35,13 +35,16 @@ import type {
   VoiceProvider,
 } from './contracts.ts'
 import type { Host } from './host.ts'
-import type { ProgramState } from './ipc.ts'
+import { COMMANDS, type ProgramState } from './ipc.ts'
 import { buildMusicSituation } from './prompts.ts'
 import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
-const QUIT_COMMAND = '/quit'
-const SETTINGS_COMMAND = '/settings'
+// Literal, not destructured from COMMANDS: meaning must never depend on the
+// list's (display) order. The type pins each literal to a COMMANDS entry, and
+// the steer tests pin the reverse — every entry parses as a command.
+const QUIT_COMMAND: (typeof COMMANDS)[number] = '/quit'
+const SETTINGS_COMMAND: (typeof COMMANDS)[number] = '/settings'
 
 // Bounded attempts for a Brain/synth call before it degrades (lose the beat,
 // never the radio).
