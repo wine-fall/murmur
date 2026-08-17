@@ -219,7 +219,12 @@ export class FakeMusicHandle implements MusicHandle {
     return this.ended
   }
 
+  // Scripted spin-up latency, for the command-short-circuit tests: a stream
+  // that takes real seconds to confirm audio.
+  startDelayMs = 0
+
   async waitStarted(_timeoutS: number): Promise<boolean> {
+    if (this.startDelayMs > 0) await sleep(this.startDelayMs)
     return this.startedOk
   }
 }

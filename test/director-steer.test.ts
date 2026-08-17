@@ -14,6 +14,7 @@ import {
   FakeBrain,
   FakeHost,
   FakeMixingPlayer,
+  FakeMusicHandle,
   FakeTrackSource,
   FakeVoice,
   pickOf,
@@ -73,6 +74,64 @@ describe('the command grammar', () => {
   it('each command keeps its own meaning regardless of list order (codex review)', () => {
     expect(steerFromLine('/quit').intent).toBe('quit')
     expect(steerFromLine('/settings').intent).toBe('settings')
+  })
+})
+
+describe('commands short-circuit line-blind waits (user report: /quit waited out a spinning stream)', () => {
+  const echo = () => new FakeSteer((t) => `re:${t}`)
+
+  it('a /quit typed during a cold talk compose stops without waiting the compose out', async () => {
+    const { director, brain, host } = build(echo(), { music: false })
+    brain.nextTalksDelayMs = 3000
+    host.type('/quit')
+    const t = performance.now()
+    await director.run()
+    expect(performance.now() - t).toBeLessThan(1000)
+    expect(host.radio).toEqual([])
+  })
+
+  it('a /quit typed while a stream spins up stops now and cuts the stream when it lands', async () => {
+    const { director, player, host, source, memory } = build(echo())
+    const handle = new FakeMusicHandle()
+    handle.startDelayMs = 800
+    player.nextHandles = [handle]
+    source.picks = [pickOf('https://stream/slow', { title: 'Slow', announce: 'up next' })]
+    const run = director.run(2) // talk, then music
+    await until(() => player.handles.length === 1, 'stream spinning up')
+    const t = performance.now()
+    host.type('/quit')
+    await run
+    expect(performance.now() - t).toBeLessThan(500)
+    // Quit reading as "music failed" must not buy one more talk segment
+    // (codex review): the first talk is the only thing that ever aired.
+    expect(host.radio).toEqual(['talk 1'])
+    // The abandoned start is not leaked: the track is cut the moment it lands,
+    // and the void start announces nothing and ledgers nothing (codex review).
+    await until(() => handle.stopped, 'abandoned stream cut on arrival')
+    expect(host.infos.some((m) => m.includes('now playing'))).toBe(false)
+    expect(memory.recentSongs(10)).toEqual([])
+  })
+
+  it('a /settings typed during a cold compose opens the pane now; the compose still airs', async () => {
+    const opened: number[] = []
+    const { director, brain, host } = build(echo(), { music: false })
+    host.showSettings = () => opened.push(1)
+    brain.nextTalksDelayMs = 150
+    host.type('/settings')
+    const run = director.run(1)
+    await until(() => opened.length === 1, 'pane opened mid-compose')
+    expect(host.radio).toEqual([]) // the pane did not wait for the compose
+    await run
+    expect(host.radio).toContain('talk 1')
+    expect(host.user).toEqual([]) // a command is never a turn
+  })
+
+  it('talk-back typed during a cold compose stays queued for the on-air race', async () => {
+    const { director, brain, host } = build(echo(), { music: false })
+    brain.nextTalksDelayMs = 100
+    host.type('hello there')
+    await director.run(1)
+    expect(host.user).toContain('hello there')
   })
 })
 
