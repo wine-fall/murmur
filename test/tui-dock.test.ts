@@ -104,6 +104,12 @@ describe('cardLines', () => {
     ])
   })
 
+  it("'>> ' rows are options — one per line, marker dropped (user report: the run-on action row)", () => {
+    const lines = cardLines('summary.\n-- voice - silent\n>> y - fix them now\n>> Enter - not now')
+    expect(lines.at(-2)).toEqual({ text: 'y - fix them now', role: 'option' })
+    expect(lines.at(-1)).toEqual({ text: 'Enter - not now', role: 'option' })
+  })
+
   it('checklist rows keep their marker roles, and the closing invite reads bright', () => {
     const lines = cardLines("summary.\nok brain - on the air\n-- voice - silent\ntype 'y':")
     expect(lines.map((l) => l.role)).toEqual(['main', 'ready', 'gap', 'main'])
@@ -136,10 +142,12 @@ describe('cardRows / cardTopRow', () => {
     expect(cardRows(long, 120)).toBeGreaterThan(cardRows(CONSENT, 120))
   })
 
-  it('a checklist card adds its divider row', () => {
-    const checklist = "summary.\nok brain - on the air\n-- voice - silent\ntype 'y':"
-    // 4 content rows + the divider + action (2) + field (2) + chrome (4) + margin (1).
-    expect(cardRows(checklist, 200)).toBe(14)
+  it('a checklist card adds its divider row; option rows replace the action row', () => {
+    const checklist =
+      'summary.\nok brain - on the air\n-- voice - silent\n>> y - fix them now\n>> Enter - not now'
+    // 5 content rows (options included) + the divider + field (2) + chrome (4)
+    // + margin (1) — a checklist card carries no separate action row.
+    expect(cardRows(checklist, 200)).toBe(13)
   })
 
   it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {

@@ -19,11 +19,12 @@ export function cardTitle(kind: AskKind, count: number, checklist: boolean): str
     : ` murmur is asking · #${String(count)} `
 }
 
-export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' }
+export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' | 'option' }
 
 // Card hierarchy from the ask text alone (zero wire additions): the first
 // line is the sentence being asked, checklist rows carry ASCII role markers
-// ('ok ' ready / '-- ' gap) the renderer colors and drops, and everything
+// ('ok ' ready / '-- ' gap / '>> ' option — one choice per line, so the
+// answer keys read as choices) the renderer colors and drops, and everything
 // else is a quieter note.
 export function cardLines(text: string): CardLine[] {
   const lines: CardLine[] = []
@@ -31,6 +32,7 @@ export function cardLines(text: string): CardLine[] {
     if (raw.trim() === '') continue
     if (raw.startsWith('ok ')) lines.push({ text: raw.slice(3), role: 'ready' })
     else if (raw.startsWith('-- ')) lines.push({ text: raw.slice(3), role: 'gap' })
+    else if (raw.startsWith('>> ')) lines.push({ text: raw.slice(3), role: 'option' })
     else if (lines.length === 0) {
       // The opening line splits at its first question mark (ref B1): the lead
       // sentence carries the light, the detail after it steps back.
@@ -61,11 +63,14 @@ export function cardRows(text: string, cols: number): number {
   const facts = lines.some((line) => line.role === 'ready' || line.role === 'gap')
   let rows = 0
   for (const line of lines) {
-    const marker = line.role === 'ready' || line.role === 'gap' ? 4 : 0
+    const marker =
+      line.role === 'ready' || line.role === 'gap' ? 4 : line.role === 'option' ? 3 : 0
     rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
   }
-  if (facts) rows += 1 // the divider above the invitation
-  rows += 2 // the action row (its top margin + the line)
+  if (facts) rows += 1 // the divider above the options
+  // A checklist card's choices are its own option rows; only the plain
+  // consent/question cards keep the renderer's action row.
+  if (!facts) rows += 2 // the action row (its top margin + the line)
   rows += 2 // the in-card answer field (its top margin + the input)
   rows += 4 // border (2) + vertical padding (2)
   rows += 1 // the gap row between the floating card and the bottom rule

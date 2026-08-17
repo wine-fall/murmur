@@ -263,23 +263,39 @@ describe('runSetup — the once-per-boot offer', () => {
     })
     expect(asks).toHaveLength(1)
     expect(asks[0]!.kind).toBe('consent')
-    expect(asks[0]!.text).toContain("type 'y'")
+    expect(asks[0]!.text).toContain('>> y - fix them now')
     expect(asks[0]!.text).toContain('-- music')
     // The probe detail is diagnostics, not card copy — it goes to the dev log.
-    expect(infos.join('\n')).not.toContain("type 'y'")
+    expect(infos.join('\n')).not.toContain('>> y - fix them now')
   })
 
   describe('setupOfferText — the checklist card copy', () => {
     const gaps = [{ kind: 'voice', reason: 'no endpoint configured' } as const]
 
-    it('leads with the summary, lists ready rows before gap rows, ends with the y/N line', () => {
+    it('leads with the summary, lists ready rows before gap rows, ends with the three options', () => {
       const lines = setupOfferText(targets(), gaps).split('\n')
       expect(lines[0]).toContain("aren't set up")
       const okAt = lines.findIndex((l) => l.startsWith('ok '))
       const gapAt = lines.findIndex((l) => l.startsWith('-- '))
       expect(okAt).toBeGreaterThan(0)
       expect(gapAt).toBeGreaterThan(okAt)
-      expect(lines.at(-1)).toContain("type 'y'")
+      // One option per line, each visibly an option (user report: the old
+      // single-line action row did not read as choices, and Enter looked like
+      // a default y).
+      expect(lines.slice(-3).every((l) => l.startsWith('>> '))).toBe(true)
+      expect(lines.at(-3)).toContain('y - fix them now')
+      expect(lines.at(-2)).toContain('Enter - not now')
+      expect(lines.at(-1)).toContain("n - don't ask again")
+    })
+
+    it('an explicit entry offers only the answers it honors — no boot-persistence promises', () => {
+      // `make setup` neither consults nor writes the standing decline (codex
+      // review): its card must not say "next boot" or "don't ask again".
+      const text = setupOfferText(targets(), gaps, true)
+      const options = text.split('\n').filter((l) => l.startsWith('>> '))
+      expect(options).toEqual(['>> y - fix them now', '>> Enter - skip for now'])
+      expect(text).not.toContain('next boot')
+      expect(text).not.toContain("don't ask again")
     })
 
     it('always credits the brain, and names each gap with its consequence', () => {
@@ -607,8 +623,9 @@ describe('runSetup — declining, and what a decline costs later', () => {
     expect(infos.join('\n')).toContain('yt-dlp')
   })
 
-  it('a closed stdin declines rather than wedging startup', async () => {
-    // A piped or service run must still reach the air.
+  it('a closed stdin skips without wedging startup — and without a standing decline', async () => {
+    // A piped or service run must still reach the air; nobody answering is
+    // not the same fact as "stop asking me".
     const { host } = fakeHost([], { atEof: true })
     const { guide, requests } = fakeGuide()
     const ledger = fakeLedger()
@@ -624,7 +641,71 @@ describe('runSetup — declining, and what a decline costs later', () => {
       ).musicOk,
     ).toBe(false)
     expect(requests).toEqual([])
-    expect(ledger.events).toHaveLength(1)
+    expect(ledger.events).toEqual([])
+  })
+
+  it('Enter skips ONCE — no standing decline, the next boot offers again (user report)', async () => {
+    // Enter reads as the default-confirm to half the world: it must never be
+    // the key that silences the offer forever.
+    const ledger = fakeLedger()
+    const { host, infos } = fakeHost([''])
+    const { guide, requests } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      ledger,
+      probes,
+    })
+    expect(requests).toEqual([])
+    expect(ledger.events).toEqual([])
+    expect(infos.join('\n')).toContain('next boot')
+    expect(infos.join('\n')).not.toContain("won't ask again")
+  })
+
+  it('a Chinese yes opens the conversation; a Chinese no is the standing decline', async () => {
+    {
+      const { host } = fakeHost(['\u597d\u7684']) // "hao de" - sure
+      const { guide, requests } = fakeGuide()
+      await runSetup({
+        host,
+        guide,
+        targets: targets({ wantsBun: false, wantsVoice: false }),
+        ledger: fakeLedger(),
+        probes,
+      })
+      expect(requests).toHaveLength(1)
+    }
+    {
+      const ledger = fakeLedger()
+      const { host } = fakeHost(['\u4e0d\u7528']) // "bu yong" - no need
+      const { guide, requests } = fakeGuide()
+      await runSetup({
+        host,
+        guide,
+        targets: targets({ wantsBun: false, wantsVoice: false }),
+        ledger,
+        probes,
+      })
+      expect(requests).toEqual([])
+      expect(ledger.events).toEqual([{ kind: 'setup', key: SETUP_DECLINED }])
+    }
+  })
+
+  it('an unrecognized answer never becomes "stop asking": skip once, record clean', async () => {
+    const ledger = fakeLedger()
+    const { host, infos } = fakeHost(['maybe later?'])
+    const { guide, requests } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      ledger,
+      probes,
+    })
+    expect(requests).toEqual([])
+    expect(ledger.events).toEqual([])
+    expect(infos.join('\n')).toContain('make setup')
   })
 
   it('a later boot with the same gaps says ONE line and does not re-ask', async () => {

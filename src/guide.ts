@@ -32,13 +32,47 @@ import { type VoiceConfig, VOICE_PROBE_LINE, writeVoiceConfigTool } from './voic
 const GUIDE_MODEL = 'claude-opus-4-8'
 const GUIDE_MAX_TURNS = 30
 
-const YES = new Set(['y', 'yes'])
+// Consent parsing hears the listener's own language: this radio converses in
+// Chinese, so an affirmation in either language is a yes. The Chinese entries
+// ride as \u escapes — v1 sources stay ASCII by the language gate — each
+// named in pinyin beside it.
+const YES = new Set([
+  'y',
+  'yes',
+  'yeah',
+  'yep',
+  'ok',
+  'okay',
+  'sure',
+  '\u597d', // hao - good / yes
+  '\u597d\u7684', // hao de - sure
+  '\u597d\u554a', // hao a - sure
+  '\u53ef\u4ee5', // ke yi - can do
+  '\u884c', // xing - fine
+  '\u55ef', // en - yeah
+  '\u540c\u610f', // tong yi - agree
+])
+const NO = new Set([
+  'n',
+  'no',
+  'nope',
+  '\u4e0d', // bu - no
+  '\u4e0d\u7528', // bu yong - no need
+  '\u4e0d\u8981', // bu yao - do not
+  '\u522b', // bie - do not
+])
 const END = new Set(['', '/done', '/quit', 'q'])
 
 // The one consent test murmur uses: anything but an explicit yes declines, so
 // EOF (which reads as '') always means no.
 export function isYes(line: string): boolean {
   return YES.has(line.trim().toLowerCase())
+}
+
+// The standing "stop asking me" needs an explicit no — an unrecognized answer
+// (Enter included) is only "not now", never "never again".
+export function isNo(line: string): boolean {
+  return NO.has(line.trim().toLowerCase())
 }
 
 // A serialized, consuming line read for the guide's asks. Two things the
@@ -312,7 +346,7 @@ const READY: Record<GapKind, string> = {
 // the y/N — diagnosis and invitation share one ask, so the modal shows them
 // as one card and the plain host prints the same text. ASCII-only markers:
 // ambiguous-width glyphs shift box borders on some terminals.
-export function setupOfferText(targets: SetupTargets, gaps: Gap[]): string {
+export function setupOfferText(targets: SetupTargets, gaps: Gap[], explicit = false): string {
   const has = (kind: GapKind): boolean => gaps.some((gap) => gap.kind === kind)
   const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
   // The name column is padded so the card reads as a checklist table (ref B3).
@@ -327,11 +361,21 @@ export function setupOfferText(targets: SetupTargets, gaps: Gap[]): string {
     if (wants && !has(kind)) rows.push(`ok ${kind.padEnd(NAME_COL)} - ${READY[kind]}`)
   }
   for (const gap of gaps) rows.push(`-- ${gap.kind.padEnd(NAME_COL)} - ${PLAIN_ENGLISH[gap.kind]}`)
-  return [
-    `a couple of things aren't set up on this machine: ${named}.`,
-    ...rows,
-    "type 'y' and I'll walk you through fixing them right now (anything else skips):",
-  ].join('\n')
+  // One option per line, each visibly a choice ('>> ' rows, spec 10 §3.2-B):
+  // Enter is never the silent default, and each answer's real cost is written
+  // on it. An explicit entry (`make setup`) carries no boot-persistence — its
+  // card must not promise any (skipping records nothing there), so it offers
+  // exactly the two answers it honors.
+  const options = explicit
+    ? ['>> y - fix them now', '>> Enter - skip for now']
+    : [
+        '>> y - fix them now',
+        ">> Enter - not now (I'll offer again next boot)",
+        ">> n - don't ask again (make setup reopens this)",
+      ]
+  return [`a couple of things aren't set up on this machine: ${named}.`, ...rows, ...options].join(
+    '\n',
+  )
 }
 
 function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
@@ -374,19 +418,24 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   // Probe detail (the raw reason) is diagnostics, not card copy: the guide
   // gets it via its prompt, the dev log keeps it for humans.
   for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
-  ask(host, setupOfferText(targets, gaps), 'consent')
+  ask(host, setupOfferText(targets, gaps, explicit), 'consent')
 
-  if (!isYes(await read())) {
+  const answer = await read()
+  if (!isYes(answer)) {
     // Leaving is not answering (codex review): a /quit mid-offer must not
     // become a standing decline that silences every later boot.
     if (run.quit?.requested === true) return outcomeFrom(targets, gaps)
-    // Only the boot-time offer records the standing answer: backing out of an
-    // explicit `make setup` is not "stop asking me".
-    if (!explicit) {
+    // Only the boot-time offer records the standing answer — and only for an
+    // EXPLICIT no. Enter reads as the default-confirm to half the world, and
+    // an unrecognized answer is "not now", never "never again". Backing out
+    // of an explicit `make setup` is not "stop asking me" either.
+    if (!explicit && isNo(answer)) {
       run.ledger?.recordEvent('setup', SETUP_DECLINED)
       host.info("no problem — I won't ask again. `make setup` reopens this any time.")
-    } else {
+    } else if (explicit) {
       host.info('skipped setup.')
+    } else {
+      host.info("not now, then — I'll offer again next boot; `make setup` any time.")
     }
     return outcomeFrom(targets, gaps)
   }

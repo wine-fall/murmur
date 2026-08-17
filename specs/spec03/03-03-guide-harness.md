@@ -158,10 +158,17 @@
 3. **Trigger policy**: at startup — after first-run (spec 06) when both apply;
    the two conversations stay separate and serial — the aggregated startup
    checks (03-02 §2.4 seam) name the gaps and offer the guide **once per
-   boot**. Decline → the session starts degraded and a `setup.declined`
-   record lands on the tier-③ ledger (spec 05); later boots with the same
-   gaps print one info line instead of re-opening the conversation. The
-   explicit entries always work.
+   boot**. The offer has three answers, one option per line on the card so
+   each reads as a choice (user report 2026-08-17: a run-on action row made
+   Enter look like a default yes): an affirmative (`y`/`yes`/common Chinese
+   affirmations) opens the conversation; an **explicit no**
+   (`n`/`no`/Chinese negations) starts the degraded session AND lands the
+   `setup.declined` record on the tier-③ ledger (spec 05) — later boots with
+   the same gaps print one info line instead of re-opening the conversation;
+   **anything else — Enter and unrecognized answers included — skips once**:
+   the session starts degraded, nothing is recorded, and the next boot offers
+   again. Only an explicit no may buy the standing silence. The explicit
+   entries always work.
 4. **Degraded posture** (extends 03-02's talk-only rule): the radio always
    launches. No music → talk-only; no voice endpoint → segments render
    through the Host (plain or TUI) with the voice silent; the conversation
@@ -245,9 +252,11 @@
 6. With bun absent, the front-end falls back to plain and the guide can
    install bun with per-action consent; after it, `--tui` works
    (pays spec 10 §5.10).
-7. Declining the boot-time offer starts the degraded session and writes the
-   ledger record; the next boot with the same gaps prints one line and does
-   not re-open the conversation.
+7. An explicit no at the boot-time offer starts the degraded session and
+   writes the ledger record; the next boot with the same gaps prints one line
+   and does not re-open the conversation. Enter (or an unrecognized answer)
+   also starts the degraded session but records nothing — the next boot
+   offers again.
 8. A missing `node` still stops `make dev` at the shell — there is nothing
    to converse with.
 

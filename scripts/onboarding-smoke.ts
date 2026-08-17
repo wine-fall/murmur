@@ -161,15 +161,17 @@ console.log('3. the next boot with the same gaps')
   // No scripted lines: if it asked anything, the read would hang and time out.
   const { host, infos } = fakeHost([])
   await runSetup({ host, guide: neverRuns, targets: targets(), ledger: reopened })
-  assert.equal(infos.length, 1, `expected ONE quiet info line, got ${String(infos.length)}`)
-  assert.match(infos[0]!, /make setup/, 'the quiet line does not say how to reopen setup')
+  // The probes' loading notice, then exactly one pointer — no question.
+  assert.equal(infos.length, 2, `expected the checking notice + ONE quiet line, got ${String(infos.length)}`)
+  assert.match(infos[0]!, /checking/, 'the probes ran without their loading notice')
+  assert.match(infos[1]!, /make setup/, 'the quiet line does not say how to reopen setup')
   // Parity with the offer itself (issue #93): every gap it named is named
   // again here, the voice included — a quiet line that quietly drops one is
   // how the voice gap went unnoticed in the first place.
   for (const gap of ['yt-dlp|music', 'bun', 'voice']) {
-    assert.match(infos[0]!, new RegExp(gap, 'i'), `the quiet line omits the ${gap} gap`)
+    assert.match(infos[1]!, new RegExp(gap, 'i'), `the quiet line omits the ${gap} gap`)
   }
-  console.log(`   ok — one line: "${infos[0]!}"\n`)
+  console.log(`   ok — one line: "${infos[1]!}"\n`)
 }
 
 // --- 4. the voice config the conversation writes -------------------------- //
@@ -222,9 +224,11 @@ console.log('5. no gaps, no offer')
     targets: targets({ wantsMusic: false, wantsBun: false }),
     ledger: memory,
   })
-  assert.deepEqual(infos, [], 'it spoke up with nothing to fix')
+  // The probes' loading notice is the only thing said — no offer, no pointer.
+  assert.equal(infos.length, 1, 'it spoke up with nothing to fix')
+  assert.match(infos[0]!, /checking/, 'the one line is not the loading notice')
   assert.equal(outcome.voiceOk, true)
-  console.log('   ok — silent\n')
+  console.log('   ok — silent beyond the loading notice\n')
 }
 
 // --- 6. the hosted (fish.audio) shape: key, model, and same-boot pickup ---- //
