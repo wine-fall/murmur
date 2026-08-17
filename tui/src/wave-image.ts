@@ -50,12 +50,14 @@ const FLOOR = mix(QUIET, INK.text, 0.35)
 // card while hushed (a kitty image sits ABOVE text cells); zero — yield the
 // stage — when the remaining sliver is too thin to read as sky.
 export function waveRowsFor(
-  hushed: boolean,
+  _hushed: boolean,
   cardTop: number | null,
   top: number,
   skyRows: number,
 ): number {
-  if (!hushed || cardTop === null) return skyRows
+  // The clip follows the floating panel (card or command menu), hush or not —
+  // a raster composites above text cells either way.
+  if (cardTop === null) return skyRows
   const rows = Math.min(skyRows, cardTop - top - 1)
   return rows < 4 ? 0 : rows
 }

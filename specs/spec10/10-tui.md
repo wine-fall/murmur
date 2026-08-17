@@ -384,12 +384,16 @@ all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
 As built: the radio commands live in one exported list (`COMMANDS` in
-`src/ipc.ts`) that the Director's parser and the TUI both read. The TUI's
-affordance is presentation only: a typed line opening with `/` shows a dim
-hint of the commands it could still become beside the input, and a line that
-IS a command warms the input ink from periwinkle to ember. Adding an entry to
-the list lands it in the parser and the hint at once; the guide-mode grammar
-(`/done`) stays the guide's own.
+`src/ipc.ts`, each entry a name + one-line blurb) that the Director's parser
+and the TUI both read. The TUI's affordance is presentation only: a typed
+line opening with `/` opens a small command menu floating above the input
+(name + blurb per row; arrows choose, Enter runs the highlighted command, Esc
+hides it until the line changes), narrowing with each keystroke; a line that
+IS a command closes the menu and warms the input ink from periwinkle to
+ember. List order is menu order only, harmless-first (`/settings` leads, so a
+stray Enter on a fresh menu never quits) — the parser binds meanings to its
+own literals. Adding an entry lands it in the parser and the menu at once;
+the guide-mode grammar (`/done`) stays the guide's own.
 
 **D. Display-state inventory** (everything the engine can tell the TUI, and
 where it lands):

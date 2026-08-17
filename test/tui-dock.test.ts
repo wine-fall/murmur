@@ -11,7 +11,7 @@ import {
   cardRows,
   cardTitle,
   cardTopRow,
-  commandHint,
+  commandMatches,
   isCommand,
   outbound,
 } from '../tui/src/dock.ts'
@@ -29,29 +29,30 @@ describe('outbound', () => {
   })
 })
 
-describe('commandHint', () => {
-  it('a bare slash surfaces every command the engine parses', () => {
-    expect(commandHint('/')).toBe(COMMANDS.join('  '))
+describe('commandMatches', () => {
+  it('a bare slash opens the menu on every command the engine parses, blurbs riding along', () => {
+    expect(commandMatches('/')).toEqual(COMMANDS)
+    for (const command of commandMatches('/')) expect(command.blurb.length).toBeGreaterThan(0)
   })
 
-  it('a typed prefix narrows the hint to what the line could still become', () => {
-    expect(commandHint('/q')).toBe('/quit')
-    expect(commandHint('/s')).toBe('/settings')
+  it('a typed prefix narrows the menu to what the line could still become', () => {
+    expect(commandMatches('/q').map((c) => c.name)).toEqual(['/quit'])
+    expect(commandMatches('/s').map((c) => c.name)).toEqual(['/settings'])
   })
 
-  it('ordinary talk-back gets no hint — the affordance never crowds a sentence', () => {
-    expect(commandHint('')).toBeNull()
-    expect(commandHint('hello there')).toBeNull()
-    expect(commandHint('what /quit does')).toBeNull()
+  it('ordinary talk-back opens no menu — the affordance never crowds a sentence', () => {
+    expect(commandMatches('')).toEqual([])
+    expect(commandMatches('hello there')).toEqual([])
+    expect(commandMatches('what /quit does')).toEqual([])
   })
 
   it('a slash line no command starts with goes quiet rather than shouting a menu', () => {
-    expect(commandHint('/nope')).toBeNull()
+    expect(commandMatches('/nope')).toEqual([])
   })
 
-  it('an exact command drops the hint — the ink change carries the confirmation', () => {
-    expect(commandHint('/quit')).toBeNull()
-    expect(commandHint('/settings')).toBeNull()
+  it('an exact command closes the menu — the ink change carries the confirmation', () => {
+    expect(commandMatches('/quit')).toEqual([])
+    expect(commandMatches('/settings')).toEqual([])
   })
 })
 
@@ -62,6 +63,12 @@ describe('isCommand', () => {
     expect(isCommand('/q')).toBe(false)
     expect(isCommand('/quit now')).toBe(false)
     expect(isCommand('quit')).toBe(false)
+  })
+})
+
+describe('the command list', () => {
+  it('leads with the harmless command: a stray Enter on the fresh menu opens settings, never quits', () => {
+    expect(COMMANDS[0]!.name).toBe('/settings')
   })
 })
 

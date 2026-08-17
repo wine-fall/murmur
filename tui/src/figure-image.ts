@@ -155,9 +155,10 @@ export function stagePlan(
   top: number,
   rows: number,
 ): StagePlan {
-  if (!hushed) return 'normal'
+  // The yield is the floating panel's, not the hush's: the command menu
+  // floats undimmed, and a raster composites above its text cells all the same.
   if (cardTop !== null && top + rows >= cardTop) return 'off'
-  return 'hushed'
+  return hushed ? 'hushed' : 'normal'
 }
 
 // Device pixels per terminal cell, from the renderer's own capability query

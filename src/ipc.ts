@@ -15,9 +15,14 @@ import { ACTIVITIES } from './activity.ts'
 export const PROTOCOL = 2
 
 // The slash commands the engine parses from the line stream (spec 10 §3.2-C:
-// one grammar, engine-owned). The Director's parser and the front-ends' hints
-// both read THIS list, so a new command lands everywhere at once.
-export const COMMANDS = ['/quit', '/settings'] as const
+// one grammar, engine-owned). The Director's parser and the front-ends' menu
+// both read THIS list, so a new command lands everywhere at once. Order is
+// presentation only (the menu's rows, harmless-first — a stray Enter on the
+// fresh menu must never quit); the parser binds meanings to its own literals.
+export const COMMANDS = [
+  { name: '/settings', blurb: 'open the settings pane' },
+  { name: '/quit', blurb: 'end the broadcast' },
+] as const
 
 const ENVELOPE = 1
 

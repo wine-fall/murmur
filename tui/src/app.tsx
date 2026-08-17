@@ -13,7 +13,7 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { cardLines, cardTitle, cardTopRow, commandHint, isCommand, outbound, type Ask } from './dock.ts'
+import { cardLines, cardTitle, cardTopRow, commandMatches, isCommand, outbound, type Ask } from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -258,9 +258,28 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
   const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
-  // The line being typed, mirrored for the slash-command affordance (§3.2-C):
-  // a `/` prefix hints the engine's commands, an exact command warms the ink.
+  // The line being typed, mirrored for the slash-command menu (§3.2-C): a `/`
+  // prefix opens the engine's commands as a small panel over the input, and an
+  // exact command warms the ink. Esc hides the menu until the line changes.
   const [typed, setTyped] = useState('')
+  const [menuAt, setMenuAt] = useState(0)
+  const [menuHidden, setMenuHidden] = useState(false)
+  const retype = (value: string): void => {
+    setTyped(value)
+    setMenuAt(0)
+    setMenuHidden(false)
+  }
+  const matches = commandMatches(typed)
+  const menuOpen = matches.length > 0 && !menuHidden && !paneOpen && asks.length === 0
+  const menuSel = Math.min(menuAt, Math.max(0, matches.length - 1))
+  // Mirrored for the keyboard handler and submit, like the pane's ref.
+  const menu = useRef({ open: false, at: 0, count: 0, selected: '' })
+  menu.current = {
+    open: menuOpen,
+    at: menuSel,
+    count: matches.length,
+    selected: matches[menuSel]?.name ?? '',
+  }
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
   // The ripple's own smoother: the raster wave paints on its own clock in an
@@ -337,6 +356,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // space/enter/arrows adjust; every change goes over the wire immediately.
   useKeyboard((key) => {
     if (key.ctrl && key.name === 'c') return wire.line('/quit')
+    // The command menu takes the arrows while it is up (the single-line input
+    // has no use for them); Enter stays with the input's own submit, which
+    // reads the selection from the ref.
+    if (!pane.current.open && menu.current.open) {
+      if (key.name === 'escape') return setMenuHidden(true)
+      if (key.name === 'up') return setMenuAt(Math.max(0, menu.current.at - 1))
+      if (key.name === 'down') return setMenuAt(Math.min(menu.current.count - 1, menu.current.at + 1))
+    }
     const { open, at, snap } = pane.current
     if (!open || snap === null) return
     if (key.name === 'escape') return setPaneOpen(false)
@@ -351,7 +378,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
-    setTyped('')
+    const chosen = menu.current.open ? menu.current.selected : null
+    retype('')
+    // Enter on the open menu runs the highlighted command, not the prefix.
+    if (chosen !== null) return wire.line(chosen)
     const line = outbound(text, asks.length > 0)
     if (line === null) return
     setAsks((queue) => queue.slice(1))
@@ -385,8 +415,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const gutter = Math.floor((dims.width - cols) / 2)
   const wide = cols >= WIDE_MIN
   // Where the spotlight card begins, for the raster paint loops: they keep
-  // the stage hushed above this row and yield it below (null = no card).
-  const cardTop = asks.length > 0 ? cardTopRow(asks[0]!.text, cols, dims.height) : null
+  // the stage hushed above this row and yield it below (null = no card). The
+  // command menu borrows the same yield — a kitty image composites above text
+  // cells, so its rows (matches + border + footer, anchored 2 above bottom)
+  // must be clear of rasters too.
+  const cardTop =
+    asks.length > 0
+      ? cardTopRow(asks[0]!.text, cols, dims.height)
+      : menuOpen
+        ? Math.max(1, dims.height - 2 - (matches.length + 3))
+        : null
   const cardTopRef = useRef(cardTop)
   cardTopRef.current = cardTop
   // In the sky composition the strip is one centred line over a full-width
@@ -775,6 +813,41 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           dims but never rearranges. Kind picks the frame: warm for a
           question, periwinkle for a consent — the listener's color, because
           the decision is theirs. */}
+      {/* The command menu (§3.2-C): the engine's commands as a small panel
+          floating over the room, anchored where the spotlight card floats —
+          above the input, never rearranging it. Arrows choose, Enter runs the
+          highlighted command, Esc puts it away until the line changes. */}
+      {menuOpen &&
+        (() => {
+          const nameCol = Math.max(...matches.map((c) => c.name.length))
+          return (
+            <box
+              style={{
+                border: true,
+                borderStyle: 'rounded',
+                borderColor: mix(PERIWINKLE, INK.bg, 0.35),
+                flexDirection: 'column',
+                position: 'absolute',
+                left: gutter + 1,
+                bottom: 2,
+                zIndex: 100,
+                paddingLeft: 1,
+                paddingRight: 1,
+                backgroundColor: CARD,
+              }}
+            >
+              {matches.map((command, at) => (
+                <text key={command.name} style={{ bg: at === menuSel ? CHIP : CARD }}>
+                  <span fg={at === menuSel ? EMBER : PERIWINKLE}>
+                    {` ${command.name.padEnd(nameCol)}`}
+                  </span>
+                  <span fg={at === menuSel ? INK.text : INK.notice}>{`  ${command.blurb} `}</span>
+                </text>
+              ))}
+              <text style={{ fg: QUIET }}>{' enter runs · esc hides'}</text>
+            </box>
+          )
+        })()}
       {asks.length > 0 &&
         (() => {
           const head = asks[0]!
@@ -888,7 +961,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <input
             ref={input}
             focused={!paneOpen}
-            placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back'}
+            placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back · / for commands'}
             style={{
               // The sky composition bounds the field and lets a quiet rule carry
               // the rest of the row (concept 04's input line); long input scrolls
@@ -902,24 +975,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               backgroundColor: INK.bg,
               focusedBackgroundColor: INK.bg,
             }}
-            onInput={setTyped}
+            onInput={retype}
             // The reconciler wires an input's onSubmit to the ENTER event, which
             // carries the submitted string; the declared prop type inherits
             // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
             onSubmit={submit as InputProps['onSubmit']}
           />
-          {/* The slash hint rides the same row where the rule (or nothing)
-              would sit — the commands the typed `/` could still become. */}
-          {commandHint(typed) !== null ? (
-            <box style={{ paddingLeft: 1, flexShrink: 0 }}>
-              <text style={{ fg: mix(PERIWINKLE, INK.bg, 0.4) }}>{commandHint(typed)}</text>
+          {wide && (
+            <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+              <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
             </box>
-          ) : (
-            wide && (
-              <box style={{ flexGrow: 1, paddingLeft: 1 }}>
-                <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
-              </box>
-            )
           )}
         </box>
       ) : (

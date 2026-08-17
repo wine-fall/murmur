@@ -43,8 +43,8 @@ import type { AnchorId, Scheduler } from './scheduler.ts'
 // Literal, not destructured from COMMANDS: meaning must never depend on the
 // list's (display) order. The type pins each literal to a COMMANDS entry, and
 // the steer tests pin the reverse — every entry parses as a command.
-const QUIT_COMMAND: (typeof COMMANDS)[number] = '/quit'
-const SETTINGS_COMMAND: (typeof COMMANDS)[number] = '/settings'
+const QUIT_COMMAND: (typeof COMMANDS)[number]['name'] = '/quit'
+const SETTINGS_COMMAND: (typeof COMMANDS)[number]['name'] = '/settings'
 
 // Bounded attempts for a Brain/synth call before it degrades (lose the beat,
 // never the radio).
