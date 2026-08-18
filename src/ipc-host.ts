@@ -123,6 +123,12 @@ export class IpcHost implements Host {
       // agreed a protocol with.
       if (!attached) return
       if (message.type === 'line') {
+        // Commands are diagnostics-worthy (quit latency, menu picks). Chat
+        // and ask answers stay out of the log — an answer may be a pasted
+        // secret (spec 03-03 §7.2).
+        if (message.text.trim().startsWith('/')) {
+          this.mirror('tui', `command received: ${message.text.trim()}`)
+        }
         // The oldest pending ask is what this line answers, if any is —
         // lineReader consumes in exactly this order.
         this.pendingAsks.shift()
