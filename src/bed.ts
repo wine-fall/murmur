@@ -141,17 +141,26 @@ export type PullBedOptions = {
   cacheDir: string
   download: BedDownload
   log?: (message: string) => void
+  // Consulted between refs: a quitting user must not wait out the manifest.
+  shouldStop?: () => boolean
 }
 
 // First-run pull (spec 03-04 §2.3): resolve each manifest ref into the cache,
 // skipping warm refs and continuing past failures — a dead ref never aborts the
 // pull. Returns the cached-track count; 0 degrades cleanly to no bed.
-export async function pullBed({ manifest, cacheDir, download, log }: PullBedOptions): Promise<number> {
+export async function pullBed({
+  manifest,
+  cacheDir,
+  download,
+  log,
+  shouldStop,
+}: PullBedOptions): Promise<number> {
   const refs = await readManifest(manifest)
   if (refs.length === 0) return cachedFiles(cacheDir).length
   await mkdir(cacheDir, { recursive: true })
   let failures = 0
   for (const ref of refs) {
+    if (shouldStop?.() === true) break
     const key = cacheKey(ref)
     if (cachedFiles(cacheDir).some((path) => path.includes(`/${key}.`))) continue
     log?.(`bed: pulling ${ref}`)

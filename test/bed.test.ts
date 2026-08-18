@@ -141,6 +141,21 @@ describe('initialBedPosition (spec 03-04 resume)', () => {
 })
 
 describe('pullBed', () => {
+  it('stops between refs when shouldStop flips — a quitting user must not wait out the manifest', async () => {
+    const manifest = join(dir, 'manifest.txt')
+    await writeFile(manifest, 'ref-a\nref-b\nref-c\n')
+    const cache = join(dir, 'cache')
+    const pulled: string[] = []
+    let stop = false
+    const download = async (ref: string, destBase: string) => {
+      pulled.push(ref)
+      stop = true // the quit lands while ref-a downloads
+      await writeFile(`${destBase}.webm`, 'audio')
+    }
+    await pullBed({ manifest, cacheDir: cache, download, shouldStop: () => stop })
+    expect(pulled).toEqual(['ref-a'])
+  })
+
   it('pulls uncached refs, skips warm ones, and continues past failures', async () => {
     const manifest = join(dir, 'manifest.txt')
     await writeFile(manifest, 'ref-a\nref-dead\nref-b\n')
