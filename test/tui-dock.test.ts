@@ -54,6 +54,15 @@ describe('commandMatches', () => {
     expect(commandMatches('/quit')).toEqual([])
     expect(commandMatches('/settings')).toEqual([])
   })
+
+  it('Tab-completing ANY highlighted command lands on that chain: menu closed, ink warmed', () => {
+    // Tab writes the highlighted name into the line verbatim (app.tsx); the
+    // menu must then read it as settled for every command the engine parses.
+    for (const command of COMMANDS) {
+      expect(commandMatches(command.name)).toEqual([])
+      expect(isCommand(command.name)).toBe(true)
+    }
+  })
 })
 
 describe('isCommand', () => {

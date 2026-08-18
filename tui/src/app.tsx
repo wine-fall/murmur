@@ -358,11 +358,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     if (key.ctrl && key.name === 'c') return wire.line('/quit')
     // The command menu takes the arrows while it is up (the single-line input
     // has no use for them); Enter stays with the input's own submit, which
-    // reads the selection from the ref.
+    // reads the selection from the ref. Tab completes the highlighted command
+    // into the line without running it — the line then IS the command, so the
+    // menu closes and the ember ink carries the confirmation.
     if (!pane.current.open && menu.current.open) {
       if (key.name === 'escape') return setMenuHidden(true)
       if (key.name === 'up') return setMenuAt(Math.max(0, menu.current.at - 1))
       if (key.name === 'down') return setMenuAt(Math.min(menu.current.count - 1, menu.current.at + 1))
+      if (key.name === 'tab') {
+        if (input.current !== null) input.current.value = menu.current.selected
+        return retype(menu.current.selected)
+      }
     }
     const { open, at, snap } = pane.current
     if (!open || snap === null) return
@@ -816,7 +822,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       {/* The command menu (§3.2-C): the engine's commands as a small panel
           floating over the room, anchored where the spotlight card floats —
           above the input, never rearranging it. Arrows choose, Enter runs the
-          highlighted command, Esc puts it away until the line changes. */}
+          highlighted command, Tab completes it into the line, Esc puts it
+          away until the line changes. */}
       {menuOpen &&
         (() => {
           const nameCol = Math.max(...matches.map((c) => c.name.length))
@@ -844,7 +851,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   <span fg={at === menuSel ? INK.text : INK.notice}>{`  ${command.blurb} `}</span>
                 </text>
               ))}
-              <text style={{ fg: QUIET }}>{' enter runs · esc hides'}</text>
+              <text style={{ fg: QUIET }}>{' tab completes · enter runs · esc hides'}</text>
             </box>
           )
         })()}
