@@ -244,7 +244,8 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(req.canUseTool).toBeDefined()
     expect(req.nextUserInput).toBeDefined()
     expect(req.onText).toBeDefined()
-    // The shipped path keeps the SDK's per-action confirm (spec 03-03 §5.4).
+    // The shipped path still routes through canUseTool (the quit deny and the
+    // secret belt live there — spec 03-03 §3).
     expect(req.permissionMode).toBeUndefined()
     expect(infos.join('\n')).toContain('yt-dlp')
   })
@@ -337,6 +338,9 @@ describe('runSetup — the once-per-boot offer', () => {
       // a default y).
       expect(lines.slice(-3).every((l) => l.startsWith('>> '))).toBe(true)
       expect(lines.at(-3)).toContain('y - fix them now')
+      // The y is an authorization, and the card says so: murmur acts on it,
+      // checking back only at real choices (spec 03-03 §3).
+      expect(lines.at(-3)).toContain('real choices')
       expect(lines.at(-2)).toContain('Enter - not now')
       expect(lines.at(-1)).toContain("n - don't ask again")
     })
@@ -346,7 +350,10 @@ describe('runSetup — the once-per-boot offer', () => {
       // review): its card must not say "next boot" or "don't ask again".
       const text = setupOfferText(targets(), gaps, true)
       const options = text.split('\n').filter((l) => l.startsWith('>> '))
-      expect(options).toEqual(['>> y - fix them now', '>> Enter - skip for now'])
+      expect(options).toEqual([
+        ">> y - fix them now (I'll run the fixes, and check with you at real choices)",
+        '>> Enter - skip for now',
+      ])
       expect(text).not.toContain('next boot')
       expect(text).not.toContain("don't ask again")
     })

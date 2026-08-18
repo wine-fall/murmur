@@ -14,6 +14,7 @@ import { readFileSync } from 'node:fs'
 import {
   createSdkMcpServer,
   query,
+  type HookCallback,
   type McpSdkServerConfigWithInstance,
   type Options,
   type SDKMessage,
@@ -134,18 +135,71 @@ export function agenticOptions(
 // task (per-task tool surface, spec 03-03 §3).
 // WebFetch is here so the guide can read a provider's CURRENT terms instead of
 // repeating a free-tier date from training (spec 03-03 §7.2); it is strictly
-// narrower than the Bash already on the list, and asks like everything else.
+// narrower than the Bash already on the list.
 export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 'WebFetch'] as const
+
+// Where a credential lives (spec 03-03 §7.2: voice.json holds the api key,
+// .env* the remote-voice creds, $MURMUR_HOME under ~/.murmur, the process
+// environment): any tool input referencing these is refused. Tested against
+// the WHOLE input, so a Grep path or a glob hits it too.
+export const SECRET_PATH = /\.env\b|voice\.json|\.murmur\b|\benviron\b/i
+
+// Bash-only atoms: a secret-shaped name, an environment dump (bare `env` is a
+// dump, `/usr/bin/env <program>` is a launcher), or a parameter expansion —
+// the guard cannot tell $HOME from $SOME_KEY, and a denied `$HOME` is cheap
+// to rephrase as a literal path. URLs are stripped before the name test: the
+// voice walkthrough legitimately opens .../app/api-keys pages.
+export const SECRET_NAME = /api[_-]?key|secret|password|credential|token/i
+const ENV_DUMP = /\bprintenv\b|\benv\b\s*(?:$|[|;&)])|\b(?:set|export|declare|typeset)\b/
+const EXPANSION = /\$(?![?(])/
+
+// This guard is a tripwire against ACCIDENTAL credential ingestion, not a
+// sandbox: the model is shaped by the prompt, not adversarial, and a regex
+// cannot enumerate every read of every secret. It refuses the shapes a
+// diagnosis plausibly wanders into; the deny reason teaches the model why.
+export function isSecretBearing(toolName: string, input: unknown): boolean {
+  // murmur-owned tools are exempt — their handlers own the secret channel
+  // (write_voice_config reads the key at the keyboard, never the transcript).
+  if (toolName.startsWith('mcp__murmur__')) return false
+  if (SECRET_PATH.test(JSON.stringify(input))) return true
+  if (toolName !== 'Bash') return false
+  const command = z.object({ command: z.string() }).safeParse(input)
+  if (!command.success) return false
+  const cmd = command.data.command.replace(/https?:\/\/\S+/g, '')
+  return SECRET_NAME.test(cmd) || ENV_DUMP.test(cmd) || EXPANSION.test(cmd)
+}
+
+export const SECRET_DENY_MESSAGE =
+  'murmur never lets a session read credential-bearing files or variables: ' +
+  'the result would be kept in the session transcript. Secrets reach murmur ' +
+  'only through its own tools (write_voice_config asks at the keyboard).'
+
+// The transcript-protection red line, enforced where EVERY tool use passes:
+// the SDK consults canUseTool only when its own policy would ask, and Read /
+// safe Bash commands never ask — so the permission callback alone cannot keep
+// a credential out of the transcript (smoke-proven: a Read of .env sailed
+// straight through it). A PreToolUse hook fires unconditionally.
+const secretGuard: HookCallback = async (input) => {
+  if (input.hook_event_name !== 'PreToolUse') return {}
+  if (isSecretBearing(input.tool_name, input.tool_input)) {
+    return {
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: SECRET_DENY_MESSAGE,
+      },
+    }
+  }
+  return {}
+}
 
 // Options for the guide harness (spec 03-03): same isolation as the other
 // harnesses (no user settings/skills/MCP), but the curated BUILT-IN tools are
-// enabled. The surface is bounded via `tools` — NOT `allowedTools`, which in
-// this SDK auto-approves (executes without asking) and would defeat the
-// per-action confirm the guide exists to keep. Factored out so the isolation
-// and never-auto-approve invariants are unit-testable without a network call.
-// murmur-owned tools ride the same `tools` allowlist as the built-ins, so a
-// task-specific tool (spec 03-03 §7.2's write_voice_config) is offered without
-// escaping the per-action confirm.
+// enabled. The surface is bounded via `tools` — NOT `allowedTools`, which
+// only pre-approves and does not bound what exists. Factored out so the
+// isolation, the bounded surface, and the secret-guard hook are unit-testable
+// without a network call. murmur-owned tools ride the same `tools` allowlist
+// as the built-ins (spec 03-03 §7.2's write_voice_config).
 export function guideOptions(req: GuideRequest): Options {
   const extra = req.tools ?? []
   const server = extra.length > 0 ? createSdkMcpServer({ name: 'murmur', tools: [...extra] }) : null
@@ -158,6 +212,7 @@ export function guideOptions(req: GuideRequest): Options {
     mcpServers: server === null ? {} : { murmur: server },
     skills: [],
     permissionMode: req.permissionMode ?? 'default',
+    hooks: { PreToolUse: [{ hooks: [secretGuard] }] },
     ...(req.canUseTool !== undefined && { canUseTool: req.canUseTool }),
     maxTurns: req.maxTurns,
     extraArgs: { 'disable-slash-commands': null },
@@ -320,8 +375,8 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   }
 
   // The setup/repair capability (spec 03-03): the native Claude Code agent
-  // with built-in tools, per-action permission asks, and the multi-turn
-  // user-reply loop — a different harness from runTask.
+  // with built-in tools, the entry-authorization permission policy, and the
+  // multi-turn user-reply loop — a different harness from runTask.
   async runGuide(req: GuideRequest): Promise<string> {
     return runGuideSession(query, req)
   }

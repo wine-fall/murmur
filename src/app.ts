@@ -464,12 +464,15 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // failure degrades to no bed; the radio still starts. Independent of the
   // music check — a warm cache needs no yt-dlp, so talk-only sessions keep it.
   const bedCacheDir = defaultBedCacheDir()
-  if (config.bedEnabled) {
+  if (config.bedEnabled && !quit.requested) {
     await pullBed({
       manifest: DEFAULT_MANIFEST,
       cacheDir: bedCacheDir,
       download: (ref, destBase) => ytdlpDownload(ref, destBase, config.ytdlpCmd),
       log: (m) => host.info(m),
+      // A Ctrl-C during the pull stops it at the next ref boundary (the
+      // in-flight download still runs out — ytdlpDownload has no abort seam).
+      shouldStop: () => quit.requested,
     })
     const bed = new CachedBedSource(bedCacheDir)
     // Pick up where the last run left off (spec 03-04 resume); nothing saved

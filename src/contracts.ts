@@ -231,19 +231,19 @@ export interface SteerBrain {
 // --- the guide harness (spec 03-03 §2) ------------------------------------ //
 //
 // A DIFFERENT harness from runTask: the native Claude Code agent with its
-// built-in system tools (Bash/Read/...) enabled and the SDK's own per-action
-// permission flow on — interactive setup/repair, not a murmur-owned tool loop.
-// The SDK drives ask/execute; murmur only routes its prompts to the user.
+// built-in system tools (Bash/Read/...) enabled — interactive setup/repair,
+// not a murmur-owned tool loop. Consent is the entry authorization: the
+// permission callback allows within it, and the secret guard rides a
+// PreToolUse hook (spec 03-03 §3).
 export type GuideRequest = {
   readonly systemPrompt: string // behavior-shaping persona (investigate → explain → ask → fix)
   readonly prompt: string // the high-level task; never prescribes the remedy
   readonly model: string
   readonly maxTurns: number
-  readonly permissionMode?: PermissionMode // shipped default: 'default' (per-action confirm)
+  readonly permissionMode?: PermissionMode // shipped default: 'default'
   readonly canUseTool?: CanUseTool // routes each pre-action ask to the user
-  // murmur-owned tools offered ALONGSIDE the SDK built-ins (spec 03-03 §7.2).
-  // Bounded via `tools`, not `allowedTools`, so they stay behind the same
-  // per-action confirm every built-in is behind.
+  // murmur-owned tools offered ALONGSIDE the SDK built-ins (spec 03-03 §7.2),
+  // riding the same `tools` allowlist that bounds the built-in surface.
   readonly tools?: readonly TaskTool[]
   readonly onText?: (text: string) => void // the agent's text, streamed as it arrives
   // Tool activity, surfaced so a long install never runs in silence: the

@@ -2,11 +2,12 @@
 // conversational onboarding built on it (§7).
 //
 // The deterministic probes decide whether to engage; when they do, the guide
-// runs with its ask/answer routed through the Host — the agent's text prints as
-// it streams (onText), each pre-action permission request is printed and
-// answered from the same stdin the Director uses (canUseTool), and the user's
-// natural-language replies flow back (nextUserInput). We only route the SDK's
-// prompts; the SDK owns the ask/execute semantics.
+// runs with its conversation routed through the Host — the agent's text prints
+// as it streams (onText), its tool activity is narrated, and the user's
+// natural-language replies flow back (nextUserInput). Consent is the ENTRY:
+// the offer card's y authorizes the fixes, canUseTool allows within that
+// authorization (denying only secret-bearing input), and the substantive
+// checkpoints live in the conversation itself.
 //
 // The posture the onboarding slice adds: murmur assumes the user has Claude
 // Code, so a gap is never a wall. The radio launches degraded and then OFFERS
@@ -15,7 +16,13 @@
 
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 
-import { toolDetail } from './brain.ts'
+import {
+  isSecretBearing,
+  SECRET_DENY_MESSAGE,
+  SECRET_NAME,
+  SECRET_PATH,
+  toolDetail,
+} from './brain.ts'
 import type { GuideCapable, LedgerKind } from './contracts.ts'
 import { ask, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
@@ -137,85 +144,22 @@ export function lineReader(host: Host, quit: QuitLatch): ReadLine {
   }
 }
 
-// Builtins that can only look, never touch. Write/Edit stay out on purpose.
-const READONLY_TOOLS = new Set(['Read', 'Glob', 'Grep'])
-
-// Where credentials live (spec 03-03 §7.2: voice.json holds the api key,
-// .env* the remote-voice creds). A "read" of these puts a secret into the SDK
-// transcript, so it is never auto-allowed, whatever the tool (codex review).
-const SECRET_BEARING = /\.env|voice\.json/i
-
-// The read-only shapes the guide's diagnosis actually uses. Whole-segment
-// anchors rather than command heads where the head alone is not enough:
-// `yt-dlp --version` reads, `yt-dlp <url>` downloads.
-const READONLY_SEGMENT = [
-  /^which(\s|$)/,
-  /^type\s/,
-  /^command -v\s/,
-  /^ls(\s|$)/,
-  /^echo(\s|$)/,
-  /^printf\s/,
-  /^pwd$/,
-  /^uname(\s|$)/,
-  /^head(\s|$)/,
-  /^tail(\s|$)/,
-  /^wc(\s|$)/,
-  /^yt-dlp --version$/,
-  /^ffmpeg -version$/,
-  /^bun --version$/,
-  /^node --version$/,
-  // `brew outdated` is NOT here: default Homebrew auto-updates its own
-  // metadata before answering it, which mutates state (codex review).
-  /^brew (info|list|config|doctor|--version|--prefix)(\s|$)/,
-  /^uv (--version$|tool list)/,
-  /^pipx (list|--version)/,
-]
-
-// A conservative classifier: is this Bash command incapable of changing the
-// machine? Redirects and backticks disqualify outright; the rest is split at
-// every separator (;, &&, ||, |, &, newline) AND around $(...) so each
-// executable segment is judged on its own — one unknown head poisons the
-// whole command. False negatives just fall back to asking; a false positive
-// would execute silently, so every rule leans strict.
-export function isReadOnlyCommand(command: string): boolean {
-  if (/[><`]/.test(command)) return false
-  // Parameter/env expansion can surface a credential into the transcript
-  // (`echo $MURMUR_TTS_API_KEY`), so `$` is allowed only as `$?` or a `$(...)`
-  // whose inner command is judged like any other segment (codex review).
-  if (/\$(?![?(])/.test(command)) return false
-  if (SECRET_BEARING.test(command)) return false
-  const segments = command
-    .split(/\|\||&&|[;&|\n]|\$\(|\)/)
-    .map((piece) => piece.trim().replace(/^["']+|["']+$/g, '').trim())
-    .filter((piece) => piece !== '')
-  if (segments.length === 0) return false
-  return segments.every((segment) => READONLY_SEGMENT.some((rule) => rule.test(segment)))
-}
-
-// Ask the user via the CLI Host before each tool the guide wants to run, and
-// return the SDK's allow/deny result. Anything but an explicit yes denies.
-// One carve-out (spec 03-03 §7.1): the card's 'y' already covered LOOKING, so
-// pure reads flow without another ask and the per-action consent lands on the
-// CHANGES — a wall of y/N for `which` and `--version` buries the one confirm
-// that matters. The dev log keeps a record of what was auto-allowed.
-export function cliPermission(host: Host, read: ReadLine, quit: QuitLatch): CanUseTool {
+// The permission callback under the entry authorization (spec 03-03 §3):
+// the offer card's y IS the consent, so every tool call is allowed outright
+// and no permission question ever reaches the user — the checkpoints that remain are conversational (the prompt stops at
+// substantive forks). The secret-input guard's enforcement point is the
+// PreToolUse hook in guideOptions (the SDK consults this callback only when
+// its own policy would ask); the same test here is the belt for the calls
+// that do arrive. The dev log keeps a record of everything allowed.
+export function cliPermission(host: Host, quit: QuitLatch): CanUseTool {
   return async (toolName, input) => {
-    // A user who is leaving gets no consent card: deny outright so the
-    // session winds down instead of parking a question nobody will answer.
+    // A user who is leaving: deny outright so the session winds down.
     if (quit.requested) return { behavior: 'deny', message: 'user quit' }
-    const detail = toolDetail(input)
-    if (
-      (READONLY_TOOLS.has(toolName) && !SECRET_BEARING.test(JSON.stringify(input))) ||
-      (toolName === 'Bash' && typeof input.command === 'string' && isReadOnlyCommand(input.command))
-    ) {
-      host.debug?.(`guide auto-allowed read-only [${toolName}]: ${detail}`)
-      return { behavior: 'allow' }
+    if (isSecretBearing(toolName, input)) {
+      return { behavior: 'deny', message: SECRET_DENY_MESSAGE }
     }
-    // One self-contained ask: a docked "allow?" with the command left behind
-    // in the log would ask the user to approve something they cannot see.
-    ask(host, `setup assistant wants to run [${toolName}]: ${detail}\nallow? [y/N]`, 'consent')
-    if (isYes(await read())) return { behavior: 'allow' }
-    return { behavior: 'deny', message: 'user declined' }
+    host.debug?.(`guide auto-allowed [${toolName}]: ${toolDetail(input)}`)
+    return { behavior: 'allow' }
   }
 }
 
@@ -400,10 +344,14 @@ export function setupOfferText(targets: SetupTargets, gaps: Gap[], explicit = fa
   // on it. An explicit entry (`make setup`) carries no boot-persistence — its
   // card must not promise any (skipping records nothing there), so it offers
   // exactly the two answers it honors.
+  // The y is an authorization, not the first of many confirms (spec 03-03
+  // §3), and its row says what it buys: murmur runs the fixes itself and
+  // comes back only at substantive forks.
+  const YES_ROW = ">> y - fix them now (I'll run the fixes, and check with you at real choices)"
   const options = explicit
-    ? ['>> y - fix them now', '>> Enter - skip for now']
+    ? [YES_ROW, '>> Enter - skip for now']
     : [
-        '>> y - fix them now',
+        YES_ROW,
         ">> Enter - not now (I'll offer again next boot)",
         ">> n - don't ask again (make setup reopens this)",
       ]
@@ -425,8 +373,8 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
 // The startup onboarding phase (spec 03-03 §7.1 point 3). The radio ALWAYS
 // launches; this is what stops a degraded launch from being a passive one. When
 // the deterministic probes find gaps, murmur names them in plain language and
-// opens a real conversation — the guide investigates, proposes, asks per action,
-// applies, and verifies. Declining is the only thing that makes later boots
+// opens a real conversation — the guide investigates, narrates, applies, and
+// verifies, asking only at substantive forks. Declining is the only thing that makes later boots
 // quiet, and it costs exactly one info line thereafter.
 export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const { host, guide, targets } = run
@@ -508,17 +456,18 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
-    canUseTool: cliPermission(host, read, quit),
+    canUseTool: cliPermission(host, quit),
     interrupt: quit.seen,
     ...(tools.length > 0 && { tools }),
     onText: (text) => host.info(text),
     // What the agent is doing, visibly: the command before it runs, the tail
-    // of its output after — a consented install must never run in silence.
-    // One exception: a secret-bearing tool use the user approved BY HAND is
-    // outside the auto-allow guard, and info lines mirror into the dev log —
-    // so its result is withheld rather than persisted (codex review).
+    // of its output after — an authorized install must never run in silence.
+    // A secret-hinting use gets its result withheld instead of echoed: info
+    // lines mirror into the dev log, and the guard is a tripwire, not a
+    // sandbox — something it missed on the way in must not be persisted on
+    // the way out.
     onToolUse: (name, detail, id) => {
-      if (SECRET_BEARING.test(detail)) secretUses.add(id)
+      if (SECRET_PATH.test(detail) || SECRET_NAME.test(detail)) secretUses.add(id)
       host.info(`-> [${name}] ${detail}`)
     },
     onToolResult: (output, isError, id) =>

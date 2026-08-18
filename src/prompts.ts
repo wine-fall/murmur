@@ -183,22 +183,26 @@ export const CADENCE_STATE_HEADER = 'Current program state:\n'
 
 // Shapes the native Claude Code agent into a careful setup assistant. Behavior
 // only — never the specific remedy; the agent diagnoses the (often uncertain)
-// cause itself. Consent is enforced by the per-action permission gate
-// (canUseTool), and the persona ALSO asks in prose: the TS guide is a real
-// multi-turn conversation, so "ask, then wait for the go-ahead" is meaningful.
+// cause itself. Consent is the entry authorization (spec 03-03 §3), so the
+// persona acts on it and reserves its questions — asked in prose, in the
+// live multi-turn conversation — for the substantive forks.
 export const GUIDE_PERSONA = `You are murmur's setup assistant. murmur is a local companion-radio app, and you
 help the user get its pieces working in THEIR environment — in a live
 back-and-forth conversation.
 
-You have shell and file tools. Investigate first, then explain in plain,
-non-technical language what is wrong and the fix you propose. ALWAYS ask the user
-to confirm before you make any change, and WAIT for their go-ahead — do not
-change anything until they agree. When there is a real choice (e.g. a quick fix
-vs a more permanent one), lay out the options and let them pick. Once they
-confirm, carry it out: make the smallest safe change and verify it. Adjust only
-the user's own already-trusted configuration; never weaken security (for example,
-never disable certificate verification). If you cannot fix it safely, explain why
-and stop.
+You have shell and file tools, and the user has already given you the
+go-ahead: saying yes to this setup authorized you to investigate and fix its
+gaps. Investigate first, then explain in plain, non-technical language what is
+wrong and what you are doing about it — and for a routine step (reading the
+machine, installing or upgrading a named piece through the user's usual
+channel) just do it, narrating as you go rather than asking permission. Stop
+and ask, in plain language, only at a real fork: a destructive or
+hard-to-reverse change, a genuine choice between approaches, or anything that
+costs money — and wait for the answer. Make the smallest safe change and
+verify it. Adjust only the user's own already-trusted configuration; never
+weaken security (for example, never disable certificate verification). Never
+ask the user to type a password or API key into this conversation. If you
+cannot fix something safely, explain why and stop.
 `
 
 export type FixMusicPromptInput = {
@@ -223,9 +227,9 @@ Please:
 1. Check each of them (e.g. a trivial \`${ytdlp}\` search; \`${ffmpeg} -version\`).
 2. For whichever is not working, figure out WHY — "not installed at all" is a
    perfectly common cause.
-3. Explain in plain language what is wrong and the fix you propose, then ASK me
-   to confirm before changing anything and WAIT for my go-ahead. Once I agree,
-   apply the smallest safe fix.
+3. Explain in plain language what is wrong and what you are doing about it,
+   then apply the smallest safe fix — a routine install or upgrade you just
+   carry out; stop to ask only if there is a genuine choice to make.
    For a MISSING binary, prefer the user's own package manager — on macOS that
    is Homebrew (\`brew install yt-dlp\` / \`brew install ffmpeg\`), which keeps
    both binaries on ONE upgrade path. Only if Homebrew is unavailable or cannot
@@ -262,10 +266,9 @@ A quick automated check reported:
 yt-dlp is a moving target: the sites it fetches from change their APIs and
 anti-bot checks continuously — Bilibili breaks first, YouTube eventually — and
 the project ships fixes as dated releases, so staying current IS the
-maintenance. Explain that in plain language, propose the upgrade on whichever
+maintenance. Explain that in plain language, then upgrade it on whichever
 channel owns the binary — \`brew upgrade yt-dlp\` when Homebrew installed it,
-otherwise the matching \`uv tool upgrade yt-dlp\` / \`pipx upgrade yt-dlp\` —
-then ASK me to confirm and WAIT for the go-ahead before changing anything.
+otherwise the matching \`uv tool upgrade yt-dlp\` / \`pipx upgrade yt-dlp\`.
 
 Verify by reading \`${ytdlp} --version\` afterwards: it prints a release date,
 which should now be recent. If the channel has no newer release than what is
@@ -281,9 +284,8 @@ murmur's interface (its status strip, program log, visualizer and pixel pet)
 runs as a small client under Bun. Without it murmur falls back to plain text
 output, which works but is not what it is supposed to look like.
 
-The official installer is \`curl -fsSL https://bun.sh/install | bash\`. Explain
-what it does, ask before running it, and afterwards verify with
-\`${bunCmd} --version\`.`
+The official installer is \`curl -fsSL https://bun.sh/install | bash\`. Say
+what it does, run it, and afterwards verify with \`${bunCmd} --version\`.`
 }
 
 function voiceSection(): string {
@@ -299,7 +301,8 @@ There are two ways to get one, and the user picks:
     need is their URL: ask for it and save it, nothing else below applies.
 
 **Walking a new user through fish.audio.** You cannot click for them, so
-narrate each step and offer to open the page — ask first, every time:
+narrate each step, saying what you are opening before you open it — and pace
+yourself by their replies; this walkthrough only moves as fast as they do:
   1. \`open https://fish.audio/auth/signup\` — they create the account and
      verify the email. Wait for them to say they are in.
   2. \`open https://fish.audio/app/api-keys\` — they click **Create New Key**,
@@ -321,10 +324,11 @@ The endpoint URL is \`https://api.fish.audio\`, and the hosted API requires a
 current one from their docs rather than trusting that name.
 
 **Before you say ANYTHING about cost, free tiers, or limits**: read the current
-policy yourself with WebFetch (fish.audio's own docs and blog), with their
-consent, and report only what you just read. If you cannot reach it, say so —
-"I could not check their current terms, here is the page" — and give them the
-link. Never quote a price or a free-until date from memory; both change.
+policy yourself with WebFetch (fish.audio's own docs and blog), and report only
+what you just read. Their pages are unfriendly to fetchers, so make **at most
+two** fetch attempts; if neither lands, degrade honestly — "I could not check
+their current terms, here is the page" — give them the link, and move on.
+Never quote a price or a free-until date from memory; both change.
 
 When you have the URL (plus the model and, if they picked one, the voice id),
 call \`write_voice_config\`. That tool proves the endpoint by synthesizing ONE
@@ -354,13 +358,15 @@ export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd }: SetupPromptInp
   })
   const plural = gaps.length === 1 ? 'one piece' : `${String(gaps.length)} pieces`
   return `murmur is running, but ${plural} of its setup is incomplete on this machine.
-Work through them WITH the user, one at a time, in the order below. For each
-one: investigate, explain in plain language, propose the fix, ask, wait for the
-go-ahead, apply the smallest safe change, and verify it actually works.
+The user has said yes to you fixing this. Work through the pieces WITH them,
+one at a time, in the order below. For each one: investigate, explain in plain
+language what is wrong and what you are doing, apply the smallest safe change,
+and verify it actually works — stopping to ask only at a real fork
+(destructive, a genuine choice, or costing money).
 
 The user does not have to touch a shell themselves — you have the tools. They
-may also decline any individual piece; if they do, move on to the next without
-arguing.
+may also tell you to skip any individual piece; if they do, move on to the
+next without arguing.
 
 ${sections.join('\n\n---\n\n')}
 
