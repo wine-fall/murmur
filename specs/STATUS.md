@@ -65,6 +65,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#81** (by-ear) A real day of pacing — spec 07 §5.16.
 - **#83** (watch) Enter during an uncommitted IME composition may submit the line.
 - **#98** (eng) Steer tool-choice eval (Ollama) owed — the smoke is on-demand only; spec 11 §5.
+- **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 
 ## Pinned — do not relitigate
