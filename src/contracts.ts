@@ -246,6 +246,13 @@ export type GuideRequest = {
   // per-action confirm every built-in is behind.
   readonly tools?: readonly TaskTool[]
   readonly onText?: (text: string) => void // the agent's text, streamed as it arrives
+  // Tool activity, surfaced so a long install never runs in silence: the
+  // command before it executes, its printed output after. `detail` is the
+  // Bash command itself, or compact JSON for any other tool's input. The
+  // tool_use id ties a result back to its use, so the consumer can apply a
+  // per-use display policy (e.g. withhold a secret-bearing read's output).
+  readonly onToolUse?: (name: string, detail: string, toolUseId: string) => void
+  readonly onToolResult?: (output: string, isError: boolean, toolUseId: string) => void
   // The user's next natural-language reply after each agent turn; null ends
   // the conversation. Absent = single-shot (one agent turn).
   readonly nextUserInput?: () => Promise<string | null>

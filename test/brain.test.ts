@@ -161,6 +161,106 @@ describe('runGuideSession', () => {
     expect(received).toEqual(['fix it', 'do the quick fix'])
     expect(final).toBe('options: A or B?\ndone.')
   })
+
+  // A long install must not run in silence: the message loop surfaces
+  // tool_use and tool_result blocks so the host hears what runs (before)
+  // and what it printed (after), matched by the block's tool_use id.
+  it('streams tool_use and tool_result through the activity callbacks', async () => {
+    const toolUses: [string, string, string][] = []
+    const toolResults: [string, boolean, string][] = []
+    const query = () => {
+      async function* stream() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [
+              { type: 'text', text: 'upgrading now.' },
+              { type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'brew upgrade yt-dlp' } },
+            ],
+          },
+        } as SDKAssistantMessage
+        yield {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [{ type: 'tool_result', tool_use_id: 't1', content: 'Upgrading yt-dlp\nDone.' }],
+          },
+          parent_tool_use_id: null,
+        } as SDKUserMessage
+        yield { type: 'result', subtype: 'success' } as SDKResultMessage
+      }
+      return stream()
+    }
+    const final = await runGuideSession(
+      query,
+      guideReq({
+        onToolUse: (name, detail, id) => void toolUses.push([name, detail, id]),
+        onToolResult: (output, isError, id) => void toolResults.push([output, isError, id]),
+      }),
+    )
+    expect(toolUses).toEqual([['Bash', 'brew upgrade yt-dlp', 't1']])
+    expect(toolResults).toEqual([['Upgrading yt-dlp\nDone.', false, 't1']])
+    expect(final).toBe('upgrading now.') // tool blocks never pollute the returned text
+  })
+
+  it('joins text-block tool results and flags errors; typed replies are not results', async () => {
+    const toolResults: [string, boolean, string][] = []
+    const query = () => {
+      async function* stream() {
+        yield {
+          type: 'user',
+          message: { role: 'user', content: 'a typed reply, not a tool result' },
+          parent_tool_use_id: null,
+        } as SDKUserMessage
+        yield {
+          type: 'user',
+          message: {
+            role: 'user',
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 't2',
+                content: [
+                  { type: 'text', text: 'line one' },
+                  { type: 'text', text: 'line two' },
+                ],
+                is_error: true,
+              },
+            ],
+          },
+          parent_tool_use_id: null,
+        } as SDKUserMessage
+        yield { type: 'result', subtype: 'success' } as SDKResultMessage
+      }
+      return stream()
+    }
+    await runGuideSession(
+      query,
+      guideReq({ onToolResult: (output, isError, id) => void toolResults.push([output, isError, id]) }),
+    )
+    expect(toolResults).toEqual([['line one\nline two', true, 't2']])
+  })
+
+  it('a non-command tool input surfaces as compact JSON', async () => {
+    const toolUses: [string, string][] = []
+    const query = () => {
+      async function* stream() {
+        yield {
+          type: 'assistant',
+          message: {
+            content: [{ type: 'tool_use', id: 't3', name: 'Read', input: { file_path: '/tmp/x' } }],
+          },
+        } as SDKAssistantMessage
+        yield { type: 'result', subtype: 'success' } as SDKResultMessage
+      }
+      return stream()
+    }
+    await runGuideSession(
+      query,
+      guideReq({ onToolUse: (name, detail) => void toolUses.push([name, detail]) }),
+    )
+    expect(toolUses).toEqual([['Read', '{"file_path":"/tmp/x"}']])
+  })
 })
 
 describe('the shipped path never bypasses permissions (spec 03-03 §5.4)', () => {

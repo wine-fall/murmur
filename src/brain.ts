@@ -19,6 +19,7 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 
 import type {
   Brain,
@@ -217,6 +218,19 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
         if (block.type === 'text' && block.text) {
           parts.push(block.text)
           req.onText?.(block.text) // stream out as it arrives
+        } else if (block.type === 'tool_use') {
+          req.onToolUse?.(block.name, toolDetail(block.input), block.id)
+        }
+      }
+    } else if (message.type === 'user') {
+      // Tool results come back as synthesized user messages. Typed replies are
+      // string content (or text blocks) and never match `tool_result`.
+      const content = message.message.content
+      if (Array.isArray(content)) {
+        for (const block of content) {
+          if (block.type === 'tool_result') {
+            req.onToolResult?.(toolResultText(block.content), block.is_error === true, block.tool_use_id)
+          }
         }
       }
     } else if (message.type === 'result') {
@@ -224,6 +238,22 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
     }
   }
   return parts.join('\n').trim()
+}
+
+// One line naming what a tool is about to do: a Bash command reads best as
+// itself; every other input reads as compact JSON.
+export function toolDetail(input: unknown): string {
+  const command = z.object({ command: z.string() }).safeParse(input)
+  return command.success ? command.data.command : JSON.stringify(input)
+}
+
+function toolResultText(content: string | { type: string; text?: string }[] | undefined): string {
+  if (content === undefined) return ''
+  if (typeof content === 'string') return content
+  return content
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('\n')
 }
 
 export class ClaudeBrain implements Brain, Harness, GuideCapable {

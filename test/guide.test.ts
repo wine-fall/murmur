@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cliConversation,
   cliPermission,
+  formatToolResult,
   isReadOnlyCommand,
   lineReader,
   quitLatch,
@@ -225,5 +226,36 @@ describe('cliConversation', () => {
     const next = cliConversation(host, lineReader(host))
     await next()
     expect(asks).toEqual([{ text: expect.stringContaining('/done'), kind: 'question' }])
+  })
+})
+
+// The visible face of a tool run (spec 03-03 bug fix): output indents under
+// the "-> [tool]" line, long output keeps only the tail, errors are labeled.
+describe('formatToolResult', () => {
+  it('indents every line of a short result', () => {
+    expect(formatToolResult('hello\nworld', false)).toBe('  hello\n  world')
+  })
+
+  it('an empty result still shows something', () => {
+    expect(formatToolResult('   \n ', false)).toBe('  (no output)')
+  })
+
+  it('labels errors', () => {
+    expect(formatToolResult('boom', true)).toBe('  [error]\n  boom')
+  })
+
+  it('keeps only the tail of a long result and says so', () => {
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i + 1}`).join('\n')
+    const shown = formatToolResult(lines, false)
+    expect(shown.split('\n')[0]).toBe('  ... (output trimmed, showing the tail)')
+    expect(shown).toContain('  line 30')
+    expect(shown).not.toContain('line 1\n')
+    expect(shown.split('\n').length).toBe(13) // header + 12 tail lines
+  })
+
+  it('caps a single giant line by characters', () => {
+    const shown = formatToolResult('x'.repeat(5000), false)
+    expect(shown.split('\n')[0]).toBe('  ... (output trimmed, showing the tail)')
+    expect(shown.length).toBeLessThan(1700)
   })
 })

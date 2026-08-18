@@ -96,6 +96,32 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     await rm(dir, { recursive: true, force: true })
   })
 
+  it('mirrors received slash commands to the dev log — chat and answers stay out', async () => {
+    // Commands are the diagnostics trail (quit latency, menu picks); any other
+    // line may be a pasted secret and must never be persisted (spec 03-03 §7.2).
+    const devLog = join(dir, 'dev.log')
+    const logged = new IpcHost({
+      socketPath: join(dir, 'logged.sock'),
+      identity: { brain: 'stub', voice: 'stub' },
+      devLog,
+    })
+    await logged.listen()
+    try {
+      const c = await FakeClient.open(join(dir, 'logged.sock'))
+      clients.push(c)
+      c.attach()
+      c.line('/quit')
+      c.line('sk-secret-pasted-key')
+      await c.settle()
+      const { readFileSync } = await import('node:fs')
+      const log = readFileSync(devLog, 'utf8')
+      expect(log).toContain('command received: /quit')
+      expect(log).not.toContain('sk-secret-pasted-key')
+    } finally {
+      await logged.close()
+    }
+  })
+
   async function client(): Promise<FakeClient> {
     const c = await FakeClient.open(socketPath)
     clients.push(c)

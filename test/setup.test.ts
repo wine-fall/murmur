@@ -249,6 +249,59 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(infos.join('\n')).toContain('yt-dlp')
   })
 
+  it('shows tool activity through the host — commands before, output after', async () => {
+    // A consented install must never run in silence: the host hears the
+    // command as it starts and the tail of its output when it lands.
+    const { host, infos } = fakeHost(['y'])
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        req.onToolUse?.('Bash', 'brew upgrade yt-dlp', 't1')
+        req.onToolResult?.('Upgrading yt-dlp\nDone.', false, 't1')
+        req.onToolResult?.('no such formula', true, 't2')
+        return 'explained.'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger: fakeLedger(),
+      probes,
+    })
+    const shown = infos.join('\n')
+    expect(shown).toContain('-> [Bash] brew upgrade yt-dlp')
+    expect(shown).toContain('  Upgrading yt-dlp\n  Done.')
+    expect(shown).toContain('  [error]\n  no such formula')
+  })
+
+  it('withholds the output of a secret-bearing tool use — info mirrors into the dev log', async () => {
+    // The SECRET_BEARING guard on auto-allow does not cover a MANUALLY
+    // approved read of voice.json/.env; its result must not be echoed either.
+    const { host, infos } = fakeHost(['y'])
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        req.onToolUse?.('Read', '{"file_path":"/home/u/.murmur/voice.json"}', 's1')
+        req.onToolResult?.('{"apiKey":"sk-super-secret"}', false, 's1')
+        req.onToolUse?.('Bash', 'cat .env', 's2')
+        req.onToolResult?.('MURMUR_TTS_API_KEY=sk-more-secret', false, 's2')
+        return 'explained.'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false }),
+      ledger: fakeLedger(),
+      probes,
+    })
+    const shown = infos.join('\n')
+    expect(shown).not.toContain('sk-super-secret')
+    expect(shown).not.toContain('sk-more-secret')
+    expect(shown).toContain('(output withheld: may hold a credential)')
+    // The command lines themselves stay visible — they carry no secret.
+    expect(shown).toContain('-> [Bash] cat .env')
+  })
+
   it('docks the WHOLE pre-broadcast checklist as one consent ask (spec 10 §3.2-B spotlight)', async () => {
     // Diagnosis and invitation share one card: ready rows, gap rows, then the
     // y/N — the modal renders it whole, the plain host prints the same text.
