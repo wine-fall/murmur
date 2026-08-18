@@ -212,30 +212,49 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
   }
 
   const parts: string[] = []
-  for await (const message of queryFn({ prompt: input(), options: guideOptions(req) })) {
-    if (message.type === 'assistant') {
-      for (const block of message.message.content) {
-        if (block.type === 'text' && block.text) {
-          parts.push(block.text)
-          req.onText?.(block.text) // stream out as it arrives
-        } else if (block.type === 'tool_use') {
-          req.onToolUse?.(block.name, toolDetail(block.input), block.id)
-        }
-      }
-    } else if (message.type === 'user') {
-      // Tool results come back as synthesized user messages. Typed replies are
-      // string content (or text blocks) and never match `tool_result`.
-      const content = message.message.content
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type === 'tool_result') {
-            req.onToolResult?.(toolResultText(block.content), block.is_error === true, block.tool_use_id)
+  // The message loop, raced against the interrupt: a /quit must not wait for
+  // the agent to finish the turn in flight. However the loop exits — done,
+  // interrupted, or a thrown handler — the finally closes the SDK subprocess
+  // (the guarantee breaking a for-await gave), without awaiting it: the exit
+  // must not hang on a slow subprocess teardown.
+  const INTERRUPTED = 'interrupted' as const
+  const interrupted = req.interrupt?.then(() => INTERRUPTED)
+  const iterator = queryFn({ prompt: input(), options: guideOptions(req) })[Symbol.asyncIterator]()
+  try {
+    while (true) {
+      const step =
+        interrupted === undefined
+          ? await iterator.next()
+          : await Promise.race([iterator.next(), interrupted])
+      if (step === INTERRUPTED) break
+      if (step.done === true) break
+      const message = step.value
+      if (message.type === 'assistant') {
+        for (const block of message.message.content) {
+          if (block.type === 'text' && block.text) {
+            parts.push(block.text)
+            req.onText?.(block.text) // stream out as it arrives
+          } else if (block.type === 'tool_use') {
+            req.onToolUse?.(block.name, toolDetail(block.input), block.id)
           }
         }
+      } else if (message.type === 'user') {
+        // Tool results come back as synthesized user messages. Typed replies
+        // are string content (or text blocks) and never match `tool_result`.
+        const content = message.message.content
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block.type === 'tool_result') {
+              req.onToolResult?.(toolResultText(block.content), block.is_error === true, block.tool_use_id)
+            }
+          }
+        }
+      } else if (message.type === 'result') {
+        turnEnded.fire()
       }
-    } else if (message.type === 'result') {
-      turnEnded.fire()
     }
+  } finally {
+    void iterator.return?.().catch(() => {})
   }
   return parts.join('\n').trim()
 }

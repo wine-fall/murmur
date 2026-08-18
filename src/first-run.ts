@@ -15,7 +15,7 @@ import { join } from 'node:path'
 
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from './contracts.ts'
-import { isYes, lineReader, type QuitLatch, type ReadLine } from './guide.ts'
+import { isYes, lineReader, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from './host.ts'
 import { claudeCodeRoot } from './paths.ts'
 import {
@@ -91,7 +91,11 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // The reader is the guide's (spec 03-03): serialized, and EOF resolves '' so
   // a piped run declines every question instead of wedging startup.
   host.start()
-  const read = lineReader(host, deps.quit)
+  // A caller without a latch still gets one — and it must be THIS latch the
+  // abandoned-conversation check below reads, or a /quit would decline every
+  // read and then be mistaken for "skipped everything".
+  const quit = deps.quit ?? quitLatch()
+  const read = lineReader(host, quit)
 
   host.info(FIRST_RUN_INTRO)
   const answers: SeedAnswer[] = []
@@ -103,7 +107,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // Leaving is not answering (codex review): a /quit run keeps the bundled
   // seed for THIS boot but writes no persona marker — the next boot asks
   // again from the top.
-  if (deps.quit?.requested === true) return deps.fallbackSeedPath
+  if (quit.requested) return deps.fallbackSeedPath
 
   if (answers.every((a) => a.answer === '')) {
     host.info('no answers — starting with the default voice; you can edit it later.')

@@ -258,6 +258,20 @@ describe('/quit during first-run (codex review: leaving is not answering)', () =
     expect(existsSync(home)).toBe(false)
     expect(brain.calls).toHaveLength(0)
   })
+
+  it('a caller without a latch gets the same exit: the fallback latch is the one the checks read', async () => {
+    // With no deps.quit, lineReader still needs a latch — but an anonymous
+    // inline one is invisible to the abandoned-conversation check below it,
+    // which would then read the all-'' answers as "skip" and write the
+    // persona marker a /quit must never leave behind.
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost(['/quit'])
+    const brain = new FakeSeeder()
+    const path = await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+    expect(brain.calls).toHaveLength(0)
+  })
 })
 
 describe('slice B execution (criteria 8 and 9)', () => {

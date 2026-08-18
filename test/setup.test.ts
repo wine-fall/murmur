@@ -659,6 +659,41 @@ describe('runSetup — declining, and what a decline costs later', () => {
     expect(infos.join('\n')).not.toContain("won't ask again")
   })
 
+  it('/quit mid-conversation returns on the known gaps: no re-probe, no closing verdict', async () => {
+    // The user is leaving; a second yt-dlp probe (a live network search) and a
+    // "still not working" report would make the exit wait on work nobody will
+    // see. The interrupt signal also reaches the guide so the SDK session is
+    // cut instead of waited out.
+    const { host, infos } = fakeHost(['y'])
+    const quit = quitLatch()
+    let musicProbes = 0
+    const requests: GuideRequest[] = []
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        requests.push(req)
+        quit.fire()
+        return 'interrupted.'
+      },
+    }
+    const outcome = await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes: {
+        music: async () => {
+          musicProbes++
+          return NO_YTDLP
+        },
+      },
+      quit,
+    })
+    expect(requests[0]?.interrupt).toBe(quit.seen)
+    expect(musicProbes).toBe(1)
+    expect(outcome.musicOk).toBe(false)
+    expect(infos.join('\n')).not.toContain('all set')
+    expect(infos.join('\n')).not.toContain('still not working')
+  })
+
   it('a decline writes the tier-3 setup.declined record and degrades the session', async () => {
     const { host, infos } = fakeHost(['n'])
     const { guide, requests } = fakeGuide()

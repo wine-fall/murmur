@@ -43,7 +43,7 @@ const askOptions = {
 describe('lineReader (codex-review regressions)', () => {
   it('EOF resolves reads as empty (= decline), so a non-interactive run never blocks', async () => {
     const { host } = fakeHost([], { atEof: true })
-    const read = lineReader(host)
+    const read = lineReader(host, quitLatch())
     expect(await read()).toBe('')
     expect(await read()).toBe('')
   })
@@ -52,7 +52,7 @@ describe('lineReader (codex-review regressions)', () => {
     // peek/take is the Director's race primitive — one line wakes every
     // waiter. Concurrent permission asks must each consume their OWN line.
     const { host } = fakeHost(['y', 'n'])
-    const read = lineReader(host)
+    const read = lineReader(host, quitLatch())
     const [first, second] = await Promise.all([read(), read()])
     expect(first).toBe('y')
     expect(second).toBe('n')
@@ -76,12 +76,64 @@ describe('lineReader (codex-review regressions)', () => {
     quit.fire()
     expect(await lineReader(host, quit)()).toBe('')
   })
+
+  // A host whose lines can arrive AFTER a read already lost the race — the
+  // shape behind the swallowed-quit defect: each read the latch (or EOF) had
+  // already resolved left a pending peekLine callback behind, and when the
+  // next line arrived that stale callback ran takeLine and destroyed it.
+  function lateLineHost({ atEof = false } = {}): {
+    host: Host
+    lines: string[]
+    wake: () => void
+  } {
+    const lines: string[] = []
+    let wake: (() => void) | undefined
+    const host: Host = {
+      start: () => {},
+      peekLine: () => new Promise((resolve) => (wake = () => resolve(lines[0]!))),
+      takeLine: () => lines.shift(),
+      eof: () => (atEof ? Promise.resolve() : new Promise(() => {})),
+      onRadioSegment: () => {},
+      onUserLine: () => {},
+      info: () => {},
+      banner: () => {},
+    }
+    return { host, lines, wake: () => wake?.() }
+  }
+
+  it('a line typed after the quit stays queued instead of being swallowed by a stale wake-up', async () => {
+    const { host, lines, wake } = lateLineHost()
+    const quit = quitLatch()
+    const read = lineReader(host, quit)
+    const pending = read()
+    quit.fire()
+    expect(await pending).toBe('')
+    lines.push('/quit') // the second quit a stuck user types
+    wake()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(lines).toEqual(['/quit']) // still there for whoever consumes next
+  })
+
+  it('a read resolved through EOF leaves a later line alone too (front-end detach/re-attach)', async () => {
+    // The IpcHost fires eof when the front-end detaches and re-opens input on
+    // re-attach: a read resolved by that eof must not leave a stale callback
+    // armed to steal the first line the returning front-end sends.
+    const { host, lines, wake } = lateLineHost({ atEof: true })
+    const quit = quitLatch()
+    const read = lineReader(host, quit)
+    expect(await read()).toBe('') // resolved via the eof arm
+    lines.push('/quit') // typed after a front-end re-attach
+    wake()
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(quit.requested).toBe(false) // the stale callback must not consume it
+    expect(lines).toEqual(['/quit'])
+  })
 })
 
 describe('cliPermission (spec 03-03 §2 — route the ask, never own the semantics)', () => {
   it('prints the tool and its command, y allows', async () => {
     const { host, infos } = fakeHost(['y'])
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     const result = await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
     expect(result).toEqual({ behavior: 'allow' })
     expect(infos.join('\n')).toContain('Bash')
@@ -90,9 +142,20 @@ describe('cliPermission (spec 03-03 §2 — route the ask, never own the semanti
 
   it('anything but yes denies (the default is NO)', async () => {
     const { host } = fakeHost([''])
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     const result = await ask('Write', { file_path: '/etc/hosts' }, askOptions)
     expect(result).toMatchObject({ behavior: 'deny' })
+  })
+
+  it('a fired quit latch denies without asking — no consent card for a user who is leaving', async () => {
+    const { host, asks, infos } = fakeHost([], { docked: true })
+    const quit = quitLatch()
+    quit.fire()
+    const ask = cliPermission(host, lineReader(host, quit), quit)
+    const result = await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
+    expect(result).toMatchObject({ behavior: 'deny' })
+    expect(asks).toEqual([])
+    expect(infos).toEqual([])
   })
 
   it('docks the whole consent — tool, command, and the y/N — as ONE ask', async () => {
@@ -100,7 +163,7 @@ describe('cliPermission (spec 03-03 §2 — route the ask, never own the semanti
     // self-contained: an "allow?" with the command left behind in the log
     // would ask the user to approve something they cannot see.
     const { host, asks, infos } = fakeHost(['y'], { docked: true })
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
     expect(asks).toHaveLength(1)
     expect(asks[0]!.kind).toBe('consent')
@@ -119,7 +182,7 @@ describe('cliPermission — read-only investigation flows without asking (spec 0
   it('auto-allows the diagnostics the guide actually runs, without touching the keyboard', async () => {
     // No scripted lines: if any of these asked, the read would hang the test.
     const { host, asks } = fakeHost([], { docked: true })
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     for (const command of [
       'which -a yt-dlp; echo "---"; yt-dlp --version; echo "---"; ls -l "$(which yt-dlp)"',
       'echo "exit: $?"; echo "---"; brew info yt-dlp | head -5',
@@ -137,7 +200,7 @@ describe('cliPermission — read-only investigation flows without asking (spec 0
     // SDK transcript; an auto-allowed read of the config or the env would put
     // them there without anyone agreeing to it.
     const { host, asks } = fakeHost(['', '', '', ''], { docked: true })
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     for (const [tool, input] of [
       ['Bash', { command: 'echo $MURMUR_TTS_API_KEY' }],
       ['Read', { file_path: '/Users/zach/.murmur/voice.json' }],
@@ -151,7 +214,7 @@ describe('cliPermission — read-only investigation flows without asking (spec 0
 
   it('read-only builtins pass without a question; Write and Edit still ask', async () => {
     const { host, asks } = fakeHost(['n'], { docked: true })
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     expect(await ask('Read', { file_path: '/tmp/x' }, askOptions)).toEqual({ behavior: 'allow' })
     expect(await ask('Glob', { pattern: '**/*.ts' }, askOptions)).toEqual({ behavior: 'allow' })
     expect(await ask('Grep', { pattern: 'x' }, askOptions)).toEqual({ behavior: 'allow' })
@@ -164,7 +227,7 @@ describe('cliPermission — read-only investigation flows without asking (spec 0
 
   it('anything that can mutate still asks: the consent stays on the change', async () => {
     const { host, infos } = fakeHost(['y', ''])
-    const ask = cliPermission(host, lineReader(host))
+    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
     expect(await ask('Bash', { command: 'brew upgrade yt-dlp' }, askOptions)).toEqual({
       behavior: 'allow',
     })
@@ -214,16 +277,25 @@ describe('isReadOnlyCommand — the conservative classifier', () => {
 describe('cliConversation', () => {
   it('returns the typed reply; empty or /done or q ends it', async () => {
     const { host } = fakeHost(['  the quick fix please  ', '', '/done', 'Q'])
-    const next = cliConversation(host, lineReader(host))
+    const next = cliConversation(host, lineReader(host, quitLatch()), quitLatch())
     expect(await next()).toBe('the quick fix please')
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
   })
 
+  it('a fired quit latch ends the conversation without prompting for a reply', async () => {
+    const { host, asks } = fakeHost([], { docked: true })
+    const quit = quitLatch()
+    quit.fire()
+    const next = cliConversation(host, lineReader(host, quit), quit)
+    expect(await next()).toBeNull()
+    expect(asks).toEqual([])
+  })
+
   it('docks the reply prompt as a question', async () => {
     const { host, asks } = fakeHost(['sure'], { docked: true })
-    const next = cliConversation(host, lineReader(host))
+    const next = cliConversation(host, lineReader(host, quitLatch()), quitLatch())
     await next()
     expect(asks).toEqual([{ text: expect.stringContaining('/done'), kind: 'question' }])
   })
