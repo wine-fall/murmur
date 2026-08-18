@@ -256,6 +256,10 @@ export type GuideRequest = {
   // The user's next natural-language reply after each agent turn; null ends
   // the conversation. Absent = single-shot (one agent turn).
   readonly nextUserInput?: () => Promise<string | null>
+  // Resolves when the listener leaves mid-session (a typed /quit, Ctrl-C): the
+  // loop stops consuming messages and closes the SDK subprocess instead of
+  // waiting out the turn in flight.
+  readonly interrupt?: Promise<unknown>
 }
 
 // The setup/repair capability, separate from Harness (find-music has no

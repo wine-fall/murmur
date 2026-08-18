@@ -110,25 +110,28 @@ export function quitLatch(): QuitLatch {
 
 const QUIT = '/quit'
 
-export function lineReader(host: Host, quit?: QuitLatch): ReadLine {
+export function lineReader(host: Host, quit: QuitLatch): ReadLine {
   const eof: Promise<string> = host.eof?.().then(() => '') ?? new Promise<string>(() => {})
-  const out: Promise<string> = quit?.seen ?? new Promise<string>(() => {})
   let chain: Promise<unknown> = Promise.resolve()
   return () => {
-    const read = chain.then(() =>
-      Promise.race([
-        host.peekLine().then(() => {
-          const line = host.takeLine() ?? ''
-          if (line.trim() === QUIT) {
-            quit?.fire()
-            return ''
-          }
-          return line
-        }),
-        eof,
-        out,
-      ]),
-    )
+    const read = chain.then(() => {
+      // `settled` marks this read as already resolved through EOF or the quit
+      // latch: its peekLine callback is then a stale wake-up, and taking would
+      // silently destroy a line typed AFTER that resolution — the second
+      // /quit a stuck user types, or the first line a re-attached front-end
+      // sends. Leave the line queued for whoever reads next.
+      let settled = false
+      const take = host.peekLine().then(() => {
+        if (settled) return ''
+        const line = host.takeLine() ?? ''
+        if (line.trim() === QUIT) {
+          quit.fire()
+          return ''
+        }
+        return line
+      })
+      return Promise.race([take, eof, quit.seen]).finally(() => (settled = true))
+    })
     chain = read
     return read
   }
@@ -195,8 +198,11 @@ export function isReadOnlyCommand(command: string): boolean {
 // pure reads flow without another ask and the per-action consent lands on the
 // CHANGES — a wall of y/N for `which` and `--version` buries the one confirm
 // that matters. The dev log keeps a record of what was auto-allowed.
-export function cliPermission(host: Host, read: ReadLine): CanUseTool {
+export function cliPermission(host: Host, read: ReadLine, quit: QuitLatch): CanUseTool {
   return async (toolName, input) => {
+    // A user who is leaving gets no consent card: deny outright so the
+    // session winds down instead of parking a question nobody will answer.
+    if (quit.requested) return { behavior: 'deny', message: 'user quit' }
     const detail = toolDetail(input)
     if (
       (READONLY_TOOLS.has(toolName) && !SECRET_BEARING.test(JSON.stringify(input))) ||
@@ -215,8 +221,13 @@ export function cliPermission(host: Host, read: ReadLine): CanUseTool {
 
 // Read the user's next natural-language reply from the CLI Host. An empty
 // line or /done|/quit|q ends the conversation (returns null).
-export function cliConversation(host: Host, read: ReadLine): () => Promise<string | null> {
+export function cliConversation(
+  host: Host,
+  read: ReadLine,
+  quit: QuitLatch,
+): () => Promise<string | null> {
   return async () => {
+    if (quit.requested) return null
     ask(host, 'your reply (natural language; empty or /done to finish):', 'question')
     const line = (await read()).trim()
     return END.has(line.toLowerCase()) ? null : line
@@ -419,6 +430,9 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
 // quiet, and it costs exactly one info line thereafter.
 export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const { host, guide, targets } = run
+  // A caller without a latch (the explicit CLI entries) still gets one: a
+  // typed /quit inside the conversation ends it the same way everywhere.
+  const quit = run.quit ?? quitLatch()
   const explicit = run.explicit === true
   // The probes take real seconds (yt-dlp is a live network search): say so
   // first, so the front-end has a loading signal instead of a silent stall.
@@ -437,7 +451,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   // The offer and the guide both read the keyboard; make sure the reader is up
   // (idempotent — the Director starts it too).
   host.start()
-  const read = lineReader(host, run.quit)
+  const read = lineReader(host, quit)
   // Probe detail (the raw reason) is diagnostics, not card copy: the guide
   // gets it via its prompt, the dev log keeps it for humans.
   for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
@@ -447,7 +461,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   if (!isYes(answer)) {
     // Leaving is not answering (codex review): a /quit mid-offer must not
     // become a standing decline that silences every later boot.
-    if (run.quit?.requested === true) return outcomeFrom(targets, gaps)
+    if (quit.requested) return outcomeFrom(targets, gaps)
     // Only the boot-time offer records the standing answer — and only for an
     // EXPLICIT no. Enter reads as the default-confirm to half the world, and
     // an unrecognized answer is "not now", never "never again". Backing out
@@ -494,7 +508,8 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
-    canUseTool: cliPermission(host, read),
+    canUseTool: cliPermission(host, read, quit),
+    interrupt: quit.seen,
     ...(tools.length > 0 && { tools }),
     onText: (text) => host.info(text),
     // What the agent is doing, visibly: the command before it runs, the tail
@@ -512,8 +527,13 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
           ? '  (output withheld: may hold a credential)'
           : formatToolResult(output, isError),
       ),
-    nextUserInput: cliConversation(host, read),
+    nextUserInput: cliConversation(host, read, quit),
   })
+
+  // Leaving mid-conversation: the app is shutting down, so the gaps we knew
+  // ARE the outcome — a re-probe (a live network search) and a closing verdict
+  // would make the exit wait on work nobody will see.
+  if (quit.requested) return outcomeFrom(targets, gaps)
 
   // Re-probe rather than believe the conversation: "the assistant said it
   // installed yt-dlp" is not the same fact as "yt-dlp works" (CLAUDE.md).

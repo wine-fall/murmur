@@ -316,12 +316,22 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
     config,
     musicOnly ? { wantsMusic: true, wantsBun: false, wantsVoice: false } : {},
   )
-  const outcome = await runSetup({
-    host,
-    guide: new ClaudeBrain(config.model),
-    targets,
-    explicit: true,
-  })
+  // The explicit entries run the same conversation, so they get the same
+  // civilized Ctrl-C: fire the latch, let the reads decline through.
+  const quit = quitLatch()
+  const offSigint = escalatingSigint(host, () => quit.fire())
+  let outcome
+  try {
+    outcome = await runSetup({
+      host,
+      guide: new ClaudeBrain(config.model),
+      targets,
+      explicit: true,
+      quit,
+    })
+  } finally {
+    offSigint()
+  }
   // Complete means every piece this entry actually covered, bun included: with
   // the TUI the default front-end, an unrepaired bun is a real gap, not a note.
   const ok =
@@ -330,6 +340,23 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
     (!targets.wantsVoice || outcome.voiceOk)
   host.info(ok ? 'setup is complete.' : 'some pieces are still not set up.')
   return ok
+}
+
+// The one two-press Ctrl-C escalation (spec 01 §3.6, extended to the Q&A
+// flows): the first press announces and runs the phase's own quiesce action —
+// fire the quit latch during onboarding, ask the Director to stop during the
+// broadcast — and a second press forces exit. Returns the dispose that hands
+// SIGINT to the next phase.
+export function escalatingSigint(host: Host, onFirst: () => void): () => void {
+  let interrupted = false
+  const handler = (): void => {
+    if (interrupted) process.exit(1)
+    interrupted = true
+    host.info('stopping...')
+    onFirst()
+  }
+  process.on('SIGINT', handler)
+  return () => void process.off('SIGINT', handler)
 }
 
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
@@ -374,6 +401,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // every pending Q&A read declines instantly, and the run shuts down instead
   // of going on the air.
   const quit = quitLatch()
+  // Armed from here until the Director's handler takes over, so a plain-mode
+  // Ctrl-C anywhere in the pre-broadcast stretch (first-run, the setup
+  // conversation, the bed pull) is a civilized exit, not a bare death.
+  const offOnboardingSigint = escalatingSigint(host, () => quit.fire())
   let personaPath = resolvePersonaPath(config, persistent)
   if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
     personaPath = await runFirstRun({
@@ -408,6 +439,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     setupMusicOk = outcome.musicOk
   }
   if (quit.requested) {
+    offOnboardingSigint()
     host.info('stopped before the broadcast.')
     viz?.stop()
     await engine.aclose()
@@ -490,17 +522,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     host.sendSettings()
   }
 
-  // Orderly shutdown on Ctrl-C (spec 01 §3.6): first signal asks the loop to
-  // stop (it cuts playback on the way out); a second forces exit.
-  let interrupted = false
-  const onSigint = () => {
-    if (interrupted) process.exit(1)
-    interrupted = true
-    host.info('stopping...')
+  // SIGINT handover: the Director's quiesce replaces the onboarding latch on
+  // adjacent lines, so no stretch of the boot is left with the bare default.
+  offOnboardingSigint()
+  const offSigint = escalatingSigint(host, () => {
     director.requestQuit()
     void engine.stop()
-  }
-  process.on('SIGINT', onSigint)
+  })
 
   await voice.start()
   // How long the room was empty (spec 10 §3.7.3), for a front-end that greets
@@ -512,9 +540,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(away !== undefined && { away }),
   })
   try {
-    await director.run(maxSegments)
+    // A Ctrl-C during the bed pull or voice start fired the latch with nobody
+    // left to read it: honor it here instead of going on the air.
+    if (!quit.requested) await director.run(maxSegments)
   } finally {
-    process.off('SIGINT', onSigint)
+    offSigint()
     // Frames stop before the graph they read does.
     viz?.stop()
     await engine.aclose()

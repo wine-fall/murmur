@@ -11,6 +11,7 @@ import {
   buildPacing,
   buildSettingsStore,
   buildVoice,
+  escalatingSigint,
   musicWiringWanted,
   resolvePersonaPath,
   runBootstrapProfileCli,
@@ -20,7 +21,8 @@ import {
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
-import { CliHost } from '../src/host.ts'
+import { quitLatch } from '../src/guide.ts'
+import { CliHost, type Host } from '../src/host.ts'
 import { HostedVoice } from '../src/hosted-voice.ts'
 import { IpcHost } from '../src/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
@@ -58,6 +60,53 @@ describe('app wiring', () => {
     // The guide IS the real Claude Code agent; there is no stub of it.
     expect(await runSetupCli(config(['--brain', 'stub']))).toBe(false)
     expect(await runSetupCli(config(['--brain', 'stub']), { musicOnly: true })).toBe(false)
+  })
+})
+
+// The one two-press Ctrl-C escalation (spec 01 §3.6): first press runs the
+// phase's own quiesce action, second press forces out. Both the onboarding
+// phase (fire the quit latch) and the Director phase (requestQuit + stop)
+// install the same handler with their own first-press action.
+describe('escalatingSigint', () => {
+  const infoHost = () => {
+    const infos: string[] = []
+    const host: Host = {
+      start: () => {},
+      peekLine: () => new Promise(() => {}),
+      takeLine: () => undefined,
+      onRadioSegment: () => {},
+      onUserLine: () => {},
+      info: (m) => void infos.push(m),
+      banner: () => {},
+    }
+    return { host, infos }
+  }
+
+  it('the first SIGINT runs the quiesce action and says so; a second forces exit', () => {
+    const { host, infos } = infoHost()
+    const quit = quitLatch()
+    const off = escalatingSigint(host, () => quit.fire())
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
+    try {
+      process.emit('SIGINT')
+      expect(quit.requested).toBe(true)
+      expect(infos.join('\n')).toContain('stopping')
+      expect(exit).not.toHaveBeenCalled()
+      process.emit('SIGINT')
+      expect(exit).toHaveBeenCalledWith(1)
+    } finally {
+      exit.mockRestore()
+      off()
+    }
+  })
+
+  it('after dispose the handler is gone — the next phase owns SIGINT', () => {
+    const { host, infos } = infoHost()
+    const quit = quitLatch()
+    escalatingSigint(host, () => quit.fire())()
+    process.emit('SIGINT')
+    expect(quit.requested).toBe(false)
+    expect(infos).toEqual([])
   })
 })
 

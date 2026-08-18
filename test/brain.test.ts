@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import type { SDKAssistantMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
+import type { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 
 import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain.ts'
@@ -239,6 +239,76 @@ describe('runGuideSession', () => {
       guideReq({ onToolResult: (output, isError, id) => void toolResults.push([output, isError, id]) }),
     )
     expect(toolResults).toEqual([['line one\nline two', true, 't2']])
+  })
+
+  it('the interrupt breaks the message loop and closes the query instead of waiting out the turn', async () => {
+    // A /quit mid-session must not wait for the agent to finish a compose or a
+    // spinning stream: the signal wins the race against the next message, the
+    // loop breaks, and breaking closes the SDK subprocess (runTask's posture).
+    // The fake models the real SDK iterator: queue-backed next(), and a
+    // return() that kills the subprocess.
+    const queue: SDKMessage[] = [assistant('looking...'), result()]
+    let returned = false
+    const iterator: AsyncIterator<SDKMessage> = {
+      next: () =>
+        queue.length > 0
+          ? Promise.resolve({ value: queue.shift()!, done: false })
+          : new Promise(() => {}),
+      return: () => {
+        returned = true
+        return Promise.resolve({ value: undefined, done: true })
+      },
+    }
+    let fire!: () => void
+    const interrupt = new Promise<void>((resolve) => (fire = resolve))
+    const final = await runGuideSession(
+      () => ({ [Symbol.asyncIterator]: () => iterator }),
+      guideReq({
+        interrupt,
+        onText: () => fire(), // the quit lands right after the first text
+        nextUserInput: async () => 'still here',
+      }),
+    )
+    expect(final).toBe('looking...')
+    expect(returned).toBe(true)
+  })
+
+  it('an exception inside the loop still closes the query (the for-await guarantee)', async () => {
+    // The manual iterator must keep what breaking a for-await gave for free:
+    // however the loop exits — done, interrupt, or a thrown handler — the SDK
+    // subprocess is closed rather than left alive with no consumer.
+    const queue: SDKMessage[] = [assistant('boom-fodder'), result()]
+    let returned = false
+    const iterator: AsyncIterator<SDKMessage> = {
+      next: () =>
+        queue.length > 0
+          ? Promise.resolve({ value: queue.shift()!, done: false })
+          : new Promise(() => {}),
+      return: () => {
+        returned = true
+        return Promise.resolve({ value: undefined, done: true })
+      },
+    }
+    await expect(
+      runGuideSession(
+        () => ({ [Symbol.asyncIterator]: () => iterator }),
+        guideReq({
+          onText: () => {
+            throw new Error('host went away')
+          },
+        }),
+      ),
+    ).rejects.toThrow('host went away')
+    expect(returned).toBe(true)
+  })
+
+  it('an interrupt that never fires changes nothing', async () => {
+    const received: string[] = []
+    const final = await runGuideSession(
+      fakeQuery([['all good.']], received),
+      guideReq({ interrupt: new Promise<void>(() => {}) }),
+    )
+    expect(final).toBe('all good.')
   })
 
   it('a non-command tool input surfaces as compact JSON', async () => {
