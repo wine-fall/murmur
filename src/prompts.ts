@@ -324,10 +324,11 @@ The endpoint URL is \`https://api.fish.audio\`, and the hosted API requires a
 current one from their docs rather than trusting that name.
 
 **Before you say ANYTHING about cost, free tiers, or limits**: read the current
-policy yourself with WebFetch (fish.audio's own docs and blog), with their
-consent, and report only what you just read. If you cannot reach it, say so —
-"I could not check their current terms, here is the page" — and give them the
-link. Never quote a price or a free-until date from memory; both change.
+policy yourself with WebFetch (fish.audio's own docs and blog), and report only
+what you just read. Their pages are unfriendly to fetchers, so make **at most
+two** fetch attempts; if neither lands, degrade honestly — "I could not check
+their current terms, here is the page" — give them the link, and move on.
+Never quote a price or a free-until date from memory; both change.
 
 When you have the URL (plus the model and, if they picked one, the voice id),
 call \`write_voice_config\`. That tool proves the endpoint by synthesizing ONE

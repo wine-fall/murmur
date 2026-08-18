@@ -232,8 +232,10 @@
 - **No dated claims**: the guide states nothing about a provider's pricing,
   free tier or limits from memory — free windows move, and a wrong date is a
   promise murmur breaks silently. It **reads the current policy live**
-  (WebFetch) and reports what it just read; if it cannot reach the
-  page it says so and hands over the link. No such date is hardcoded anywhere
+  (WebFetch, at most two attempts — the provider's pages are fetcher-hostile,
+  and issue #102 measured ~6 burned rounds without a cap) and reports what it
+  just read; past the cap it degrades honestly: says it could not verify and
+  hands over the link. No such date is hardcoded anywhere
   in murmur — prompts included. Consequently `WebFetch` joins the guide's
   built-in surface; it is strictly narrower than the `Bash` already there.
 - **Tool surface**: this guide task gets ONE murmur-owned extra tool,

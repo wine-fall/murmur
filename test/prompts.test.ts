@@ -355,6 +355,12 @@ describe('the voice-endpoint walkthrough (spec 03-03 §7.2)', () => {
       bunCmd: 'bun',
     })
 
+  it('caps the live policy check and degrades honestly past it (issue #102)', () => {
+    const text = prompt()
+    expect(text).toMatch(/at most\s+two/)
+    expect(text).toContain('could not check')
+  })
+
   it('walks registration by name: signup, the key page, the model header', () => {
     const text = prompt()
     expect(text).toContain('https://fish.audio/auth/signup')
