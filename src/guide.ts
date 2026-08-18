@@ -15,6 +15,7 @@
 
 import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
 
+import { toolDetail } from './brain.ts'
 import type { GuideCapable, LedgerKind } from './contracts.ts'
 import { ask, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
@@ -196,7 +197,7 @@ export function isReadOnlyCommand(command: string): boolean {
 // that matters. The dev log keeps a record of what was auto-allowed.
 export function cliPermission(host: Host, read: ReadLine): CanUseTool {
   return async (toolName, input) => {
-    const detail = typeof input.command === 'string' ? input.command : JSON.stringify(input)
+    const detail = toolDetail(input)
     if (
       (READONLY_TOOLS.has(toolName) && !SECRET_BEARING.test(JSON.stringify(input))) ||
       (toolName === 'Bash' && typeof input.command === 'string' && isReadOnlyCommand(input.command))
@@ -220,6 +221,28 @@ export function cliConversation(host: Host, read: ReadLine): () => Promise<strin
     const line = (await read()).trim()
     return END.has(line.toLowerCase()) ? null : line
   }
+}
+
+// How much of a tool's printed output the host shows. Installs can print
+// hundreds of lines; the tail is where a package manager puts its verdict.
+const RESULT_TAIL_LINES = 12
+const RESULT_TAIL_CHARS = 1600
+
+// The visible face of a tool run: output indents under the `-> [tool]` line
+// the caller printed, long output keeps only the tail, errors are labeled.
+export function formatToolResult(output: string, isError: boolean): string {
+  const trimmed = output.trim()
+  const body = trimmed === '' ? ['(no output)'] : trimmed.split('\n')
+  let tail = body.slice(-RESULT_TAIL_LINES)
+  const joined = tail.join('\n')
+  if (joined.length > RESULT_TAIL_CHARS) tail = joined.slice(-RESULT_TAIL_CHARS).split('\n')
+  const clipped = tail.length < body.length || joined.length > RESULT_TAIL_CHARS
+  const lines = [
+    ...(clipped ? ['... (output trimmed, showing the tail)'] : []),
+    ...(isError ? ['[error]'] : []),
+    ...tail,
+  ]
+  return lines.map((line) => `  ${line}`).join('\n')
 }
 
 // --- conversational onboarding (spec 03-03 §7) ---------------------------- //
@@ -440,6 +463,8 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     return outcomeFrom(targets, gaps)
   }
 
+  // Tool uses whose OUTPUT must not be echoed (and thereby dev-logged).
+  const secretUses = new Set<string>()
   const wantsVoice = gaps.some((gap) => gap.kind === 'voice')
   const tools = wantsVoice
     ? [
@@ -472,6 +497,21 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     canUseTool: cliPermission(host, read),
     ...(tools.length > 0 && { tools }),
     onText: (text) => host.info(text),
+    // What the agent is doing, visibly: the command before it runs, the tail
+    // of its output after — a consented install must never run in silence.
+    // One exception: a secret-bearing tool use the user approved BY HAND is
+    // outside the auto-allow guard, and info lines mirror into the dev log —
+    // so its result is withheld rather than persisted (codex review).
+    onToolUse: (name, detail, id) => {
+      if (SECRET_BEARING.test(detail)) secretUses.add(id)
+      host.info(`-> [${name}] ${detail}`)
+    },
+    onToolResult: (output, isError, id) =>
+      host.info(
+        secretUses.has(id)
+          ? '  (output withheld: may hold a credential)'
+          : formatToolResult(output, isError),
+      ),
     nextUserInput: cliConversation(host, read),
   })
 
