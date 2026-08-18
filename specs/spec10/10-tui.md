@@ -387,8 +387,9 @@ As built: the radio commands live in one exported list (`COMMANDS` in
 `src/ipc.ts`, each entry a name + one-line blurb) that the Director's parser
 and the TUI both read. The TUI's affordance is presentation only: a typed
 line opening with `/` opens a small command menu floating above the input
-(name + blurb per row; arrows choose, Enter runs the highlighted command, Esc
-hides it until the line changes), narrowing with each keystroke; a line that
+(name + blurb per row; arrows choose, Enter runs the highlighted command, Tab
+completes it into the line without running it, Esc hides it until the line
+changes), narrowing with each keystroke; a line that
 IS a command closes the menu and warms the input ink from periwinkle to
 ember. List order is menu order only, harmless-first (`/settings` leads, so a
 stray Enter on a fresh menu never quits) — the parser binds meanings to its
