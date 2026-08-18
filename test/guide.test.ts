@@ -4,7 +4,6 @@ import {
   cliConversation,
   cliPermission,
   formatToolResult,
-  isReadOnlyCommand,
   lineReader,
   quitLatch,
 } from '../src/guide.ts'
@@ -130,147 +129,71 @@ describe('lineReader (codex-review regressions)', () => {
   })
 })
 
-describe('cliPermission (spec 03-03 §2 — route the ask, never own the semantics)', () => {
-  it('prints the tool and its command, y allows', async () => {
-    const { host, infos } = fakeHost(['y'])
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    const result = await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
-    expect(result).toEqual({ behavior: 'allow' })
-    expect(infos.join('\n')).toContain('Bash')
-    expect(infos.join('\n')).toContain('brew install yt-dlp')
-  })
-
-  it('anything but yes denies (the default is NO)', async () => {
-    const { host } = fakeHost([''])
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    const result = await ask('Write', { file_path: '/etc/hosts' }, askOptions)
-    expect(result).toMatchObject({ behavior: 'deny' })
-  })
-
-  it('a fired quit latch denies without asking — no consent card for a user who is leaving', async () => {
+describe('cliPermission (spec 03-03 §3 — the entry authorization, no per-action asks)', () => {
+  it("allows installs and writes without a question: the card's y was the consent", async () => {
     const { host, asks, infos } = fakeHost([], { docked: true })
-    const quit = quitLatch()
-    quit.fire()
-    const ask = cliPermission(host, lineReader(host, quit), quit)
-    const result = await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
-    expect(result).toMatchObject({ behavior: 'deny' })
-    expect(asks).toEqual([])
-    expect(infos).toEqual([])
-  })
-
-  it('docks the whole consent — tool, command, and the y/N — as ONE ask', async () => {
-    // The dock replaces the log's adjacency, so the question it pins must be
-    // self-contained: an "allow?" with the command left behind in the log
-    // would ask the user to approve something they cannot see.
-    const { host, asks, infos } = fakeHost(['y'], { docked: true })
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    await ask('Bash', { command: 'brew install yt-dlp' }, askOptions)
-    expect(asks).toHaveLength(1)
-    expect(asks[0]!.kind).toBe('consent')
-    expect(asks[0]!.text).toContain('Bash')
-    expect(asks[0]!.text).toContain('brew install yt-dlp')
-    expect(asks[0]!.text).toContain('[y/N]')
-    expect(infos).toEqual([])
-  })
-})
-
-// The card's 'y' already covered LOOKING (the user asked to be walked through
-// a fix); what still needs per-action consent is CHANGE. Pure investigation
-// flows without another ask — a wall of y/N for `which` and `--version` reads
-// as noise and buries the one confirm that matters.
-describe('cliPermission — read-only investigation flows without asking (spec 03-03 §7.1)', () => {
-  it('auto-allows the diagnostics the guide actually runs, without touching the keyboard', async () => {
-    // No scripted lines: if any of these asked, the read would hang the test.
-    const { host, asks } = fakeHost([], { docked: true })
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    for (const command of [
-      'which -a yt-dlp; echo "---"; yt-dlp --version; echo "---"; ls -l "$(which yt-dlp)"',
-      'echo "exit: $?"; echo "---"; brew info yt-dlp | head -5',
-      'uv tool list && pipx list',
-      'ffmpeg -version',
-      'brew --prefix && brew list --versions yt-dlp',
-    ]) {
-      expect(await ask('Bash', { command }, askOptions)).toEqual({ behavior: 'allow' })
-    }
-    expect(asks).toEqual([])
-  })
-
-  it('secret-bearing reads stay behind consent, whatever the tool (codex review)', async () => {
-    // The out-of-band secret flow (§7.2) exists so credentials never enter the
-    // SDK transcript; an auto-allowed read of the config or the env would put
-    // them there without anyone agreeing to it.
-    const { host, asks } = fakeHost(['', '', '', ''], { docked: true })
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
+    const permit = cliPermission(host, quitLatch())
     for (const [tool, input] of [
-      ['Bash', { command: 'echo $MURMUR_TTS_API_KEY' }],
+      ['Bash', { command: 'brew install yt-dlp' }],
+      ['Bash', { command: 'curl -fsSL https://bun.sh/install | bash' }],
+      ['Bash', { command: 'which -a yt-dlp; yt-dlp --version' }],
+      ['Write', { file_path: '/tmp/x' }],
+      ['Edit', { file_path: '/tmp/x' }],
+      ['Read', { file_path: '/tmp/x' }],
+      ['Glob', { pattern: '**/*.ts' }],
+    ] as const) {
+      expect(await permit(tool, input, askOptions)).toEqual({ behavior: 'allow' })
+    }
+    expect(asks).toEqual([]) // never a permission card
+    expect(infos).toEqual([]) // and never a printed question either
+  })
+
+  it('keeps a dev-log record of everything it allowed', async () => {
+    const debugs: string[] = []
+    const { host } = fakeHost([])
+    host.debug = (m) => void debugs.push(m)
+    await cliPermission(host, quitLatch())('Bash', { command: 'brew install yt-dlp' }, askOptions)
+    expect(debugs.join('\n')).toContain('brew install yt-dlp')
+  })
+
+  it('denies secret-bearing input outright, whatever the tool — with a reason the model can act on', async () => {
+    // The one hard limit inside the authorization: a credential must never
+    // enter the SDK transcript (spec 03-03 §7.2) — not the config files that
+    // hold one, not a secret-shaped variable, not an environment dump.
+    const { host, asks } = fakeHost([], { docked: true })
+    const permit = cliPermission(host, quitLatch())
+    for (const [tool, input] of [
       ['Read', { file_path: '/Users/zach/.murmur/voice.json' }],
       ['Read', { file_path: '/Users/zach/.personal/murmur/.env' }],
       ['Grep', { pattern: 'apiKey', path: '/Users/zach/.murmur/voice.json' }],
+      ['Bash', { command: 'cat /Users/zach/.murmur/voice.json' }],
+      ['Bash', { command: 'echo $MURMUR_TTS_API_KEY' }],
+      ['Bash', { command: 'printenv OPENAI_API_KEY' }],
+      ['Bash', { command: 'env | sort' }],
     ] as const) {
-      expect(await ask(tool, input, askOptions)).toMatchObject({ behavior: 'deny' })
+      const result = await permit(tool, input, askOptions)
+      expect(result?.behavior, JSON.stringify(input)).toBe('deny')
+      if (result?.behavior === 'deny') expect(result.message).toContain('credential')
     }
-    expect(asks).toHaveLength(4)
+    expect(asks).toEqual([]) // denied, not asked about
   })
 
-  it('read-only builtins pass without a question; Write and Edit still ask', async () => {
-    const { host, asks } = fakeHost(['n'], { docked: true })
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    expect(await ask('Read', { file_path: '/tmp/x' }, askOptions)).toEqual({ behavior: 'allow' })
-    expect(await ask('Glob', { pattern: '**/*.ts' }, askOptions)).toEqual({ behavior: 'allow' })
-    expect(await ask('Grep', { pattern: 'x' }, askOptions)).toEqual({ behavior: 'allow' })
-    expect(asks).toEqual([])
-    expect(await ask('Write', { file_path: '/tmp/x' }, askOptions)).toMatchObject({
-      behavior: 'deny',
-    })
-    expect(asks).toHaveLength(1)
+  it("murmur-owned tools are exempt: write_voice_config's needsApiKey is its design, not a leak", async () => {
+    const { host } = fakeHost([])
+    const result = await cliPermission(host, quitLatch())(
+      'mcp__murmur__write_voice_config',
+      { ttsUrl: 'https://api.fish.audio', needsApiKey: true },
+      askOptions,
+    )
+    expect(result).toEqual({ behavior: 'allow' })
   })
 
-  it('anything that can mutate still asks: the consent stays on the change', async () => {
-    const { host, infos } = fakeHost(['y', ''])
-    const ask = cliPermission(host, lineReader(host, quitLatch()), quitLatch())
-    expect(await ask('Bash', { command: 'brew upgrade yt-dlp' }, askOptions)).toEqual({
-      behavior: 'allow',
-    })
-    expect(await ask('Bash', { command: 'brew install ffmpeg' }, askOptions)).toMatchObject({
-      behavior: 'deny',
-    })
-    expect(infos.join('\n')).toContain('brew upgrade yt-dlp')
-  })
-})
-
-describe('isReadOnlyCommand — the conservative classifier', () => {
-  it('refuses unknown heads, redirects, chained mutations, and mutating substitutions', () => {
-    for (const command of [
-      'brew upgrade yt-dlp',
-      'rm -rf /tmp/x',
-      'echo hi > /tmp/x', // a redirect writes
-      'ls $(curl example.com)', // unknown head inside $()
-      'which yt-dlp && brew upgrade yt-dlp', // one bad segment poisons the chain
-      'ls & rm -rf /tmp/x', // a single & backgrounds; the second head must be seen
-      'yt-dlp https://example.com', // beyond --version, yt-dlp downloads
-      'echo `rm -rf /tmp/x`', // backticks are substitution too
-      '', // nothing is not a read
-      'brew outdated yt-dlp', // brew auto-updates its own metadata first (codex review)
-      'echo $MURMUR_TTS_API_KEY', // env expansion can surface a credential (codex review)
-      'ls "$HOME/.murmur"', // same: parameter expansion is not provably a read
-      'cat voice.json', // the secret-bearing config never auto-reads
-    ]) {
-      expect(isReadOnlyCommand(command), command).toBe(false)
-    }
-  })
-
-  it('accepts version reads and package queries', () => {
-    for (const command of [
-      'yt-dlp --version',
-      'ffmpeg -version',
-      'brew list',
-      'brew --prefix',
-      'pwd',
-      'uname -a',
-      'command -v yt-dlp',
-    ]) {
-      expect(isReadOnlyCommand(command), command).toBe(true)
-    }
+  it('a fired quit latch denies — the session is being torn down', async () => {
+    const quit = quitLatch()
+    quit.fire()
+    const { host } = fakeHost([])
+    const result = await cliPermission(host, quit)('Bash', { command: 'ls' }, askOptions)
+    expect(result).toMatchObject({ behavior: 'deny' })
   })
 })
 

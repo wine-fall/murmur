@@ -132,12 +132,24 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
 })
 
 describe('guide prompts (spec 03-03)', () => {
-  it('the persona shapes behavior: investigate, explain plainly, confirm before change', () => {
+  it('the persona shapes behavior: authorized to act, conversational stops only at real forks', () => {
     expect(GUIDE_PERSONA).toContain('setup assistant')
     expect(GUIDE_PERSONA).toContain('Investigate first')
-    expect(GUIDE_PERSONA).toContain('confirm')
     expect(GUIDE_PERSONA).toContain('smallest safe change')
     expect(GUIDE_PERSONA).toContain('never disable certificate verification')
+    // The entry authorization (spec 03-03 §3): routine steps run
+    // without asking; the checkpoints that remain are conversational and sit
+    // on the substantive forks.
+    expect(GUIDE_PERSONA).toContain('just do it')
+    expect(GUIDE_PERSONA).toContain('destructive')
+    expect(GUIDE_PERSONA).toContain('costs money')
+    // No per-action consent language left over.
+    expect(GUIDE_PERSONA).not.toContain('ALWAYS ask')
+    expect(GUIDE_PERSONA).not.toContain('before you make any change')
+  })
+
+  it('the persona still refuses to take a credential through the conversation', () => {
+    expect(GUIDE_PERSONA.toLowerCase()).toMatch(/never\s+ask the user to type[^.]*(key|password)/)
   })
 
   it('the fix-music task names both binaries and asks to verify both', () => {
@@ -145,6 +157,9 @@ describe('guide prompts (spec 03-03)', () => {
     expect(p).toContain('`yt-dlp`')
     expect(p).toContain('`ffmpeg`')
     expect(p).toContain('Verify BOTH')
+    // The old per-action gate is gone from the task too: a routine install is
+    // carried out, not proposed-and-parked.
+    expect(p).not.toContain('WAIT for my go-ahead')
   })
 
   it('carries the preflight finding as evidence only when there is one', () => {

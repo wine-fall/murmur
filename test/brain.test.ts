@@ -97,12 +97,105 @@ describe('guideOptions (spec 03-03 §5.1)', () => {
     expect(GUIDE_BUILTINS).toContain('WebFetch')
   })
 
-  it('never auto-approves: allowedTools stays unset, permission flow gates each action', () => {
-    // In this SDK `allowedTools` EXECUTES WITHOUT ASKING — the opposite of the
-    // per-action confirm the guide is for. The surface is bounded via `tools`.
+  it('bounds the surface via tools: allowedTools stays unset', () => {
+    // `allowedTools` only pre-approves — it does not bound the surface. The
+    // guide's tool surface is bounded via `tools`.
     const o = guideOptions(guideReq())
     expect(o.allowedTools).toBeUndefined()
     expect(o.permissionMode).toBe('default')
+  })
+
+  // The transcript-protection red line (spec 03-03 §7.2) must sit where EVERY
+  // tool use passes: the SDK consults canUseTool only when its own policy
+  // would ask, and Read / safe Bash commands never ask — a smoke proved a
+  // Read of .env sails straight through the permission callback. The
+  // PreToolUse hook fires unconditionally.
+  describe('the secret guard hook', () => {
+    const hook = (): NonNullable<ReturnType<typeof guideOptions>['hooks']> =>
+      guideOptions(guideReq()).hooks ?? {}
+
+    const fire = async (tool_name: string, tool_input: unknown) => {
+      const callbacks = hook().PreToolUse?.flatMap((m) => m.hooks) ?? []
+      expect(callbacks.length).toBeGreaterThan(0)
+      return await callbacks[0]!(
+        {
+          hook_event_name: 'PreToolUse',
+          tool_name,
+          tool_input,
+          tool_use_id: 't1',
+          session_id: 's',
+          transcript_path: '/tmp/t',
+          cwd: '/tmp',
+        },
+        't1',
+        { signal: new AbortController().signal },
+      )
+    }
+
+    it('denies a secret-bearing tool use before it runs, with the credential reason', async () => {
+      for (const [tool, input] of [
+        ['Read', { file_path: '/Users/zach/.personal/murmur/.env' }],
+        ['Read', { file_path: '/Users/zach/.murmur/voice.json' }],
+        ['Bash', { command: 'printenv MURMUR_TTS_API_KEY' }],
+        ['Bash', { command: 'env | sort' }],
+        // The review's bypass set: env-dumping builtins, indirection reads of
+        // the config home, bare expansions of un-"api"-named keys.
+        ['Bash', { command: 'set' }],
+        ['Bash', { command: 'export -p' }],
+        ['Bash', { command: 'cat /proc/self/environ' }],
+        ['Bash', { command: 'cat ~/.murmur/*.json' }],
+        ['Bash', { command: 'echo $FISH_AUDIO_KEY' }],
+        ['Grep', { pattern: 'sk-', path: '/Users/zach/.murmur', output_mode: 'content' }],
+      ] as const) {
+        const out = await fire(tool, input)
+        const specific = 'hookSpecificOutput' in out ? out.hookSpecificOutput : undefined
+        expect(specific, JSON.stringify(input)).toMatchObject({
+          hookEventName: 'PreToolUse',
+          permissionDecision: 'deny',
+        })
+        if (specific?.hookEventName === 'PreToolUse') {
+          expect(specific.permissionDecisionReason).toContain('credential')
+        }
+      }
+    })
+
+    it('passes routine tool uses through untouched', async () => {
+      for (const [tool, input] of [
+        ['Bash', { command: 'node --version' }],
+        ['Bash', { command: 'brew install yt-dlp' }],
+        ['Bash', { command: 'echo "exit: $?"' }],
+        ['Bash', { command: 'ls -l $(which yt-dlp)' }],
+        ['Read', { file_path: '/tmp/notes.md' }],
+      ] as const) {
+        const out = await fire(tool, input)
+        expect(out, JSON.stringify(input)).not.toHaveProperty('hookSpecificOutput')
+      }
+    })
+
+    it('does not deny the work the prompts themselves mandate (review false-positive set)', async () => {
+      for (const [tool, input] of [
+        // The voice walkthrough opens the provider's api-keys page by URL.
+        ['Bash', { command: 'open https://fish.audio/app/api-keys' }],
+        // The pip fallback path launches through /usr/bin/env — a launcher,
+        // not an environment dump.
+        ['Bash', { command: '/usr/bin/env python3 -m pip install -U yt-dlp' }],
+        // Reading current pricing may well say "token" in the prompt.
+        ['WebFetch', { url: 'https://fish.audio/pricing', prompt: 'what is the cost per token?' }],
+        // A written script's shebang is not an env dump either.
+        ['Write', { file_path: '/tmp/probe.sh', content: '#!/usr/bin/env bash\necho hi' }],
+      ] as const) {
+        const out = await fire(tool, input)
+        expect(out, JSON.stringify(input)).not.toHaveProperty('hookSpecificOutput')
+      }
+    })
+
+    it('exempts murmur-owned tools: write_voice_config carries needsApiKey by design', async () => {
+      const out = await fire('mcp__murmur__write_voice_config', {
+        ttsUrl: 'https://api.fish.audio',
+        needsApiKey: true,
+      })
+      expect(out).not.toHaveProperty('hookSpecificOutput')
+    })
   })
 
   it('threads permissionMode and canUseTool through', () => {

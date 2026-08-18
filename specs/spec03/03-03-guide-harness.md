@@ -15,6 +15,13 @@
 > read-only commands (e.g. `echo`) without an ask; every state-changing action
 > still asks — consent semantics stay SDK-owned per §2. Interactive acceptance
 > (§5.3) on the TS build **passed 2026-08-01** on a delegated real-SDK run.
+> **Consent revised (2026-08-18, user decision)**: per-action consent — and the
+> 2026-08-12 read-only auto-allow carve-out that patched it — is retired in
+> favor of **entry authorization + conversational checkpoints**: the offer
+> card's `y` authorizes the fixes, `cliPermission` allows every call except
+> secret-bearing input, and the guide stops (in natural language) only at
+> substantive forks. See §3; §5 criteria updated to match. Earlier
+> per-action-consent language in the banners above is history, not contract.
 > **Part**: The third part of spec 03 (the music family), riding the brain-harness from [`03-01-brain-harness.md`](03-01-brain-harness.md): shape the **native Claude Code agent** to diagnose and — with the user's consent — fix why the music dependencies (**yt-dlp + ffmpeg** — both unbound external binaries per master §10.1) aren't working in *their* environment (missing entirely, or broken — e.g. a corporate proxy whose CA yt-dlp doesn't trust). This is what makes 03's music **actually usable** on constrained machines. See master [`../DESIGN.md`](../DESIGN.md) §3.2 (the brain is a harnessed agent), §10.1 (guided provisioning), §7 pillar 1 (deterministic checks are local, 0 tokens).
 > **Milestone**: L1 — part of delivering working music (03). Depends on 03-01 (the harness) + 01 (CLI Host); independent of 03-02 (ducking).
 > **Conventions**: English; written for a coding agent. We do **not** build an agent — Claude Code is the agent; we shape it. Prompts centralized in `src/prompts.ts`; no CJK in source (master §0).
@@ -25,16 +32,16 @@
 
 ### Delivers
 1. **The guide harness** — a capability on the harness seam (03-01): `GuideCapable.run_guide(system_prompt, prompt, *, model, max_turns, permission_mode)`. We configure **only two things**; the SDK does the rest:
-   - a **behavior-shaping system prompt** — investigate first → explain in plain language → **ask before acting** → smallest safe change → verify;
-   - the **SDK launch mode** — Claude Code's built-in tools enabled, run in **`permission_mode="default"`** (step-by-step user confirmation). We never build a consent/detection protocol and never prescribe the fix; the SDK drives ask/execute, and the agent diagnoses the (open-ended) cause itself.
+   - a **behavior-shaping system prompt** — investigate first → explain in plain language → act on the entry authorization, **stopping to ask only at substantive forks** → smallest safe change → verify;
+   - the **SDK launch mode** — Claude Code's built-in tools enabled, bounded via `tools`, with the `canUseTool` callback allowing within the entry authorization (denying only secret-bearing input — §3). We never prescribe the fix; the agent diagnoses the (open-ended) cause itself.
 2. **First use — `SetupGuide.fix_music`**: diagnose why the music dependencies (yt-dlp and/or ffmpeg) aren't working (cause is uncertain: not installed, proxy CA, outdated binary, no network, …) and, with the user's consent, fix them in ONE session, then verify. The preflight's findings are handed to the agent as evidence, seeding the diagnosis.
 3. **Deterministic preflight trigger**: cheap **local** probes (0 tokens — master §7 pillar 1, *not* LLM calls) — one per binary (`preflight_ytdlp`, `preflight_ffmpeg`), aggregated by `preflight_music` (ok iff BOTH ok; the combined reason names each broken piece) — run at startup / via `--setup-music`, offering the guide on failure.
-4. **Run-loop integration**: the guide's confirmations flow to the user through murmur's **existing CLI Host** (`print` + `stdin`, spec 01) — **no TUI required**; the SDK's permission requests are routed to the user and the answers back. **Amended (2026-08-11)**: question lines (entry consent, per-tool permission, secret paste, free-reply prompt) route through the optional `Host.ask` seam (spec 10 §3.2-B) so a front-end with a question surface can dock them; a bare host falls back to `info` — this section's plain-CLI behavior is unchanged.
+4. **Run-loop integration**: the guide's conversation flows through murmur's **existing CLI Host** (`print` + `stdin`, spec 01) — **no TUI required**: its text streams out, its tool activity is narrated, and the user's replies flow back. **Amended (2026-08-11)**: question lines (entry consent, secret paste, free-reply prompt) route through the optional `Host.ask` seam (spec 10 §3.2-B) so a front-end with a question surface can dock them; a bare host falls back to `info` — this section's plain-CLI behavior is unchanged.
 
 ### Out of scope (explicit non-goals)
-- **A custom consent protocol or detection/repair logic** — the Claude Code SDK handles ask/execute; we set prompt + mode only.
+- **A custom consent protocol or detection/repair logic** — consent is the entry authorization plus the prompt's conversational checkpoints; the permission callback carries only the secret-input guard, never a dialogue.
 - **Prescribing the fix** in the prompt — the agent figures out the uncertain cause and proposes the remedy.
-- **`bypassPermissions`** in any shipped build — supervised dev only; the default is step-by-step confirmation.
+- **`bypassPermissions`** in any shipped build — supervised dev only; the auto-allow lives in the `canUseTool` callback, where the secret-input guard stays enforceable.
 - **A CLI subcommand** (`murmur doctor`) — triggered through murmur's normal interaction; a subcommand is a later option.
 - A TUI-specific confirm surface — the Host seam carries the interaction in both plain and TUI front-ends (spec 10 §3.2-B).
 - Repairing anything beyond the §7 onboarding surface (music binaries, bun, the voice endpoint); a general dependency doctor stays future work.
@@ -46,14 +53,14 @@
 - **`SetupGuide`** (guide.py): `fix_music(*, ytdlp="yt-dlp", ffmpeg="ffmpeg", reason="", venv_python=None, permission_mode="default") -> str` — `reason` carries the preflight findings into the task prompt.
 - **Prompts** (prompts/guide.py, done): `GUIDE_PERSONA` (behavior) + `build_fix_music_prompt` (high-level task, no prescribed remedy).
 - **Preflight** (music/preflight.py): deterministic probes — `preflight_ytdlp(binary)` (trivial query), `preflight_ffmpeg(binary)` (`-version` probe), and `preflight_music(ytdlp=..., ffmpeg=...)` aggregating both into one `PreflightResult(ok, reason)` (ok iff both; reason prefixes each broken binary's name). No LLM.
-- **Permission routing** (setup.py, done): the SDK's `can_use_tool` callback backed by CLI Host I/O — the ask is printed, the y/N read from the same stdin. Kept minimal: we *route* the SDK's prompt, we do not design consent semantics.
+- **Permission enforcement, two layers** (smoke-measured seam fact: the SDK consults `canUseTool` only when its own policy would ask — a `Read` or a classifier-safe Bash command never reaches it): the **secret-input guard lives in a `PreToolUse` hook** (`guideOptions`, `src/brain.ts`), which fires for every tool use and denies secret-bearing input with an explanation (murmur-owned tools exempt — their handlers own the secret channel); `cliPermission` (`src/guide.ts`) allows whatever does arrive under the entry authorization, repeats the secret test as the belt, and never puts a question to the user. Visibility comes from the tool-activity stream (`onToolUse`/`onToolResult`), which narrates every tool use into the host and dev log.
 
 ---
 
 ## 3. Design
 - **Isolation preserved** (03-01 §2.1): `setting_sources=[]`, `strict_mcp_config=True`, no user skills/MCP. **But built-in tools are ENABLED** and allowlisted (`_GUIDE_BUILTINS` = Bash/Read/Write/Edit/Glob/Grep) — the bounded surface a repair task needs (contrast: find-music runs with `tools=[]`). This is the per-task tool-surface principle: each capability gets exactly what it needs.
 - **Flow**: startup / first music use → deterministic preflight → if broken, murmur tells the user plainly and offers the guide → on opt-in, `SetupGuide.fix_music` runs → Claude Code investigates (Bash), **asks before each change** (SDK `default` mode, routed to the CLI Host), applies the smallest safe fix, verifies → returns an explanation.
-  **Amended (2026-08-12, user decision — consent lands on the change, not the look)**: the offer's `y` already covers *investigation*, so `cliPermission` auto-allows pure reads instead of re-asking — the read-only builtins (Read/Glob/Grep) and Bash commands every segment of which matches a conservative read-only allowlist (`isReadOnlyCommand`, `src/guide.ts`: which/ls/echo/version-reads/brew info-list/…; redirects, backticks, parameter expansion (`$VAR` — only `$?` and an allowlisted `$(...)` pass), or one unknown head disqualify the whole command, falling back to the ask; `brew outdated` is excluded because default Homebrew auto-updates before answering it). Secret-bearing targets (`voice.json`, `.env*`) are never auto-allowed for any tool — an unconsented read would put a credential into the SDK transcript §7.2 keeps it out of. Anything that can mutate — installs, upgrades, Write/Edit, any unrecognized command — still gets the per-action y/N. `bypassPermissions` remains forbidden (the red line stands); auto-allows are recorded in the dev log.
+  **Amended (2026-08-18, user decision — consent moves to the entry, checkpoints move into the conversation)**: the per-action y/N gate — and the 2026-08-12 read-only auto-allow carve-out that patched it — is retired. The offer card's `y` IS the authorization: `cliPermission` allows every tool call outright and never puts a permission question to the user; the wall of y/N it produced buried the conversation the guide exists to have. Two limits remain. (1) **Secret-bearing input is denied**, with a reason the model can act on: a path that can hold a credential (`.env*`, `voice.json`, the `~/.murmur` home, `environ`) for any tool, and for Bash additionally secret-shaped names (api-key/secret/token/password — URLs stripped first, so opening a provider's `api-keys` page stays legal), environment dumps (`env`/`printenv`/`set`/`export`), and parameter expansion (`$VAR` — the guard cannot tell `$HOME` from `$SOME_KEY`, and a literal path is cheap to rephrase). The guard is a **tripwire against accidental credential ingestion, not a sandbox** — the model is prompt-aligned, not adversarial, and a regex cannot enumerate every read of every secret; a secret-hinting tool use's OUTPUT is additionally withheld from the host so a miss on the way in is not persisted on the way out. murmur-owned tools are exempt: their handlers own the secret channel. (2) **Substantive forks stop the conversation, not the tool call**: the prompt has the guide ask in natural language — and wait — before anything destructive or hard-to-reverse, a genuine choice between remedies, or anything that costs money. `bypassPermissions` remains forbidden (the red line stands; the surface stays bounded via `tools`), and the secret guard's real enforcement point is a `PreToolUse` hook — see §2 — because the SDK does not consult `canUseTool` for the calls its own policy already allows. Visibility is the tool-activity stream: every tool use is narrated into the host and the dev log.
 - **Off the live broadcast loop** (master §3.2 boundary ②): setup/repair is a foreground interaction (first-run, radio not yet broadcasting) or a background job — its exact relationship to the broadcast loop is an open question.
 - **Model**: Opus (repair is judgment-heavy and occasional; the token cost amortizes).
 
@@ -67,20 +74,20 @@
 ---
 
 ## 5. Acceptance criteria
-1. **Guide options** are isolated (`setting_sources=[]`, `strict_mcp_config=True`), built-ins allowlisted, and `permission_mode="default"`. *(Unit — done.)*
+1. **Guide options** are isolated (`setting_sources=[]`, `strict_mcp_config=True`), built-ins bounded via `tools`, the `PreToolUse` secret-guard hook installed, and the `canUseTool` callback implementing the entry-authorization policy: allow, deny secret-bearing input, never ask the user. *(Unit — done; revised 2026-08-18.)*
 2. **Preflight** deterministically detects broken/missing/healthy states for BOTH binaries with **no LLM call** (unit: failing / passing stand-in binaries → correct `ok` + reason), and the aggregate is ok only when both are (a combined reason names each broken piece).
-3. **Interactive repair (the real bar, human-run)**: on a machine where yt-dlp is broken (e.g. a corporate proxy CA), starting murmur → it tells you plainly it's broken → offers to fix → **you confirm** → it fixes it, asking before each action → yt-dlp then works (a real search returns JSON, no `--no-check-certificate`). The agent produces the fix; the user answers the confirmations. Can't be self-verified (needs a human + a real broken env).
+3. **Interactive repair (the real bar, human-run)**: on a machine where yt-dlp is broken (e.g. a corporate proxy CA), starting murmur → it tells you plainly it's broken → offers to fix → **you authorize once at the offer** → it fixes it, narrating as it goes and checking back only at substantive forks → yt-dlp then works (a real search returns JSON, no `--no-check-certificate`). The agent produces the fix; the user steers by conversation. Can't be self-verified (needs a human + a real broken env). *(The 2026-07-06 / 2026-08-01 passes below ran under the earlier per-action-consent flow; the 2026-08-18 revision owes a fresh by-ear pass.)*
    **Passed on the TS build — 2026-08-01, delegated real-SDK run**: yt-dlp made unresolvable via a sandboxed PATH; the report named exactly the broken binary, each action asked for consent, the consented fix was applied, and the recheck came back green through the real preflight probe.
 4. **`bypassPermissions` never appears** in the shipped path (grep-able invariant).
 
 ### Testing (master §11)
-- **Unit**: the guide options builder (done); the deterministic preflight (stand-in binaries, no network/LLM); a grep-guard that the shipped default is `"default"`, not `"bypassPermissions"`.
+- **Unit**: the guide options builder (done); the deterministic preflight (stand-in binaries, no network/LLM); the `cliPermission` policy (allow / secret-deny / murmur-tool exemption / quit); a grep-guard that `bypassPermissions` appears nowhere in `src/`.
 - **Integration / human acceptance**: the interactive repair on a real broken environment — user-run.
 
 ---
 
 ## 6. Open questions
-- **Settled — permission routing mechanism**: the SDK's `can_use_tool` callback backed by CLI Host print/stdin (`setup.py::_cli_permission`); no bespoke consent protocol.
+- **Settled — consent mechanism (revised 2026-08-18)**: entry authorization at the offer card + conversational checkpoints at substantive forks; the `canUseTool` callback enforces only the secret-input guard. The earlier per-action y/N (and its read-only carve-out) is retired.
 - **Settled — preflight scope**: the music dependencies as a set (yt-dlp + ffmpeg, one aggregated check). A general "dependency doctor" stays future work — the startup-checks seam (03-02 §2.4) is where new checks register.
 - **Settled — relationship to the broadcast loop** (§7.1): setup is a foreground conversation offered once per boot before broadcasting; declining degrades the session instead of blocking it.
 - **Persistence/safety of fixes**: e.g. appending a CA to certifi is semi-global — confirm each fix is the smallest safe change and reversible/explained.
@@ -140,8 +147,8 @@
      proposes an upgrade on the channel that owns the binary, verified by
      re-reading the release date;
    - `bun` — the spec-10 front-end runtime (pays off spec 10 §5.10): the guide
-     offers the official installer with per-action consent and verifies with
-     `preflightBun`; until then the front-end has fallen back to plain
+     runs the official installer under the entry authorization and verifies
+     with `preflightBun`; until then the front-end has fallen back to plain
      (spec 10 §6 default record);
    - the **hosted-voice endpoint** — §7.2.
    - **Amended (2026-08-01, issue #93)**: the voice endpoint is a **nameable
@@ -201,9 +208,9 @@
   in full, not just its URL, or the freshly configured voice stays silent (§7.3
   criterion 5).
 - **Registration walkthrough** (hosted): murmur cannot click for the user, so
-  the guide narrates and offers to **open** each page with the usual per-action
-  consent — the signup page, then the API-keys page — and names what to click
-  there. Two things it must also get, or the result does not work:
+  the guide narrates and **opens** each page as the walkthrough reaches it —
+  the signup page, then the API-keys page — and names what to click there,
+  pacing itself by the user's replies. Two things it must also get, or the result does not work:
   - the **`model`**, which the hosted API requires on every call;
   - a **`referenceId`** — the user picks a voice from the provider's library.
     fish.audio has no default voice identity and no `seed` in its request
@@ -225,7 +232,7 @@
 - **No dated claims**: the guide states nothing about a provider's pricing,
   free tier or limits from memory — free windows move, and a wrong date is a
   promise murmur breaks silently. It **reads the current policy live**
-  (WebFetch, consented) and reports what it just read; if it cannot reach the
+  (WebFetch) and reports what it just read; if it cannot reach the
   page it says so and hands over the link. No such date is hardcoded anywhere
   in murmur — prompts included. Consequently `WebFetch` joins the guide's
   built-in surface; it is strictly narrower than the `Bash` already there.
@@ -250,7 +257,7 @@
    `$MURMUR_HOME` voice config and an audible line — the user never touches
    a shell.
 6. With bun absent, the front-end falls back to plain and the guide can
-   install bun with per-action consent; after it, `--tui` works
+   install bun under the entry authorization; after it, `--tui` works
    (pays spec 10 §5.10).
 7. An explicit no at the boot-time offer starts the degraded session and
    writes the ledger record; the next boot with the same gaps prints one line

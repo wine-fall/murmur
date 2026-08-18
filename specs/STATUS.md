@@ -7,10 +7,10 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-11 (onboarding polish from the first real run: the
-answer field moves into the spotlight card, the wordmark ident opens every
-log, `make dev` enters the TUI immediately with in-session probes + loading
-notice, and /quit / Ctrl-C works mid-onboarding via the quit latch)_
+_Last updated: 2026-08-18 (engine line: /quit now cuts the guide session and
+every pre-broadcast phase has a civilized Ctrl-C; guide consent revised by
+user decision — entry authorization + conversational checkpoints replace the
+per-action y/N, spec 03-03 §3)_
 
 ## Where we are
 
