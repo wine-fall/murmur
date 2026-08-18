@@ -19,6 +19,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import { devLogMirror, LineQueue, type AskKind, type Host } from './host.ts'
 import {
+  COMMANDS,
   decodeTuiMessage,
   encode,
   ndjson,
@@ -125,9 +126,11 @@ export class IpcHost implements Host {
       if (message.type === 'line') {
         // Commands are diagnostics-worthy (quit latency, menu picks). Chat
         // and ask answers stay out of the log — an answer may be a pasted
-        // secret (spec 03-03 §7.2).
-        if (message.text.trim().startsWith('/')) {
-          this.mirror('tui', `command received: ${message.text.trim()}`)
+        // secret (spec 03-03 §7.2), and a leading slash alone is not a
+        // command: only the engine's own grammar (COMMANDS) qualifies.
+        const trimmed = message.text.trim()
+        if (COMMANDS.some((c) => trimmed === c.name || trimmed.startsWith(`${c.name} `))) {
+          this.mirror('tui', `command received: ${trimmed}`)
         }
         // The oldest pending ask is what this line answers, if any is —
         // lineReader consumes in exactly this order.

@@ -112,11 +112,18 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       c.attach()
       c.line('/quit')
       c.line('sk-secret-pasted-key')
+      // A leading slash is not a command: an ask answer may be an absolute
+      // path, and chat may open with '/'. Only the engine's own grammar
+      // (ipc.ts COMMANDS) is diagnostics.
+      c.line('/Users/zach/.murmur/voice.json')
+      c.line('/shrug whatever')
       await c.settle()
       const { readFileSync } = await import('node:fs')
       const log = readFileSync(devLog, 'utf8')
       expect(log).toContain('command received: /quit')
       expect(log).not.toContain('sk-secret-pasted-key')
+      expect(log).not.toContain('/Users/zach')
+      expect(log).not.toContain('/shrug')
     } finally {
       await logged.close()
     }
