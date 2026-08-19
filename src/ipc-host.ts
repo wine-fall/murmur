@@ -68,6 +68,7 @@ export class IpcHost implements Host {
   private vizSubscriber: ((on: boolean, fps: number | undefined) => void) | null = null
   private vizWanted: { on: boolean; fps: number | undefined } | null = null
   private settingsBridge: SettingsBridge | null = null
+  private interruptHandler: (() => void) | null = null
   private mirror: (name: string, message: string) => void
   private markEof!: () => void
   private eofSeen: Promise<void>
@@ -136,6 +137,22 @@ export class IpcHost implements Host {
         // lineReader consumes in exactly this order.
         this.pendingAsks.shift()
         this.queue.push(message.text)
+      }
+      if (message.type === 'interrupt') {
+        // Esc from the front-end: stop the registered flow and bury its
+        // pending questions — engine-side here, client-side via askDrop. With
+        // no flow registered (first-run seeds, the broadcast) it is noise:
+        // the cards must stand for the reader still waiting on them.
+        if (this.interruptHandler !== null) {
+          this.mirror('tui', 'interrupt received: stopping the running flow')
+          this.pendingAsks = []
+          // Straight to the client, NOT send(): askDrop is a live moment, and
+          // the replay backlog must not close a future attach's fresh cards.
+          if (this.client !== null) this.write(this.client, { v: 1, type: 'askDrop' })
+          this.interruptHandler()
+        } else {
+          this.mirror('tui', 'interrupt received with no flow to stop; ignored')
+        }
       }
       if (message.type === 'vizSub') this.wantViz(message.on, message.fps)
       if (message.type === 'settingsSet') {
@@ -297,6 +314,10 @@ export class IpcHost implements Host {
     this.pendingAsks.push(message)
     if (this.client !== null) this.write(this.client, message)
     this.mirror('host', text)
+  }
+
+  onInterrupt(handler: (() => void) | null): void {
+    this.interruptHandler = handler
   }
 
   onState(state: ProgramState): void {

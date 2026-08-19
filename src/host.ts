@@ -30,6 +30,11 @@ export interface Host {
   // question surface pins it beside the input; absent, callers fall back to
   // info (the plain host's recency-adjacency). Route through ask() below.
   ask?(text: string, kind: AskKind): void
+  // The listener's way out of a running flow without leaving (spec 03-03 §7 +
+  // spec 10 §3.4): Esc in the TUI. A flow that can be stopped registers its
+  // handler for its own duration (null to unregister); a host without the
+  // seam — or an engine with no flow registered — treats Esc as noise.
+  onInterrupt?(handler: (() => void) | null): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void

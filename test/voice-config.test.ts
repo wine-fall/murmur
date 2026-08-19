@@ -257,6 +257,43 @@ describe('write_voice_config tool (spec 03-03 §7.2)', () => {
   // back to the model — and an endpoint that echoes the Authorization header
   // into its error body would put the key in the transcript the out-of-band
   // capture exists to keep it out of.
+  it('an aborted flow neither validates nor writes — Esc mid-paste must not persist', async () => {
+    // The stop latch resolves the pending secret read as ''; without the
+    // aborted guard the tool would fall through to a real synth and a saved
+    // voice.json AFTER the user asked to stop.
+    let stopped = false
+    let validated = 0
+    const dir = home()
+    const tool = writeVoiceConfigTool({
+      home: dir,
+      validate: async () => void validated++,
+      promptSecret: async () => {
+        stopped = true // Esc lands while the paste prompt is waiting
+        return ''
+      },
+      aborted: () => stopped,
+    })
+    const reply = await call(tool, { ttsUrl: 'https://tts.example', needsApiKey: true })
+    expect(reply.ok).toBe(false)
+    expect(validated).toBe(0)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toBeNull()
+  })
+
+  it('an abort during the validating synth still writes nothing', async () => {
+    let stopped = false
+    const dir = home()
+    const tool = writeVoiceConfigTool({
+      home: dir,
+      validate: async () => {
+        stopped = true // Esc lands while the probe synth is in flight
+      },
+      aborted: () => stopped,
+    })
+    const reply = await call(tool, { ttsUrl: 'https://tts.example' })
+    expect(reply.ok).toBe(false)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toBeNull()
+  })
+
   it('redacts the captured key from whatever the endpoint said back', async () => {
     const secret = 'sk-not-a-real-key'
     const tool = writeVoiceConfigTool({

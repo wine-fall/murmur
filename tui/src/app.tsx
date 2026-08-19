@@ -25,7 +25,7 @@ import {
   stagePlan,
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
-import { TAGLINE, WORDMARK } from './logo.ts'
+import { identPinned, TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { adjust, paneFacts, paneItems } from './settings-pane.ts'
 import {
@@ -313,6 +313,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             message.kind === 'question' ? { ...message, no: ++questionNo.current } : message,
           ])
           break
+        case 'askDrop':
+          // The flow behind the cards was stopped (Esc): every pending
+          // question died with it. The log already keeps the record.
+          setAsks([])
+          break
         case 'state':
           setState(message.state)
           setMicrocopy(message.microcopy ?? null)
@@ -371,7 +376,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       }
     }
     const { open, at, snap } = pane.current
-    if (!open || snap === null) return
+    if (!open || snap === null) {
+      // Esc with nothing client-local to close asks the engine to stop the
+      // running flow (spec 10 §3.4) — the guide winds down like a coding
+      // agent's; with nothing stoppable the engine treats it as noise.
+      if (key.name === 'escape') wire.send({ v: 1, type: 'interrupt' })
+      return
+    }
     if (key.name === 'escape') return setPaneOpen(false)
     const items = paneItems(snap)
     if (key.name === 'up') return setPaneAt(Math.max(0, at - 1))
@@ -455,7 +466,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // Rows left once the strip, its rule, now-playing, identity, and input take
   // theirs, split scene-over-log at 2:1. The scene spans the frame minus its
   // one-cell side padding.
-  const { scene: sceneRows } = sceneSplit(Math.max(dims.height - 5, 10))
+  const { scene: sceneRows, log: logRows } = sceneSplit(Math.max(dims.height - 5, 10))
   const sceneWidth = cols - 2
   // Whether the scene band holds the stage. The settings pane always reclaims
   // its rows (a mode the listener opened is their own full attention). The
@@ -463,6 +474,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // stays on stage dimmed beneath it — only the raster layers yield, and only
   // where the card's own rows reach (stagePlan / waveRowsFor via the refs).
   const sceneShown = wide && !paneOpen
+  // The station ident stays on stage in the wide composition — pinned
+  // between the scene and the log when the log can spare the rows, so the
+  // guide's tool narration cannot scroll it away; the narrow band keeps the
+  // classic in-log ident that the program scrolls away itself.
+  const pinnedIdent = identPinned(wide, logRows)
   const sceneShownRef = useRef(sceneShown)
   sceneShownRef.current = sceneShown
   // The newest broadcast line carries the bullet (concept 04); older lines
@@ -733,6 +749,25 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <text style={{ fg: INK.dim }}>{'  ↑↓ move · ←→/space adjust · esc back'}</text>
         </box>
       ) : (
+        <box style={{ flexGrow: 1, flexDirection: 'column' }}>
+        {pinnedIdent && (
+          <box
+            style={{
+              flexDirection: 'column',
+              alignItems: 'center',
+              marginTop: 1,
+              marginBottom: 1,
+              flexShrink: 0,
+            }}
+          >
+            {WORDMARK.map((row, at) => (
+              <text key={at} style={{ fg: lit(INK.text) }}>
+                {row}
+              </text>
+            ))}
+            <text style={{ fg: lit(INK.dim) }}>{TAGLINE}</text>
+          </box>
+        )}
         <scrollbox
           stickyScroll
           stickyStart="bottom"
@@ -743,8 +778,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             rootOptions: { backgroundColor: INK.bg },
           }}
         >
-          {/* The station ident (§3.3 as built): the wordmark opens every log —
-              first thing every boot, scrolled away by the program itself. */}
+          {/* The station ident (§3.3 as built): pinned above in the wide
+              composition; opening the log — scrolled away by the program
+              itself — everywhere else. */}
+          {!pinnedIdent && (
           <box
             style={{
               flexDirection: 'column',
@@ -762,6 +799,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               <text style={{ fg: lit(INK.dim) }}>{TAGLINE}</text>
             </box>
           </box>
+          )}
           {entries.map((entry) => (
             // The sky composition lets the log breathe — one blank line between
             // entries, the poem spacing of §6.1, no icon markers (the speaker
@@ -791,6 +829,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             </box>
           ))}
         </scrollbox>
+        </box>
       )}
 
       </box>

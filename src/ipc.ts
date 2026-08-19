@@ -115,6 +115,9 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // guessing which info line wants an answer. Additive — an older client drops
   // it and keeps the info-line adjacency it already relies on.
   z.object({ v, type: z.literal('ask'), text: z.string(), kind: z.enum(['question', 'consent']) }),
+  // Every pending ask just died with its flow (the listener's Esc stopped it):
+  // the client drops its cards. Additive, like `ask`.
+  z.object({ v, type: z.literal('askDrop') }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
   // after every settingsSet — the pane always renders truth, never local
@@ -142,6 +145,10 @@ export const TuiMessageSchema = z.discriminatedUnion('type', [
   z.object({ v, type: z.literal('line'), text: z.string() }),
   z.object({ v, type: z.literal('vizSub'), on: z.boolean(), fps: z.number().positive().optional() }),
   z.object({ v, type: z.literal('settingsSet'), patch: SettingsPatchSchema }),
+  // Esc with nothing client-local to close: stop the running engine flow (the
+  // setup/guide conversation) without ending the broadcast. An engine with no
+  // stoppable flow ignores it.
+  z.object({ v, type: z.literal('interrupt') }),
 ])
 
 export type TuiMessage = z.infer<typeof TuiMessageSchema>

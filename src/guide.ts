@@ -117,7 +117,10 @@ export function quitLatch(): QuitLatch {
 
 const QUIT = '/quit'
 
-export function lineReader(host: Host, quit: QuitLatch): ReadLine {
+// `stop` is the flow-scoped sibling of the quit latch (spec 10 §3.4 Esc): it
+// resolves reads the same way — '' declines through — but the app is not
+// shutting down, only this flow is.
+export function lineReader(host: Host, quit: QuitLatch, stop?: QuitLatch): ReadLine {
   const eof: Promise<string> = host.eof?.().then(() => '') ?? new Promise<string>(() => {})
   let chain: Promise<unknown> = Promise.resolve()
   return () => {
@@ -137,7 +140,8 @@ export function lineReader(host: Host, quit: QuitLatch): ReadLine {
         }
         return line
       })
-      return Promise.race([take, eof, quit.seen]).finally(() => (settled = true))
+      const outs = stop === undefined ? [take, eof, quit.seen] : [take, eof, quit.seen, stop.seen]
+      return Promise.race(outs).finally(() => (settled = true))
     })
     chain = read
     return read
@@ -151,10 +155,12 @@ export function lineReader(host: Host, quit: QuitLatch): ReadLine {
 // PreToolUse hook in guideOptions (the SDK consults this callback only when
 // its own policy would ask); the same test here is the belt for the calls
 // that do arrive. The dev log keeps a record of everything allowed.
-export function cliPermission(host: Host, quit: QuitLatch): CanUseTool {
+export function cliPermission(host: Host, quit: QuitLatch, stop?: QuitLatch): CanUseTool {
   return async (toolName, input) => {
-    // A user who is leaving: deny outright so the session winds down.
+    // A user who is leaving — or who stopped this flow: deny outright so the
+    // session winds down.
     if (quit.requested) return { behavior: 'deny', message: 'user quit' }
+    if (stop?.requested === true) return { behavior: 'deny', message: 'user stopped the flow' }
     if (isSecretBearing(toolName, input)) {
       return { behavior: 'deny', message: SECRET_DENY_MESSAGE }
     }
@@ -164,15 +170,19 @@ export function cliPermission(host: Host, quit: QuitLatch): CanUseTool {
 }
 
 // Read the user's next natural-language reply from the CLI Host. An empty
-// line or /done|/quit|q ends the conversation (returns null).
+// line or /done|/quit|q ends the conversation (returns null). The prompt is
+// an info line, never an ask: the guide's own words carry the question, and a
+// spotlight card reading only "your reply" would hush the room over nothing —
+// the modal stays reserved for the onboarding decisions.
 export function cliConversation(
   host: Host,
   read: ReadLine,
   quit: QuitLatch,
+  stop?: QuitLatch,
 ): () => Promise<string | null> {
   return async () => {
-    if (quit.requested) return null
-    ask(host, 'your reply (natural language; empty or /done to finish):', 'question')
+    if (quit.requested || stop?.requested === true) return null
+    host.info('reply in the input line (/done to finish):')
     const line = (await read()).trim()
     return END.has(line.toLowerCase()) ? null : line
   }
@@ -377,29 +387,54 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
 // verifies, asking only at substantive forks. Declining is the only thing that makes later boots
 // quiet, and it costs exactly one info line thereafter.
 export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
-  const { host, guide, targets } = run
+  const { host, targets } = run
   // A caller without a latch (the explicit CLI entries) still gets one: a
   // typed /quit inside the conversation ends it the same way everywhere.
   const quit = run.quit ?? quitLatch()
   const explicit = run.explicit === true
-  // The probes take real seconds (yt-dlp is a live network search): say so
-  // first, so the front-end has a loading signal instead of a silent stall.
-  host.info('checking the gear on this machine...')
-  const gaps = await detectGaps(targets, run.probes ?? {})
-  if (gaps.length === 0) return outcomeFrom(targets, gaps)
+  // The listener's Esc (spec 10 §3.4): stops THIS flow — reads decline, the
+  // guide session is cut — while the radio goes on booting. Armed for the
+  // WHOLE flow, opening probes included (they are a live network search
+  // taking real seconds); the finally hands the seam back.
+  const stop = quitLatch()
+  host.onInterrupt?.(() => stop.fire())
+  try {
+    // The probes take real seconds: say so first, so the front-end has a
+    // loading signal instead of a silent stall.
+    host.info('checking the gear on this machine...')
+    const gaps = await detectGaps(targets, run.probes ?? {})
+    if (stop.requested && !quit.requested) {
+      host.info('stopped \u2014 `make setup` reopens this any time.')
+      return outcomeFrom(targets, gaps)
+    }
+    if (quit.requested || gaps.length === 0) return outcomeFrom(targets, gaps)
 
-  const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
+    const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
 
-  // A standing decline: one line, no question, no re-nagging (§7.1 point 3).
-  if (!explicit && run.ledger?.recentEvents('setup', 1).includes(SETUP_DECLINED) === true) {
-    host.info(`${named}. Run \`make setup\` whenever you want to sort that out.`)
-    return outcomeFrom(targets, gaps)
+    // A standing decline: one line, no question, no re-nagging (§7.1 point 3).
+    if (!explicit && run.ledger?.recentEvents('setup', 1).includes(SETUP_DECLINED) === true) {
+      host.info(`${named}. Run \`make setup\` whenever you want to sort that out.`)
+      return outcomeFrom(targets, gaps)
+    }
+
+    // The offer and the guide both read the keyboard; make sure the reader is
+    // up (idempotent — the Director starts it too).
+    host.start()
+    return await runSetupFlow(run, quit, stop, gaps, explicit)
+  } finally {
+    host.onInterrupt?.(null)
   }
+}
 
-  // The offer and the guide both read the keyboard; make sure the reader is up
-  // (idempotent — the Director starts it too).
-  host.start()
-  const read = lineReader(host, quit)
+async function runSetupFlow(
+  run: SetupRun,
+  quit: QuitLatch,
+  stop: QuitLatch,
+  gaps: Gap[],
+  explicit: boolean,
+): Promise<SetupOutcome> {
+  const { host, guide, targets } = run
+  const read = lineReader(host, quit, stop)
   // Probe detail (the raw reason) is diagnostics, not card copy: the guide
   // gets it via its prompt, the dev log keeps it for humans.
   for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
@@ -408,8 +443,14 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const answer = await read()
   if (!isYes(answer)) {
     // Leaving is not answering (codex review): a /quit mid-offer must not
-    // become a standing decline that silences every later boot.
+    // become a standing decline that silences every later boot — and an Esc
+    // is the same non-answer with the radio staying up, worth one line of
+    // closure where /quit's exit line comes from the app.
     if (quit.requested) return outcomeFrom(targets, gaps)
+    if (stop.requested) {
+      host.info('stopped \u2014 `make setup` reopens this any time.')
+      return outcomeFrom(targets, gaps)
+    }
     // Only the boot-time offer records the standing answer — and only for an
     // EXPLICIT no. Enter reads as the default-confirm to half the world, and
     // an unrecognized answer is "not now", never "never again". Backing out
@@ -433,6 +474,9 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
         writeVoiceConfigTool({
           home: targets.home,
           validate: run.validateVoice ?? ((config) => validateEndpoint(config)),
+          // Esc/quit while the tool holds the floor (the paste prompt, the
+          // probe synth): abort instead of persisting on a declined read.
+          aborted: () => stop.requested || quit.requested,
           // The secret's own channel: murmur asks, the user types, the tool
           // keeps it. It never becomes a message, so it never reaches the API
           // or the session transcript the SDK keeps (spec 03-03 §7.2).
@@ -456,8 +500,8 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
-    canUseTool: cliPermission(host, quit),
-    interrupt: quit.seen,
+    canUseTool: cliPermission(host, quit, stop),
+    interrupt: Promise.race([quit.seen, stop.seen]),
     ...(tools.length > 0 && { tools }),
     onText: (text) => host.info(text),
     // What the agent is doing, visibly: the command before it runs, the tail
@@ -476,17 +520,26 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
           ? '  (output withheld: may hold a credential)'
           : formatToolResult(output, isError),
       ),
-    nextUserInput: cliConversation(host, read, quit),
+    nextUserInput: cliConversation(host, read, quit, stop),
   })
 
   // Leaving mid-conversation: the app is shutting down, so the gaps we knew
   // ARE the outcome — a re-probe (a live network search) and a closing verdict
   // would make the exit wait on work nobody will see.
   if (quit.requested) return outcomeFrom(targets, gaps)
+  // Stopped mid-conversation: same arithmetic, but the radio is staying up —
+  // say where the door is.
+  if (stop.requested) {
+    host.info('stopped — `make setup` reopens this any time.')
+    return outcomeFrom(targets, gaps)
+  }
 
   // Re-probe rather than believe the conversation: "the assistant said it
   // installed yt-dlp" is not the same fact as "yt-dlp works" (CLAUDE.md).
   const left = await detectGaps(targets, run.probes ?? {})
+  // An Esc that landed during the re-probe: the fresh facts still count, but
+  // the user asked for quiet, not a verdict.
+  if (quit.requested || stop.requested) return outcomeFrom(targets, left)
   if (left.length === 0) host.info('all set — everything is working now.')
   else host.info(`still not working: ${left.map((gap) => gap.kind).join(', ')}.`)
   return outcomeFrom(targets, left)
