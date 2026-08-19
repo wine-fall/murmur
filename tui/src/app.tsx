@@ -243,6 +243,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // renders it and sends patches, never local optimism. Mirrored into a ref so
   // the keyboard handler always sees the current pane, not a stale closure.
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
+  // Who holds the floor (spec 10 §3.4): the radio, or the setup guide. The
+  // engine owns the switch; this client only paints it — strip, identity
+  // line, input ink — so the listener always knows who is listening.
+  const [mode, setMode] = useState<'radio' | 'guide'>('radio')
   const [paneOpen, setPaneOpen] = useState(false)
   const [paneAt, setPaneAt] = useState(0)
   const pane = useRef({ open: false, at: 0, snap: null as SettingsSnapshot | null })
@@ -294,6 +298,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         case 'hello':
           setIdentity({ persona: message.persona, brain: message.brain, voice: message.voice })
           setGreeting(awayGreeting(message.away))
+          setMode(message.mode ?? 'radio')
           break
         case 'segment':
           append('segment', message.text)
@@ -312,6 +317,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             ...queue,
             message.kind === 'question' ? { ...message, no: ++questionNo.current } : message,
           ])
+          break
+        case 'mode':
+          setMode(message.who)
           break
         case 'askDrop':
           // The flow behind the cards was stopped (Esc): every pending
@@ -447,15 +455,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.
+  const guideFloor = mode === 'guide'
   const strip =
     !wide
-      ? [greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
+      ? [guideFloor ? 'in the workshop' : (greeting ?? microcopy ?? 'warming up...'), state?.nowPlaying]
           .filter((part) => part !== undefined && part !== '')
           .join('  ♪ ')
       : [
-          greeting ?? microcopy ?? 'murmur is on the air',
-          state?.scene,
-          state?.activity ?? 'here',
+          guideFloor ? 'in the workshop' : (greeting ?? microcopy ?? 'murmur is on the air'),
+          guideFloor ? 'the setup guide has the floor' : state?.scene,
+          guideFloor ? undefined : (state?.activity ?? 'here'),
         ]
           .filter((part) => part !== undefined && part !== '')
           .join(' · ')
@@ -846,8 +855,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       {/* Persona rides the identity line: the wide strip is the program's
           words, but WHO is on air must survive in the status region (§3.3). */}
       <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
-        <text style={{ fg: lit(INK.dim) }}>
-          {[identity.persona, identity.brain, identity.voice].filter(Boolean).join(' · ')}
+        <text style={{ fg: guideFloor ? lit(WARM) : lit(INK.dim) }}>
+          {guideFloor
+            ? ['setup guide', identity.brain].filter(Boolean).join(' · ')
+            : [identity.persona, identity.brain, identity.voice].filter(Boolean).join(' · ')}
         </text>
       </box>
 
@@ -1020,11 +1031,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           {/* The listener's channel is periwinkle — the room's one cold accent
               (§6.1): prompt, typed text, and the resting invitation alike. A
               line the engine will take as a command warms to ember instead. */}
-          <text style={{ fg: PERIWINKLE }}>{'> '}</text>
+          <text style={{ fg: guideFloor ? WARM : PERIWINKLE }}>{'> '}</text>
           <input
             ref={input}
             focused={!paneOpen}
-            placeholder={paneOpen ? 'settings open — esc to return' : 'type to talk back · / for commands'}
+            placeholder={
+              paneOpen
+                ? 'settings open — esc to return'
+                : guideFloor
+                  ? 'talking to the setup guide · esc interrupts · /done hands back'
+                  : 'type to talk back · / for commands'
+            }
             style={{
               // The sky composition bounds the field and lets a quiet rule carry
               // the rest of the row (concept 04's input line); long input scrolls
@@ -1032,9 +1049,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
               // The field is permanently focused (§3.2), so the focused pair is
               // the ink that actually paints; the base pair keeps them honest.
-              textColor: isCommand(typed) ? EMBER : PERIWINKLE,
-              focusedTextColor: isCommand(typed) ? EMBER : PERIWINKLE,
-              placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+              textColor: isCommand(typed) ? EMBER : guideFloor ? WARM : PERIWINKLE,
+              focusedTextColor: isCommand(typed) ? EMBER : guideFloor ? WARM : PERIWINKLE,
+              placeholderColor: mix(guideFloor ? WARM : PERIWINKLE, INK.bg, 0.4),
               backgroundColor: INK.bg,
               focusedBackgroundColor: INK.bg,
             }}

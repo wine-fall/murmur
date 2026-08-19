@@ -186,13 +186,14 @@ Engine → TUI:
 
 | type | payload | carries |
 |---|---|---|
-| `hello` | `{ protocol: 2, persona, brain, voice, away? }` | handshake; replaces `banner`. `away` = seconds since murmur last heard anything, for §3.7.3 |
+| `hello` | `{ protocol: 2, persona, brain, voice, away?, mode? }` | handshake; replaces `banner`. `away` = seconds since murmur last heard anything, for §3.7.3. `mode` = who holds the floor right now (§3.4), so an attach mid-setup opens on the guide's face; absent = radio |
 | `segment` | `{ text }` | `onRadioSegment` |
 | `userLine` | `{ text }` | `onUserLine` echo |
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
 | `info` | `{ text }` | host info lines — context, notices, and everything that is not a question (§3.2-B) |
 | `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
-| `askDrop` | `{}` | every pending ask just died with its flow — the listener's Esc stopped it (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
+| `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
+| `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |
 | `viz` | `{ bins: number[] }` | one FFT frame (§3.6); highest-frequency message |
 | `bye` | `{}` | engine is shutting down |
 
@@ -203,7 +204,7 @@ TUI → Engine:
 | `attach` | `{ protocol: 2 }` | must be first; version mismatch → engine replies `bye` |
 | `line` | `{ text }` | a submitted input line — talk-back, Q&A answers, and commands alike (`/quit` included; the engine owns all parsing, same as stdin today) |
 | `vizSub` | `{ on: boolean, fps?: number }` | subscribe/unsubscribe the viz stream |
-| `interrupt` | `{}` | Esc with nothing client-local to close (§3.4): stop the running engine flow (the setup/guide conversation) without ending the broadcast. An engine with no flow registered ignores it — the first-run seeds keep their cards |
+| `interrupt` | `{}` | Esc with nothing client-local to close (§3.4): the engine's Esc router decides what it means from where the flow stands — never more than cutting a turn or handing the floor back. An engine with no flow registered ignores it — the first-run seeds keep their cards |
 
 - **Versioned handshake, additive evolution**: unknown message types are
   ignored (forward compatibility); breaking changes bump `protocol`.
@@ -495,21 +496,49 @@ The TUI owns the keyboard. A submitted line goes over the wire as `line`; the
 engine feeds it into the same `LineQueue`, so the Director's
 prepare-then-barge-in talkback path and the guide's serialized reader work
 unchanged (§3.2). Ctrl-C in the TUI sends `line: "/quit"` rather than killing
-only the client — one shutdown path.
+only the client — one shutdown path. Every way a quit begins prints
+`going off the air...` the moment it is heard (`Director.beginQuit`): the
+teardown that follows (voice close, engine drain, bed position) is honest
+work, but doing it in silence read as a hang (user report, 2026-08-19).
 
-**Esc stops the flow, not the radio (2026-08-19, user report: a running
-guide install could not be stopped without quitting).** Esc with nothing
-client-local to close (no command menu, no settings pane) goes over the wire
-as `interrupt`. Engine-side it is a flow-scoped stop: a stoppable flow (the
-setup conversation, `runSetup` in `src/guide.ts`) registers a handler on the
-optional `Host.onInterrupt` seam for exactly its own duration and wires it
-to a stop latch — the sibling of the quit latch: reads decline through as
-`''`, the guide's SDK session is cut via its `interrupt` promise, the
-closing re-probe is skipped — but the app is NOT shutting down; the radio
-goes on booting/broadcasting. The engine buries the flow's pending asks and
-tells the client to close its cards (`askDrop`). With no handler registered
-(first-run seeds, the broadcast) the interrupt is noise: the cards must
-stand for the reader still waiting on them.
+**The conversation-partner boundary (2026-08-19, grilling session — nine
+user-pinned decisions).** The input line always has exactly one partner:
+the DJ (murmur), or a **foreground agent session** — today the setup guide,
+a real third-party code agent. The rules, written here as the extension
+contract (no framework until a second agent exists):
+
+- **At most one foreground agent session at a time.** While it holds the
+  floor the radio waits (boot) — and the identity line names the agent.
+- **Three-point face change** while the agent holds the floor: the status
+  strip reads `in the workshop · the setup guide has the floor`, the
+  identity line reads `setup guide · <brain>`, and the input line turns to
+  the warm ink with the placeholder `talking to the setup guide · esc
+  interrupts · /done hands back`. The floor rides `hello.mode` on attach and
+  the `mode` message live; `runSetup` flips it via the optional
+  `Host.setMode` seam from the accepted `y` to the conversation's end.
+- **Esc interrupts, never dismisses.** Esc (with no menu/pane open) goes
+  over the wire as `interrupt`; the engine's Esc router (`runSetup` in
+  `src/guide.ts`, registered on `Host.onInterrupt` for the flow's whole
+  duration, opening probes included) reads it by where the flow stands:
+  before the accepted `y` it is "not now" (the offer declines for this boot,
+  never a standing decline); while the guide **works** it cuts the TURN —
+  `query.interrupt()` via the `GuideRequest.onSession` handle, the turn's
+  tool calls denied and an in-turn read (the secret paste) aborted — and the
+  guide goes idle listening; while the guide **waits** it ends the
+  conversation exactly like a typed `/done` (the Esc-Esc exit), with the
+  normal closing re-probe and verdict. Only `/quit` kills the session.
+- **No idle timeout.** A waiting guide waits — the exit affordance is
+  written on the reply prompt and the placeholder; nothing switches the
+  partner automatically.
+- **Cards follow the flow**: an interrupt that reaches a registered flow
+  drops the pending asks on both sides (`askDrop`); with no flow registered
+  (first-run seeds, the broadcast) the interrupt is noise and the cards
+  stand.
+
+Deferred to the mid-broadcast slice (decided, not yet built): a `/setup`
+command recalls the guide over the air — the Director's talk loop pauses,
+the engine/bed keeps playing, and `/done` resumes the DJ where it paused
+(closes issue #97's reopen gap).
 
 ### 3.5 Process lifecycle (v1)
 

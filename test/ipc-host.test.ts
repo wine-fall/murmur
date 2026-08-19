@@ -279,6 +279,25 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(true)
   })
 
+  it('broadcasts the floor mode, and hands the CURRENT mode to a late attach', async () => {
+    // The conversation-partner boundary (spec 10 §3.4): a front-end attaching
+    // mid-setup must open on the guide's face, not the radio's.
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.setMode('guide')
+    await first.settle()
+    expect(first.received.at(-1)).toEqual({ v: 1, type: 'mode', who: 'guide' })
+    const second = await client()
+    second.attach()
+    await second.settle()
+    const hello = second.received.find((m) => m.type === 'hello')
+    expect(hello).toMatchObject({ mode: 'guide' })
+    host.setMode('radio')
+    await second.settle()
+    expect(second.received.at(-1)).toEqual({ v: 1, type: 'mode', who: 'radio' })
+  })
+
   it('feeds a submitted line into the same queue the CLI host uses', async () => {
     const c = await client()
     c.attach()

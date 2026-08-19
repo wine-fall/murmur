@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   cliConversation,
   cliPermission,
+  escPulse,
   formatToolResult,
   lineReader,
   quitLatch,
@@ -47,16 +48,32 @@ describe('lineReader (codex-review regressions)', () => {
     expect(await read()).toBe('')
   })
 
-  it('a fired stop latch resolves reads as empty — Esc ends the flow without quitting the radio', async () => {
-    const { host } = fakeHost([])
+  it('an esc pulse resolves the PENDING read as empty and re-arms — no quit, no fast-forward', async () => {
+    // Esc is an event, not a state: it answers the read that was waiting and
+    // nothing else — the next read hears the keyboard again (unlike the quit
+    // latch, whose fast-forward is the app going away).
+    const lines: string[] = []
+    const { host } = fakeHost(lines)
     const quit = quitLatch()
-    const stop = quitLatch()
-    const read = lineReader(host, quit, stop)
+    const esc = escPulse()
+    const read = lineReader(host, quit, esc)
     const pending = read()
-    stop.fire()
+    await new Promise((r) => setImmediate(r)) // the read registers on a microtask
+    esc.fire()
     expect(await pending).toBe('')
-    expect(await read()).toBe('') // fast-forward, like quit's
+    lines.push('still talking')
+    expect(await read()).toBe('still talking')
     expect(quit.requested).toBe(false)
+  })
+
+  it('an esc pulse fired with nobody waiting is dropped, never stored', async () => {
+    const esc = escPulse()
+    esc.fire() // lands while a guide turn runs — no read pending
+    const lines: string[] = []
+    const { host } = fakeHost(lines)
+    const read = lineReader(host, quitLatch(), esc)
+    lines.push('a real answer')
+    expect(await read()).toBe('a real answer')
   })
 
   it('serializes concurrent reads: one typed line answers exactly one ask', async () => {
@@ -160,6 +177,12 @@ describe('cliPermission (spec 03-03 §3 — the entry authorization, no per-acti
     expect(infos).toEqual([]) // and never a printed question either
   })
 
+  it('a turn-abort halt denies the cut turn\'s calls — the belt behind interruptTurn', async () => {
+    const { host } = fakeHost([])
+    const result = await cliPermission(host, quitLatch(), () => true)('Bash', { command: 'ls' }, askOptions)
+    expect(result).toMatchObject({ behavior: 'deny' })
+  })
+
   it('keeps a dev-log record of everything it allowed', async () => {
     const debugs: string[] = []
     const { host } = fakeHost([])
@@ -239,15 +262,36 @@ describe('cliConversation', () => {
     expect(infos.join('\n')).toContain('/done')
   })
 
-  it('a fired stop latch ends the conversation like quit does, without a prompt', async () => {
-    const { host, infos } = fakeHost([], { docked: true })
+  it('marks the waiting window and resets the turn-abort flag each turn', async () => {
+    // The Esc router reads these: waiting=true means Esc ends the conversation
+    // (the guide is idle); turnAborted is a per-turn fact, cleared the moment a
+    // new prompt opens (the next turn must not inherit a spent abort).
+    const { host } = fakeHost([])
     const quit = quitLatch()
-    const stop = quitLatch()
-    stop.fire()
-    const next = cliConversation(host, lineReader(host, quit, stop), quit, stop)
-    expect(await next()).toBeNull()
-    expect(infos).toEqual([])
+    const esc = escPulse()
+    const flow = { waiting: false, turnAborted: true }
+    const next = cliConversation(host, lineReader(host, quit, esc), quit, flow)
+    const pending = next()
+    await new Promise((r) => setImmediate(r))
+    expect(flow.waiting).toBe(true)
+    expect(flow.turnAborted).toBe(false) // reset by the new turn
+    esc.fire()
+    expect(await pending).toBeNull()
+    expect(flow.waiting).toBe(false)
+  })
+
+  it('an esc while the guide waits ends the conversation — the Esc-Esc exit', async () => {
+    const { host, infos } = fakeHost([])
+    const quit = quitLatch()
+    const esc = escPulse()
+    const flow = { waiting: false, turnAborted: false }
+    const next = cliConversation(host, lineReader(host, quit, esc), quit, flow)
+    const pending = next()
+    await new Promise((r) => setImmediate(r))
+    esc.fire()
+    expect(await pending).toBeNull()
     expect(quit.requested).toBe(false)
+    expect(infos.join('\n')).toContain('/done') // the prompt named the exit before Esc took it
   })
 })
 

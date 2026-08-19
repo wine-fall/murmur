@@ -305,6 +305,30 @@ describe('Director — quit', () => {
     expect(host.radio).toEqual(['a'])
   })
 
+  it('/quit answers instantly with the going-off line — teardown must not be silent', async () => {
+    // The 3 seconds of voice/engine close are honest work; the lag the user
+    // felt was the silence. The ack lands when the quit is HEARD.
+    const { brain, player, host, director } = setup()
+    brain.batches = [['a']]
+    player.auto = false
+    const run = director.run()
+    await until(() => player.played.length === 1, 'clip on air')
+    host.type('/quit')
+    await until(() => host.infos.some((m) => m.includes('going off the air')), 'the ack line')
+    await run
+  })
+
+  it('requestQuit (Ctrl-C) prints the same going-off ack', async () => {
+    const { brain, player, host, director } = setup()
+    brain.batches = [['a']]
+    player.auto = false
+    const run = director.run()
+    await until(() => player.played.length === 1, 'clip on air')
+    director.requestQuit()
+    await run
+    expect(host.infos.some((m) => m.includes('going off the air'))).toBe(true)
+  })
+
   it('/quit merged into a compose window quits without airing the reply', async () => {
     const { brain, player, host, director } = setup()
     brain.batches = [['a']]
@@ -317,6 +341,8 @@ describe('Director — quit', () => {
     host.type('/quit')
     await run
     expect(host.radio).toEqual(['a']) // no reply aired
+    // The merged path is still a quit someone typed: it acks like the rest.
+    expect(host.infos.some((m) => m.includes('going off the air'))).toBe(true)
   })
 
   it('a line typed during the gap gets a reply, then the program moves on', async () => {

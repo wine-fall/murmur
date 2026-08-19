@@ -222,7 +222,7 @@ export function guideOptions(req: GuideRequest): Options {
 type QueryFn = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>
   options?: Options
-}) => AsyncIterable<SDKMessage>
+}) => AsyncIterable<SDKMessage> & { interrupt?: () => Promise<unknown> }
 
 const userMessage = (text: string): SDKUserMessage => ({
   type: 'user',
@@ -274,7 +274,17 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
   // must not hang on a slow subprocess teardown.
   const INTERRUPTED = 'interrupted' as const
   const interrupted = req.interrupt?.then(() => INTERRUPTED)
-  const iterator = queryFn({ prompt: input(), options: guideOptions(req) })[Symbol.asyncIterator]()
+  const query = queryFn({ prompt: input(), options: guideOptions(req) })
+  // The live handle (Esc's seam): interruptTurn asks the SDK to end the turn
+  // in flight — it answers with that turn's result, so the reply loop below
+  // keeps running. Best-effort by design: a query without interrupt support
+  // no-ops, and a failure must not surface through a keypress.
+  req.onSession?.({
+    interruptTurn: async () => {
+      await Promise.resolve(query.interrupt?.()).catch(() => {})
+    },
+  })
+  const iterator = query[Symbol.asyncIterator]()
   try {
     while (true) {
       const step =

@@ -35,6 +35,11 @@ export interface Host {
   // handler for its own duration (null to unregister); a host without the
   // seam — or an engine with no flow registered — treats Esc as noise.
   onInterrupt?(handler: (() => void) | null): void
+  // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
+  // the radio, or a foreground agent session (the setup guide). A front-end
+  // with a face paints the switch; the plain host reads fine without one —
+  // its transcript is serial anyway.
+  setMode?(who: FloorMode): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void
@@ -54,6 +59,10 @@ export interface Host {
 // presentational (the dock's title), not semantic — the reader treats both as
 // one line either way.
 export type AskKind = 'question' | 'consent'
+
+// At most one foreground agent session at a time (the boundary rule): 'guide'
+// while the setup guide holds the floor, 'radio' otherwise.
+export type FloorMode = 'radio' | 'guide'
 
 // Every question the engine asks goes through here: hosts with a question
 // surface get the marked ask, bare ones get the same text as info.
