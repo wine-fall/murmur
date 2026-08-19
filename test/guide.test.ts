@@ -47,6 +47,18 @@ describe('lineReader (codex-review regressions)', () => {
     expect(await read()).toBe('')
   })
 
+  it('a fired stop latch resolves reads as empty — Esc ends the flow without quitting the radio', async () => {
+    const { host } = fakeHost([])
+    const quit = quitLatch()
+    const stop = quitLatch()
+    const read = lineReader(host, quit, stop)
+    const pending = read()
+    stop.fire()
+    expect(await pending).toBe('')
+    expect(await read()).toBe('') // fast-forward, like quit's
+    expect(quit.requested).toBe(false)
+  })
+
   it('serializes concurrent reads: one typed line answers exactly one ask', async () => {
     // peek/take is the Director's race primitive — one line wakes every
     // waiter. Concurrent permission asks must each consume their OWN line.
@@ -216,11 +228,26 @@ describe('cliConversation', () => {
     expect(asks).toEqual([])
   })
 
-  it('docks the reply prompt as a question', async () => {
-    const { host, asks } = fakeHost(['sure'], { docked: true })
+  it('keeps the reply prompt OUT of the dock — the conversation lives in the log and the input line', async () => {
+    // A spotlight card reading only "your reply" carries no question — the
+    // guide's actual words are in the log. The card is for onboarding
+    // decisions; the per-turn prompt is an info line.
+    const { host, asks, infos } = fakeHost(['sure'], { docked: true })
     const next = cliConversation(host, lineReader(host, quitLatch()), quitLatch())
     await next()
-    expect(asks).toEqual([{ text: expect.stringContaining('/done'), kind: 'question' }])
+    expect(asks).toEqual([])
+    expect(infos.join('\n')).toContain('/done')
+  })
+
+  it('a fired stop latch ends the conversation like quit does, without a prompt', async () => {
+    const { host, infos } = fakeHost([], { docked: true })
+    const quit = quitLatch()
+    const stop = quitLatch()
+    stop.fire()
+    const next = cliConversation(host, lineReader(host, quit, stop), quit, stop)
+    expect(await next()).toBeNull()
+    expect(infos).toEqual([])
+    expect(quit.requested).toBe(false)
   })
 })
 

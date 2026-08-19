@@ -243,6 +243,42 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(false)
   })
 
+  it('routes an interrupt to the registered flow and drops the pending asks on both sides', async () => {
+    // Esc in the TUI: the running flow stops, its waiting questions are
+    // dead — the engine forgets them and tells the client to close its cards.
+    let fired = 0
+    host.onInterrupt(() => fired++)
+    host.ask('paste your key:', 'question')
+    const c = await client()
+    c.attach()
+    await c.settle()
+    c.send(encode({ v: 1, type: 'interrupt' }))
+    await c.settle()
+    expect(fired).toBe(1)
+    expect(c.received.at(-1)).toEqual({ v: 1, type: 'askDrop' })
+    // Nothing pending survives for a later attach.
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.some((m) => m.type === 'ask')).toBe(false)
+  })
+
+  it('an interrupt with no flow to stop is ignored — no askDrop, no crash', async () => {
+    host.onInterrupt(null)
+    host.ask('what should I call you?', 'question')
+    const c = await client()
+    c.attach()
+    await c.settle()
+    c.send(encode({ v: 1, type: 'interrupt' }))
+    await c.settle()
+    // The first-run seeds still wait on their reader: the card must stand.
+    expect(c.received.some((m) => m.type === 'askDrop')).toBe(false)
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.some((m) => m.type === 'ask')).toBe(true)
+  })
+
   it('feeds a submitted line into the same queue the CLI host uses', async () => {
     const c = await client()
     c.attach()

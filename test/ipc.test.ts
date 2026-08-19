@@ -23,6 +23,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'info', text: 'now playing: a song' },
   { v: 1, type: 'ask', text: 'what should I call you?', kind: 'question' },
   { v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' },
+  { v: 1, type: 'askDrop' },
   { v: 1, type: 'viz', bins: [0, 0.5, 1] },
   {
     v: 1,
@@ -65,6 +66,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
 const TUI_MESSAGES: TuiMessage[] = [
   { v: 1, type: 'attach', protocol: PROTOCOL },
   { v: 1, type: 'line', text: '/quit' },
+  { v: 1, type: 'interrupt' },
   { v: 1, type: 'vizSub', on: true, fps: 24 },
   { v: 1, type: 'vizSub', on: false },
   { v: 1, type: 'settingsSet', patch: { musicEnabled: false, gapSeconds: 3.5 } },

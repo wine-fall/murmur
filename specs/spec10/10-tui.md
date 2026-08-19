@@ -192,6 +192,7 @@ Engine → TUI:
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
 | `info` | `{ text }` | host info lines — context, notices, and everything that is not a question (§3.2-B) |
 | `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
+| `askDrop` | `{}` | every pending ask just died with its flow — the listener's Esc stopped it (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `viz` | `{ bins: number[] }` | one FFT frame (§3.6); highest-frequency message |
 | `bye` | `{}` | engine is shutting down |
 
@@ -202,6 +203,7 @@ TUI → Engine:
 | `attach` | `{ protocol: 2 }` | must be first; version mismatch → engine replies `bye` |
 | `line` | `{ text }` | a submitted input line — talk-back, Q&A answers, and commands alike (`/quit` included; the engine owns all parsing, same as stdin today) |
 | `vizSub` | `{ on: boolean, fps?: number }` | subscribe/unsubscribe the viz stream |
+| `interrupt` | `{}` | Esc with nothing client-local to close (§3.4): stop the running engine flow (the setup/guide conversation) without ending the broadcast. An engine with no flow registered ignores it — the first-run seeds keep their cards |
 
 - **Versioned handshake, additive evolution**: unknown message types are
   ignored (forward compatibility); breaking changes bump `protocol`.
@@ -436,6 +438,11 @@ focus, and the broadcast never pauses under it.
 **Station ident (2026-08-11, user-asked):** the murmur wordmark
 (`tui/src/logo.ts`, half-block letters + tagline) opens every program log —
 the first thing a boot shows, scrolled away by the program itself.
+**Amended (2026-08-19, user report: the guide's tool flood scrolled the
+wordmark away):** in the wide composition the ident is PINNED between the
+scene band and the log (`identPinned` in `logo.ts`) whenever the log region
+can spare its rows and still hold a readable tail (log ≥ 2× the ident's six
+rows); a cramped log and the narrow band keep the classic in-log ident.
 
 **As built (2026-08-12, stacked recomposition — supersedes the 2026-08-07
 side-panel): composition has one breakpoint, one max width, and one vertical
@@ -489,6 +496,20 @@ engine feeds it into the same `LineQueue`, so the Director's
 prepare-then-barge-in talkback path and the guide's serialized reader work
 unchanged (§3.2). Ctrl-C in the TUI sends `line: "/quit"` rather than killing
 only the client — one shutdown path.
+
+**Esc stops the flow, not the radio (2026-08-19, user report: a running
+guide install could not be stopped without quitting).** Esc with nothing
+client-local to close (no command menu, no settings pane) goes over the wire
+as `interrupt`. Engine-side it is a flow-scoped stop: a stoppable flow (the
+setup conversation, `runSetup` in `src/guide.ts`) registers a handler on the
+optional `Host.onInterrupt` seam for exactly its own duration and wires it
+to a stop latch — the sibling of the quit latch: reads decline through as
+`''`, the guide's SDK session is cut via its `interrupt` promise, the
+closing re-probe is skipped — but the app is NOT shutting down; the radio
+goes on booting/broadcasting. The engine buries the flow's pending asks and
+tells the client to close its cards (`askDrop`). With no handler registered
+(first-run seeds, the broadcast) the interrupt is noise: the cards must
+stand for the reader still waiting on them.
 
 ### 3.5 Process lifecycle (v1)
 
