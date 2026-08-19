@@ -856,6 +856,28 @@ describe('runSetup — declining, and what a decline costs later', () => {
     expect(readVoiceConfig(join(home, 'voice.json'))).toBeNull()
   })
 
+  it('a guide session that dies must not take the radio down — the boot continues (real-SDK crash shape)', async () => {
+    // Reproduced live: ending the streaming input right after an interrupted
+    // turn makes the SDK iterator throw its error result. Whatever the guide
+    // dies of, runSetup absorbs it: one honest line, floor back, outcome from
+    // the known gaps — the radio always launches (spec 03-03).
+    const { host, infos, modes } = fakeHost(['y'])
+    const guide: GuideCapable = {
+      runGuide: async () => {
+        throw new Error('Claude Code returned an error result: [ede_diagnostic] stop_reason=tool_use')
+      },
+    }
+    const outcome = await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes,
+    })
+    expect(outcome.musicOk).toBe(false)
+    expect(modes).toEqual(['guide', 'radio'])
+    expect(infos.join('\n')).toContain('ended unexpectedly')
+  })
+
   it('the guide holds the floor from the y to the conversation end — BEFORE the closing probe', async () => {
     // The re-probe takes seconds; a face still saying "talking to the setup
     // guide" while lines queue for the Director would recreate the exact

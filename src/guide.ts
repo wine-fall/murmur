@@ -576,7 +576,11 @@ async function runSetupFlow(
       ]
     : []
 
-  await guide.runGuide({
+  // Whatever the session dies of — the SDK iterator throwing its interrupted
+  // turn's error result (seen live on the Esc-Esc shape), a subprocess crash —
+  // the radio still launches (spec 03-03): absorb, say so once, re-probe.
+  try {
+    await guide.runGuide({
     systemPrompt: GUIDE_PERSONA,
     prompt: buildSetupPrompt({
       gaps,
@@ -608,7 +612,11 @@ async function runSetupFlow(
           : formatToolResult(output, isError),
       ),
     nextUserInput: cliConversation(host, read, quit, flow),
-  })
+    })
+  } catch (err) {
+    host.debug?.(`guide session error: ${String(err)}`)
+    host.info('the setup conversation ended unexpectedly; the radio goes on.')
+  }
 
   // The conversation is over: an Esc from here on has nothing to cut, and
   // the floor goes back NOW — the closing re-probe takes seconds, and a face
