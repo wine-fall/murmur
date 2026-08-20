@@ -10,6 +10,7 @@ import {
   quitLatch,
   runSetup,
   SETUP_DECLINED,
+  setupComplete,
   setupOfferText,
   type SetupLedger,
   type SetupTargets,
@@ -129,6 +130,15 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
     )
     expect(gaps).toEqual([])
     expect(probed).toBe(0)
+  })
+
+  it('a configured endpoint that is FAILING auth is a gap again — the #97 reopen', async () => {
+    const gaps = await detectGaps(
+      targets({ voiceUrl: () => 'https://tts.example', voiceFailing: () => true }),
+      { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => OK },
+    )
+    expect(gaps.map((g) => g.kind)).toEqual(['voice'])
+    expect(gaps[0]!.reason).toContain('auth')
   })
 
   it('a configured endpoint is not a gap, wherever it came from', async () => {
@@ -657,6 +667,43 @@ describe('runSetup — the voice endpoint conversation (issue #96)', () => {
     expect(paste?.kind).toBe('question')
     const everything = [...infos, ...asks.map((a) => a.text)].join('\n')
     expect(everything).not.toContain(secret)
+  })
+})
+
+describe('runSetup — the explicit entry with nothing to fix', () => {
+  it('says so instead of returning in silence (the /setup recall path)', async () => {
+    const { host, infos } = fakeHost([])
+    const { guide, requests } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes: { music: async () => OK, ytdlpFresh: async () => OK },
+      explicit: true,
+    })
+    expect(requests).toEqual([])
+    expect(infos.join('\n')).toContain('nothing to fix')
+  })
+
+  it('the boot path stays quiet on a clean machine — no new chatter', async () => {
+    const { host, infos } = fakeHost([])
+    const { guide } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes: { music: async () => OK, ytdlpFresh: async () => OK },
+    })
+    expect(infos.join('\n')).not.toContain('nothing to fix')
+  })
+})
+
+describe('setupComplete — one verdict shared by make setup and /setup', () => {
+  it('true only when every WANTED surface is ok', () => {
+    const t = targets({ wantsMusic: true, wantsBun: false, wantsVoice: false })
+    expect(setupComplete(t, { musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: false })).toBe(true)
+    expect(setupComplete(t, { musicOk: true, ytdlpFresh: false, bunOk: true, voiceOk: true })).toBe(false)
+    expect(setupComplete(targets(), { musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: false })).toBe(false)
   })
 })
 

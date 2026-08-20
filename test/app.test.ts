@@ -18,6 +18,7 @@ import {
   runSetupCli,
   setupTargets,
   voiceAfterSetup,
+  voiceChanged,
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import { isFirstRun } from '../src/first-run.ts'
@@ -107,6 +108,27 @@ describe('escalatingSigint', () => {
     process.emit('SIGINT')
     expect(quit.requested).toBe(false)
     expect(infos).toEqual([])
+  })
+})
+
+// The /setup recall's live-apply seam (spec 10 §3.4): the swap happens only
+// when the resolved voice actually changed — an untouched endpoint must not
+// have its provider torn down mid-broadcast.
+describe('voiceChanged', () => {
+  const home = () => ({ MURMUR_HOME: emptyHome() })
+
+  it('flags a fresh endpoint, a new key, or a provider flip', () => {
+    const before = config([], home())
+    const after = voiceAfterSetup(before, { ttsUrl: 'https://written.example' })
+    expect(voiceChanged(before, after)).toBe(true)
+    expect(voiceChanged(after, { ...after, ttsApiKey: 'sk-new' })).toBe(true)
+    expect(voiceChanged(after, { ...after, voice: 'stub' })).toBe(true)
+  })
+
+  it('an unchanged voice is not a change — non-voice knobs do not count', () => {
+    const a = config([], home())
+    expect(voiceChanged(a, { ...a })).toBe(false)
+    expect(voiceChanged(a, { ...a, gapSeconds: 9 })).toBe(false)
   })
 })
 

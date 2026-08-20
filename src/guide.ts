@@ -270,6 +270,9 @@ export type SetupTargets = {
   readonly wantsBun: boolean
   readonly wantsVoice: boolean
   readonly voiceUrl: () => string
+  // A configured endpoint that is refusing auth (fed by the Director's synth
+  // failures): still a gap — issue #97's reopen path.
+  readonly voiceFailing?: () => boolean
   // The saved config behind that URL, re-read the same way: what the run wires
   // its voice from once the conversation is over (issue #96).
   readonly voiceConfig: () => VoiceConfig | null
@@ -311,8 +314,12 @@ export async function detectGaps(
   if (!music.ok) gaps.push({ kind: 'music', reason: music.reason })
   if (!fresh.ok) gaps.push({ kind: 'ytdlp', reason: fresh.reason })
   if (!bun.ok) gaps.push({ kind: 'bun', reason: bun.reason })
-  if (targets.wantsVoice && targets.voiceUrl().trim() === '') {
-    gaps.push({ kind: 'voice', reason: 'no endpoint configured' })
+  if (targets.wantsVoice) {
+    if (targets.voiceUrl().trim() === '') {
+      gaps.push({ kind: 'voice', reason: 'no endpoint configured' })
+    } else if (targets.voiceFailing?.() === true) {
+      gaps.push({ kind: 'voice', reason: 'the configured endpoint is failing auth' })
+    }
   }
   return gaps
 }
@@ -351,7 +358,7 @@ const PLAIN_ENGLISH: Record<GapKind, string> = {
   music: 'music needs yt-dlp and ffmpeg, so the program is talk-only for now',
   ytdlp: 'yt-dlp is getting stale, so fetching songs (Bilibili first) may fail until it is upgraded',
   bun: 'the terminal interface needs bun, so this is the plain text version',
-  voice: 'there is no voice endpoint yet, so lines are shown instead of spoken',
+  voice: 'the voice endpoint is missing or failing, so lines are shown instead of spoken',
 }
 
 const READY: Record<GapKind, string> = {
@@ -399,6 +406,16 @@ export function setupOfferText(targets: SetupTargets, gaps: Gap[], explicit = fa
       ]
   return [`a couple of things aren't set up on this machine: ${named}.`, ...rows, ...options].join(
     '\n',
+  )
+}
+
+// One verdict shared by `make setup` and the /setup recall: complete means
+// every surface this session WANTS is ok.
+export function setupComplete(targets: SetupTargets, outcome: SetupOutcome): boolean {
+  return (
+    (!targets.wantsMusic || (outcome.musicOk && outcome.ytdlpFresh)) &&
+    (!targets.wantsBun || outcome.bunOk) &&
+    (!targets.wantsVoice || outcome.voiceOk)
   )
 }
 
@@ -475,7 +492,12 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
       host.info("not now, then — I'll offer again next boot; `make setup` any time.")
       return outcomeFrom(targets, gaps)
     }
-    if (gaps.length === 0) return outcomeFrom(targets, gaps)
+    if (gaps.length === 0) {
+      // An explicit entry (make setup, the /setup recall) deserves an answer;
+      // the boot path stays quiet on a clean machine.
+      if (explicit) host.info('everything checks out — nothing to fix.')
+      return outcomeFrom(targets, gaps)
+    }
 
     const named = gaps.map((gap) => PLAIN_ENGLISH[gap.kind]).join('; ')
 

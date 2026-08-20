@@ -44,6 +44,7 @@ import type { AnchorId, Scheduler } from './scheduler.ts'
 // list's (display) order. The type pins each literal to a COMMANDS entry, and
 // the steer tests pin the reverse — every entry parses as a command.
 const QUIT_COMMAND: (typeof COMMANDS)[number]['name'] = '/quit'
+const SETUP_COMMAND: (typeof COMMANDS)[number]['name'] = '/setup'
 const SETTINGS_COMMAND: (typeof COMMANDS)[number]['name'] = '/settings'
 
 // Bounded attempts for a Brain/synth call before it degrades (lose the beat,
@@ -77,12 +78,14 @@ const AWAY_GAP_FACTOR = 3
 export type Steer =
   | { intent: 'quit' }
   | { intent: 'settings' }
+  | { intent: 'setup' }
   | { intent: 'talkback'; text: string }
 
 export function steerFromLine(line: string): Steer {
   const trimmed = line.trim()
   if (trimmed === QUIT_COMMAND) return { intent: 'quit' }
   if (trimmed === SETTINGS_COMMAND) return { intent: 'settings' }
+  if (trimmed === SETUP_COMMAND) return { intent: 'setup' }
   return { intent: 'talkback', text: line }
 }
 
@@ -144,6 +147,13 @@ export type DirectorDeps = {
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
   compactor?: { maybeSchedule(): boolean }
+  // The mid-broadcast recall (spec 10 §3.4): a typed /setup parks the talk
+  // loop inside this call — the engine keeps playing — and the loop resumes
+  // when it returns. Absent (stub runs): /setup answers with the shell pointer.
+  setupRecall?: () => Promise<void>
+  // An auth-shaped voice failure, raised so the app can mark the endpoint as
+  // failing — detectGaps then treats the configured endpoint as a gap (#97).
+  onVoiceAuthFailure?: () => void
 }
 
 // A look-ahead entry: the beat with its synthesis already running (spec 04
@@ -210,6 +220,25 @@ export class Director {
   requestQuit(): void {
     this.beginQuit()
     this.wakeOnQuit()
+  }
+
+  // The /setup recall: park the loop in the app's setup conversation while
+  // whatever is on the air plays out (the record keeps spinning — boundary
+  // decision Q6). Single-flight: while a session runs, the guide owns the
+  // keyboard and a second /setup would be its reply, not a command.
+  private inSetup = false
+  private async recallSetup(): Promise<void> {
+    if (this.deps.setupRecall === undefined) {
+      this.deps.host.info('the setup guide needs the real brain — run `make setup` from a shell.')
+      return
+    }
+    if (this.inSetup) return
+    this.inSetup = true
+    try {
+      await this.deps.setupRecall()
+    } finally {
+      this.inSetup = false
+    }
   }
 
   // Every way a quit begins routes through here, so the listener hears the
@@ -324,6 +353,11 @@ export class Director {
       if (steer.intent === 'quit') {
         this.beginQuit()
         return null
+      }
+      if (steer.intent === 'setup') {
+        await this.recallSetup()
+        if (this.quit) return null // a /quit landed inside the conversation
+        continue
       }
       if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
       else this.deps.host.info('settings live in settings.json under the murmur home.')
@@ -490,6 +524,13 @@ export class Director {
       this.talkAhead.push({ beat, clip: this.synthesizeOrSkip(beat.text) })
     }
     this.deps.host.debug?.(`talk.refill got=${beats.length} depth=${this.talkAhead.length}`)
+  }
+
+  // The voice provider just changed under the delegate (spec 10 §3.4): every
+  // buffered clip was synthesized — and stored — by the OLD provider, whose
+  // close may remove its temp clips. Drop them; the refill re-synthesizes.
+  invalidateTalkAhead(): void {
+    this.discardTalkAhead()
   }
 
   // Drop the buffered look-ahead and orphan any in-flight refill (spec 04
@@ -708,6 +749,11 @@ export class Director {
     return []
   }
 
+  // An auth-shaped voice failure names the way back ONCE (issue #97): a
+  // lapsed key used to skip segments silently forever, with no path to the
+  // guide short of the shell.
+  private voiceSetupHinted = false
+
   private async synthesizeOrSkip(text: string): Promise<AudioClip | null> {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
@@ -715,6 +761,13 @@ export class Director {
       } catch (err) {
         if (attempt === ATTEMPTS) {
           this.deps.host.info(`voice synthesis failed (${String(err)}); skipping this segment.`)
+          if (/\b40[123]\b/.test(String(err))) {
+            this.deps.onVoiceAuthFailure?.()
+            if (!this.voiceSetupHinted) {
+              this.voiceSetupHinted = true
+              this.deps.host.info('the voice endpoint is refusing auth — type /setup to fix it.', 'flow')
+            }
+          }
         }
       }
     }
@@ -812,6 +865,14 @@ export class Director {
           steer = null
           continue
         }
+        if (steer.intent === 'setup') {
+          // The song (or the tail of the clip) keeps playing under the guide's
+          // text — the loop parks here and the race resumes on return.
+          await this.recallSetup()
+          if (this.quit) return // the finally cuts voice and song
+          steer = null
+          continue
+        }
         this.discardTalkAhead() // buffered look-ahead predates this user turn -> stale
         const composed = await this.compose(steer.text)
         steer = null
@@ -874,6 +935,13 @@ export class Director {
       if (merged.intent === 'quit') {
         this.beginQuit()
         return null
+      }
+      if (merged.intent === 'setup') {
+        // A command, not a turn: run the recall, then keep composing — unless
+        // a /quit landed inside the conversation.
+        await this.recallSetup()
+        if (this.quit) return null
+        continue
       }
       if (merged.intent === 'settings') {
         // A /settings typed mid-compose is still just a command: show the pane

@@ -21,6 +21,7 @@ export const PROTOCOL = 2
 // fresh menu must never quit); the parser binds meanings to its own literals.
 export const COMMANDS = [
   { name: '/settings', blurb: 'open the settings pane' },
+  { name: '/setup', blurb: 'call the setup guide' },
   { name: '/quit', blurb: 'end the broadcast' },
 ] as const
 

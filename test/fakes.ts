@@ -137,13 +137,14 @@ export class FakeBrain implements Brain {
 export class FakeVoice {
   synthesized: string[] = []
   failTimes = 0
+  failWith = 'synth down'
 
   async start(): Promise<void> {}
 
   async synthesize(text: string): Promise<AudioClip> {
     if (this.failTimes > 0) {
       this.failTimes--
-      throw new Error('synth down')
+      throw new Error(this.failWith)
     }
     this.synthesized.push(text)
     return { source: `/fake/${this.synthesized.length}.wav`, kind: 'talk' }

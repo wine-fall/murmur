@@ -323,6 +323,14 @@ export class IpcHost implements Host {
     this.interruptHandler = handler
   }
 
+  // A live identity change (the /setup recall swapped the voice provider):
+  // re-greet the attached client so the identity line tells the truth, and
+  // let every later attach greet with it too.
+  refreshIdentity(patch: Partial<IpcHostOptions['identity']>): void {
+    this.opts.identity = { ...this.opts.identity, ...patch }
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'hello', ...this.greeting() })
+  }
+
   // The floor holder (spec 10 §3.4). Straight to the client, NOT send(): mode
   // is a state, and a replayed stale mode would repaint the wrong face on a
   // later attach — adopt() hands the current one instead.

@@ -37,7 +37,8 @@ describe('commandMatches', () => {
 
   it('a typed prefix narrows the menu to what the line could still become', () => {
     expect(commandMatches('/q').map((c) => c.name)).toEqual(['/quit'])
-    expect(commandMatches('/s').map((c) => c.name)).toEqual(['/settings'])
+    expect(commandMatches('/s').map((c) => c.name)).toEqual(['/settings', '/setup'])
+    expect(commandMatches('/setu').map((c) => c.name)).toEqual(['/setup'])
   })
 
   it('ordinary talk-back opens no menu — the affordance never crowds a sentence', () => {
