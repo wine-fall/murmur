@@ -190,7 +190,7 @@ Engine → TUI:
 | `segment` | `{ text }` | `onRadioSegment` |
 | `userLine` | `{ text }` | `onUserLine` echo |
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
-| `info` | `{ text }` | host info lines — context, notices, and everything that is not a question (§3.2-B) |
+| `info` | `{ text, tone? }` | host info lines — context, notices, and everything that is not a question (§3.2-B). `tone: 'flow'` marks a state-transition line (a stopped flow, the going-off ack): the client renders it in marked warm ink with a `■` marker so it cannot drown in tool output; the plain host prints it like any other line. Additive |
 | `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
 | `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |

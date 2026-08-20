@@ -243,6 +243,20 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(false)
   })
 
+  it('carries an info tone to the client — the flow-transition ink', async () => {
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.info('stopped — the setup guide is waiting for you', 'flow')
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({
+      v: 1,
+      type: 'info',
+      text: 'stopped — the setup guide is waiting for you',
+      tone: 'flow',
+    })
+  })
+
   it('routes an interrupt to the registered flow and drops the pending asks on both sides', async () => {
     // Esc in the TUI: the running flow stops, its waiting questions are
     // dead — the engine forgets them and tells the client to close its cards.

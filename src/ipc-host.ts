@@ -17,7 +17,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { devLogMirror, LineQueue, type AskKind, type FloorMode, type Host } from './host.ts'
+import { devLogMirror, LineQueue, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
 import {
   COMMANDS,
   decodeTuiMessage,
@@ -301,8 +301,8 @@ export class IpcHost implements Host {
     this.mirror('user', text)
   }
 
-  info(message: string): void {
-    this.send({ v: 1, type: 'info', text: message })
+  info(message: string, tone?: InfoTone): void {
+    this.send({ v: 1, type: 'info', text: message, ...(tone !== undefined && { tone }) })
     this.mirror('host', message)
   }
 

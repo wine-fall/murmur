@@ -463,7 +463,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     flow.escEpoch++
     esc.fire()
     void flow.session?.interruptTurn()
-    host.info('stopped that — the setup guide is listening.')
+    host.info('stopped — the setup guide is waiting for you', 'flow')
   })
   try {
     // The probes take real seconds: say so first, so the front-end has a
@@ -615,7 +615,7 @@ async function runSetupFlow(
     })
   } catch (err) {
     host.debug?.(`guide session error: ${String(err)}`)
-    host.info('the setup conversation ended unexpectedly; the radio goes on.')
+    host.info('the setup conversation ended unexpectedly; the radio goes on.', 'flow')
   }
 
   // The conversation is over: an Esc from here on has nothing to cut, and

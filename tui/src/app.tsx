@@ -78,7 +78,7 @@ const DOZE_FADE = 0.45
 // text cell, instead of leaving the stage.
 const HUSH_FADE = 0.55
 
-type Entry = { id: number; kind: 'segment' | 'user' | 'info'; text: string }
+type Entry = { id: number; kind: 'segment' | 'user' | 'info' | 'flow'; text: string }
 
 // Padded to one shared column: the two emoji do not render at the same width,
 // so a fixed count of spaces after each leaves the log ragged.
@@ -86,6 +86,7 @@ const MARKER: Record<Entry['kind'], string> = {
   segment: '\u{1F399} ',
   user: '\u2328\uFE0F ',
   info: '\u00B7  ',
+  flow: '\u25A0 ', // the state-transition block: a stopped flow must not drown
 }
 
 type Identity = { persona: string; brain: string; voice: string }
@@ -307,7 +308,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           append('user', message.text)
           break
         case 'info':
-          append('info', message.text)
+          append(message.tone === 'flow' ? 'flow' : 'info', message.text)
           break
         case 'ask':
           // The log keeps the record (the card clears on answer); the card
@@ -822,7 +823,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                       ? accent.bright
                       : entry.kind === 'user'
                         ? INK.user
-                        : INK.notice,
+                        : entry.kind === 'flow'
+                          ? WARM
+                          : INK.notice,
                   ),
                 }}
               >
@@ -830,9 +833,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   ? MARKER[entry.kind]
                   : entry.id === latestSegment
                     ? '● '
-                    : entry.kind === 'info'
-                      ? '· '
-                      : ''}
+                    : entry.kind === 'flow'
+                      ? '■ '
+                      : entry.kind === 'info'
+                        ? '· '
+                        : ''}
                 {entry.text}
               </text>
             </box>

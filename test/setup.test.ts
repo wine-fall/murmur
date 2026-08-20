@@ -35,11 +35,13 @@ function fakeHost(
 ): {
   host: Host
   infos: string[]
+  flows: string[]
   asks: { text: string; kind: AskKind }[]
   interrupts: { handler: (() => void) | null }
   modes: string[]
 } {
   const infos: string[] = []
+  const flows: string[] = []
   const asks: { text: string; kind: AskKind }[] = []
   const interrupts: { handler: (() => void) | null } = { handler: null }
   const modes: string[] = []
@@ -50,13 +52,16 @@ function fakeHost(
     eof: () => (atEof ? Promise.resolve() : new Promise(() => {})),
     onRadioSegment: () => {},
     onUserLine: () => {},
-    info: (m) => void infos.push(m),
+    info: (m, tone) => {
+      infos.push(m)
+      if (tone === 'flow') flows.push(m)
+    },
     onInterrupt: (handler) => void (interrupts.handler = handler),
     setMode: (who) => void modes.push(who),
     banner: () => {},
   }
   if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
-  return { host, infos, asks, interrupts, modes }
+  return { host, infos, flows, asks, interrupts, modes }
 }
 
 function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
@@ -715,7 +720,7 @@ describe('runSetup — declining, and what a decline costs later', () => {
     // The technician model: Esc while the guide works = query.interrupt() —
     // the turn dies, the session lives, the next typed line still goes to the
     // guide. Only /quit closes the session.
-    const { host, infos, interrupts } = fakeHost(['y', '/done'])
+    const { host, infos, flows, interrupts } = fakeHost(['y', '/done'])
     let musicProbes = 0
     let turnCuts = 0
     const requests: GuideRequest[] = []
@@ -743,6 +748,8 @@ describe('runSetup — declining, and what a decline costs later', () => {
     })
     expect(turnCuts).toBe(1)
     expect(outcome.musicOk).toBe(false)
+    // The stop is a state transition the listener must SEE: marked ink.
+    expect(flows.some((m) => m.includes('stopped'))).toBe(true)
     // A normal end: the closing re-probe runs and reports.
     expect(musicProbes).toBe(2)
     expect(infos.join('\n')).toContain('still not working')

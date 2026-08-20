@@ -217,7 +217,7 @@ export class Director {
   // (voice close, engine drain, bed position) is honest work, but doing it in
   // silence read as a hang (user report).
   private beginQuit(): void {
-    if (!this.quit) this.deps.host.info('going off the air...')
+    if (!this.quit) this.deps.host.info('going off the air...', 'flow')
     this.quit = true
   }
 
