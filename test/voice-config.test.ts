@@ -271,7 +271,7 @@ describe('write_voice_config tool (spec 03-03 §7.2)', () => {
         stopped = true // Esc lands while the paste prompt is waiting
         return ''
       },
-      aborted: () => stopped,
+      armAbort: () => () => stopped,
     })
     const reply = await call(tool, { ttsUrl: 'https://tts.example', needsApiKey: true })
     expect(reply.ok).toBe(false)
@@ -287,11 +287,37 @@ describe('write_voice_config tool (spec 03-03 §7.2)', () => {
       validate: async () => {
         stopped = true // Esc lands while the probe synth is in flight
       },
-      aborted: () => stopped,
+      armAbort: () => () => stopped,
     })
     const reply = await call(tool, { ttsUrl: 'https://tts.example' })
     expect(reply.ok).toBe(false)
     expect(readVoiceConfig(join(dir, 'voice.json'))).toBeNull()
+  })
+
+  it('the abort is armed at ENTRY: a cut noticed later still cancels this call, a spent cut does not', async () => {
+    // The watch is per-invocation: an Esc that lands mid-flight cancels THIS
+    // call even if the flow-level flag has since been reset by a new turn —
+    // and a fresh call after the cut is not haunted by it.
+    let epoch = 0
+    let calls = 0
+    const dir = home()
+    const tool = writeVoiceConfigTool({
+      home: dir,
+      validate: async () => {
+        if (++calls === 1) epoch++ // the Esc lands during the FIRST call's synth
+      },
+      armAbort: () => {
+        const at = epoch
+        return () => epoch > at
+      },
+    })
+    const cut = await call(tool, { ttsUrl: 'https://tts.example' })
+    expect(cut.ok).toBe(false)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toBeNull()
+    // No new Esc: the next call proceeds and writes.
+    const clean = await call(tool, { ttsUrl: 'https://tts.example' })
+    expect(clean.ok).toBe(true)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).not.toBeNull()
   })
 
   it('redacts the captured key from whatever the endpoint said back', async () => {

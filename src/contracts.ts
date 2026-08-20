@@ -260,6 +260,15 @@ export type GuideRequest = {
   // loop stops consuming messages and closes the SDK subprocess instead of
   // waiting out the turn in flight.
   readonly interrupt?: Promise<unknown>
+  // Hands the caller a live handle once the session opens. interruptTurn cuts
+  // only the turn in flight (the SDK answers with a result and the reply loop
+  // continues) — the listener's Esc, as opposed to `interrupt`'s /quit. On a
+  // query without interrupt support it resolves as a no-op.
+  readonly onSession?: (session: GuideSession) => void
+}
+
+export type GuideSession = {
+  interruptTurn(): Promise<void>
 }
 
 // The setup/repair capability, separate from Harness (find-music has no

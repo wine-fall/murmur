@@ -17,7 +17,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { devLogMirror, LineQueue, type AskKind, type Host } from './host.ts'
+import { devLogMirror, LineQueue, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
 import {
   COMMANDS,
   decodeTuiMessage,
@@ -69,6 +69,7 @@ export class IpcHost implements Host {
   private vizWanted: { on: boolean; fps: number | undefined } | null = null
   private settingsBridge: SettingsBridge | null = null
   private interruptHandler: (() => void) | null = null
+  private mode: FloorMode = 'radio'
   private mirror: (name: string, message: string) => void
   private markEof!: () => void
   private eofSeen: Promise<void>
@@ -191,7 +192,8 @@ export class IpcHost implements Host {
     // Only the questions still awaiting an answer, oldest first (§3.2-B).
     for (const message of this.pendingAsks) this.write(socket, message)
     // Every attach gets a fresh snapshot (spec 12 §2.5) — which is exactly why
-    // snapshots stay out of the replay backlog above.
+    // snapshots stay out of the replay backlog above. The floor mode rides in
+    // `hello` for the same reason: current state, never replay.
     this.sendSettings()
   }
 
@@ -203,6 +205,7 @@ export class IpcHost implements Host {
       persona: this.persona,
       ...this.opts.identity,
       ...(this.away !== undefined && { away: this.away }),
+      ...(this.mode !== 'radio' && { mode: this.mode }),
     }
   }
 
@@ -298,8 +301,8 @@ export class IpcHost implements Host {
     this.mirror('user', text)
   }
 
-  info(message: string): void {
-    this.send({ v: 1, type: 'info', text: message })
+  info(message: string, tone?: InfoTone): void {
+    this.send({ v: 1, type: 'info', text: message, ...(tone !== undefined && { tone }) })
     this.mirror('host', message)
   }
 
@@ -318,6 +321,15 @@ export class IpcHost implements Host {
 
   onInterrupt(handler: (() => void) | null): void {
     this.interruptHandler = handler
+  }
+
+  // The floor holder (spec 10 §3.4). Straight to the client, NOT send(): mode
+  // is a state, and a replayed stale mode would repaint the wrong face on a
+  // later attach — adopt() hands the current one instead.
+  setMode(who: FloorMode): void {
+    this.mode = who
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'mode', who })
+    this.mirror('tui', `floor: ${who}`)
   }
 
   onState(state: ProgramState): void {

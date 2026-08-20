@@ -208,8 +208,17 @@ export class Director {
   // Orderly-stop entry for signal handlers (Ctrl-C): the loop notices after
   // the current await settles; a playing clip is cut in runVoice's exit path.
   requestQuit(): void {
-    this.quit = true
+    this.beginQuit()
     this.wakeOnQuit()
+  }
+
+  // Every way a quit begins routes through here, so the listener hears the
+  // acknowledgment the moment the quit is HEARD — the teardown that follows
+  // (voice close, engine drain, bed position) is honest work, but doing it in
+  // silence read as a hang (user report).
+  private beginQuit(): void {
+    if (!this.quit) this.deps.host.info('going off the air...', 'flow')
+    this.quit = true
   }
 
   async run(maxSegments?: number): Promise<void> {
@@ -313,7 +322,7 @@ export class Director {
       if (intent === 'talkback') return work // queued for the on-air race
       const steer = this.takeSteer()
       if (steer.intent === 'quit') {
-        this.quit = true
+        this.beginQuit()
         return null
       }
       if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
@@ -791,7 +800,7 @@ export class Director {
           steer = this.takeSteer()
         }
         if (steer.intent === 'quit') {
-          this.quit = true
+          this.beginQuit()
           return
         }
         if (steer.intent === 'settings') {
@@ -822,7 +831,7 @@ export class Director {
         if (this.quitAfterReply) {
           this.quitAfterReply = false
           await current.promise
-          this.quit = true
+          this.beginQuit()
           return
         }
       }
@@ -863,7 +872,7 @@ export class Director {
       this.steerEpoch++ // the orphaned steer task's actions are dead (spec 11 §2.2)
       const merged = this.takeSteer()
       if (merged.intent === 'quit') {
-        this.quit = true
+        this.beginQuit()
         return null
       }
       if (merged.intent === 'settings') {

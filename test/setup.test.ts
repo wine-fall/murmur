@@ -35,12 +35,16 @@ function fakeHost(
 ): {
   host: Host
   infos: string[]
+  flows: string[]
   asks: { text: string; kind: AskKind }[]
   interrupts: { handler: (() => void) | null }
+  modes: string[]
 } {
   const infos: string[] = []
+  const flows: string[] = []
   const asks: { text: string; kind: AskKind }[] = []
   const interrupts: { handler: (() => void) | null } = { handler: null }
+  const modes: string[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
@@ -48,12 +52,16 @@ function fakeHost(
     eof: () => (atEof ? Promise.resolve() : new Promise(() => {})),
     onRadioSegment: () => {},
     onUserLine: () => {},
-    info: (m) => void infos.push(m),
+    info: (m, tone) => {
+      infos.push(m)
+      if (tone === 'flow') flows.push(m)
+    },
     onInterrupt: (handler) => void (interrupts.handler = handler),
+    setMode: (who) => void modes.push(who),
     banner: () => {},
   }
   if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
-  return { host, infos, asks, interrupts }
+  return { host, infos, flows, asks, interrupts, modes }
 }
 
 function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
@@ -708,20 +716,23 @@ describe('runSetup — declining, and what a decline costs later', () => {
     expect(infos.join('\n')).not.toContain('still not working')
   })
 
-  it("Esc mid-conversation stops the flow without quitting: guide cut, no re-probe, the radio boots on", async () => {
-    // The front-end's Esc arrives as a host interrupt. It ends THIS flow the
-    // way /quit does — reads decline, the SDK session is cut, no closing
-    // network probe — but the app is NOT shutting down.
-    const { host, infos, interrupts } = fakeHost(['y'])
-    const quit = quitLatch()
+  it('Esc mid-turn cuts the TURN, not the session: the conversation continues (spec 03-03 §7 lifecycle)', async () => {
+    // The technician model: Esc while the guide works = query.interrupt() —
+    // the turn dies, the session lives, the next typed line still goes to the
+    // guide. Only /quit closes the session.
+    const { host, infos, flows, interrupts } = fakeHost(['y', '/done'])
     let musicProbes = 0
+    let turnCuts = 0
     const requests: GuideRequest[] = []
     const guide: GuideCapable = {
       runGuide: async (req) => {
         requests.push(req)
-        interrupts.handler?.()
-        await req.interrupt // must resolve on the stop latch, not only on quit
-        return 'interrupted.'
+        req.onSession?.({ interruptTurn: async () => void turnCuts++ })
+        interrupts.handler?.() // Esc lands while the turn is in flight
+        // The session survives the Esc: the reply loop still runs and the
+        // typed /done is what actually ends it.
+        expect(await req.nextUserInput?.()).toBeNull()
+        return 'done'
       },
     }
     const outcome = await runSetup({
@@ -734,20 +745,47 @@ describe('runSetup — declining, and what a decline costs later', () => {
           return NO_YTDLP
         },
       },
-      quit,
     })
-    expect(quit.requested).toBe(false)
-    expect(musicProbes).toBe(1)
+    expect(turnCuts).toBe(1)
     expect(outcome.musicOk).toBe(false)
-    const shown = infos.join('\n')
-    expect(shown).toContain('stopped')
-    expect(shown).not.toContain('all set')
-    expect(shown).not.toContain('still not working')
+    // The stop is a state transition the listener must SEE: marked ink.
+    expect(flows.some((m) => m.includes('stopped'))).toBe(true)
+    // A normal end: the closing re-probe runs and reports.
+    expect(musicProbes).toBe(2)
+    expect(infos.join('\n')).toContain('still not working')
     // The flow is over: the handler is unregistered so a later Esc is noise.
     expect(interrupts.handler).toBeNull()
   })
 
-  it('Esc at the offer declines it for now — never a standing decline', async () => {
+  it('Esc while the guide waits for a reply ends the conversation — the Esc-Esc exit ≡ /done', async () => {
+    const { host, infos, interrupts } = fakeHost(['y'])
+    let musicProbes = 0
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        const pending = req.nextUserInput?.()
+        await new Promise((r) => setImmediate(r))
+        interrupts.handler?.() // the guide is idle at the reply prompt
+        expect(await pending).toBeNull()
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes: {
+        music: async () => {
+          musicProbes++
+          return NO_YTDLP
+        },
+      },
+    })
+    // Ending is ending: same closing re-probe and verdict as a typed /done.
+    expect(musicProbes).toBe(2)
+    expect(infos.join('\n')).toContain('still not working')
+  })
+
+  it('Esc at the offer reads as "not now" — never a standing decline', async () => {
     const ledger = fakeLedger()
     const { host, infos, interrupts } = fakeHost([])
     const { guide, requests } = fakeGuide()
@@ -758,19 +796,17 @@ describe('runSetup — declining, and what a decline costs later', () => {
       ledger,
       probes,
     })
-    // The offer is waiting on the keyboard; Esc answers it with "stop".
     await new Promise((r) => setImmediate(r))
     interrupts.handler?.()
     await pending
     expect(requests).toEqual([])
     expect(ledger.events).toEqual([])
     expect(infos.join('\n')).not.toContain("won't ask again")
-    // Not silence either: the card vanishing needs one line of closure.
-    expect(infos.join('\n')).toContain('stopped')
+    expect(infos.join('\n')).toContain('not now')
   })
 
   it('Esc during the opening probes is already armed: no offer opens', async () => {
-    // detectGaps is a live network search taking real seconds; the stop seam
+    // detectGaps is a live network search taking real seconds; the Esc seam
     // must exist for its whole window, not only once the offer is up.
     const { host, asks, infos, interrupts } = fakeHost([], { docked: true })
     const { guide, requests } = fakeGuide()
@@ -788,10 +824,10 @@ describe('runSetup — declining, and what a decline costs later', () => {
     })
     expect(asks).toEqual([])
     expect(requests).toEqual([])
-    expect(infos.join('\n')).toContain('stopped')
+    expect(infos.join('\n')).toContain('not now')
   })
 
-  it('Esc while the paste prompt waits: nothing validated, nothing saved', async () => {
+  it('Esc while the paste prompt waits aborts the TOOL; a second Esc at the idle prompt hands back', async () => {
     const { host, interrupts } = fakeHost(['y'])
     const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
     let validated = 0
@@ -803,11 +839,17 @@ describe('runSetup — declining, and what a decline costs later', () => {
           { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', needsApiKey: true },
           {},
         )
-        // The paste prompt is waiting on the keyboard; Esc lands now.
+        // The paste prompt is waiting on the keyboard; Esc #1 lands mid-turn:
+        // the tool aborts, the session lives.
         await new Promise((r) => setImmediate(r))
         interrupts.handler?.()
         await pending
-        return 'stopped'
+        // The guide goes idle at the reply prompt; Esc #2 is the hand-back.
+        const reply = req.nextUserInput?.()
+        await new Promise((r) => setImmediate(r))
+        interrupts.handler?.()
+        expect(await reply).toBeNull()
+        return 'done'
       },
     }
     await runSetup({
@@ -818,6 +860,93 @@ describe('runSetup — declining, and what a decline costs later', () => {
       validateVoice: async () => void validated++,
     })
     expect(validated).toBe(0)
+    expect(readVoiceConfig(join(home, 'voice.json'))).toBeNull()
+  })
+
+  it('a guide session that dies must not take the radio down — the boot continues (real-SDK crash shape)', async () => {
+    // Reproduced live: ending the streaming input right after an interrupted
+    // turn makes the SDK iterator throw its error result. Whatever the guide
+    // dies of, runSetup absorbs it: one honest line, floor back, outcome from
+    // the known gaps — the radio always launches (spec 03-03).
+    const { host, infos, modes } = fakeHost(['y'])
+    const guide: GuideCapable = {
+      runGuide: async () => {
+        throw new Error('Claude Code returned an error result: [ede_diagnostic] stop_reason=tool_use')
+      },
+    }
+    const outcome = await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes,
+    })
+    expect(outcome.musicOk).toBe(false)
+    expect(modes).toEqual(['guide', 'radio'])
+    expect(infos.join('\n')).toContain('ended unexpectedly')
+  })
+
+  it('the guide holds the floor from the y to the conversation end — BEFORE the closing probe', async () => {
+    // The re-probe takes seconds; a face still saying "talking to the setup
+    // guide" while lines queue for the Director would recreate the exact
+    // wrong-partner confusion this boundary exists to kill.
+    const events: string[] = []
+    const { host, modes } = fakeHost(['y', '/done'])
+    const inner = host.setMode!
+    host.setMode = (who) => {
+      events.push(`mode:${who}`)
+      inner(who)
+    }
+    const { guide } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes: {
+        music: async () => {
+          events.push('probe')
+          return NO_YTDLP
+        },
+      },
+    })
+    expect(modes).toEqual(['guide', 'radio'])
+    // The floor went back BETWEEN the conversation and the closing probe.
+    expect(events).toEqual(['probe', 'mode:guide', 'mode:radio', 'probe'])
+  })
+
+  it('Esc during the validating synth still aborts, even after a new turn reset the flow flag', async () => {
+    // The race codex found: interruptTurn ends the turn, nextUserInput opens a
+    // new one (resetting turnAborted) while the tool's validate is still in
+    // flight — the abort must be scoped to the tool call, not the flow flag.
+    const { host, interrupts } = fakeHost(['y'])
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    let releaseValidate!: () => void
+    const validateGate = new Promise<void>((r) => (releaseValidate = r))
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        const tool = req.tools?.[0]
+        if (tool === undefined) throw new Error('the voice gap got no write tool')
+        const pending = tool.handler({ ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free' }, {})
+        await new Promise((r) => setImmediate(r))
+        interrupts.handler?.() // Esc lands while validate is in flight
+        // The SDK ends the turn and the reply loop opens a NEW turn, which
+        // resets the flow-level abort flag — the classic race window.
+        const reply = req.nextUserInput?.()
+        await new Promise((r) => setImmediate(r))
+        releaseValidate() // validate finishes only now
+        await pending
+        await new Promise((r) => setImmediate(r))
+        interrupts.handler?.() // idle Esc: hand back
+        expect(await reply).toBeNull()
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, home }),
+      probes: { music: async () => OK, bun: async () => OK },
+      validateVoice: async () => validateGate,
+    })
     expect(readVoiceConfig(join(home, 'voice.json'))).toBeNull()
   })
 

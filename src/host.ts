@@ -24,7 +24,10 @@ export interface Host {
   eof?(): Promise<void>
   onRadioSegment(text: string): void
   onUserLine(text: string): void
-  info(message: string): void
+  // `tone` marks the rare state-transition line the listener must not miss
+  // (a stopped flow, the going-off ack): a front-end with color renders it in
+  // marked ink; the plain host prints it like any other line.
+  info(message: string, tone?: InfoTone): void
   // A question that wants the user's next line (spec 10 §3.2-B): the guide's
   // consents, the first-run seeds, the free-reply prompt. A front-end with a
   // question surface pins it beside the input; absent, callers fall back to
@@ -35,6 +38,11 @@ export interface Host {
   // handler for its own duration (null to unregister); a host without the
   // seam — or an engine with no flow registered — treats Esc as noise.
   onInterrupt?(handler: (() => void) | null): void
+  // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
+  // the radio, or a foreground agent session (the setup guide). A front-end
+  // with a face paints the switch; the plain host reads fine without one —
+  // its transcript is serial anyway.
+  setMode?(who: FloorMode): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void
@@ -54,6 +62,12 @@ export interface Host {
 // presentational (the dock's title), not semantic — the reader treats both as
 // one line either way.
 export type AskKind = 'question' | 'consent'
+
+// At most one foreground agent session at a time (the boundary rule): 'guide'
+// while the setup guide holds the floor, 'radio' otherwise.
+export type FloorMode = 'radio' | 'guide'
+
+export type InfoTone = 'flow'
 
 // Every question the engine asks goes through here: hosts with a question
 // surface get the marked ask, bare ones get the same text as info.
@@ -163,6 +177,7 @@ export class CliHost implements Host {
     this.mirror('user', text)
   }
 
+  // The plain host has one ink: a toned line prints like any other.
   info(message: string): void {
     console.log(`·  ${message}`)
     this.mirror('host', message)

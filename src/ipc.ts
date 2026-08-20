@@ -97,6 +97,9 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     // Seconds since murmur last heard anything, so the pet can acknowledge the
     // absence (spec 10 §3.7.3). Absent = no history to go on (a first run).
     away: z.number().optional(),
+    // Who holds the floor right now (§3.4): an attach mid-setup opens on the
+    // guide's face. Absent = radio (additive).
+    mode: z.enum(['radio', 'guide']).optional(),
   }),
   z.object({ v, type: z.literal('segment'), text: z.string() }),
   z.object({ v, type: z.literal('userLine'), text: z.string() }),
@@ -109,7 +112,9 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     state: ProgramStateSchema,
     microcopy: z.string().optional(),
   }),
-  z.object({ v, type: z.literal('info'), text: z.string() }),
+  // `tone: 'flow'` marks a state-transition line (a stopped flow, the
+  // going-off ack) for marked ink client-side. Additive.
+  z.object({ v, type: z.literal('info'), text: z.string(), tone: z.enum(['flow']).optional() }),
   // A question pinned beside the input (spec 10 §3.2-B): the guide's consents
   // and the first-run seeds, marked so the front-end can dock them instead of
   // guessing which info line wants an answer. Additive — an older client drops
@@ -118,6 +123,10 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // Every pending ask just died with its flow (the listener's Esc stopped it):
   // the client drops its cards. Additive, like `ask`.
   z.object({ v, type: z.literal('askDrop') }),
+  // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
+  // the client paints the switch — strip, identity line, input. Stateful, not
+  // replayed: the host resends the current mode on every attach.
+  z.object({ v, type: z.literal('mode'), who: z.enum(['radio', 'guide']) }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
   // after every settingsSet — the pane always renders truth, never local

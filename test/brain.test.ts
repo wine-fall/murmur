@@ -6,7 +6,7 @@ import type { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage 
 import { describe, expect, it } from 'vitest'
 
 import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain.ts'
-import type { ContextPack, GuideRequest } from '../src/contracts.ts'
+import type { ContextPack, GuideRequest, GuideSession } from '../src/contracts.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 import { cleanBeats, emitTalkBeatsTool } from '../src/talk-tools.ts'
 
@@ -393,6 +393,77 @@ describe('runGuideSession', () => {
       ),
     ).rejects.toThrow('host went away')
     expect(returned).toBe(true)
+  })
+
+  it('onSession.interruptTurn cuts the turn in flight and the conversation continues (Esc)', async () => {
+    // Esc mid-turn (spec 03-03 §7 lifecycle): query.interrupt() ends only the
+    // CURRENT turn — the SDK answers it with a result — and the streaming
+    // input then pulls the user's next reply. The session survives; only the
+    // `interrupt` promise (a /quit) closes it.
+    const received: string[] = []
+    let sess: GuideSession | null = null
+    const replies = ['try uv instead', null]
+    const query = ({ prompt }: { prompt: string | AsyncIterable<SDKUserMessage> }) => {
+      if (typeof prompt === 'string') throw new Error('guide must use streaming input')
+      const queue: SDKMessage[] = []
+      let wake: (() => void) | null = null
+      let closed = false
+      const push = (m?: SDKMessage): void => {
+        if (m !== undefined) queue.push(m)
+        wake?.()
+        wake = null
+      }
+      void (async () => {
+        let turn = 0
+        for await (const message of prompt) {
+          received.push(String(message.message.content))
+          turn++
+          if (turn === 1) push(assistant('installing the slow way...')) // then hangs: no result
+          else {
+            push(assistant('done via uv.'))
+            push(result())
+          }
+        }
+        closed = true
+        push()
+      })()
+      return {
+        async *[Symbol.asyncIterator](): AsyncGenerator<SDKMessage> {
+          while (true) {
+            if (queue.length === 0) {
+              if (closed) return
+              await new Promise<void>((res) => (wake = res))
+            }
+            const m = queue.shift()
+            if (m !== undefined) yield m
+          }
+        },
+        interrupt: async () => push(result()), // the SDK closes the turn with a result
+      }
+    }
+    const final = await runGuideSession(
+      query,
+      guideReq({
+        onSession: (s) => (sess = s),
+        onText: (t) => {
+          if (t.includes('slow way')) void sess?.interruptTurn()
+        },
+        nextUserInput: async () => replies.shift() ?? null,
+      }),
+    )
+    expect(received).toEqual(['fix it', 'try uv instead'])
+    expect(final).toContain('done via uv.')
+  })
+
+  it('onSession still arrives on a query without interrupt support, and interruptTurn is a no-op', async () => {
+    let sess: GuideSession | null = null
+    const final = await runGuideSession(
+      fakeQuery([['all good.']], []),
+      guideReq({ onSession: (s) => (sess = s) }),
+    )
+    expect(sess).not.toBeNull()
+    await expect(sess!.interruptTurn()).resolves.toBeUndefined()
+    expect(final).toBe('all good.')
   })
 
   it('an interrupt that never fires changes nothing', async () => {

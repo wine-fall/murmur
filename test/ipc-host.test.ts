@@ -243,6 +243,20 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(false)
   })
 
+  it('carries an info tone to the client — the flow-transition ink', async () => {
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.info('stopped — the setup guide is waiting for you', 'flow')
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({
+      v: 1,
+      type: 'info',
+      text: 'stopped — the setup guide is waiting for you',
+      tone: 'flow',
+    })
+  })
+
   it('routes an interrupt to the registered flow and drops the pending asks on both sides', async () => {
     // Esc in the TUI: the running flow stops, its waiting questions are
     // dead — the engine forgets them and tells the client to close its cards.
@@ -277,6 +291,25 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     second.attach()
     await second.settle()
     expect(second.received.some((m) => m.type === 'ask')).toBe(true)
+  })
+
+  it('broadcasts the floor mode, and hands the CURRENT mode to a late attach', async () => {
+    // The conversation-partner boundary (spec 10 §3.4): a front-end attaching
+    // mid-setup must open on the guide's face, not the radio's.
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.setMode('guide')
+    await first.settle()
+    expect(first.received.at(-1)).toEqual({ v: 1, type: 'mode', who: 'guide' })
+    const second = await client()
+    second.attach()
+    await second.settle()
+    const hello = second.received.find((m) => m.type === 'hello')
+    expect(hello).toMatchObject({ mode: 'guide' })
+    host.setMode('radio')
+    await second.settle()
+    expect(second.received.at(-1)).toEqual({ v: 1, type: 'mode', who: 'radio' })
   })
 
   it('feeds a submitted line into the same queue the CLI host uses', async () => {

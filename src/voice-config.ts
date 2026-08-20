@@ -121,11 +121,12 @@ export type WriteVoiceConfigDeps = {
   // Absent = this session has no keyboard to ask with (a non-interactive run),
   // which is a refusal, not a silent keyless write.
   promptSecret?: (label: string) => Promise<string>
-  // The user stopped the flow (Esc / quit). The stop resolves a pending
-  // promptSecret as '', which must read as an abort — never as "no key,
-  // proceed": a validating synth and a saved voice.json after the user asked
-  // to stop are side effects nobody consented to.
-  aborted?: () => boolean
+  // Arm a per-call abort watch at handler entry. The user's Esc cuts a TURN;
+  // this call may still be in flight when the next turn opens and resets the
+  // flow-level flag, so the watch is scoped to the invocation: it answers
+  // "did a cut land since THIS call began". A stop resolving the pending
+  // promptSecret as '' must read as an abort — never as "no key, proceed".
+  armAbort?: () => () => boolean
   // Fired only after a validated config has actually landed on disk. Receives
   // the config, so a consumer must print only the fields it means to (the URL).
   onWritten?: (config: VoiceConfig) => void
@@ -170,6 +171,7 @@ export function writeVoiceConfigTool(deps: WriteVoiceConfigDeps): TaskTool {
         .describe('true if this endpoint authenticates with a key; murmur will ask the user for it'),
     },
     async (args) => {
+      const aborted = deps.armAbort?.() ?? (() => false)
       const parsed = VoiceConfigSchema.safeParse(args)
       if (!parsed.success) {
         return reply({ ok: false, error: 'a non-empty ttsUrl is required' })
@@ -189,7 +191,7 @@ export function writeVoiceConfigTool(deps: WriteVoiceConfigDeps): TaskTool {
           })
         }
         const key = (await deps.promptSecret(API_KEY_LABEL)).trim()
-        if (deps.aborted?.() === true) {
+        if (aborted()) {
           return reply({ ok: false, error: 'the user stopped the setup' })
         }
         if (key !== '') config = { ...config, apiKey: key }
@@ -207,9 +209,9 @@ export function writeVoiceConfigTool(deps: WriteVoiceConfigDeps): TaskTool {
       } catch (err) {
         return reply({ ok: false, error: `the endpoint did not answer: ${message(err)}` })
       }
-      // Esc while the probe synth was in flight: proven or not, the user is
-      // gone — persist nothing.
-      if (deps.aborted?.() === true) {
+      // Esc while the probe synth was in flight: proven or not, the user cut
+      // this call — persist nothing.
+      if (aborted()) {
         return reply({ ok: false, error: 'the user stopped the setup' })
       }
       try {
