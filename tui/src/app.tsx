@@ -656,7 +656,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             backgroundColor: INK.bg,
           }}
         >
-          <text style={{ fg: roomAccent.bright }}>{strip}</text>
+          <text style={{ fg: guideFloor ? lit(WARM) : roomAccent.bright }}>{strip}</text>
           <text style={{ fg: lit(INK.dim) }}>
             {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
           </text>
@@ -664,7 +664,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       ) : (
         <box style={{ flexDirection: 'column' }}>
           <box style={{ flexDirection: 'row', justifyContent: 'center', height: 1 }}>
-            <text style={{ fg: roomAccent.bright }}>{strip}</text>
+            <text style={{ fg: guideFloor ? lit(WARM) : roomAccent.bright }}>{strip}</text>
           </box>
           <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
         </box>
