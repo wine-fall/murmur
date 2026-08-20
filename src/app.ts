@@ -35,7 +35,7 @@ import { MusicProgrammer } from './music-programmer.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { loadPersona, personaLine } from './persona.ts'
-import { quitLatch, runSetup, type SetupTargets } from './guide.ts'
+import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import { preflightBun } from './startup.ts'
@@ -303,6 +303,19 @@ export function voiceAfterSetup(config: Config, saved: VoiceConfig | null): Conf
   return config.voiceExplicit ? next : { ...next, voice: 'hosted' }
 }
 
+// Whether the /setup recall's outcome needs a live provider swap (spec 10
+// §3.4): exactly the knobs buildVoice reads.
+export function voiceChanged(a: Config, b: Config): boolean {
+  return (
+    a.voice !== b.voice ||
+    a.ttsUrl !== b.ttsUrl ||
+    a.ttsApiKey !== b.ttsApiKey ||
+    a.ttsReferenceId !== b.ttsReferenceId ||
+    a.ttsModel !== b.ttsModel ||
+    a.ttsSeed !== b.ttsSeed
+  )
+}
+
 // The explicit setup entries (spec 03-03 §7.1): `murmur --setup` walks the whole
 // onboarding surface and `murmur --setup-music` just the music binaries — each a
 // separate serial conversation, never woven into a first run. No broadcast.
@@ -334,10 +347,7 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
   }
   // Complete means every piece this entry actually covered, bun included: with
   // the TUI the default front-end, an unrepaired bun is a real gap, not a note.
-  const ok =
-    (!targets.wantsMusic || (outcome.musicOk && outcome.ytdlpFresh)) &&
-    (!targets.wantsBun || outcome.bunOk) &&
-    (!targets.wantsVoice || outcome.voiceOk)
+  const ok = setupComplete(targets, outcome)
   host.info(ok ? 'setup is complete.' : 'some pieces are still not set up.')
   return ok
 }
@@ -426,7 +436,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // missing and murmur offers — once per boot — to fix it by talking. A decline
   // is remembered on the tier-3 ledger so later boots stay quiet. The radio
   // launches either way; the gaps only decide how degraded it starts.
-  const targets = setupTargets(config)
+  // A configured endpoint the Director watched fail auth (issue #97): the
+  // flag turns the endpoint back into a gap for the /setup recall's probes,
+  // and a successful swap clears it.
+  const voiceAuthDown = { current: false }
+  const targets = setupTargets(config, { voiceFailing: () => voiceAuthDown.current })
   let setupMusicOk = false
   if (claude !== null && !quit.requested) {
     const outcome = await runSetup({
@@ -448,12 +462,20 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   }
   // Resolved after the conversation, so an endpoint saved during it is heard
   // THIS boot rather than the next one — and so the banner reports the voice
-  // that is actually playing, not the one the flags asked for.
-  const resolved = voiceAfterSetup(config, targets.voiceConfig())
+  // that is actually playing, not the one the flags asked for. `let`: the
+  // /setup recall re-resolves the same way and swaps the live provider.
+  let resolved = voiceAfterSetup(config, targets.voiceConfig())
   // The live settings authority (spec 12 §2.4), seeded from the fully resolved
   // config: everything below reads it instead of captured scalars.
   const settings = buildSettingsStore(resolved, (m) => host.info(m))
-  const voice = buildVoice(resolved, (m) => host.info(m))
+  // The delegate is what everything holds; the provider behind it can be
+  // swapped by the /setup recall without anyone noticing (spec 10 §3.4).
+  let liveVoice = buildVoice(resolved, (m) => host.info(m))
+  const voice: VoiceProvider = {
+    start: () => liveVoice.start(),
+    synthesize: (text) => liveVoice.synthesize(text),
+    close: () => liveVoice.close(),
+  }
   // The listener's mute is the engine's master gain (spec 12 §3.4): applied
   // from the persisted state now and on every change — the program never
   // notices, only the speakers do.
@@ -494,6 +516,51 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // Director keeps its tool-less respond path there by construction.
   const steer = claude !== null ? new SteerResponder({ brain: claude, model: config.model }) : undefined
 
+  // The mid-broadcast /setup recall (spec 10 §3.4, closes issue #97's reopen
+  // gap): the same conversation as boot, explicit like `make setup` (no
+  // standing decline), with the outcome applied live where it can be — the
+  // voice provider swaps behind the delegate; a music repair waits for the
+  // wiring the next boot builds, and says so.
+  let onSetupQuit: () => void = () => {}
+  let onVoiceSwap: () => void = () => {}
+  const setupRecall =
+    claude !== null
+      ? async (): Promise<void> => {
+          const outcome = await runSetup({ host, guide: claude, targets, quit, explicit: true })
+          const next = voiceAfterSetup(config, targets.voiceConfig())
+          if (voiceChanged(resolved, next)) {
+            resolved = next
+            const old = liveVoice
+            liveVoice = buildVoice(resolved, (m) => host.info(m))
+            await liveVoice.start()
+            voiceAuthDown.current = false
+            // The buffered look-ahead was synthesized by the old provider,
+            // whose close removes its temp clips — drop it before closing.
+            onVoiceSwap()
+            // A grace before the close: the clip on air may still be
+            // streaming from the old provider's directory.
+            // ponytail: a timer, not a refcount — clips are seconds long and
+            // the leak on early exit is one temp dir the OS reaps.
+            setTimeout(() => void old.close().catch(() => {}), 60_000).unref()
+            host.info('the voice change is live.', 'flow')
+            if (host instanceof IpcHost) {
+              host.refreshIdentity({ voice: resolved.voice })
+              host.sendSettings()
+            }
+          } else if (voiceAuthDown.current && targets.wantsVoice && outcome.voiceOk) {
+            // Repaired on disk but not in this process: the endpoint knobs
+            // come from the environment, which outranks the saved file.
+            host.info('the endpoint settings come from your environment — update .env and restart to apply the fix.')
+          }
+          if (targets.wantsMusic && outcome.musicOk && music === undefined) {
+            host.info('music tools are ready — they wire up on the next boot.')
+          }
+          // A /quit typed INTO the setup conversation was consumed by its
+          // reader; hand it to the Director so leaving still works.
+          if (quit.requested) onSetupQuit()
+        }
+      : undefined
+
   const director = new Director({
     persona,
     brain,
@@ -506,7 +573,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(music !== undefined && { music }),
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
+    ...(setupRecall !== undefined && { setupRecall }),
+    onVoiceAuthFailure: () => (voiceAuthDown.current = true),
   })
+  onSetupQuit = () => director.requestQuit()
+  onVoiceSwap = () => director.invalidateTalkAhead()
 
   // The settings bridge (spec 12 §2.5): the pane reads and writes through the
   // engine, and every accepted change is broadcast by the store's own event.

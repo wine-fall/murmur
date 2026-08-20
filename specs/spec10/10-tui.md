@@ -382,7 +382,8 @@ Deliberately deferred, additive when wanted: an `ask` hint field for
 placeholder examples and per-flow option copy, and step metadata for a real
 `n/total` — the counter and the generic option row cost zero wire changes.
 
-**C. Commands**: `/quit` (spec 01), `/done` (guide mode). The engine parses
+**C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
+mid-broadcast recall). The engine parses
 all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
@@ -535,10 +536,21 @@ contract (no framework until a second agent exists):
   (first-run seeds, the broadcast) the interrupt is noise and the cards
   stand.
 
-Deferred to the mid-broadcast slice (decided, not yet built): a `/setup`
-command recalls the guide over the air — the Director's talk loop pauses,
-the engine/bed keeps playing, and `/done` resumes the DJ where it paused
-(closes issue #97's reopen gap).
+**The mid-broadcast recall (as built)**: a typed `/setup` recalls the guide
+over the air. The Director treats it as a command, not a turn (the
+`/settings` precedent) at every steer site — the segment loop PARKS inside
+the app's `setupRecall` callback while whatever is on the air plays out
+(the record keeps spinning; the clip's tail finishes on its own; no new
+segment opens) and resumes when the conversation ends. The recall runs the
+same `runSetup`, explicit like `make setup` (no standing decline; a clean
+machine answers `everything checks out — nothing to fix.`), with the
+outcome applied live where it can be: the voice provider swaps behind a
+delegate when the resolved voice changed (`voiceChanged`), a repaired music
+stack says it wires up next boot, and a `/quit` consumed by the guide's
+reader is handed to the Director on return. Stub runs (no guide) answer
+`/setup` with the shell pointer. An auth-shaped voice failure (401/402/403)
+names this path once per run — `type /setup to fix it` — instead of
+skipping segments silently forever (issue #97).
 
 ### 3.5 Process lifecycle (v1)
 

@@ -243,6 +243,22 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(false)
   })
 
+  it('refreshIdentity re-greets the client, so a swapped voice shows on the identity line', async () => {
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('guide')
+    host.refreshIdentity({ voice: 'hosted' })
+    await c.settle()
+    const hellos = c.received.filter((m) => m.type === 'hello')
+    expect(hellos.at(-1)).toMatchObject({ voice: 'hosted', mode: 'guide' })
+    // A later attach greets with the updated identity too.
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.find((m) => m.type === 'hello')).toMatchObject({ voice: 'hosted' })
+  })
+
   it('carries an info tone to the client — the flow-transition ink', async () => {
     const c = await client()
     c.attach()

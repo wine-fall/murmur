@@ -31,10 +31,107 @@ function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
 }
 
 describe('steerFromLine', () => {
-  it('classifies /quit, /settings and talkback', () => {
+  it('classifies /quit, /settings, /setup and talkback', () => {
     expect(steerFromLine(' /quit ')).toEqual({ intent: 'quit' })
     expect(steerFromLine('/settings')).toEqual({ intent: 'settings' })
+    expect(steerFromLine('/setup')).toEqual({ intent: 'setup' })
     expect(steerFromLine('hello')).toEqual({ intent: 'talkback', text: 'hello' })
+  })
+})
+
+describe('Director — /setup recall (spec 10 §3.4 mid-broadcast)', () => {
+  it('a typed /setup pauses the talk loop for the recall and resumes after', async () => {
+    // Q6 of the boundary decisions: the DJ stops opening new segments while
+    // the guide has the floor; the recall returning hands the loop back.
+    let inRecall = false
+    let recalls = 0
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    const { brain, player, host, director } = setup({
+      setupRecall: async () => {
+        recalls++
+        inRecall = true
+        await gate
+        inRecall = false
+      },
+    })
+    brain.batches = [['a'], ['b']]
+    player.auto = false
+    const run = director.run(2)
+    await until(() => player.played.length === 1, 'first clip on air')
+    host.type('/setup')
+    await until(() => inRecall, 'the recall opened')
+    // The loop is parked inside the recall: no second segment airs.
+    await new Promise((r) => setTimeout(r, 30))
+    expect(player.played.length).toBe(1)
+    release()
+    player.finish() // the parked clip ends; the loop moves to the next segment
+    await until(() => player.played.length === 2, 'the broadcast resumed')
+    host.type('/quit')
+    await run
+    expect(recalls).toBe(1)
+  })
+
+  it('without the recall wiring (a stub run), /setup answers with the shell pointer', async () => {
+    const { brain, player, host, director } = setup()
+    brain.batches = [['a']]
+    player.auto = false
+    const run = director.run()
+    await until(() => player.played.length === 1, 'clip on air')
+    host.type('/setup')
+    await until(() => host.infos.some((m) => m.includes('make setup')), 'the pointer line')
+    host.type('/quit')
+    await run
+  })
+
+  it('auth-shaped synth failures point at /setup ONCE — the reopen path (issue #97)', async () => {
+    const { brain, voice, player, host, director } = setup()
+    brain.batches = [['a'], ['b'], ['c']]
+    player.auto = true
+    voice.failTimes = 99
+    voice.failWith = 'endpoint answered 401 unauthorized'
+    await director.run(3)
+    const hints = host.infos.filter((m) => m.includes('/setup'))
+    expect(hints.length).toBe(1)
+  })
+
+  it('an auth failure also raises the app seam, so detectGaps can see a failing endpoint', async () => {
+    let raised = 0
+    const { brain, voice, player, director } = setup({ onVoiceAuthFailure: () => void raised++ })
+    brain.batches = [['a']]
+    player.auto = true
+    voice.failTimes = 99
+    voice.failWith = '403 forbidden'
+    await director.run(1)
+    expect(raised).toBeGreaterThanOrEqual(1)
+  })
+
+  it('a /quit that lands inside the recall stops the loop without composing more', async () => {
+    let fireQuit: () => void = () => {}
+    const { brain, player, host, director } = setup({
+      setupRecall: async () => fireQuit(), // the user typed /quit INTO the setup conversation
+    })
+    fireQuit = () => director.requestQuit()
+    brain.batches = [['a'], ['b']]
+    player.auto = false
+    const run = director.run()
+    await until(() => player.played.length === 1, 'clip on air')
+    host.type('/setup')
+    player.finish()
+    await run // must resolve: the recall's quit is honored, no second segment
+    expect(player.played.length).toBe(1)
+    expect(host.infos.some((m) => m.includes('going off the air'))).toBe(true)
+  })
+
+  it('a non-auth synth failure keeps the plain skip line — no /setup nagging', async () => {
+    const { brain, voice, player, host, director } = setup()
+    brain.batches = [['a']]
+    player.auto = true
+    voice.failTimes = 99
+    voice.failWith = 'socket hang up'
+    await director.run(1)
+    expect(host.infos.some((m) => m.includes('skipping this segment'))).toBe(true)
+    expect(host.infos.some((m) => m.includes('/setup'))).toBe(false)
   })
 })
 
