@@ -74,7 +74,11 @@ live tracker is [`specs/STATUS.md`](specs/STATUS.md).
 ## Install & run
 
 ```bash
-# core (runs model-free: stub voice, stub or real brain)
+# as a CLI (once published; runs the same code, no build step)
+npm install -g murmur-radio
+murmur
+
+# from a checkout: core (runs model-free: stub voice, stub or real brain)
 pnpm install
 
 # run the loop

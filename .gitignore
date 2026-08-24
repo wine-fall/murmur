@@ -23,3 +23,6 @@ graphify-out/
 # Local-only env configs (endpoints/keys) — .env is generated from .env.<backend>
 # by `make dev-fishaudio` / `make dev-opuslab`; never commit any of them.
 .env*
+
+# prepack build output (npm tarball only)
+dist/
