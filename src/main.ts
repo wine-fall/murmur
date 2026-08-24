@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Entry point: parse the CLI, run the app. Kept separate from app.ts so tests
 // can import the wiring without executing it.
 

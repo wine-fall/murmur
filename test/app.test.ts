@@ -8,6 +8,7 @@ import { IdleSensor } from '../src/activity.ts'
 import {
   buildHost,
   buildMemory,
+  ensureTuiDeps,
   buildPacing,
   buildSettingsStore,
   buildVoice,
@@ -413,6 +414,76 @@ describe('front-end wiring (spec 10)', () => {
     return path
   }
 
+  // A tui dir whose deps are already there — buildHost must not reach for bun.
+  const installedTui = (): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-tui-'))
+    mkdirSync(join(dir, 'node_modules'))
+    return dir
+  }
+
+  // A packaged install (`npm i -g murmur-radio`) ships tui/ sources but no
+  // tui/node_modules — the global node_modules ancestor even disables bun's
+  // auto-install. The engine fills that gap itself, once, at TUI launch.
+  describe('ensureTuiDeps (a packaged install ships no tui/node_modules)', () => {
+    // A stand-in bun that records its argv + cwd instead of installing.
+    const loggingBun = (log: string): string => {
+      const dir = mkdtempSync(join(tmpdir(), 'murmur-bun-'))
+      const path = join(dir, 'bun')
+      writeFileSync(path, `#!/bin/sh\necho "$(pwd) $@" >> ${log}\n`, { mode: 0o755 })
+      return path
+    }
+
+    it('runs bun install in the tui dir when node_modules is missing', () => {
+      const tuiDir = mkdtempSync(join(tmpdir(), 'murmur-tui-'))
+      const log = join(tuiDir, 'calls.log')
+      ensureTuiDeps(loggingBun(log), tuiDir)
+      const call = readFileSync(log, 'utf8').trim()
+      expect(call).toContain(tuiDir)
+      expect(call).toContain('install')
+    })
+
+    it('leaves an already-installed tui alone', () => {
+      const tuiDir = mkdtempSync(join(tmpdir(), 'murmur-tui-'))
+      mkdirSync(join(tuiDir, 'node_modules'))
+      const log = join(tuiDir, 'calls.log')
+      expect(ensureTuiDeps(loggingBun(log), tuiDir)).toBe(true)
+      expect(existsSync(log)).toBe(false)
+    })
+
+    // Peer review (codex): a failed install must not leave the radio headless —
+    // buildHost needs a verdict to fall back on, and a half-written
+    // node_modules must not suppress the retry on the next boot.
+    it('reports failure and clears the partial install for a retry', () => {
+      const tuiDir = mkdtempSync(join(tmpdir(), 'murmur-tui-'))
+      const dir = mkdtempSync(join(tmpdir(), 'murmur-bun-'))
+      const failing = join(dir, 'bun')
+      writeFileSync(failing, `#!/bin/sh\nmkdir -p ${tuiDir}/node_modules\nexit 1\n`, { mode: 0o755 })
+      expect(ensureTuiDeps(failing, tuiDir)).toBe(false)
+      expect(existsSync(join(tuiDir, 'node_modules'))).toBe(false)
+    })
+
+    it('falls back to the plain host with a notice when the install fails', async () => {
+      const tuiDir = mkdtempSync(join(tmpdir(), 'murmur-tui-'))
+      const dir = mkdtempSync(join(tmpdir(), 'murmur-bun-'))
+      const failing = join(dir, 'bun')
+      writeFileSync(failing, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo 1.3.14; else exit 1; fi\n', {
+        mode: 0o755,
+      })
+      const said: string[] = []
+      const log = vi.spyOn(console, 'log').mockImplementation((m: unknown) => void said.push(String(m)))
+      const bundle = await buildHost({
+        ...config(['--tui']),
+        tuiSocket: join(mkdtempSync(join(tmpdir(), 'murmur-front-')), 'tui.sock'),
+        bunCmd: failing,
+        tuiDir,
+      })
+      log.mockRestore()
+      expect(bundle.host).toBeInstanceOf(CliHost)
+      expect(said).toHaveLength(1)
+      await bundle.close()
+    })
+  })
+
   it('--plain is the explicit escape, with nothing to tear down', async () => {
     const bundle = await buildHost(config(['--plain']))
     expect(bundle.host).toBeInstanceOf(CliHost)
@@ -426,6 +497,7 @@ describe('front-end wiring (spec 10)', () => {
       ...config(['--tui']),
       tuiSocket: socket,
       bunCmd: stubBun(),
+      tuiDir: installedTui(),
     })
     expect(bundle.host).toBeInstanceOf(IpcHost)
     expect(existsSync(socket)).toBe(true)
@@ -446,6 +518,7 @@ describe('front-end wiring (spec 10)', () => {
       ...config(['--tui']),
       tuiSocket: join(dir, 'tui.sock'),
       bunCmd: dead,
+      tuiDir: installedTui(),
     })
     await expect(bundle.host.eof!()).resolves.toBeUndefined()
     await bundle.close()

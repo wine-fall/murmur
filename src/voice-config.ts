@@ -187,7 +187,7 @@ export function writeVoiceConfigTool(deps: WriteVoiceConfigDeps): TaskTool {
         if (deps.promptSecret === undefined) {
           return reply({
             ok: false,
-            error: 'this session cannot ask for a key; run `make setup` in a terminal',
+            error: 'this session cannot ask for a key; run `murmur --setup` in a terminal',
           })
         }
         const key = (await deps.promptSecret(API_KEY_LABEL)).trim()

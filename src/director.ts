@@ -229,7 +229,7 @@ export class Director {
   private inSetup = false
   private async recallSetup(): Promise<void> {
     if (this.deps.setupRecall === undefined) {
-      this.deps.host.info('the setup guide needs the real brain — run `make setup` from a shell.')
+      this.deps.host.info('the setup guide needs the real brain — run `murmur --setup` from a shell.')
       return
     }
     if (this.inSetup) return

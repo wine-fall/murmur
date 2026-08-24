@@ -94,6 +94,10 @@ export const ConfigSchema = z.object({
   // The runtime the TUI client runs under — a provisioned binary like
   // yt-dlp/ffmpeg, never a dependency of the engine itself (spec 10 §2.2).
   bunCmd: z.string().default('bun'),
+  // Where the TUI client package lives — a sibling of src/, resolved from the
+  // engine's own location so the install (repo checkout or global npm dir) can
+  // sit anywhere. A config field so tests can point it at a temp dir.
+  tuiDir: z.string().default(join(import.meta.dirname, '..', 'tui')),
   // Where the two processes meet (spec 10 §2.3), resolved by paths.ts.
   tuiSocket: z.string().default(() => tuiSocketPath()),
 

@@ -3,6 +3,8 @@
 // process, shut down cleanly. The engine is the sole audio authority — the
 // interim subprocess player is gone.
 
+import { spawnSync } from 'node:child_process'
+import { existsSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
@@ -65,9 +67,20 @@ export function resolvePersonaPath(config: Config, persistent: boolean): string 
 // the plain host, the socket and the client process for the TUI.
 export type HostBundle = { host: Host; close: () => Promise<void> }
 
-// Where the TUI client lives, resolved from the engine's own location so the
-// repo can sit anywhere. It is a sibling of src/, never imported by it.
-const TUI_ENTRY = join(import.meta.dirname, '..', 'tui', 'src', 'main.tsx')
+// A packaged install (`npm i -g murmur-radio`) ships tui/ sources with no
+// node_modules — and the global node_modules ancestor disables bun's
+// auto-install, so the client would die resolving @opentui. Fill the gap once,
+// here, right before the first TUI launch; a dev checkout (`make dev` ran
+// `bun install`) is a no-op. A failure (offline, read-only global dir) reports
+// false so buildHost can fall back to plain — and clears whatever the aborted
+// install half-wrote, so the next boot retries instead of trusting the stub.
+export function ensureTuiDeps(bunCmd: string, tuiDir: string): boolean {
+  if (existsSync(join(tuiDir, 'node_modules'))) return true
+  const run = spawnSync(bunCmd, ['install', '--silent'], { cwd: tuiDir, stdio: 'ignore' })
+  if (run.status === 0) return true
+  rmSync(join(tuiDir, 'node_modules'), { recursive: true, force: true })
+  return false
+}
 
 export async function buildHost(config: Config): Promise<HostBundle> {
   const plain = (): HostBundle => ({ host: new CliHost(), close: () => Promise.resolve() })
@@ -84,6 +97,12 @@ export async function buildHost(config: Config): Promise<HostBundle> {
     return bundle
   }
 
+  if (!ensureTuiDeps(config.bunCmd, config.tuiDir)) {
+    const bundle = plain()
+    bundle.host.info('could not fetch the terminal interface packages; using the plain one for now.')
+    return bundle
+  }
+
   const host = new IpcHost({
     socketPath: config.tuiSocket,
     identity: { brain: config.brain, voice: config.voice },
@@ -91,7 +110,7 @@ export async function buildHost(config: Config): Promise<HostBundle> {
   await host.listen()
   const client = spawnTuiClient({
     bunCmd: config.bunCmd,
-    entry: TUI_ENTRY,
+    entry: join(config.tuiDir, 'src', 'main.tsx'),
     socketPath: config.tuiSocket,
     onGone: (reason) => host.frontEndGone(reason),
   })

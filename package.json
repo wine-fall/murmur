@@ -1,12 +1,33 @@
 {
-  "name": "murmur",
-  "private": true,
+  "name": "murmur-radio",
+  "version": "0.1.0",
+  "description": "A fully-local companion radio — always on the air, Claude as its brain, keyboard-driven replies.",
+  "license": "SEE LICENSE IN README.md",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wine-fall/murmur.git"
+  },
   "type": "module",
   "packageManager": "pnpm@11.5.0",
   "engines": {
     "node": ">=24"
   },
+  "bin": {
+    "murmur": "dist/main.js"
+  },
+  "files": [
+    "dist",
+    "src/ipc.ts",
+    "src/activity.ts",
+    "assets",
+    "tui/src",
+    "tui/assets",
+    "tui/package.json",
+    "tui/bun.lock",
+    "tui/tsconfig.json"
+  ],
   "scripts": {
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/prompts && cp src/prompts/persona-seed.md dist/prompts/",
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src test scripts .github/scripts",
