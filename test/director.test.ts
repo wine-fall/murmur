@@ -79,7 +79,7 @@ describe('Director — /setup recall (spec 10 §3.4 mid-broadcast)', () => {
     const run = director.run()
     await until(() => player.played.length === 1, 'clip on air')
     host.type('/setup')
-    await until(() => host.infos.some((m) => m.includes('make setup')), 'the pointer line')
+    await until(() => host.infos.some((m) => m.includes('murmur --setup')), 'the pointer line')
     host.type('/quit')
     await run
   })

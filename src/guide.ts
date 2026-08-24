@@ -402,7 +402,7 @@ export function setupOfferText(targets: SetupTargets, gaps: Gap[], explicit = fa
     : [
         YES_ROW,
         ">> Enter - not now (I'll offer again next boot)",
-        ">> n - don't ask again (make setup reopens this)",
+        ">> n - don't ask again (murmur --setup reopens this)",
       ]
   return [`a couple of things aren't set up on this machine: ${named}.`, ...rows, ...options].join(
     '\n',
@@ -489,7 +489,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
     const gaps = await detectGaps(targets, run.probes ?? {})
     if (quit.requested) return outcomeFrom(targets, gaps)
     if (offerEsc.requested) {
-      host.info("not now, then — I'll offer again next boot; `make setup` any time.")
+      host.info("not now, then — I'll offer again next boot; `murmur --setup` any time.")
       return outcomeFrom(targets, gaps)
     }
     if (gaps.length === 0) {
@@ -503,7 +503,7 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
 
     // A standing decline: one line, no question, no re-nagging (§7.1 point 3).
     if (!explicit && run.ledger?.recentEvents('setup', 1).includes(SETUP_DECLINED) === true) {
-      host.info(`${named}. Run \`make setup\` whenever you want to sort that out.`)
+      host.info(`${named}. Run \`murmur --setup\` whenever you want to sort that out.`)
       return outcomeFrom(targets, gaps)
     }
 
@@ -555,11 +555,11 @@ async function runSetupFlow(
     // of an explicit `make setup` is not "stop asking me" either.
     if (!explicit && isNo(answer)) {
       run.ledger?.recordEvent('setup', SETUP_DECLINED)
-      host.info("no problem — I won't ask again. `make setup` reopens this any time.")
+      host.info("no problem — I won't ask again. `murmur --setup` reopens this any time.")
     } else if (explicit) {
       host.info('skipped setup.')
     } else {
-      host.info("not now, then — I'll offer again next boot; `make setup` any time.")
+      host.info("not now, then — I'll offer again next boot; `murmur --setup` any time.")
     }
     return outcomeFrom(targets, gaps)
   }

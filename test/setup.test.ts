@@ -1096,7 +1096,7 @@ describe('runSetup — declining, and what a decline costs later', () => {
     })
     expect(requests).toEqual([])
     expect(ledger.events).toEqual([])
-    expect(infos.join('\n')).toContain('make setup')
+    expect(infos.join('\n')).toContain('murmur --setup')
   })
 
   it('a later boot with the same gaps says ONE line and does not re-ask', async () => {
@@ -1119,7 +1119,7 @@ describe('runSetup — declining, and what a decline costs later', () => {
     // The checking notice (the probes still run), then exactly one pointer.
     expect(infos).toHaveLength(2)
     expect(infos[0]).toContain('checking')
-    expect(infos[1]).toContain('make setup')
+    expect(infos[1]).toContain('murmur --setup')
     // The record is not re-written on every quiet boot.
     expect(ledger.events).toEqual([])
   })
