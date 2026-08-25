@@ -1,7 +1,7 @@
 {
   "name": "murmur-radio",
-  "version": "0.1.0",
-  "description": "A fully-local companion radio — always on the air, Claude as its brain, keyboard-driven replies.",
+  "version": "0.1.1",
+  "description": "A companion radio, always on the air — Claude for a brain, a fish-speech voice, keyboard-driven replies.",
   "license": "SEE LICENSE IN README.md",
   "repository": {
     "type": "git",
