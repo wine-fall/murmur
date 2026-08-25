@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseSearchOutput, parseStreamUrl, YtDlpMusicProvider } from '../src/music.ts'
+import { parseResolveOutput, parseSearchOutput, YtDlpMusicProvider } from '../src/music.ts'
 
 // One line of real-shaped `yt-dlp --dump-json` output.
 function hit(overrides: Record<string, unknown> = {}): string {
@@ -56,13 +56,31 @@ describe('parseSearchOutput', () => {
   })
 })
 
-describe('parseStreamUrl', () => {
-  it('takes the first non-empty line', () => {
-    expect(parseStreamUrl('\n  https://stream/1  \nhttps://stream/2\n')).toBe('https://stream/1')
+describe('parseResolveOutput', () => {
+  it('reads the duration line and the stream url yt-dlp prints in --print order', () => {
+    expect(parseResolveOutput('183\nhttps://stream/1\n')).toEqual({
+      source: 'https://stream/1',
+      durationS: 183,
+    })
+  })
+
+  it("treats yt-dlp's NA (a live stream, a hit with no duration) as 0 — unknown, not a length", () => {
+    expect(parseResolveOutput('NA\nhttps://stream/1\n').durationS).toBe(0)
+    expect(parseResolveOutput('\nhttps://stream/1\n').durationS).toBe(0)
+    expect(parseResolveOutput('-1\nhttps://stream/1\n').durationS).toBe(0)
+    expect(parseResolveOutput('183.7\nhttps://stream/1\n').durationS).toBe(183)
+  })
+
+  it('finds the url wherever it sits, so a mis-ordered field never becomes the source', () => {
+    // The song dies silently if a duration line is handed to the decoder as a
+    // stream: pick the line that IS a url rather than trusting the position.
+    expect(parseResolveOutput('https://stream/1\n183\n').source).toBe('https://stream/1')
+    expect(parseResolveOutput('  \n183\n  https://stream/1  \n').source).toBe('https://stream/1')
   })
 
   it('fails loudly when yt-dlp printed no url', () => {
-    expect(() => parseStreamUrl('   \n')).toThrow(/stream url/i)
+    expect(() => parseResolveOutput('   \n')).toThrow(/stream url/i)
+    expect(() => parseResolveOutput('183\n')).toThrow(/stream url/i)
   })
 })
 
@@ -83,17 +101,32 @@ describe('YtDlpMusicProvider', () => {
     expect(candidates).toHaveLength(1)
   })
 
-  it('resolves a ref to a stream URL, audio-only preferred (no disk download)', async () => {
+  it('resolves a ref to a stream URL and its length, audio-only preferred (no disk download)', async () => {
     const calls: string[][] = []
     const provider = new YtDlpMusicProvider({
       run: async (args) => {
         calls.push(args)
-        return 'https://stream/audio\n'
+        return '183\nhttps://stream/audio\n'
       },
     })
     const clip = await provider.resolve('https://youtube.com/watch?v=a')
-    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '-g', 'https://youtube.com/watch?v=a'])
-    expect(clip).toEqual({ source: 'https://stream/audio', kind: 'music' })
+    // The length rides the SAME call that already resolves the stream — measured
+    // at no cost over the bare `-g` (2.4s either way), and no second extraction.
+    expect(calls[0]).toEqual([
+      '-f',
+      'bestaudio/best',
+      '--print',
+      '%(duration)s',
+      '--print',
+      'urls',
+      'https://youtube.com/watch?v=a',
+    ])
+    expect(clip).toEqual({ source: 'https://stream/audio', kind: 'music', durationS: 183 })
+  })
+
+  it('leaves durationS off the clip when yt-dlp does not know the length', async () => {
+    const provider = new YtDlpMusicProvider({ run: async () => 'NA\nhttps://stream/audio\n' })
+    expect(await provider.resolve('ref')).toEqual({ source: 'https://stream/audio', kind: 'music' })
   })
 })
 

@@ -264,8 +264,11 @@ export class FakeTrackSource implements TrackSource {
   }
 }
 
-export function pickOf(source: string, extras: Partial<TrackPick> = {}): TrackPick {
-  return { clip: { source, kind: 'music' }, ...extras }
+export function pickOf(
+  source: string,
+  { durationS, ...extras }: Partial<TrackPick> & { durationS?: number } = {},
+): TrackPick {
+  return { clip: { source, kind: 'music', ...(durationS !== undefined && { durationS }) }, ...extras }
 }
 
 export class FakeHost implements Host {

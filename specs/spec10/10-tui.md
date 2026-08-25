@@ -105,10 +105,26 @@ export interface Host {
   type ProgramState = {
     kind: 'talk' | 'music' | 'gap'
     nowPlaying?: string            // title, when kind === 'music'
+    durationS?: number             // the track's length; absent = unknown
+    startedAt?: number             // epoch ms the track went on air
     scene?: string                 // time-of-day scene (spec 04 §3.4)
     activity?: Activity            // presence (spec 07); absent = unknown
   }
   ```
+
+  **Progress (2026-08-25, user-asked).** `durationS` + `startedAt` are the
+  denominator and the origin of the now-playing rail (§3.3): the front-end
+  advances it on its own clock, so a playing song costs no per-second traffic.
+  The length comes from the same yt-dlp extraction that resolves the stream
+  (spec 03-01 §2.2), never from the model. `startedAt` rides the state rather
+  than being read off arrival — a re-emit on a typed line, or a fresh attach
+  replaying the state mid-song, must land on the same origin instead of
+  restarting the bar. `durationS` absent (a live stream, an extractor that
+  omits it) = no rail, just the title. What the rail shows is wall clock since
+  air time, not the engine's audio position: an underrun re-anchors the stream
+  a little later than the wall clock, so the two drift by seconds over a track.
+  Exact position would mean `MusicHandle` exposing its first scheduled time and
+  a periodic push; deferred until the drift is visible by ear.
 
   (`awaitingReply` left with the retired spec-07 invite degree, 2026-08-07 —
   a breaking removal, so `protocol` bumped 1 → 2 per §2.3.)
@@ -452,7 +468,14 @@ split.** At ≥ 96 columns the alive band recomposes as a full-width **scene
 band over the log**: the sky spans the frame's top — the visualizer's bins as
 a radial wave riding an implied circle (§3.6) with the whisper-figure at the
 circle's center (§3.7) over an otherwise empty night — with now-playing as a
-centered tricolor `♪` line under the band, and the program log beneath at
+centered tricolor `♪` line under the band — carrying, when the track's length
+is known, an 18-cell eighth-block rail and `elapsed / total` on the SAME row
+(the band's row count is fixed: a row that appeared with a song would shift the
+sky out from under the raster layers' absolute anchors). The label is cut to
+whatever cells the note, the rail, and the clocks leave — measured in terminal
+cells over graphemes, since a CJK or emoji-carrying title is twice as wide as
+its length and a wrapped row takes a line the sky is standing on — and the log
+sits beneath at
 scene:log ≈ 2:1 (`sceneSplit`: the log takes a third of the usable rows,
 floored at six — the listener is here for the radio, not the transcript).
 The log keeps one blank line between entries and the newest broadcast line

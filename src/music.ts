@@ -6,8 +6,9 @@
 // measured ~10-17s per search; flat is ~2s) whose entries still carry the
 // judging signal (title, uploader, duration, view_count), so the brain can
 // reject junk (hour-long loops, low-quality re-uploads) and prefer official
-// audio. resolve runs `-f bestaudio/best -g` and returns a STREAM URL, never a
-// download (master decision A); Phase 3's engine decodes it.
+// audio. resolve runs `-f bestaudio/best` with `--print` and returns a STREAM
+// URL plus the track's length, never a download (master decision A); Phase 3's
+// engine decodes it, and spec 10 §3.3's rail counts against the length.
 //
 // yt-dlp's JSON is an untrusted boundary, so every hit is zod-parsed and a hit
 // that does not fit is skipped rather than coerced.
@@ -67,10 +68,22 @@ export function parseSearchOutput(stdout: string, limit: number): TrackCandidate
   return candidates
 }
 
-export function parseStreamUrl(stdout: string): string {
-  const url = stdout.split('\n').find((line) => line.trim() !== '')
-  if (url === undefined) throw new Error('yt-dlp -g produced no stream url')
-  return url.trim()
+// resolve prints two fields (see MusicProvider.resolve below): the track's
+// length, then its stream url. The url is found by shape rather than by
+// position — a duration handed to the decoder as a source is a song that dies
+// silently, and this is an untrusted boundary like the search JSON above.
+export function parseResolveOutput(stdout: string): { source: string; durationS: number } {
+  const lines = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter((line) => line !== '')
+  const source = lines.find((line) => /^https?:\/\//.test(line))
+  if (source === undefined) throw new Error('yt-dlp produced no stream url')
+  // yt-dlp writes the literal `NA` for a field it has no value for (a live
+  // stream, a hit whose extractor omits it). 0 = unknown, the same reading
+  // TrackCandidate.durationS gives a missing duration.
+  const durationS = Math.trunc(Number(lines[0]))
+  return { source, durationS: Number.isFinite(durationS) && durationS > 0 ? durationS : 0 }
 }
 
 // Injectable so the unit layer covers argument construction without the binary
@@ -95,6 +108,11 @@ export class YtDlpMusicProvider implements MusicProvider {
   }
 
   async resolve(ref: string): Promise<AudioClip> {
-    return { source: parseStreamUrl(await this.run(['-f', 'bestaudio/best', '-g', ref])), kind: 'music' }
+    // `--print` in place of `-g`: the same single extraction yields the stream
+    // url AND the track's length, which is what a progress bar needs as its
+    // denominator (spec 10 §3.3). Measured at no cost over the bare `-g`.
+    const printed = await this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ref])
+    const { source, durationS } = parseResolveOutput(printed)
+    return { source, kind: 'music', ...(durationS > 0 && { durationS }) }
   }
 }
