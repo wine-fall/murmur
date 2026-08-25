@@ -7,49 +7,20 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-18 (engine line: /quit now cuts the guide session and
-every pre-broadcast phase has a civilized Ctrl-C; guide consent revised by
-user decision — entry authorization + conversational checkpoints replace the
-per-action y/N, spec 03-03 §3)_
+_Last updated: 2026-08-25 (index synced against GitHub; the per-spec build
+history that used to sit under **Where we are** now lives where it belongs —
+each spec's own status header, and git)_
 
 ## Where we are
 
 **L0 + L1 are code-complete in TypeScript, and every code spec on the roadmap is
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
-bed + spec 05 memory. Unit gate green (vitest); real-SDK smokes passed per
-phase. Everything left is under **Open** — engineering items first, then the
-by-ear passes.
-
-Built, with the PR that landed it — read the spec for what it does, the PR for
-how it got there:
-
-- Python → TypeScript migration, issue #54 (#56-#61). The specs stayed the
-  contracts; per-spec `TS port` banners record what each phase realized.
-- spec 04 look-ahead — depth-2, survives music (#64); measured 2026-07-31, see
-  [`spec04/04-no-dead-air.md`](spec04/04-no-dead-air.md) §3.3.
-- spec 05 persistent three-tier memory + compaction (#59).
-- spec 06 first-run persona seed, consented profile bootstrap, relationship
-  section (#67).
-- spec 07 presence, time anchors, away gating (#68; the invite degree was
-  retired 2026-08-07 — spec 07 status note).
-- spec 10 TUI — the wire + `IpcHost` + OpenTUI client (#71); the visualizer
-  feed + pixel pet + warmth kit (#74). Redesign decisions: #70. The TUI is now
-  the DEFAULT front-end (spec 10 §6), falling back to plain without bun. The
-  §6.1 quiet-constellation skin landed 2026-08-07 (spec 10 §6.1 for its terms).
-- spec 03-03 §7 conversational onboarding — the shell preflight demoted to a
-  reporter, one aggregated setup offer per boot with a ledger-recorded decline,
-  and the guide-written voice endpoint (#88). The TUI question dock (spec 10
-  §3.2-B as built) pins those questions above the input.
-- Spec restructure — persona stays stable, 06 rescoped, 07 extended, 08 and 09
-  retired (#65).
-- spec 11 agentic-steer — the reply turn runs the harness with
-  `switch_music` (handover-on-resolve) / `end_broadcast` (confirm-first) /
-  `submit_reply`; boundary automation stays local policy.
-- spec 12 settings — `$MURMUR_HOME/settings.json` merged under env/flags per
-  knob, the engine-owned single-writer `SettingsStore` with hot application,
-  `settings`/`settingsSet` on the wire, and the TUI `/settings` pane (seven
-  intents + read-only home/endpoint facts).
+bed + spec 05 memory, with 04, 06, 07, 10, 11 and 12 built on top. Unit gate
+green (vitest); real-SDK smokes passed per phase. **Each spec's own status
+header records what its build realized and the PR that landed it** — read the
+spec for what it does, its PR for how it got there. Everything left is under
+**Open** — engineering items first, then the by-ear passes.
 
 ## Open
 
@@ -66,8 +37,11 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#83** (watch) Enter during an uncommitted IME composition may submit the line.
 - **#145** (bug, eng) The first line a listener types in a session is silently dropped.
 - **#98** (eng) Steer tool-choice eval (Ollama) owed — the smoke is on-demand only; spec 11 §5.
+- **#102** (enhancement, eng) The voice guide's live policy check burns ~6 consent rounds before degrading.
+- **#104** (eng) DESIGN.md still claims fully-local / two hops / Claude-brain — stale vs what shipped.
 - **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
+- **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
 
 ## Pinned — do not relitigate
 
