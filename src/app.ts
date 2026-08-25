@@ -166,9 +166,14 @@ export function buildSettingsStore(
   log: (message: string) => void = () => {},
 ): SettingsStore {
   const path = join(resolved.home, SETTINGS_FILE)
+  const stored = readSettingsFile(path, log)
   return new SettingsStore({
     path,
     initial: {
+      // `language` is the one knob with no flag or env surface (spec 12 §3.9),
+      // so the FILE is its only source — Config cannot carry it, and seeding it
+      // from `touched` alone would leave the override dead after a restart.
+      ...(stored.language !== undefined && { language: stored.language }),
       anchorsEnabled: resolved.anchorsEnabled,
       musicEnabled: resolved.musicEnabled,
       cadenceMode: resolved.cadenceMode,
@@ -178,7 +183,7 @@ export function buildSettingsStore(
       muted: resolved.muted,
       tuiPet: resolved.tuiPet,
     },
-    touched: readSettingsFile(path, log),
+    touched: stored,
     log,
   })
 }
@@ -593,6 +598,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     memory,
     host,
     settings: () => settings.current(),
+    // The same store, handed to the reply turn so telling murmur and pressing a
+    // key in /settings are one act (spec 12 §2.6).
+    settingsStore: settings,
     ...(pacing !== undefined && { pacing }),
     ...(music !== undefined && { music }),
     ...(steer !== undefined && { steer }),

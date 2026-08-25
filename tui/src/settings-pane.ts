@@ -1,29 +1,51 @@
-// The settings pane's pure logic (spec 12 §3.5/§3.6): what the seven items
+// The settings pane's pure logic (spec 12 §3.5/§3.6): what the eight items
 // say, which are adjustable right now, and what patch a keypress becomes. The
 // pane exposes intent, never field names — the translation to engine knobs
 // happens here and nowhere else in the client. Rendering lives in app.tsx.
 
-import type { Settings, SettingsPatch, SettingsSnapshot } from '../../src/ipc.ts'
+import {
+  LANGUAGE_MAX,
+  MIX_EVERY_N,
+  MIX_NAMES,
+  type MixName,
+  type Settings,
+  type SettingsPatch,
+  type SettingsSnapshot,
+} from '../../src/ipc.ts'
 
-// The mix gear (spec 12 §3.5): three presets the pane can write, plus the
-// honest read-only position for values the pane cannot express.
-const GEARS = [
-  { name: 'more music', musicEveryN: 1 },
-  { name: 'balanced', musicEveryN: 2 },
-  { name: 'more talk', musicEveryN: 4 },
-] as const
-
-export type GearName = (typeof GEARS)[number]['name'] | 'custom'
+// The mix gear presets are shared with the reply turn's change_settings tool
+// (spec 12 §2.6); 'custom' is the pane's honest read-only position for a value
+// no preset can express.
+export type GearName = MixName | 'custom'
 
 export function gearOf(values: Settings): GearName {
   if (values.cadenceMode !== 'every_n') return 'custom'
-  return GEARS.find((gear) => gear.musicEveryN === values.musicEveryN)?.name ?? 'custom'
+  return MIX_NAMES.find((name) => MIX_EVERY_N[name] === values.musicEveryN) ?? 'custom'
 }
 
 const GAP = { min: 0, max: 10, step: 0.5 }
 const WINDOW = { min: 4, max: 48, step: 2 }
 
-export type PaneItemKey = 'anchors' | 'music' | 'gear' | 'gap' | 'voice' | 'pet' | 'window'
+export type PaneItemKey =
+  | 'anchors'
+  | 'music'
+  | 'gear'
+  | 'gap'
+  | 'voice'
+  | 'language'
+  | 'pet'
+  | 'window'
+
+// The one item a keypress cannot step through (spec 12 §3.9): a language is
+// free text, so the pane edits it by typing. `adjust` returns null for it and
+// the client opens an inline edit instead; this turns what was typed into the
+// patch, or null when it is not worth sending.
+export function languagePatch(typed: string): SettingsPatch | null {
+  const name = typed.trim()
+  if (name.length > LANGUAGE_MAX) return null
+  // Empty is a real instruction: hand the language back to the persona.
+  return { language: name }
+}
 
 export type PaneItem = {
   key: PaneItemKey
@@ -35,7 +57,7 @@ export type PaneItem = {
 
 const onOff = (on: boolean): string => (on ? 'on' : 'off')
 
-// Exactly seven, in a fixed order (spec 12 §1 — the ceiling, not a tranche).
+// Exactly eight, in a fixed order (spec 12 §1).
 export function paneItems(snap: SettingsSnapshot): PaneItem[] {
   const v = snap.values
   const musicOn = snap.musicAvailable && v.musicEnabled
@@ -48,6 +70,9 @@ export function paneItems(snap: SettingsSnapshot): PaneItem[] {
     // voice-endpoint feature, so it never greys. The endpoint fact below still
     // explains "sound on but nobody speaks".
     { key: 'voice', label: 'sound', value: v.muted ? 'muted' : 'on', enabled: true, advanced: false },
+    // No override = the persona's own word, and the pane says so rather than
+    // inventing a value it does not know (spec 12 §3.9).
+    { key: 'language', label: 'language', value: v.language ?? "the persona's own", enabled: true, advanced: false },
     { key: 'pet', label: 'pixel pet', value: onOff(v.tuiPet), enabled: true, advanced: false },
     { key: 'window', label: 'memory span', value: String(v.recentWindow), enabled: true, advanced: true },
   ]
@@ -87,13 +112,16 @@ export function adjust(snap: SettingsSnapshot, key: PaneItemKey, dir: -1 | 1): S
       return { tuiPet: !v.tuiPet }
     case 'voice':
       return { muted: !v.muted }
+    // Free text: the client opens an inline edit and sends languagePatch().
+    case 'language':
+      return null
     case 'gear': {
-      const current = GEARS.findIndex((gear) => gear.name === gearOf(v))
+      const current = MIX_NAMES.indexOf(gearOf(v) as MixName)
       // From custom, any press lands on balanced: selecting a gear overwrites.
       const next = current === -1 ? 1 : current + dir
-      const gear = GEARS[next]
-      if (gear === undefined || next === current) return null
-      return { cadenceMode: 'every_n', musicEveryN: gear.musicEveryN }
+      const name = MIX_NAMES[next]
+      if (name === undefined || next === current) return null
+      return { cadenceMode: 'every_n', musicEveryN: MIX_EVERY_N[name] }
     }
     case 'gap': {
       const next = stepped(v.gapSeconds, dir, GAP)

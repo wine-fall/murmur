@@ -78,11 +78,12 @@ that call has no hands. Consequences observed:
 
 ### 2.1 The steer tools (`src/steer-tools.ts`)
 
-Handed to `runTask` by the steer task builder. All three are murmur-owned,
+Handed to `runTask` by the steer task builder. All are murmur-owned,
 in-process, and validated by zod schemas (03-01 isolation invariants apply
 unchanged). Availability is capability-gated: `switch_music` is only in the
-set when music is wired (not `--no-music`, not a failed preflight), so the
-model cannot call what the program cannot do.
+set when music is wired (not `--no-music`, not a failed preflight), and
+`change_settings` only when a settings store is wired, so the model cannot
+call what the program cannot do.
 
 - `switch_music(hint?: string) -> {ok, status}` — the listener wants different
   music. Handler, synchronously in the tool call:
@@ -115,6 +116,25 @@ model cannot call what the program cannot do.
     `end_broadcast` (the listener said no / changed the subject), the armed
     flag clears. The brain's prompt pins the semantics: call it on an explicit
     stop request, and call it *again* only when the listener has confirmed.
+- `change_settings(...) -> {ok, status}` — the listener asked to change how the
+  radio behaves (added 2026-08-25; spec 12 §2.6 is the contract). This is the
+  conversational half of the two equal ways into the settings layer: the
+  handler calls the **same** `SettingsStore.set` the `/settings` pane's
+  keypress reaches, so the pane and the conversation can never drift.
+  - **Intent, not field names**, mirroring the pane's vocabulary (spec 12 §1):
+    `music` on/off, `mix` more-music/balanced/more-talk, `breathingRoom`
+    seconds, `sound` on/muted, `anchors` on/off, `pet` on/off, `memorySpan`,
+    `language`. Every field optional; a call with none is an error, not a
+    no-op, so a confused model is told rather than silently believed.
+  - **Only on a real request.** The prompt pins it: a mood remark is not a
+    request ("this song is too loud" is not "mute"). Unlike `end_broadcast`
+    there is no confirm phase — a settings change is cheap and reversible —
+    but inventing one from ambience is the failure mode to guard.
+  - **`language` clears on empty**: passing an empty string removes the
+    override and returns the host to whatever its persona says (spec 12 §3.9).
+  - Result reports what is true **at return time** — the applied values, or
+    `{ok: false, error}` when the patch was rejected by the store's validator.
+    A rejected patch never reads as applied.
 - `submit_reply(text: string) -> {ok}` — **terminal** (calls `finish`). The
   spoken reply: clean spoken text, no markup/labels (same hygiene contract as
   `emit_talk_beats`). Calling this ends the task.

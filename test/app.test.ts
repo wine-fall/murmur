@@ -542,3 +542,21 @@ describe('front-end wiring (spec 10)', () => {
     await bundle.close()
   })
 })
+
+// codex review: the language override is the one knob with no flag or env
+// surface, so the FILE is its only source. Building `initial` from Config alone
+// left it dead after a restart — set once, gone next boot.
+describe('buildSettingsStore carries the persisted language (spec 12 §3.9)', () => {
+  it('seeds the live value from the file, not just the write-back set', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-settings-boot-'))
+    writeFileSync(join(dir, 'settings.json'), JSON.stringify({ language: 'Japanese' }))
+    const store = buildSettingsStore({ ...config([]), home: dir })
+    expect(store.current().language).toBe('Japanese')
+  })
+
+  it('leaves it absent when the file never set it', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-settings-boot-'))
+    const store = buildSettingsStore({ ...config([]), home: dir })
+    expect(store.current().language).toBeUndefined()
+  })
+})

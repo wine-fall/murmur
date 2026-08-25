@@ -11,6 +11,7 @@ import {
   buildRespondPrompt,
   buildSeedPersonaPrompt,
   buildSetupPrompt,
+  buildSteerPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
   FIND_MUSIC_INSTRUCTION,
@@ -20,6 +21,7 @@ import {
   SEED_QUESTIONS,
   STATUS_MICROCOPY,
   statusMicrocopy,
+  withLanguage,
 } from '../src/prompts.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
@@ -430,5 +432,53 @@ describe('the stale-ytdlp task (spec 03-03 §7.1)', () => {
     expect(uvAt).toBeGreaterThan(brewAt)
     // Verified deterministically — the dated release, not a flaky live fetch.
     expect(text).toContain('--version')
+  })
+})
+
+// spec 12 §3.9: the settings override never edits persona.md. It rides as one
+// directive appended to the persona, so clearing it restores the persona's own
+// word and a hand-edited persona is never clobbered.
+describe('the language override directive (spec 12 §3.9)', () => {
+  const persona = '# a night host\n\nAlways speak in English.'
+
+  it('leaves the persona untouched when nothing is set', () => {
+    expect(withLanguage(persona, undefined)).toBe(persona)
+    expect(withLanguage(persona, '   ')).toBe(persona)
+  })
+
+  it('appends a directive that outranks what the persona says', () => {
+    const composed = withLanguage(persona, 'Japanese')
+    expect(composed.startsWith(persona)).toBe(true)
+    expect(composed).toMatch(/Japanese/)
+    // It has to win against the persona's own line, or the override is advice.
+    expect(composed).toMatch(/persona/i)
+  })
+})
+
+// codex review: the tool being in the set is not enough — the steer prompt's
+// catch-all ("anything else is just conversation, no action tools") actively
+// told the model NOT to act on a settings request. Authorization is per
+// capability, exactly like switch_music.
+describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
+  const ctx = { persona: 'p', recent: [] }
+
+  it('names the tool and what earns it, when a store is wired', () => {
+    const p = buildSteerPrompt('mute yourself', ctx, {
+      musicWired: false,
+      shutdownArmed: false,
+      settingsWired: true,
+    })
+    expect(p).toMatch(/change_settings/)
+    // The same guard the pane's vocabulary implies: a mood remark is not a request.
+    expect(p).toMatch(/not a request/i)
+  })
+
+  it('says nothing about it when no store is wired', () => {
+    const p = buildSteerPrompt('mute yourself', ctx, {
+      musicWired: false,
+      shutdownArmed: false,
+      settingsWired: false,
+    })
+    expect(p).not.toMatch(/change_settings/)
   })
 })

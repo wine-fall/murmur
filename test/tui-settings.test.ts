@@ -1,12 +1,12 @@
-// The settings pane's pure logic (spec 12 §3.5/§3.6): exactly seven items,
+// The settings pane's pure logic (spec 12 §3.5/§3.6): exactly eight items,
 // intent labels only, gear presets with an honest custom position, steppers
 // with pane-enforced ranges. Rendering stays untested (spec 10 §3.9); this is
 // the state machine the client renders.
 
 import { describe, expect, it } from 'vitest'
 
-import type { Settings, SettingsSnapshot } from '../src/ipc.ts'
-import { adjust, gearOf, paneFacts, paneItems } from '../tui/src/settings-pane.ts'
+import { LANGUAGE_MAX, type Settings, type SettingsSnapshot } from '../src/ipc.ts'
+import { adjust, gearOf, languagePatch, paneFacts, paneItems } from '../tui/src/settings-pane.ts'
 
 const VALUES: Settings = {
   anchorsEnabled: true,
@@ -31,9 +31,9 @@ const snap = (
 })
 
 describe('paneItems', () => {
-  it('lists exactly the seven writable intents, in a fixed order', () => {
+  it('lists exactly the eight writable intents, in a fixed order', () => {
     const keys = paneItems(snap()).map((item) => item.key)
-    expect(keys).toEqual(['anchors', 'music', 'gear', 'gap', 'voice', 'pet', 'window'])
+    expect(keys).toEqual(['anchors', 'music', 'gear', 'gap', 'voice', 'language', 'pet', 'window'])
   })
 
   it('never leaks a field name or mode name into a label or value', () => {
@@ -131,5 +131,33 @@ describe('paneFacts', () => {
     expect(facts.join(' ')).toContain('configured')
     const bare = paneFacts(snap({}, { voiceConfigured: false }))
     expect(bare.map((f) => f.value).join(' ')).toContain('not configured')
+  })
+})
+
+// spec 12 §3.9: the one item a keypress cannot step through, because a language
+// is free text. It reads its value honestly (the persona's own word when the
+// listener never set an override) and edits by typing, not by arrowing.
+describe('the language item (spec 12 §3.9)', () => {
+  const item = (values: Partial<Settings> = {}) =>
+    paneItems(snap(values)).find((i) => i.key === 'language')!
+
+  it("says whose word it is when there is no override", () => {
+    expect(item().value).toMatch(/persona/i)
+    expect(item({ language: 'Japanese' }).value).toBe('Japanese')
+  })
+
+  it('is an edit, not a stepper — arrowing it changes nothing', () => {
+    expect(adjust(snap(), 'language', 1)).toBeNull()
+    expect(adjust(snap({ language: 'Japanese' }), 'language', -1)).toBeNull()
+  })
+
+  it('turns typed text into a patch, and empty into a clear', () => {
+    expect(languagePatch('  Japanese  ')).toEqual({ language: 'Japanese' })
+    expect(languagePatch('')).toEqual({ language: '' })
+    expect(languagePatch('   ')).toEqual({ language: '' })
+  })
+
+  it('refuses text the engine would reject anyway, rather than sending it', () => {
+    expect(languagePatch('x'.repeat(LANGUAGE_MAX + 1))).toBeNull()
   })
 })

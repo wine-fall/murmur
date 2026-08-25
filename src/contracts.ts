@@ -11,6 +11,7 @@
 import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
 
 import type { Activity } from './activity.ts'
+import type { Settings, SettingsPatch } from './ipc.ts'
 
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
@@ -216,9 +217,18 @@ export type SteerShutdownActions = {
   confirm(): void
 }
 
+// The settings authority as the reply turn sees it (spec 12 §2.6): the same
+// engine-side setter the /settings pane reaches, narrowed to what a tool needs.
+// Absent = no store wired, and `change_settings` is not offered at all.
+export type SteerSettingsActions = {
+  current(): Settings
+  set(patch: SettingsPatch): boolean
+}
+
 export type SteerActions = {
   readonly music?: SteerMusicActions
   readonly shutdown: SteerShutdownActions
+  readonly settings?: SteerSettingsActions
 }
 
 // The agentic reply capability (spec 11 §2.2): resolves to the reply text the

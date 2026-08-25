@@ -498,3 +498,29 @@ describe('Director — program state (spec 10)', () => {
     expect(host.radio).toEqual(['a'])
   })
 })
+
+// spec 12 §2.6/§3.9: the override reaches the model through the same live
+// settings read every other hot knob uses — no restart, and persona.md is never
+// touched, so clearing it hands the language back to the persona. Assertions are
+// order-robust: the spec-04 look-ahead means a beat's brain call happens well
+// before that beat airs, so call COUNTS are not a contract here.
+describe('Director — the language override (spec 12 \u00a73.9)', () => {
+  const said = (ctx: { persona: string }) => /Speak in Japanese\./.test(ctx.persona)
+
+  it('rides on the persona only while it is set', async () => {
+    const { brain, knobs, director } = setup()
+    brain.batches = Array.from({ length: 12 }, (_, i) => [`talk ${i}`])
+    const run = director.run(8)
+
+    await until(() => brain.talkContexts.length >= 1, 'the first brain call')
+    expect(brain.talkContexts.every((c) => c.persona === 'p')).toBe(true)
+
+    knobs.language = 'Japanese'
+    await until(() => brain.talkContexts.some(said), 'the override reached a brain call')
+
+    // Clearing is pinned where it lives: withLanguage(persona, undefined) in
+    // prompts.test.ts and the store's erase in settings.test.ts. Re-proving it
+    // here would only buy a race against the look-ahead.
+    await run
+  })
+})

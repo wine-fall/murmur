@@ -27,6 +27,7 @@ import type {
   MusicHandle,
   Player,
   SteerActions,
+  SteerSettingsActions,
   SteerBrain,
   TalkBeat,
   TrackPick,
@@ -36,7 +37,7 @@ import type {
 } from './contracts.ts'
 import type { Host } from './host.ts'
 import { COMMANDS, type ProgramState } from './ipc.ts'
-import { buildMusicSituation } from './prompts.ts'
+import { buildMusicSituation, withLanguage } from './prompts.ts'
 import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
@@ -128,6 +129,9 @@ export type DirectorSettings = {
   recentWindow: number
   anchorsEnabled: boolean
   musicEnabled: boolean
+  // Absent = the persona decides (spec 12 §3.9). Read live like every other
+  // knob here, so a change lands on the next beat with no restart.
+  language?: string | undefined
 }
 
 export type DirectorDeps = {
@@ -138,6 +142,9 @@ export type DirectorDeps = {
   memory: MemoryStore
   host: Host
   settings: () => DirectorSettings
+  // The mutable side of the same layer, handed to the reply turn's
+  // change_settings tool (spec 12 §2.6). Absent = the tool is not offered.
+  settingsStore?: SteerSettingsActions
   music?: MusicWiring
   pacing?: PacingWiring
   // The agentic reply turn (spec 11): preferred over brain.respond when
@@ -434,7 +441,7 @@ export class Director {
     const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
     return {
-      persona: this.deps.persona,
+      persona: this.persona(),
       recent: queued.length === 0 ? recent : [...recent, ...turns],
       scene: currentScene(new Date()),
       profile: this.deps.memory.profile(),
@@ -564,9 +571,16 @@ export class Director {
     return kind === 'music'
   }
 
+  // The persona as the model receives it: the file's text plus the listener's
+  // language override when they set one (spec 12 §3.9). Composed per read, not
+  // captured, so the knob is hot.
+  private persona(): string {
+    return withLanguage(this.deps.persona, this.deps.settings().language)
+  }
+
   private musicContext(): MusicContext {
     return {
-      persona: this.deps.persona,
+      persona: this.persona(),
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         this.deps.memory.recentSongs(AVOID_DEPTH),
@@ -1006,6 +1020,16 @@ export class Director {
           switchTrack: (hint?: string) => {
             if (live()) this.switchMusic(hint)
           },
+        },
+      }),
+      // The conversational half of the settings layer (spec 12 §2.6). Absent on
+      // a run with no store, which gates change_settings out of the tool set.
+      // The epoch guard applies here too: an orphaned attempt must not land a
+      // knob change the listener's newer turn already superseded.
+      ...(this.deps.settingsStore !== undefined && {
+        settings: {
+          current: () => this.deps.settingsStore!.current(),
+          set: (patch) => (live() ? this.deps.settingsStore!.set(patch) : false),
         },
       }),
       shutdown: {

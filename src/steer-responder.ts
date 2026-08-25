@@ -31,6 +31,7 @@ export class SteerResponder implements SteerBrain {
       systemPrompt: ctx.persona,
       prompt: buildSteerPrompt(userText, ctx, {
         musicWired: actions.music !== undefined,
+        settingsWired: actions.settings !== undefined,
         shutdownArmed: actions.shutdown.armed(),
       }),
       model: this.deps.model,

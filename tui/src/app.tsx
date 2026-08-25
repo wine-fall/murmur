@@ -8,7 +8,7 @@
 // the art direction session (§6.1) can restyle murmur without touching logic.
 
 import { useEffect, useRef, useState } from 'react'
-import { useKeyboard, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
+import { useKeyboard, usePaste, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
 import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
@@ -27,7 +27,7 @@ import {
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { identPinned, TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
-import { adjust, paneFacts, paneItems } from './settings-pane.ts'
+import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
   bandLayout,
@@ -250,8 +250,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [mode, setMode] = useState<'radio' | 'guide'>('radio')
   const [paneOpen, setPaneOpen] = useState(false)
   const [paneAt, setPaneAt] = useState(0)
-  const pane = useRef({ open: false, at: 0, snap: null as SettingsSnapshot | null })
-  pane.current = { open: paneOpen, at: paneAt, snap: settings }
+  // The language item is free text (spec 12 §3.9), so it is the one pane row
+  // that opens an editor instead of stepping. Non-null = that editor is up and
+  // owns every key until Enter commits or Esc backs out.
+  const [paneEdit, setPaneEdit] = useState<string | null>(null)
+  const pane = useRef({ open: false, at: 0, snap: null as SettingsSnapshot | null, edit: null as string | null })
+  pane.current = { open: paneOpen, at: paneAt, snap: settings, edit: paneEdit }
   // The absence the pet greets (§3.7.3). It stands until the program itself has
   // something to say, so the welcome is never cut short by a timer.
   const [greeting, setGreeting] = useState<string | null>(null)
@@ -368,6 +372,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // settings pane is open, keys route to it (spec 12 §3.6 — the sanctioned
   // exception to the input line's permanent focus): Esc returns, arrows move,
   // space/enter/arrows adjust; every change goes over the wire immediately.
+  // Bracketed paste arrives as its own event, not through useKeyboard, and the
+  // input line is unfocused while the pane is open — so without this, pasting a
+  // language name into the pane's editor was silently dropped (codex review).
+  usePaste((event) => {
+    const { open, edit } = pane.current
+    if (!open || edit === null) return
+    const pasted = new TextDecoder().decode(event.bytes)
+    // One line only: a multi-line paste is a mis-paste, and the field is a name.
+    setPaneEdit(edit + pasted.replace(/[\r\n]+/g, ' ').trimEnd())
+  })
+
   useKeyboard((key) => {
     if (key.ctrl && key.name === 'c') return wire.line('/quit')
     // The command menu takes the arrows while it is up (the single-line input
@@ -384,7 +399,24 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         return retype(menu.current.selected)
       }
     }
-    const { open, at, snap } = pane.current
+    const { open, at, snap, edit } = pane.current
+    if (open && edit !== null) {
+      // Esc backs out of the edit only — the pane stays up, so a mistyped
+      // language never costs the listener the whole pane.
+      if (key.name === 'escape') return setPaneEdit(null)
+      if (key.name === 'return') {
+        const patch = languagePatch(edit)
+        if (patch !== null) wire.send({ v: 1, type: 'settingsSet', patch })
+        return setPaneEdit(null)
+      }
+      if (key.name === 'backspace') return setPaneEdit(edit.slice(0, -1))
+      // Printable only: a bare letter arrives as its own sequence, while every
+      // control/chord carries a modifier or a multi-char escape sequence.
+      if (!key.ctrl && !key.meta && key.sequence.length === 1 && key.sequence >= ' ') {
+        return setPaneEdit(edit + key.sequence)
+      }
+      return
+    }
     if (!open || snap === null) {
       // Esc with nothing client-local to close asks the engine to stop the
       // running flow (spec 10 §3.4) — the guide winds down like a coding
@@ -392,12 +424,19 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       if (key.name === 'escape') wire.send({ v: 1, type: 'interrupt' })
       return
     }
-    if (key.name === 'escape') return setPaneOpen(false)
+    if (key.name === 'escape') {
+      setPaneEdit(null)
+      return setPaneOpen(false)
+    }
     const items = paneItems(snap)
     if (key.name === 'up') return setPaneAt(Math.max(0, at - 1))
     if (key.name === 'down') return setPaneAt(Math.min(items.length - 1, at + 1))
     if (['left', 'right', 'space', 'return'].includes(key.name)) {
-      const patch = adjust(snap, items[at]!.key, key.name === 'left' ? -1 : 1)
+      const item = items[at]!
+      // Seed the editor with the override in force, or empty when the persona
+      // still owns the language — there is no text to correct in that case.
+      if (item.key === 'language') return setPaneEdit(snap.values.language ?? '')
+      const patch = adjust(snap, item.key, key.name === 'left' ? -1 : 1)
       if (patch !== null) wire.send({ v: 1, type: 'settingsSet', patch })
     }
   })
@@ -745,7 +784,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   fg: index === paneAt ? accent.bright : item.enabled ? INK.text : INK.dim,
                 }}
               >
-                {`${index === paneAt ? '▸ ' : '  '}${item.label.padEnd(24)}${item.value}`}
+                {`${index === paneAt ? '▸ ' : '  '}${item.label.padEnd(24)}${
+                  // The open editor shows what is being typed, with a caret, so
+                  // the row is the field rather than a stale value beside one.
+                  paneEdit !== null && item.key === 'language' ? `${paneEdit}▏` : item.value
+                }`}
               </text>
             </box>
           ))}
