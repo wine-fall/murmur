@@ -10,7 +10,7 @@
 // here and runs unawaited in the background, the same posture spec 05 §3.6 uses
 // for startup catch-up compaction.
 
-import { copyFileSync, existsSync, mkdirSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
@@ -18,6 +18,7 @@ import type { Brain, Harness, SeedAnswer } from './contracts.ts'
 import { isYes, lineReader, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from './host.ts'
 import { claudeCodeRoot } from './paths.ts'
+import { renderPersona } from './persona.ts'
 import {
   BOOTSTRAP_OFFER,
   PERSONA_CHAR_CAP,
@@ -47,6 +48,10 @@ export type FirstRunDeps = {
   memoryDir: string
   fallbackSeedPath: string // config.personaPath — the bundled seed
   model: string // the good tier: this runs once per install (§3.3)
+  // The machine-detected default output language (spec 06 §3.2), settled here
+  // and only here: it fills the bundled seed's slot and backs the Brain up
+  // where the answers name no language.
+  language: string
   // Fired by a typed /quit (Ctrl-C in the TUI): reads decline through and the
   // app shuts down instead of broadcasting.
   quit?: QuitLatch
@@ -74,7 +79,10 @@ function useBundledSeed(deps: FirstRunDeps): string {
   const home = personaHome(deps.memoryDir)
   try {
     mkdirSync(deps.memoryDir, { recursive: true })
-    copyFileSync(deps.fallbackSeedPath, home)
+    // Rendered, not copied: what lands at the home is the listener's own
+    // persona from here on, and it must read as finished text, not a template.
+    const seed = readFileSync(deps.fallbackSeedPath, 'utf-8')
+    atomicWrite(home, renderPersona(seed, deps.language))
     return home
   } catch {
     // Even the copy failed (a read-only home?). Load the seed where it lies —
@@ -116,7 +124,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
 
   let persona: string
   try {
-    persona = (await deps.brain.seedPersona(answers)).trim()
+    persona = (await deps.brain.seedPersona(answers, deps.language)).trim()
   } catch (err) {
     host.info(`could not write a persona from those answers (${String(err)}); using the default voice.`)
     return useBundledSeed(deps)

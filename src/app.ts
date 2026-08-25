@@ -36,6 +36,7 @@ import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
+import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLine } from './persona.ts'
 import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
 import { LedgerScheduler } from './scheduler.ts'
@@ -434,6 +435,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // Ctrl-C anywhere in the pre-broadcast stretch (first-run, the setup
   // conversation, the bed pull) is a civilized exit, not a bare death.
   const offOnboardingSigint = escalatingSigint(host, () => quit.fire())
+  // The default output language, read once from the machine (spec 06 §3.2).
+  // Nothing re-reads it: from here the persona names the language it speaks.
+  const language = detectLanguage()
   let personaPath = resolvePersonaPath(config, persistent)
   if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
     personaPath = await runFirstRun({
@@ -443,12 +447,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       memoryDir: config.memoryDir,
       fallbackSeedPath: config.personaPath,
       model: config.model,
+      language,
       quit,
       // No harness (a stub run) = slice B is never offered.
       ...(claude !== null && { harness: claude }),
     })
   }
-  const persona = loadPersona(personaPath)
+  const persona = loadPersona(personaPath, language)
 
   // Conversational onboarding (spec 03-03 §7.1): AFTER the first run, and a
   // separate serial conversation from it. The deterministic probes name what is

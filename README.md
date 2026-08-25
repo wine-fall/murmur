@@ -124,7 +124,7 @@ brew install ffmpeg yt-dlp    # binaries real runs need (music)
 
 Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; real-boundary checks run on demand as throwaway `scratch/` smokes; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
 
-Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check-source-language.ts` via pre-commit.
+Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks whatever language the listener settled on at onboarding (the machine's locale by default, English as the floor), produced by the model from the persona; enforced by `scripts/check-source-language.ts` via pre-commit.
 
 ## Credits
 

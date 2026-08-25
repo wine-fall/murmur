@@ -13,7 +13,8 @@ in the brand register.
 Developers and curious tinkerers who find the repo through GitHub or a link.
 They read fast, distrust marketing, and can judge a project by whether the
 demo looks real. Many read Chinese; the page is bilingual (EN default, Chinese
-toggle) and the radio itself speaks Chinese on air.
+toggle) and the radio speaks the listener's own language on air — their
+machine's locale by default, English where it says nothing.
 
 ## Product Purpose
 

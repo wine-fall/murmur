@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 
 import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain.ts'
 import type { ContextPack, GuideRequest, GuideSession } from '../src/contracts.ts'
+import { renderPersona } from '../src/persona.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 import { cleanBeats, emitTalkBeatsTool } from '../src/talk-tools.ts'
 
@@ -28,10 +29,13 @@ describe('StubBrain', () => {
     expect(updated).toBe('who you are')
   })
 
-  it('seedPersona returns the bundled seed unchanged (offline no-op, spec 06 §2.2)', async () => {
+  it('seedPersona returns the bundled seed, language slot filled (offline no-op, spec 06 §2.2)', async () => {
     const brain = new StubBrain()
-    const seeded = await brain.seedPersona([{ question: 'q', answer: 'a' }])
-    expect(seeded).toBe(readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim())
+    const seeded = await brain.seedPersona([{ question: 'q', answer: 'a' }], 'Japanese')
+    expect(seeded).toBe(
+      renderPersona(readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim(), 'Japanese'),
+    )
+    expect(seeded).not.toContain('{{')
   })
 })
 

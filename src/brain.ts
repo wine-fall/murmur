@@ -43,11 +43,12 @@ import {
   DEFAULT_PERSONA_PATH,
   SEED_PERSONA_SYSTEM_PROMPT,
 } from './prompts.ts'
+import { renderPersona } from './persona.ts'
 import { emitTalkBeatsTool } from './talk-tools.ts'
 
 // Canned English fake output so the loop looks realistic with no network. The
-// stub's language is irrelevant to the product: the real radio speaks Chinese
-// only at runtime, produced by the model from the persona prompt (DESIGN §0).
+// stub's language is irrelevant to the product: the real radio's language is
+// produced by the model from the persona prompt (DESIGN §0).
 const STUB_SEGMENTS = [
   "It's late, and it's just you and me on the air tonight. Let's talk about nothing in particular.",
   'A thought drifted past just now -- the older we get, the more we swallow the things we meant to say.',
@@ -79,10 +80,11 @@ export class StubBrain implements Brain {
     return profile
   }
 
-  async seedPersona(_answers: readonly SeedAnswer[]): Promise<string> {
+  async seedPersona(_answers: readonly SeedAnswer[], language: string): Promise<string> {
     // Offline: hand back the bundled seed, so a stub onboarding is inert and
-    // still produces a loadable persona (spec 06 §2.2).
-    return readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim()
+    // still produces a loadable persona (spec 06 §2.2) — with its language slot
+    // filled, since what this returns is written to the listener's home.
+    return renderPersona(readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim(), language)
   }
 }
 
@@ -400,8 +402,8 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   // One tool-less fold of the onboarding answers into a persona, on the good
   // tier: it happens once per install and every later beat inherits it (spec
   // 06 §3.3).
-  async seedPersona(answers: readonly SeedAnswer[]): Promise<string> {
-    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers))
+  async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
+    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language))
   }
 
   private async generate(persona: string, prompt: string): Promise<string> {
