@@ -27,6 +27,7 @@ import {
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { identPinned, TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
+import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
@@ -60,6 +61,12 @@ const POSES = loadPoses()
 // The sky composition's max width (§6.1): the concept frames its page; an
 // ultra-wide terminal centers that frame rather than stretching it.
 const MAX_COLS = 184
+
+// The now-playing rail (§3.3). Fixed, so the line does not breathe as one
+// track's title gives way to another's — and it rides the SAME row as the
+// title: the scene band owns a fixed row count, and a row that appears with a
+// song would shift the sky out from under the raster layers' absolute anchors.
+const RAIL_CELLS = 18
 
 // The narrow band draws the pet at half scale — the full 42x44 grid would eat
 // a 24-row terminal whole (codex review, 2026-08-07).
@@ -255,6 +262,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // engine owns the switch; this client only paints it — strip, identity
   // line, input ink — so the listener always knows who is listening.
   const [mode, setMode] = useState<'radio' | 'guide'>('radio')
+  // The rail advances on this client's own clock (§3.3): the engine sends the
+  // track's length and its start once, and a tick a second is all the traffic a
+  // playing song costs. Nothing ticks when nothing is playing.
+  const [now, setNow] = useState(() => Date.now())
   const [paneOpen, setPaneOpen] = useState(false)
   const [paneAt, setPaneAt] = useState(0)
   // The language item is free text (spec 12 §3.9), so it is the one pane row
@@ -515,6 +526,22 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         ]
           .filter((part) => part !== undefined && part !== '')
           .join(' · ')
+  // A track with a known length is the only thing that earns a rail: a live
+  // stream (or an extractor that omits the duration) keeps the bare title.
+  const track =
+    state?.kind === 'music' && state.startedAt !== undefined && (state.durationS ?? 0) > 0
+      ? { startedAt: state.startedAt, durationS: state.durationS! }
+      : null
+  useEffect(() => {
+    if (track === null) return
+    setNow(Date.now())
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+    // The identity of the TRACK, not of the object: a re-emit during the song
+    // (a typed line refreshing presence) must not restart the interval.
+  }, [track?.startedAt, track?.durationS])
+  const elapsedS = track === null ? 0 : (now - track.startedAt) / 1000
+
   // The alive band's composition follows the live pet setting (spec 12 §3.7),
   // with the env override resolved inside bandLayout.
   const band = bandLayout(process.env, settings?.values.tuiPet)
@@ -747,7 +774,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <box style={{ flexDirection: 'row', justifyContent: 'center' }}>
             {state?.nowPlaying !== undefined && state.nowPlaying !== '' ? (
               (() => {
-                const split = splitNowPlaying(state.nowPlaying)
+                const rail = track === null ? null : progressBar(elapsedS, track.durationS, RAIL_CELLS)
+                const times = track === null ? '' : `  ${clock(elapsedS)} / ${clock(track.durationS)}`
+                // One row, always: the band's rows are fixed (§3.3), so a label
+                // long enough to wrap takes a row the sky is standing on — and
+                // the raster layers stay anchored to the rows it left. The
+                // budget is the frame minus the band's padding, the note, and
+                // whatever the rail and its clocks are using.
+                const split = splitNowPlaying(
+                  fit(state.nowPlaying, cols - 4 - (rail === null ? 0 : 3 + RAIL_CELLS + cells(times))),
+                )
                 return (
                   <text>
                     <span fg={lit(PERIWINKLE)}>{'♪ '}</span>
@@ -758,7 +794,20 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                         <span fg={lit(INK.notice)}>{split.rest}</span>
                       </>
                     ) : (
-                      <span fg={lit(INK.notice)}>{state.nowPlaying}</span>
+                      <span fg={lit(INK.notice)}>
+                        {fit(
+                          state.nowPlaying,
+                          cols - 4 - (rail === null ? 0 : 3 + RAIL_CELLS + cells(times)),
+                        )}
+                      </span>
+                    )}
+                    {rail !== null && track !== null && (
+                      <>
+                        <span fg={lit(INK.dim)}>{'   '}</span>
+                        <span fg={lit(PERIWINKLE)}>{rail.played}</span>
+                        <span fg={lit(mix(INK.dim, INK.bg, 0.35))}>{rail.rest}</span>
+                        <span fg={lit(INK.dim)}>{times}</span>
+                      </>
                     )}
                   </text>
                 )

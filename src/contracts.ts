@@ -17,6 +17,9 @@ export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
   readonly source: string
   readonly kind: 'talk' | 'music'
+  // The track's length, when the source knew it (spec 03-01 §2.2 resolve).
+  // Absent = unknown — a live stream, or an extractor that omits it.
+  readonly durationS?: number
 }
 
 export type Turn = {

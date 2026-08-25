@@ -33,6 +33,14 @@ const ENVELOPE = 1
 export const ProgramStateSchema = z.object({
   kind: z.enum(['talk', 'music', 'gap']),
   nowPlaying: z.string().optional(),
+  // The playing track's length and the epoch ms it went on air (spec 10 §3.3):
+  // together they are a progress bar a front-end can advance on its own clock,
+  // with no per-second traffic. `startedAt` rides the state rather than being
+  // read off arrival, so a re-emit — or a fresh attach replaying it mid-song —
+  // lands on the same origin instead of restarting the bar. `durationS` absent
+  // = the source never knew the length (a live stream): no bar, just the title.
+  durationS: z.number().optional(),
+  startedAt: z.number().optional(),
   scene: z.string().optional(),
   activity: z.enum(ACTIVITIES).optional(),
 })

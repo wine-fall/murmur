@@ -83,7 +83,7 @@ class MusicProvider(Protocol):
     async def resolve(self, ref: str) -> AudioClip: ...   # AudioClip(kind="music")
     async def aclose(self) -> None: ...
 ```
-- **yt-dlp adapter (default):** `search` via `ytsearch{limit}:<query>` (metadata only, no download); `resolve` via `-f bestaudio/best -g` (audio-only preferred; falls back to a combined format where yt-dlp cannot offer bestaudio, e.g. JS-runtime-gated YouTube formats — ffmpeg decodes either) → a **stream URL** (`AudioClip.source` = URL, no disk download — master decision A). Covers YouTube + Bilibili.
+- **yt-dlp adapter (default):** `search` via `ytsearch{limit}:<query>` (metadata only, no download); `resolve` via `-f bestaudio/best --print "%(duration)s" --print urls` (audio-only preferred; falls back to a combined format where yt-dlp cannot offer bestaudio, e.g. JS-runtime-gated YouTube formats — ffmpeg decodes either) → a **stream URL** (`AudioClip.source` = URL, no disk download — master decision A) **plus the track's length** (`AudioClip.durationS`, the progress rail's denominator — spec 10 §3.3). `--print` in place of `-g` keeps it ONE extraction: measured at no cost over the bare `-g` (2.4s either way, 2026-08-25). The url is found by shape rather than by position — a duration handed to the decoder as a source is a song that dies silently — and yt-dlp's literal `NA` (a live stream, an extractor that omits it) reads as 0, the same "unknown" a missing `TrackCandidate.durationS` means. Covers YouTube + Bilibili.
 - **musicdl adapter (optional, user-installed):** same seam; a downloader → `AudioClip.source` = a local file. Not required for core tests; not in the shipped default (master §5).
 
 ### 2.3 Music tools (the harness's first tools, wrapping `MusicProvider`)

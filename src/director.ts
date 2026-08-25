@@ -191,8 +191,10 @@ export class Director {
   // (§3.2) and refreshed when a typed line proves the listener is back.
   private now = new Date()
   private activity: Activity | undefined
-  // The segment the front-end is currently showing (spec 10 §2.1).
-  private segment: { kind: ProgramState['kind']; nowPlaying?: string } = { kind: 'gap' }
+  // The segment the front-end is currently showing (spec 10 §2.1). A music
+  // segment carries the track's length and the moment it went on air, which is
+  // what makes the strip's progress bar the front-end's own arithmetic.
+  private segment: ProgramState = { kind: 'gap' }
   // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
   // background so its find-and-pull latency overlaps talk, never the boundary.
   private pendingPick: Pending<TrackPick | null> | null = null
@@ -411,8 +413,17 @@ export class Director {
   // What the program is doing, for a front-end with a status region (spec 10
   // §2.1). Pushed at the boundaries that already exist — no timer, no polling,
   // and nothing here changes what the radio does.
-  private emitState(kind: ProgramState['kind'], nowPlaying?: string): void {
-    this.segment = { kind, ...(nowPlaying !== undefined && { nowPlaying }) }
+  private emitState(kind: ProgramState['kind'], track?: { label: string; durationS?: number }): void {
+    this.segment = {
+      kind,
+      ...(track !== undefined && {
+        nowPlaying: track.label,
+        // Stamped here, once, where the track actually goes on air — restate()
+        // below re-sends this same origin rather than minting a new one.
+        startedAt: Date.now(),
+        ...(track.durationS !== undefined && { durationS: track.durationS }),
+      }),
+    }
     this.restate()
   }
 
@@ -651,6 +662,7 @@ export class Director {
         if (started === null) continue
         this.switchDue = false
         await this.runVoice(started.voice, started.handle)
+        this.noteTrackEnd()
         return true
       }
       if (!this.quit) {
@@ -661,6 +673,18 @@ export class Director {
       this.deps.host.info(`music segment failed (${String(err)}); back to talk.`)
       return false
     }
+  }
+
+  // What the dev log needs to answer "did that song finish?" — the two numbers
+  // are otherwise unrecoverable, since a stream that dies mid-track ends the
+  // segment exactly like a natural end. Sited after runVoice so /quit is
+  // reported too; a mid-segment swap reports whichever track it left on air.
+  private noteTrackEnd(): void {
+    const { nowPlaying, startedAt, durationS } = this.segment
+    if (nowPlaying === undefined || startedAt === undefined) return
+    const played = Math.round((Date.now() - startedAt) / 1000)
+    const expected = durationS === undefined ? 'unknown' : `${durationS}s`
+    this.deps.host.debug?.(`music.end ${JSON.stringify(nowPlaying)} played=${played}s expected=${expected}`)
   }
 
   // startTrack raced against the keyboard. When quit wins mid-start, the
@@ -704,7 +728,10 @@ export class Director {
     }
     const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
     this.deps.host.info(`now playing: ${label}`)
-    this.emitState('music', label)
+    this.emitState('music', {
+      label,
+      ...(pick.clip.durationS !== undefined && { durationS: pick.clip.durationS }),
+    })
     // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
     // only — not a dropped candidate. Feeds the music avoid-list.
     this.deps.memory.recordEvent('song', label)

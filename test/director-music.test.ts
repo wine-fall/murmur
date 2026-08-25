@@ -328,6 +328,66 @@ describe('program state during music (spec 10)', () => {
     await run
   })
 
+  it('carries the track length and its start, so a front-end can draw progress', async () => {
+    // spec 10 §3.3: the strip's progress bar needs a denominator (the length,
+    // resolved with the stream) and an origin (when this track went on air).
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', durationS: 183 })]
+    const before = Date.now()
+    const run = director.run(2)
+    await until(() => host.states.some((s) => s.kind === 'music'), 'music state')
+    const music = host.states.find((s) => s.kind === 'music')!
+    expect(music.durationS).toBe(183)
+    expect(music.startedAt).toBeGreaterThanOrEqual(before)
+    expect(music.startedAt).toBeLessThanOrEqual(Date.now())
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('says nothing about a length the source did not know — a live stream has none', async () => {
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/live', { title: 'Live' })]
+    const run = director.run(2)
+    await until(() => host.states.some((s) => s.kind === 'music'), 'music state')
+    const music = host.states.find((s) => s.kind === 'music')!
+    expect(music.durationS).toBeUndefined()
+    expect(music.startedAt).toBeGreaterThan(0) // the origin stands either way
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('holds the start across a re-emit — a typed line must not restart the bar', async () => {
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', durationS: 183 })]
+    const run = director.run(2)
+    await until(() => host.states.some((s) => s.kind === 'music'), 'music state')
+    const first = host.states.find((s) => s.kind === 'music')!
+    host.type('this one is nice')
+    await until(() => host.radio.some((t) => t.startsWith('re:')), 'reply aired')
+    expect(host.states.at(-1)).toMatchObject({
+      kind: 'music',
+      startedAt: first.startedAt,
+      durationS: 183,
+    })
+    player.handles[0]!.end()
+    host.type('/quit')
+    await run
+  })
+
+  it('records how much of the track actually played, so the log can answer "did it finish"', async () => {
+    const { director, player, host, source } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', durationS: 183 })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    const ended = host.debugs.find((m) => m.startsWith('music.end'))
+    expect(ended).toBeDefined()
+    expect(ended).toContain('Song')
+    expect(ended).toMatch(/expected=183s/)
+    expect(ended).toMatch(/played=\d+s/)
+  })
+
   it('keeps now-playing while an interjection is answered over the ducked song', async () => {
     // spec 10 §5.3: the reply must not make the strip forget what is playing —
     // the song is still on air, it is only ducked.
