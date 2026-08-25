@@ -39,10 +39,27 @@ export const ProgramStateSchema = z.object({
 
 export type ProgramState = z.infer<typeof ProgramStateSchema>
 
-// The listener's knobs (spec 12 §1): exactly these eight, resolved — the live
+// The listener's knobs (spec 12 §1): exactly these nine, resolved — the live
 // values the engine's SettingsStore holds. The schema doubles as the per-key
 // validator for the settings FILE (spec 12 §2.1), so the file and the wire can
 // never disagree on what a legal value is.
+// A language NAME as a person would say it ("Japanese", "Traditional Chinese").
+// One line, bounded — enough to keep a runaway model or a mangled file out of
+// every system prompt, without pretending a closed list could cover everyone.
+// The mix gear (spec 12 §3.5) as INTENT — the vocabulary both ways into the
+// settings layer translate from (§2.6). It lives here, shared, so the pane's
+// keypress and the reply turn's tool cannot drift into different numbers.
+export const MIX_NAMES = ['more music', 'balanced', 'more talk'] as const
+export type MixName = (typeof MIX_NAMES)[number]
+export const MIX_EVERY_N: Record<MixName, number> = {
+  'more music': 1,
+  balanced: 2,
+  'more talk': 4,
+}
+
+export const LANGUAGE_MAX = 40
+const LanguageSchema = z.string().trim().min(1).max(LANGUAGE_MAX).regex(/^[^\n\r]+$/)
+
 export const SettingsValuesSchema = z.object({
   anchorsEnabled: z.boolean(),
   musicEnabled: z.boolean(),
@@ -55,11 +72,16 @@ export const SettingsValuesSchema = z.object({
   // swap (`--voice stub` remains the dev-surface knob for not synthesizing).
   muted: z.boolean(),
   tuiPet: z.boolean(),
+  // The one OPTIONAL knob (spec 12 §3.9). Absent means the listener never said,
+  // and the persona decides; set is an override applied as a directive on top
+  // of the persona, never an edit to persona.md. Free text — a language name as
+  // a person says it — so the bound is a shape, not a vocabulary.
+  language: LanguageSchema.optional(),
 })
 
 export type Settings = z.infer<typeof SettingsValuesSchema>
 
-// A mutation (spec 12 §2.4): a partial over the same eight knobs.
+// A mutation (spec 12 §2.4): a partial over the same nine knobs.
 export const SettingsPatchSchema = z.object({
   anchorsEnabled: z.boolean().optional(),
   musicEnabled: z.boolean().optional(),
@@ -69,6 +91,9 @@ export const SettingsPatchSchema = z.object({
   recentWindow: z.number().int().positive().optional(),
   muted: z.boolean().optional(),
   tuiPet: z.boolean().optional(),
+  // Empty string is legal HERE and only here: it is how the listener clears the
+  // override and hands the language back to the persona (spec 12 §3.9).
+  language: z.union([LanguageSchema, z.literal('')]).optional(),
 })
 
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>

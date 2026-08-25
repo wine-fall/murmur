@@ -132,3 +132,49 @@ describe('SettingsStore (spec 12 §2.4)', () => {
     expect(existsSync(path)).toBe(false) // nothing was ever written
   })
 })
+
+// spec 12 §3.9: the one optional knob. Absent means "the user never said" and
+// the persona decides — so setting it must be reversible all the way back to
+// absent, not merely to some default.
+describe('the language override (spec 12 §3.9)', () => {
+  it('round-trips through the file like any other key', () => {
+    const path = fileIn(home())
+    writeSettingsFile(path, { language: 'Japanese' })
+    expect(readSettingsFile(path)).toEqual({ language: 'Japanese' })
+  })
+
+  it('salvages a file whose language is unusable, keeping the good keys', () => {
+    const path = fileIn(home())
+    writeFileSync(path, JSON.stringify({ language: 'x\ny', muted: true }))
+    expect(readSettingsFile(path)).toEqual({ muted: true })
+  })
+
+  it('starts absent and applies as a plain set', () => {
+    const s = store({})
+    expect(s.current().language).toBeUndefined()
+    expect(s.set({ language: 'Traditional Chinese' })).toBe(true)
+    expect(s.current().language).toBe('Traditional Chinese')
+  })
+
+  it('an empty string clears the override rather than storing a blank', () => {
+    const path = fileIn(home())
+    const s = store({ path, initial: { language: 'Japanese' }, touched: { language: 'Japanese' } })
+    expect(s.set({ language: '' })).toBe(true)
+    expect(s.current().language).toBeUndefined()
+    // Cleared on disk too: a stale key would resurrect the override next boot.
+    expect(readSettingsFile(path).language).toBeUndefined()
+  })
+
+  it('clearing an override that was never set is still a no-op set, not a crash', () => {
+    const s = store({})
+    expect(s.set({ language: '' })).toBe(true)
+    expect(s.current().language).toBeUndefined()
+  })
+
+  it('refuses a value that is not a language name', () => {
+    const s = store({})
+    expect(s.set({ language: 'a'.repeat(60) })).toBe(false)
+    expect(s.set({ language: 'Japanese\nand also English' })).toBe(false)
+    expect(s.current().language).toBeUndefined()
+  })
+})

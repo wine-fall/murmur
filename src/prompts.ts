@@ -16,6 +16,16 @@ export const DEFAULT_PERSONA_PATH = fileURLToPath(
   new URL('./prompts/persona-seed.md', import.meta.url),
 )
 
+// The listener's language override (spec 12 §3.9). The persona names a language
+// of its own and murmur never rewrites that file, so an override rides on top as
+// one directive — which means clearing it restores the persona's word, and a
+// hand-edited persona is never clobbered by a stale setting.
+export function withLanguage(persona: string, language: string | undefined): string {
+  const name = language?.trim()
+  if (name === undefined || name === '') return persona
+  return `${persona}\n\nSpeak in ${name}. This overrides any language the persona above names.`
+}
+
 // Output discipline appended to every Brain call: the result is fed straight
 // to TTS, so it must be clean spoken text with no markup or stage directions.
 const OUTPUT_RULES =
@@ -554,8 +564,20 @@ const STEER_END_RULE =
   '- An explicit ask to stop or close the radio -> call end_broadcast and ' +
   'follow its status. Never call it for a mood remark (tired is not a request).\n'
 
+// Without this the catch-all below actively told the model NOT to act on a
+// settings request (codex review): the tool was in the set, but the prompt said
+// anything that is not music or shutdown is just conversation.
+const STEER_SETTINGS_RULE =
+  '- An explicit ask to change how the radio behaves — music on/off, more ' +
+  'music or more talk, breathing room, sound/mute, the morning and night ' +
+  'moments, the pixel pet, memory span, or the language it speaks -> call ' +
+  'change_settings with only the fields they asked about, then say what ' +
+  'changed. A mood remark is not a request ("this song is too loud" is not ' +
+  '"mute"). For the language, pass the language name; pass an empty string to ' +
+  'return to its own default.\n'
+
 const STEER_REPLY_RULE =
-  '- Anything else is just conversation — no action tools.\n\n' +
+  '- Anything the tools above do not cover is just conversation — no action tools.\n\n' +
   'Always finish by calling submit_reply with your spoken reply, in character, ' +
   'easing back into the program.'
 
@@ -569,11 +591,14 @@ export const STEER_ARMED_NOTE =
 export function buildSteerPrompt(
   userText: string,
   ctx: ContextPack,
-  opts: { musicWired: boolean; shutdownArmed: boolean },
+  opts: { musicWired: boolean; shutdownArmed: boolean; settingsWired: boolean },
 ): string {
   const transcript = renderTranscript(ctx, userText)
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
-  const rules = `${opts.musicWired ? STEER_SWITCH_RULE : ''}${STEER_END_RULE}${STEER_REPLY_RULE}`
+  const rules =
+    `${opts.musicWired ? STEER_SWITCH_RULE : ''}` +
+    `${opts.settingsWired ? STEER_SETTINGS_RULE : ''}` +
+    `${STEER_END_RULE}${STEER_REPLY_RULE}`
   const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
   return (
     `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n\n` +

@@ -11,9 +11,41 @@ import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
 import type { SteerActions, TaskTool } from './contracts.ts'
+import { LANGUAGE_MAX, MIX_EVERY_N, MIX_NAMES, type SettingsPatch } from './ipc.ts'
 
 function reply(payload: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] }
+}
+
+// The listener's words -> the engine's fields (spec 12 §2.6). The tool's schema
+// is the pane's vocabulary, so this is the ONE place the translation happens on
+// the conversational side; null = the call asked for nothing.
+type SettingsIntent = {
+  music?: boolean | undefined
+  mix?: (typeof MIX_NAMES)[number] | undefined
+  breathingRoom?: number | undefined
+  sound?: 'on' | 'muted' | undefined
+  anchors?: boolean | undefined
+  pet?: boolean | undefined
+  memorySpan?: number | undefined
+  language?: string | undefined
+}
+
+function settingsPatch(intent: SettingsIntent): SettingsPatch | null {
+  const patch: SettingsPatch = {
+    ...(intent.music !== undefined && { musicEnabled: intent.music }),
+    ...(intent.mix !== undefined && {
+      cadenceMode: 'every_n' as const,
+      musicEveryN: MIX_EVERY_N[intent.mix],
+    }),
+    ...(intent.breathingRoom !== undefined && { gapSeconds: intent.breathingRoom }),
+    ...(intent.sound !== undefined && { muted: intent.sound === 'muted' }),
+    ...(intent.anchors !== undefined && { anchorsEnabled: intent.anchors }),
+    ...(intent.pet !== undefined && { tuiPet: intent.pet }),
+    ...(intent.memorySpan !== undefined && { recentWindow: intent.memorySpan }),
+    ...(intent.language !== undefined && { language: intent.language }),
+  }
+  return Object.keys(patch).length === 0 ? null : patch
 }
 
 export function steerTools(actions: SteerActions, finish: (replyText: string) => void): TaskTool[] {
@@ -43,6 +75,76 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
             : 'no track playing; a fresh pick is being prepared and will air at ' +
               'the next break — do NOT name or promise a specific song'
           return reply({ ok: true, status })
+        },
+      ),
+    )
+  }
+
+  const settings = actions.settings
+  if (settings !== undefined) {
+    tools.push(
+      tool(
+        'change_settings',
+        'The listener EXPLICITLY asked to change how the radio behaves — the ' +
+          'same knobs the /settings pane holds. A mood remark is NOT a request: ' +
+          '"this song is too loud" is not "mute". Pass only the fields they ' +
+          'actually asked about.',
+        {
+          music: z.boolean().optional().describe('play music at all; false = pure talk radio'),
+          mix: z.enum(MIX_NAMES).optional().describe('how much music against talk'),
+          breathingRoom: z
+            .number()
+            .min(0)
+            .max(10)
+            .optional()
+            .describe('seconds of silence between segments'),
+          sound: z
+            .enum(['on', 'muted'])
+            .optional()
+            .describe('muted keeps broadcasting, it only gates the output'),
+          anchors: z.boolean().optional().describe('the morning and night moments'),
+          pet: z.boolean().optional().describe('the pixel pet in the front-end'),
+          memorySpan: z
+            .number()
+            .int()
+            .min(4)
+            .max(48)
+            .optional()
+            .describe('how many recent turns it keeps in mind'),
+          language: z
+            .string()
+            .max(LANGUAGE_MAX)
+            .optional()
+            .describe(
+              'the language to speak, as a name ("Japanese", "Traditional ' +
+                'Chinese"). Empty string returns it to its own default.',
+            ),
+        },
+        async (args) => {
+          // The pane greys the music items when this run has no pipeline; the
+          // conversation must refuse them for the same reason, or the model is
+          // told {ok:true} about music that can never play.
+          if (music === undefined && (args.music !== undefined || args.mix !== undefined)) {
+            return reply({
+              ok: false,
+              error:
+                'this run has no music pipeline, so the music knobs cannot be ' +
+                'changed — say so plainly instead of promising music',
+            })
+          }
+          const patch = settingsPatch(args)
+          if (patch === null) {
+            return reply({
+              ok: false,
+              error: 'change_settings asks for nothing — pass at least one field',
+            })
+          }
+          if (!settings.set(patch)) {
+            return reply({ ok: false, error: 'the radio refused those values; nothing changed' })
+          }
+          // What is true at RETURN time (spec 11 §3.2), so the reply composed
+          // afterwards cannot narrate a change that did not land.
+          return reply({ ok: true, applied: settings.current() })
         },
       ),
     )

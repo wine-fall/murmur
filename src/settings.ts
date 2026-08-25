@@ -98,6 +98,15 @@ export class SettingsStore {
     const entries = Object.entries(checked.data).filter(([, value]) => value !== undefined)
     if (entries.length === 0) return false
     for (const [key, value] of entries) {
+      // The one erasable knob (spec 12 §3.9): '' is not a value, it is the
+      // listener taking their hand off the knob. Storing it would leave a blank
+      // language in every system prompt AND a stale key that resurrects the
+      // override at the next boot, so it is deleted from both live and file.
+      if (value === '') {
+        delete this.live[key as keyof Settings]
+        delete this.touched[key as keyof Settings]
+        continue
+      }
       Object.assign(this.live, { [key]: value })
       Object.assign(this.touched, { [key]: value })
     }

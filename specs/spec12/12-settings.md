@@ -20,18 +20,26 @@
    agent-writable persistence layer for the knobs a *listener* (not a
    developer) adjusts, merged under env and flags at boot.
 2. **The engine as the sole settings authority**: one live store, one writer,
-   change events; every consumer (TUI pane today, a brain-harness tool later)
-   goes through the same engine-side setter.
+   change events; every consumer goes through the same engine-side setter.
 3. **Two additive wire messages** (`settings` / `settingsSet`) so the TUI
    reads and writes settings without touching disk or importing anything
    beyond `src/ipc.ts`.
-4. **A `/settings` pane in the TUI** — exactly **seven writable items** plus
-   two read-only lines. Seven is the ceiling, not a first tranche (spec 10 §1
-   rules out the sixteen-knob theming engine).
+4. **A `/settings` pane in the TUI** — exactly **eight writable items** plus
+   two read-only lines. Eight is the ceiling, not a tranche (spec 10 §1 rules
+   out the sixteen-knob theming engine).
 5. **Hot application**: every item targets take-effect-now; anything that
    falls to the recorded fallback is labeled honestly in the pane.
+6. **Two equal ways to change every knob** (amended 2026-08-25, §2.6): the
+   `/settings` pane **and** simply telling murmur. Neither is the "real" one —
+   the pane's keypress and the reply turn's `change_settings` tool call the
+   same `SettingsStore.set`, so they cannot drift.
 
-### The seven writable items (locked 2026-08-07 — do not reopen)
+### The eight writable items
+
+Seven were locked 2026-08-07. The eighth was added **2026-08-25 by user
+decision**: spec 06 §3.2 made the host's language a real choice, and a choice
+with no user-facing way to change it is not a setting. The lock stands for
+everything else — this is not an invitation to a ninth.
 
 | # | Pane intent (user-facing) | Underlying knob(s) |
 |---|---|---|
@@ -42,6 +50,7 @@
 | 5 | Sound on/off (mute keeps broadcasting) | `muted` (§3.4 — the master output gain) |
 | 6 | Pixel pet on/off | `tuiPet` (§3.7) |
 | 7 | Memory span (advanced group) | `recentWindow` |
+| 8 | The language it speaks | `language` (§3.9) |
 
 Read-only display: the resolved storage home (`config.home`) and the voice
 endpoint status (configured / not configured — **never** the key or URL
@@ -61,11 +70,8 @@ and the raw knob identifiers appear nowhere in the UI.
   `MURMUR_DEV_LOG`. `memoryDir` / `tuiSocket` are pure derivations with no
   handle — they stay read-only facts of the home.
 - **No theming, no layout knobs, no mouse** (spec 10 §1).
-- **No brain-harness settings tool in this spec.** The engine-side setter is
-  built so that tool is a later thin wrapper; the tool itself (spec 11's
-  posture) is not part of this delivery.
-- **No schema extension points.** The file schema is exactly the eight keys
-  of §3.1; unknown keys are dropped on read.
+- **No schema extension points.** The file schema is exactly the nine keys of
+  §3.1; unknown keys are dropped on read.
 
 ---
 
@@ -89,6 +95,7 @@ and the raw knob identifiers appear nowhere in the UI.
     recentWindow?: number  // int, positive
     muted?: boolean        // the listener's output mute (§3.4)
     tuiPet?: boolean
+    language?: string      // the spoken-language override (§3.9)
   }
   ```
 
@@ -128,7 +135,9 @@ flag wins again, which is what flags mean.
 
 ```ts
 // src/settings.ts
-export type Settings = { /* the 8 keys of §3.1, all required, resolved */ }
+// The 9 keys of §3.1, resolved. All required EXCEPT `language`, whose absence
+// is meaningful at runtime too: it means the persona decides (§3.9).
+export type Settings = { /* ... */ }
 
 export interface SettingsStore {
   current(): Settings                    // resolved, live values
@@ -138,7 +147,9 @@ export interface SettingsStore {
 ```
 
 - Initialized from the merged boot `Config` (so flags/env are respected as
-  the starting state), **not** from the file alone.
+  the starting state), **not** from the file alone — except `language`, which
+  has no `Config` field to carry it and is seeded straight from the file
+  (§3.9).
 - `set()` is the **only** mutation path — the pane and any future agent tool
   both land here. It zod-validates the patch (reject = drop, no partial
   apply), applies to the live values, writes the file atomically, then
@@ -168,6 +179,46 @@ TUI → Engine — one new message:
 
 ---
 
+### 2.6 Two equal ways in (amended 2026-08-25)
+
+Every knob in the table above is reachable **both** ways, and the two are the
+same act:
+
+1. **The pane** — `/settings`, a keypress becomes a `SettingsPatch` on the
+   wire (§2.5), and the engine applies it.
+2. **Saying so** — "turn the music off", "speak Japanese", "give it more room
+   to breathe". The reply turn is already an agent (spec 11); it gains a
+   `change_settings` tool whose handler calls the **same**
+   `SettingsStore.set`.
+
+Neither path is privileged and neither owns state. Consequences that are
+contracts, not implementation taste:
+
+- **One writer, still.** The tool does not touch disk, `Config`, or the
+  Director's fields; it calls the store, and the store's existing
+  persist-and-notify does the rest (§2.4). A pane open at that moment
+  refreshes through the same `onChange` -> `settings` snapshot it always did.
+- **The tool speaks intent, not field names.** Its schema is the pane's
+  vocabulary (music on/off, more music / more talk, breathing room, sound,
+  memory span, the language) — the raw knob identifiers appear in neither UI,
+  per §1. The mapping from intent to fields lives in one place per client.
+- **Ask before a destructive read of intent.** A settings change is cheap and
+  reversible, so it needs no confirmation ceremony (unlike `end_broadcast`,
+  spec 11 §2.1) — but the model must not infer one from a mood remark. "This
+  song is too loud" is not "mute"; only an actual request changes a knob.
+- **Narration follows delivery** (spec 11 §3.2): the tool applies the change
+  and returns what is now true; the spoken reply is composed afterwards, so
+  the host never promises a change it did not make.
+- **Exposing the tool is not authorizing it.** The steer prompt's catch-all
+  ends "anything the tools above do not cover is just conversation", so a
+  settings rule must be added to that prompt alongside the `switch_music` one,
+  gated on the same capability. A tool in the set that the prompt does not
+  name is a tool the model is being told not to use.
+- **Capability parity with the pane.** The pane greys the music items when
+  this run has no music pipeline; the tool refuses those same fields for the
+  same reason and says why. A knob the run cannot honour must never answer
+  `ok`.
+
 ## 3. Design
 
 ### 3.1 File keys mirror `Config` field names
@@ -190,6 +241,7 @@ Every knob targets hot. Mechanism per knob:
 | `cadenceMode` + `musicEveryN` | the cadence decision point reads the live store (rebuild-per-boundary or getter — implementation's pick) | next segment boundary |
 | `musicEnabled` | the music pipeline is **built whenever its dependencies exist** regardless of the flag; the Director's schedule-next-music site checks the live flag. **Off gates the spend, not just the airtime** (peer-review find): the prefetch paths consult the same flag, so a disabled session pays zero discovery calls. Toggle-on re-enters through the existing boundary cold path (the away-stream precedent) | next segment boundary |
 | `tuiPet` | client-side render toggle driven by the `settings` snapshot | immediate |
+| `language` | the Director composes the system prompt as persona + the language directive (§3.9); a change re-composes it | next brain call |
 
 **Fallback clause (recorded, with teeth)**: if implementation finds the
 music pipeline's build-time coupling (yt-dlp preflight, guide trigger) too
@@ -314,6 +366,37 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
 
 ---
 
+### 3.9 The language knob (added 2026-08-25)
+
+The one knob whose authority lives outside this layer. Spec 06 §3.2 makes the
+**persona** the standing statement of what the host speaks, written once at
+onboarding and never rewritten by murmur. This knob does not touch that:
+
+- **`language` is optional in the resolved `Settings`** — the only knob that
+  is. **Absent means "the user never said", and the persona decides**, exactly
+  the fall-through §2.2 already describes for the file. It is not defaulted to
+  the detected locale: that default is already baked into the persona at
+  onboarding, and defaulting here would silently override a persona the
+  listener hand-wrote.
+- **Set means an override**, applied by composing the system prompt as
+  `persona` + one directive line (`languageDirective()`, `src/prompts.ts`).
+  `persona.md` is never edited — so clearing the knob restores whatever the
+  persona says, and a hand-edited persona is never clobbered by a stale knob.
+- **Free text, not an enum.** The value is a language *name* as a person would
+  say it ("Japanese", "Traditional Chinese", "Brazilian Portuguese"). Any
+  closed list would be wrong for someone. Validation is a length bound and a
+  one-line shape check, not a vocabulary.
+- **The pane cannot step through it**, so the language item is the one pane
+  entry that opens an inline text edit on Enter rather than toggling
+  (§3.6 delta). Escape cancels; empty submit clears the override. The editor
+  takes bracketed paste as well as keystrokes — the input line is unfocused
+  while the pane is open, so paste would otherwise be dropped.
+- **The FILE is its only boot source.** Unlike every other knob it has no env
+  or CLI surface, so §2.2's precedence chain has just one link: the store's
+  boot `initial` must be seeded from `settings.json` directly, not from
+  `Config`. Seeding only the write-back set leaves the override dead after a
+  restart — set once, gone next boot.
+
 ## 4. Dependencies
 
 - **spec 01 / `config.ts`**: the merge chain.
@@ -340,11 +423,18 @@ Per master §11: all deterministic → unit tests on fakes, test-first.
    snapshot, and a schema-invalid one is dropped as malformed (§2.5); old
    clients are unaffected; no protocol bump; snapshots never appear in the
    replay backlog.
-4. **Pane**: `/settings` opens the pane; exactly seven writable items + two
+4. **Pane**: `/settings` opens the pane; exactly eight writable items + two
    read-only lines; intent labels only (no `every_n`/`random`/`brain`, no
    field names); custom gear position renders when values match no preset;
-   gear greys when music is off; Esc returns focus with the broadcast
-   uninterrupted; ranges enforced as §3.6.
+   gear greys when music is off; the language row opens an inline edit (typed
+   or pasted) instead of stepping, and reads "the persona's own" with no
+   override set; Esc returns focus with the broadcast uninterrupted; ranges
+   enforced as §3.6.
+4b. **Both ways in** (§2.6): telling murmur to change a knob moves
+   `settings.json` exactly as the pane's keypress does — verified at the FILE,
+   never from the reply's narration; the steer prompt names `change_settings`
+   only when a store is wired; the music fields are refused when this run has
+   no music pipeline; a `language` set survives a restart.
 5. **Hot effect, per knob**: gap and memory-span changes land without
    reconstruction (fakes); mute silences the whole output instantly and
    unmute restores it mid-sentence (offline render, §3.8);
