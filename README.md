@@ -4,13 +4,13 @@
 
 # murmur
 
-**A local-first companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
+**A companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
 murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It *broadcasts, never solicits* — it keeps going whether or not you say anything, and when you type back it chats for a bit, then eases back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
-Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **local + proactive + emotional companionship + voice radio** combination. That gap is murmur.
+Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
-> Open-source, non-commercial, and **local-first** — the only network hops are ① brain inference, ② the music stream, and ③ a hosted voice for now (a local TTS is the noted want). Everything else (logic, I/O, memory, mixing) stays on your machine.
+> Open-source and non-commercial — but **not self-contained**. Three things come off the network: the brain is a Claude session, the music streams in, and the voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio), reached over a hosted endpoint. What runs on your machine is everything murmur itself owns — program logic, keyboard I/O, memory, persona, and audio mixing. A local TTS is a noted want, not current code.
 
 ## Core experience
 
@@ -29,7 +29,7 @@ A single Node.js (TypeScript) process. One loop drives "speaking up," a readline
 | **CLI Host** | render "now playing" + read keyboard input (proactive + typing share the terminal) |
 | **Program Director** | the soul: continuously decide what plays next (talk / music / time-anchor); modulate pacing |
 | **Brain** | Claude session (via `@anthropic-ai/claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
-| **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted fish-speech endpoint) |
+| **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted [fish-speech](https://github.com/fishaudio/fish-speech) endpoint) |
 | **MusicProvider** | topic/query → audio stream; hot-swappable (v1 = yt-dlp, covering YouTube + Bilibili) |
 | **AudioEngine** | sole audio authority: one output stream mixing music + voice, gain-envelope **ducking** (talk rides over the song; an interjection ducks it, never stops it) |
 | **Memory** | who you are, topics discussed, songs played (anti-repeat), conversation log — and the host's own character file, written once at setup and yours to edit after that |
@@ -69,12 +69,12 @@ live tracker is [`specs/STATUS.md`](specs/STATUS.md).
 
 - Node.js ≥ 24 and **pnpm** (`corepack enable pnpm`, or `brew install pnpm`)
 - A local **Claude Code** subscription login (for the real brain) — or run `--brain stub` fully offline
-- For a real voice: a hosted TTS endpoint (fish-speech; set `MURMUR_TTS_URL` — see `make dev-fishaudio`)
+- For a real voice: a hosted [fish-speech](https://github.com/fishaudio/fish-speech) endpoint (set `MURMUR_TTS_URL` — see `make dev-fishaudio`)
 
 ## Install & run
 
 ```bash
-# as a CLI (once published; runs the same code, no build step)
+# as a CLI (Node ≥ 24; no build step, no checkout)
 npm install -g murmur-radio
 murmur
 
@@ -125,6 +125,10 @@ brew install ffmpeg yt-dlp    # binaries real runs need (music)
 Testing is layered (see [`DESIGN.md` §11](specs/DESIGN.md)): unit tests are test-first against fakes; real-boundary checks run on demand as throwaway `scratch/` smokes; sensory "sounds human / feels like radio" checks are human acceptance. Every seam ships a fake, so the core loop is testable without real audio, LLM, or network.
 
 Conventions: specs are written in English and optimized for a coding agent to consume. No CJK anywhere in source (comments, literals, docstrings) — the radio speaks Chinese only at runtime, produced by the model from the persona prompt; enforced by `scripts/check-source-language.ts` via pre-commit.
+
+## Credits
+
+The voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio) — the reason murmur sounds like a person on the radio instead of a screen reader. murmur talks to it over a hosted endpoint; the model and the work behind it are theirs.
 
 ## License
 
