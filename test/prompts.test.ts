@@ -217,15 +217,25 @@ describe('seed-persona prompt (spec 06 §2.2/§3.3)', () => {
   })
 
   it('carries every answered question and its answer', () => {
-    const p = buildSeedPersonaPrompt(answers)
+    const p = buildSeedPersonaPrompt(answers, 'English')
     for (const a of answers) {
       expect(p).toContain(a.question)
       expect(p).toContain(a.answer)
     }
   })
 
+  // spec 06 §3.2: what the listener asked for wins; the language they typed in
+  // is the next-best read; the detected default only catches the rest.
+  it('ranks the language sources and names the detected default', () => {
+    const p = buildSeedPersonaPrompt(answers, 'Japanese')
+    expect(p).toMatch(/language/i)
+    expect(p).toContain('Japanese')
+    expect(p).toMatch(/wrote their answers in/i)
+    expect(p).toMatch(/state that language explicitly/i)
+  })
+
   it('demands a standalone persona, not a summary, and states the cap', () => {
-    const p = buildSeedPersonaPrompt(answers)
+    const p = buildSeedPersonaPrompt(answers, 'English')
     expect(p).toContain(String(PERSONA_CHAR_CAP))
     expect(p).toMatch(/not a summary/i)
     expect(p).toMatch(/do not invent/i)
@@ -238,10 +248,13 @@ describe('seed-persona prompt (spec 06 §2.2/§3.3)', () => {
   })
 
   it('drops skipped questions rather than sending blanks', () => {
-    const p = buildSeedPersonaPrompt([
-      { question: 'Q1', answer: 'answered' },
-      { question: 'Q2', answer: '   ' },
-    ])
+    const p = buildSeedPersonaPrompt(
+      [
+        { question: 'Q1', answer: 'answered' },
+        { question: 'Q2', answer: '   ' },
+      ],
+      'English',
+    )
     expect(p).toContain('Q1')
     expect(p).not.toContain('Q2')
   })

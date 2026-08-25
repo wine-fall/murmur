@@ -24,6 +24,10 @@
 > already ships. This spec therefore delivers three slices and **no new
 > machinery loop**. It also **absorbs** the profile half of the retired spec 09
 > (`claude-code-ingestion`) as slice B.
+> **Amended (2026-08-25)**: the host's language is no longer hardcoded. The
+> bundled seed named Chinese outright; it now carries a `{{language}}` slot and
+> the default comes from the machine's locale, with English as the floor
+> (§3.2). One boot-time read, no watcher — the persona remains the authority.
 > **Milestone**: first run + relationship. Depends on spec 05 (landed).
 > **Privacy boundary (master §3.1)**: everything here is **on-device**. The
 > onboarding answers, the Claude Code transcripts read in slice B, `persona.md`
@@ -251,6 +255,29 @@ Exactly three, short, answerable in one line, in this order. Wording lives in
    language it should speak. *Feeds*: voice, register, and the output language
    (master §0: the prompt scaffolding is English; the persona sets the spoken
    language).
+
+**The output language is decided here, once.** No language is hardcoded
+anywhere in the source. `detectLanguage()` (`src/locale.ts`) reads the machine's
+message locale once at boot and names it in English (`zh_TW` ->
+`Traditional Chinese`, `ja_JP` -> `Japanese`, `sr_RS@latin` ->
+`Serbian (Latin)`; the region is dropped, the script kept only where it departs
+from the language's default, including the script a glibc `@latin`/`@cyrillic`
+modifier selects). Precedence is POSIX: `LC_ALL`, then `LC_MESSAGES`, then
+`LANG`, and the **first one that is set is the answer** — a set `LC_ALL=C`
+overrides a localized `LANG` rather than falling through to it. `C`, `POSIX`,
+an unnameable tag, or an environment that sets none of the three all yield
+`English`, the floor. That name is the **default**, and the seed
+persona prompt ranks it last: what the listener **asked for** wins, then the
+language they **wrote their answers in**, then the detected default. The
+generated persona states its language explicitly, and murmur never rewrites the
+file — so nothing re-reads the locale afterwards. Changing the language later
+means editing `persona.md`; changing the default means the environment murmur
+launches in.
+
+The bundled seed (`src/prompts/persona-seed.md`) therefore names no language of
+its own: it carries a `{{language}}` slot, filled by `renderPersona()`
+(`src/persona.ts`) wherever the seed is read or lands at the listener's home. A
+persona that states its own language has no slot, so filling one is a no-op.
 
 The generated persona must be a **complete standalone System Prompt** — the
 bundled seed is the shape reference, so a hand-written seed and a generated one

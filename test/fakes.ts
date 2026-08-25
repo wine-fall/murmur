@@ -128,9 +128,9 @@ export class FakeBrain implements Brain {
     return `${profile}+${transcript.length}`
   }
 
-  async seedPersona(answers: readonly SeedAnswer[]): Promise<string> {
+  async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
     this.seedAnswers.push(answers)
-    return `persona from ${answers.length} answers`
+    return `persona from ${answers.length} answers in ${language}`
   }
 }
 

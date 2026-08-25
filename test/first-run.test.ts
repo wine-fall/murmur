@@ -24,11 +24,13 @@ function workspace(): { dir: string; memoryDir: string; seed: string; home: stri
 
 class FakeSeeder implements Pick<Brain, 'seedPersona'> {
   calls: (readonly SeedAnswer[])[] = []
+  languages: string[] = []
   result = GENERATED
   fail = false
 
-  async seedPersona(answers: readonly SeedAnswer[]): Promise<string> {
+  async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
     this.calls.push(answers)
+    this.languages.push(language)
     if (this.fail) throw new Error('brain down')
     return this.result
   }
@@ -65,6 +67,7 @@ const deps = (over: Partial<Parameters<typeof runFirstRun>[0]>) => ({
   memoryDir: '',
   fallbackSeedPath: '',
   model: 'test-model',
+  language: 'English',
   ...over,
 })
 
@@ -101,6 +104,24 @@ describe('onboarding (criterion 2)', () => {
     ])
   })
 
+  // spec 06 §3.2: nothing in the source picks the host's language. The default
+  // is decided once here, from the machine the listener is on, and the answers
+  // override it.
+  it('hands the detected language to the Brain as the default', async () => {
+    const { memoryDir, seed } = workspace()
+    const brain = new FakeSeeder()
+    await runFirstRun(
+      deps({
+        host: scriptedHost(['a', 'b', 'c']),
+        brain,
+        memoryDir,
+        fallbackSeedPath: seed,
+        language: 'Japanese',
+      }),
+    )
+    expect(brain.languages).toEqual(['Japanese'])
+  })
+
   it('tells the user where the persona lives, since editing it is the only way it changes', async () => {
     const { memoryDir, seed, home } = workspace()
     const host = scriptedHost(['a', 'b', 'c'])
@@ -119,6 +140,20 @@ describe('skip and non-interactive (criterion 3)', () => {
     expect(path).toBe(home)
     expect(readFileSync(home, 'utf-8')).toBe(SEED_TEXT)
     expect(brain.calls).toHaveLength(0)
+  })
+
+  // The skipped path is the one with no answers to read a language out of, so
+  // it is the one that must not leave a raw slot in the listener's persona.
+  it('fills the bundled seed language slot on the way to the home', async () => {
+    const { dir, memoryDir, home } = workspace()
+    const seed = join(dir, 'slotted.md')
+    writeFileSync(seed, 'You are a host.\n- Always speak in {{language}}.\n')
+    const path = await runFirstRun(
+      deps({ host: scriptedHost(['', '', '']), memoryDir, fallbackSeedPath: seed, language: 'Japanese' }),
+    )
+    expect(path).toBe(home)
+    expect(readFileSync(home, 'utf-8')).toContain('Always speak in Japanese.')
+    expect(readFileSync(home, 'utf-8')).not.toContain('{{')
   })
 
   it('a closed stdin declines every question instead of wedging startup', async () => {

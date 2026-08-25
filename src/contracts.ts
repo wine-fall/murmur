@@ -295,6 +295,8 @@ export interface Brain {
   compactProfile(profile: string, transcript: readonly Turn[]): Promise<string>
   // Turn the first-run onboarding answers into a persona seed: a complete
   // standalone system prompt for the host, in the listener's own language
-  // (spec 06 §2.2). Tool-less text generation, same posture as compactProfile.
-  seedPersona(answers: readonly SeedAnswer[]): Promise<string>
+  // (spec 06 §2.2). `language` is the machine-detected default, used only where
+  // the answers do not settle the question. Tool-less text generation, same
+  // posture as compactProfile.
+  seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string>
 }

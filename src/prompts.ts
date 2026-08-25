@@ -1,7 +1,7 @@
 // Centralized prompt text (DESIGN §0): every prompt murmur sends to the Brain
 // lives here, in English. The radio's output language is set inside the
-// persona seed (it instructs Chinese speech), so English scaffolding still
-// yields a Chinese-speaking radio.
+// persona, which names it explicitly — so English scaffolding still yields a
+// radio speaking whatever the listener settled on at onboarding.
 //
 // Spec-01 builders only; later phases add profile/covered-topics/scene blocks
 // (specs 04/05) when their data exists.
@@ -459,7 +459,7 @@ export const SEED_PERSONA_SYSTEM_PROMPT =
 
 // Fold the onboarding answers into a complete standalone persona — the same
 // shape a hand-written seed has, so spec 01's loader cannot tell them apart.
-export function buildSeedPersonaPrompt(answers: readonly SeedAnswer[]): string {
+export function buildSeedPersonaPrompt(answers: readonly SeedAnswer[], language: string): string {
   const said = answers
     .filter((a) => a.answer.trim() !== '')
     .map((a) => `Q: ${a.question}\nA: ${a.answer.trim()}`)
@@ -474,8 +474,10 @@ ${said}
 Rules:
 - Write the host's CHARACTER — who it is, how it speaks, how it keeps company.
   It is not a summary of the answers and never mentions this questionnaire.
-- Write it in the language the listener asked to be spoken to in, and state
-  that language explicitly inside the persona.
+- Pick the language the host speaks, in this order: the language the listener
+  asked to be spoken to in; else the language they wrote their answers in;
+  else ${language}. Write the persona in that language, and
+  state that language explicitly inside it.
 - Keep it time-neutral. The host is not a late-night host, a morning host, or
   a host for any season — not even when the listener says what hours they keep.
   Their hours are context about THEM; the host meets them at any hour, and the

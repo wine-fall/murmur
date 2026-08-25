@@ -23,7 +23,17 @@ export function personaLine(persona: string): string {
   return label.length > LABEL_MAX ? `${label.slice(0, LABEL_MAX - 1).trimEnd()}\u2026` : label
 }
 
-export function loadPersona(path: string): string {
+// The bundled seed names no language of its own (spec 06 §3.2): it carries this
+// slot, filled with the language decided for the install. A generated or
+// hand-written persona states its language outright and has no slot, so filling
+// one is a no-op there.
+const LANGUAGE_SLOT = /\{\{language\}\}/g
+
+export function renderPersona(text: string, language: string): string {
+  return text.replace(LANGUAGE_SLOT, language)
+}
+
+export function loadPersona(path: string, language: string): string {
   let raw: string
   try {
     raw = readFileSync(path, 'utf-8')
@@ -32,5 +42,5 @@ export function loadPersona(path: string): string {
   }
   const text = raw.trim()
   if (!text) throw new Error(`persona seed file is empty: ${path}`)
-  return text
+  return renderPersona(text, language)
 }
