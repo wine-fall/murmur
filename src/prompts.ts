@@ -138,28 +138,45 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
 // Header prefixing the volatile context block in the music task turn.
 export const MUSIC_CONTEXT_HEADER = 'Current context for choosing music:\n'
 
-// The selection heuristics live in the task instruction (not scattered in code,
-// and not a formal SDK skill for now). English scaffolding; the listener's
-// language and taste come from the persona.
-export const FIND_MUSIC_INSTRUCTION = `Choose ONE piece of music to play next on a personal radio.
+// The pick task's instruction, in two halves (spec 03-01 §2.3). English
+// scaffolding; the listener's language and taste come from the persona.
+//
+// The CONTRACT half is code-owned: how the task ends, and what `submit_pick`
+// must carry. A listener policy that forgot to ask for an announce would
+// otherwise put a track on the air with no intro.
+export const FIND_MUSIC_CONTRACT = `Choose ONE piece of music to play next on a personal radio.
 
-Use the search_music tool to find candidates, judge them against the persona and
-the context below, then call submit_pick with the single best track and a short
-reason.
+Use the search_music tool to find candidates, judge them against the persona,
+the policy below, and the context, then call submit_pick with the single best
+track and a short reason.
 
-Guidance:
-- Prefer official audio / studio versions; avoid hour-long loops, low-quality
+- If your pick fails to resolve, pick another candidate and submit again.
+- In submit_pick, also pass the track's title and artist (from the candidate),
+  and write \`announce\`: ONE short spoken line introducing the track, in the
+  persona's voice and language — like a radio DJ's "up next". No quotes around
+  it, no markdown; it will be read aloud over the song's opening.`
+
+// The TASTE half — everything a listener may replace wholesale by writing
+// $MURMUR_HOME/music-policy.md (spec 03-01 §2.3).
+export const DEFAULT_MUSIC_POLICY = `- Prefer official audio / studio versions; avoid hour-long loops, low-quality
   re-uploads, and live or cover versions unless they clearly fit the moment.
 - Pick a song with vocals — someone singing. Avoid instrumental-only tracks
   (light/background music, lofi beats, piano versions) unless the listener
   explicitly asked for instrumental.
 - Match the listener's taste and language as expressed by the persona.
 - Do not repeat something already noted as recently played.
-- If your pick fails to resolve, pick another candidate and submit again.
-- In submit_pick, also pass the track's title and artist (from the candidate),
-  and write \`announce\`: ONE short spoken line introducing the track, in the
-  persona's voice and language — like a radio DJ's "up next". No quotes around
-  it, no markdown; it will be read aloud over the song's opening.`
+- Do not settle for the few songs that come to mind first — that habit plays
+  the same handful of artists forever. When the similar_music tool is
+  available, seed it with an artist or track that fits and pick from what real
+  listeners play alongside it.`
+
+export const MUSIC_POLICY_HEADER = 'Policy:'
+
+export function buildFindMusicInstruction(policy: string = DEFAULT_MUSIC_POLICY): string {
+  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}`
+}
+
+export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
 
 // The volatile situation block (spec 03-02 §1 #9): the session's recent turns
 // plus the Director's intent. Recently-played songs to avoid arrive with the

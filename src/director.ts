@@ -58,8 +58,11 @@ const STREAM_START_TIMEOUT_S = 8
 const MUSIC_START_ATTEMPTS = 2
 
 // Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
-// (spec 05 §3.5) — cross-session on the persistent store.
-const AVOID_DEPTH = 8
+// (spec 05 §3.5) — cross-session on the persistent store. Deep enough to cover
+// more than one evening: at eight, a favourite came back every other session,
+// and the model's own taste already narrows hard without help. The ledger
+// keeps far more than this, and the list costs one prompt line per song.
+const AVOID_DEPTH = 32
 
 // How many recent turns the music situation carries (issue #76): choosing a
 // track needs the current mood, not the full talk window, and the discovery

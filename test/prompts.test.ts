@@ -14,6 +14,8 @@ import {
   buildSteerPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
+  buildFindMusicInstruction,
+  DEFAULT_MUSIC_POLICY,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
   PERSONA_CHAR_CAP,
@@ -65,6 +67,30 @@ describe('music prompts', () => {
     expect(FIND_MUSIC_INSTRUCTION).toContain('submit_pick')
     expect(FIND_MUSIC_INSTRUCTION).toContain('announce')
     expect(FIND_MUSIC_INSTRUCTION).toContain('vocals')
+  })
+
+  // spec 03-01 §2.3: the listener owns the taste half, the code owns the
+  // contract half. A policy that forgets to ask for an announce must not be
+  // able to produce a pick with no announce.
+  it('lets a listener policy replace the taste rules but never the contract', () => {
+    const mine = '- only cantopop, nothing else'
+    const instruction = buildFindMusicInstruction(mine)
+    expect(instruction).toContain(mine)
+    expect(instruction).not.toContain('vocals') // the built-in taste is gone
+    expect(instruction).toContain('search_music')
+    expect(instruction).toContain('submit_pick')
+    expect(instruction).toContain('announce')
+  })
+
+  it('falls back to the built-in policy when there is no file', () => {
+    expect(buildFindMusicInstruction()).toBe(FIND_MUSIC_INSTRUCTION)
+    expect(FIND_MUSIC_INSTRUCTION).toContain(DEFAULT_MUSIC_POLICY)
+  })
+
+  // The whole point of the data source (spec 03-01 §2.3): left to its own
+  // memory the model plays the same handful of songs forever.
+  it('tells the task not to lean on the songs it already remembers', () => {
+    expect(DEFAULT_MUSIC_POLICY).toContain('similar_music')
   })
 
   it('renders the recent turns and the music-break intent', () => {
