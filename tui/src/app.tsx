@@ -46,6 +46,13 @@ import type { Wire } from './wire.ts'
 // program actually lives. Keep the tail a terminal can scroll through.
 const LOG_MAX = 500
 
+// The log scrolls, but wears no rail: the sky composition (§6.1) is a night
+// with nothing in it but the program. It must ride in as a PROP — the
+// reconciler applies props through the setters, and only ScrollBar's `visible`
+// setter pins the bar against its own size recalculation. Hoisted for a stable
+// reference, so a render does not re-assign the bars and repaint for nothing.
+const NO_SCROLLBAR = { visible: false } as const
+
 // The sprites, read once at start-up: they are committed text, not a resource
 // that can change under a running client.
 const POSES = loadPoses()
@@ -824,6 +831,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <scrollbox
           stickyScroll
           stickyStart="bottom"
+          scrollbarOptions={NO_SCROLLBAR}
           style={{
             flexGrow: 1,
             paddingLeft: !wide ? 1 : 2,
