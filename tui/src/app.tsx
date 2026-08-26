@@ -22,6 +22,7 @@ import {
   figurePen,
   figureRaster,
   figureScale,
+  figureSprite,
   placeFigure,
   stagePlan,
 } from './figure-image.ts'
@@ -587,18 +588,22 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // start-of-broadcast flash. Only a real relayout re-runs the effect.
   const poseRef = useRef(pose)
   poseRef.current = pose
-  // The sprite holds the figure until the raster proves it can run. A terminal
-  // that only CLAIMS kitty by env — tmux, ssh, anything ignoring the
-  // window-pixel query — would otherwise be handed a PNG it never renders
-  // while the sprite stayed suppressed behind it, and the sky came up empty.
-  const [rasterFigure, setRasterFigure] = useState(false)
+  // The sprite is the raster's fallback and only that. A terminal that only
+  // CLAIMS kitty by env — tmux, ssh, anything ignoring the window-pixel query
+  // — would otherwise be handed a PNG it never renders while the sprite stayed
+  // suppressed behind it, and the sky came up empty. Until the settle below
+  // has ruled on the cell pitch an image-pen terminal draws no figure at all:
+  // a sprite shown in that window is a size larger than the PNG replacing it.
+  const [rasterRuledOut, setRasterRuledOut] = useState(false)
   useEffect(() => {
     if (!wide || figMode !== 'image' || !band.pet) return
     let loop: ReturnType<typeof setInterval> | undefined
     const settle = setTimeout(() => {
       const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
-      if (!figureRaster(figMode, cell)) return
-      setRasterFigure(true)
+      if (!figureRaster(figMode, cell)) {
+        setRasterRuledOut(true)
+        return
+      }
       const spriteCols = POSES.idle[0]![0]!.length
       const scale = figureScale(cell.width, spriteCols)
       // Every pose shares the sprite grid, so geometry is computed once and a
@@ -650,7 +655,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     return () => {
       clearTimeout(settle)
       clearInterval(loop)
-      setRasterFigure(false)
+      setRasterRuledOut(false)
       rawOut.writeOut(deleteFigures())
     }
   }, [wide, cols, gutter, sceneRows, sceneWidth, figMode, band.pet, renderer, dims.width, dims.height])
@@ -774,7 +779,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             sink={vizSink}
             accent={roomAccent}
             pose={pose}
-            showPet={band.pet && !rasterFigure}
+            showPet={band.pet && figureSprite(figMode, rasterRuledOut)}
             charWave={!rasterWave}
             width={sceneWidth}
             rows={sceneRows}
