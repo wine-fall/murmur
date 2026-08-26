@@ -37,8 +37,8 @@ The tools your policy can direct:
   search_music   find candidates by query (it executes your words literally)
   similar_music  what real listeners play alongside an artist or track
   top_tracks     what they actually play the most BY an artist
-The last two exist only when MURMUR_LASTFM_API_KEY is set; without it, say
-what you want in words and let search do the rest.
+The last two need a listening catalogue configured -- see the README. Without
+one, say what you want in words and let search do the rest.
 
 Rewrite freely. Some things worth saying: a language or region to favour, a
 decade to live in, artists you never want to hear again, how far off your

@@ -52,6 +52,15 @@ describe('seedMusicPolicy', () => {
     expect(parseMusicPolicy(text)).toBe(DEFAULT_MUSIC_POLICY)
   })
 
+  // The seed is written with `wx` and never rewritten, so anything in it that
+  // can go stale is stale forever on that listener's disk. Names that live in
+  // the README belong in the README.
+  it('does not hardcode configuration names that could drift', () => {
+    const dir = home()
+    seedMusicPolicy(fileIn(dir))
+    expect(readFileSync(fileIn(dir), 'utf-8')).not.toMatch(/MURMUR_[A-Z_]+/)
+  })
+
   it('never overwrites what the listener wrote', () => {
     const dir = home()
     writeFileSync(fileIn(dir), '- mine\n', 'utf-8')

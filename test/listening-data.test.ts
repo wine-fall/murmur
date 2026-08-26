@@ -1,10 +1,11 @@
-// Similar-music lookups over Last.fm's public API (spec 03-01 §2.3). The API
-// is an untrusted boundary: every hit is zod-parsed, and anything that does
-// not fit is skipped rather than coerced.
+// The listening-data adapter (spec 03-01 §2.3): similar artists, similar
+// tracks, and an artist's most-played, over the public audioscrobbler protocol.
+// A remote catalogue is an untrusted boundary: every hit is zod-parsed, and
+// anything that does not fit is skipped rather than coerced.
 
 import { describe, expect, it } from 'vitest'
 
-import { LastfmListening } from '../src/listening-data.ts'
+import { HostedListening } from '../src/listening-data.ts'
 
 function fake(payload: unknown, status = 200): { calls: string[]; fetch: typeof fetch } {
   const calls: string[] = []
@@ -17,10 +18,10 @@ function fake(payload: unknown, status = 200): { calls: string[]; fetch: typeof 
 
 const similar = (payload: unknown, status = 200) => {
   const { calls, fetch: f } = fake(payload, status)
-  return { calls, client: new LastfmListening({ apiKey: 'KEY', fetch: f }) }
+  return { calls, client: new HostedListening({ apiKey: 'KEY', fetch: f }) }
 }
 
-describe('LastfmListening.artists', () => {
+describe('HostedListening.artists', () => {
   it('asks artist.getsimilar with the key and limit, and returns the names', async () => {
     const { calls, client } = similar({
       similarartists: {
@@ -49,7 +50,7 @@ describe('LastfmListening.artists', () => {
   })
 })
 
-describe('LastfmListening.tracks', () => {
+describe('HostedListening.tracks', () => {
   it('asks track.getsimilar and returns title + artist pairs', async () => {
     const { calls, client } = similar({
       similartracks: {
@@ -73,7 +74,7 @@ describe('LastfmListening.tracks', () => {
 
 // The trap the artist-level lookup leaves open: a fresh artist whose ONE
 // famous song is what the model would have named anyway.
-describe('LastfmListening.topTracks', () => {
+describe('HostedListening.topTracks', () => {
   it('asks artist.gettoptracks and returns the titles people actually play', async () => {
     const { calls, client } = similar({
       toptracks: {
@@ -99,7 +100,7 @@ describe('LastfmListening.topTracks', () => {
   })
 })
 
-describe('a Last.fm that will not answer', () => {
+describe('a catalogue that will not answer', () => {
   it('raises the API error message rather than a silent empty list', async () => {
     const { client } = similar({ error: 6, message: 'The artist you supplied could not be found' })
     await expect(client.artists('nobody at all', 5)).rejects.toThrow(/could not be found/)
@@ -108,5 +109,24 @@ describe('a Last.fm that will not answer', () => {
   it('raises on a non-200 too', async () => {
     const { client } = similar({}, 503)
     await expect(client.artists('Bon Iver', 5)).rejects.toThrow(/503/)
+  })
+
+  // The failure the listener has to act on is "this endpoint said no", and the
+  // method is what says which lookup: neither needs a brand in the sentence.
+  it('names the lookup, not a vendor, when it fails', async () => {
+    const { client } = similar({}, 503)
+    await expect(client.artists('Bon Iver', 5)).rejects.toThrow(/artist\.getsimilar/)
+    await expect(client.artists('Bon Iver', 5)).rejects.not.toThrow(/last\.fm/i)
+  })
+})
+
+// The endpoint is a knob, not a constant, so the class is named for what it is
+// rather than for whoever answers: any host speaking the same protocol works.
+describe('a different host', () => {
+  it('sends the lookups wherever it is pointed', async () => {
+    const { calls, fetch: f } = fake({ similarartists: { artist: [{ name: 'Grouper' }] } })
+    const client = new HostedListening({ apiKey: 'KEY', endpoint: 'https://libre.fm/2.0/', fetch: f })
+    expect(await client.artists('Bon Iver', 3)).toEqual(['Grouper'])
+    expect(new URL(calls[0]!).origin).toBe('https://libre.fm')
   })
 })

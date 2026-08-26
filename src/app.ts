@@ -32,7 +32,7 @@ import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
 import { CliHost, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
-import { LastfmListening } from './listening-data.ts'
+import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
 import { MusicProgrammer } from './music-programmer.ts'
@@ -219,7 +219,13 @@ function buildMusic(
   // Co-listening data widens the candidate pool past the model's own memory
   // (spec 03-01 §2.3). No key configured = no tool, and discovery is exactly
   // its pre-key self.
-  const listening = config.lastfmApiKey === '' ? undefined : new LastfmListening({ apiKey: config.lastfmApiKey })
+  const listening =
+    config.listeningApiKey === ''
+      ? undefined
+      : new HostedListening({
+          apiKey: config.listeningApiKey,
+          ...(config.listeningUrl !== '' && { endpoint: config.listeningUrl }),
+        })
   const source = new MusicProgrammer({
     brain: harness,
     provider,
