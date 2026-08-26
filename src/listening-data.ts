@@ -1,13 +1,19 @@
-// Similar-music lookups over Last.fm's public API (spec 03-01 §2.3).
+// The listening-data source behind similar_music / top_tracks (spec 03-01
+// §2.3) — the `ListeningData` contract's one adapter, as `music.ts` is the
+// `MusicProvider`'s.
 //
-// Why this exists: search_music EXECUTES a search, it does not recommend, so
-// the candidate list is only ever as wide as what the model remembers first —
-// which is how a personal radio ends up playing the same few famous songs
-// forever. artist.getsimilar / track.getsimilar answer from what real people
-// actually play together, which is a different source than the model's memory.
+// Why the seam exists: search_music EXECUTES a search, it does not recommend,
+// so the candidate list is only ever as wide as what the model remembers
+// first — which is how a personal radio ends up playing the same few famous
+// songs forever. Real play data is a different source than the model's memory,
+// at both levels: which artist, and which of theirs.
 //
-// Read-only and account-free: it needs a (free) API key, never a listener's
-// Last.fm login. No key = the tool is not offered at all.
+// The wire is the public audioscrobbler protocol (artist.getsimilar,
+// track.getsimilar, artist.gettoptracks) — read-only and account-free: it needs
+// an API key, never a listener's account on anyone's service. Last.fm is where
+// it points by default and more than one catalogue speaks the same protocol,
+// so the endpoint is a knob. No key = the tools are not offered at all, and
+// discovery runs on search alone.
 //
 // The API is an untrusted boundary (issue #54 rule): every hit is zod-parsed,
 // and a hit that does not fit is skipped rather than coerced.
@@ -16,7 +22,10 @@ import { z } from 'zod'
 
 import type { ListeningData, SimilarTrack } from './contracts.ts'
 
-const ENDPOINT = 'https://ws.audioscrobbler.com/2.0/'
+// Where the lookups go by default. A knob rather than a constant: the wire
+// protocol is public and more than one catalogue speaks it, so pointing this
+// elsewhere is a config change, not a code change.
+const DEFAULT_ENDPOINT = 'https://ws.audioscrobbler.com/2.0/'
 
 // A pick is on the clock: the Director is waiting to fill a boundary, so a
 // hung lookup must fail fast and let the task fall back to plain search.
@@ -40,17 +49,18 @@ const TopTracksSchema = z.object({
   toptracks: z.object({ track: z.array(z.unknown()).optional() }),
 })
 
-export type LastfmOptions = {
+export type HostedListeningOptions = {
   apiKey: string
+  endpoint?: string | undefined
   fetch?: typeof fetch | undefined
   timeoutMs?: number | undefined
 }
 
-export class LastfmSimilar implements ListeningData {
-  private opts: LastfmOptions
+export class HostedListening implements ListeningData {
+  private opts: HostedListeningOptions
   private fetch: typeof fetch
 
-  constructor(opts: LastfmOptions) {
+  constructor(opts: HostedListeningOptions) {
     this.opts = opts
     this.fetch = opts.fetch ?? fetch
   }
@@ -86,25 +96,25 @@ export class LastfmSimilar implements ListeningData {
   }
 
   private async call(method: string, params: Record<string, string>): Promise<unknown> {
-    const url = new URL(ENDPOINT)
+    const url = new URL(this.opts.endpoint?.trim() || DEFAULT_ENDPOINT)
     url.search = new URLSearchParams({
       ...params,
       method,
       api_key: this.opts.apiKey,
       format: 'json',
-      // Last.fm matches a misspelled or differently-cased seed to its own
-      // catalog name; without it a near-miss returns nothing at all.
+      // The catalogue matches a misspelled or differently-cased seed to its
+      // own spelling; without it a near-miss returns nothing at all.
       autocorrect: '1',
     }).toString()
 
     const response = await this.fetch(url, {
       signal: AbortSignal.timeout(this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     })
-    if (!response.ok) throw new Error(`last.fm ${method} failed: HTTP ${response.status}`)
+    if (!response.ok) throw new Error(`listening lookup ${method} failed: HTTP ${response.status}`)
     const json: unknown = await response.json()
     // The API answers 200 with an error body, so the status alone proves nothing.
     const failed = ErrorSchema.safeParse(json)
-    if (failed.success) throw new Error(`last.fm ${method} failed: ${failed.data.message}`)
+    if (failed.success) throw new Error(`listening lookup ${method} failed: ${failed.data.message}`)
     return json
   }
 }
