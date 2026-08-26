@@ -158,17 +158,22 @@ export interface TrackSource {
 // The carrier passed to nextTrack (spec 03-01 §2.4): a stable cacheable prefix
 // plus a volatile block. Which signals ride in `situation` grows with later
 // specs; adding one touches only the renderer, never the harness.
-// Real co-listening data (spec 03-01 §2.3): what people actually play
-// alongside an artist or track, as a widener for the pick task's candidate
-// pool. Optional wiring -- absent when no key is configured.
+// Real listening data (spec 03-01 §2.3): what people actually play alongside
+// an artist or track, and what they actually play BY an artist, as a widener
+// for the pick task's candidate pool. Optional wiring -- absent when no key is
+// configured.
 export type SimilarTrack = {
   readonly title: string
   readonly artist: string
 }
 
-export type SimilarMusic = {
+export type ListeningData = {
   artists(artist: string, limit: number): Promise<string[]>
   tracks(artist: string, track: string, limit: number): Promise<SimilarTrack[]>
+  // The artist-level lookup alone leaves the habit intact one level down: a
+  // fresh name, then their single most famous song. This answers "which of
+  // theirs" with play counts instead of recall.
+  topTracks(artist: string, limit: number): Promise<string[]>
 }
 
 export type MusicContext = {

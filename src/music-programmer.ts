@@ -10,7 +10,7 @@ import type {
   Harness,
   MusicContext,
   MusicProvider,
-  SimilarMusic,
+  ListeningData,
   TrackCandidate,
   TrackPick,
   TrackSource,
@@ -40,9 +40,9 @@ export type MusicProgrammerDeps = {
   // policy file is hot, so an edit lands on the next song without a restart.
   instruction?: () => string
   probe?: StreamProbe
-  // Real co-listening data behind similar_music (spec 03-01 §2.3). Absent when
-  // no key is configured; the pick then runs on search alone.
-  similar?: SimilarMusic
+  // Real listening data behind similar_music / top_tracks (spec 03-01 §2.3).
+  // Absent when no key is configured; the pick then runs on search alone.
+  listening?: ListeningData
   // Per-stage discovery timing (spec 04 §3.1, issue #76): dev-log-only lines
   // that say where a pick's wall-clock goes. Optional — absent means silent.
   debug?: (message: string) => void
@@ -109,7 +109,7 @@ export class MusicProgrammer implements TrackSource {
       prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.similar),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.listening),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

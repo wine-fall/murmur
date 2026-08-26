@@ -2,8 +2,10 @@
 // instruction, as a file they own at $MURMUR_HOME/music-policy.md.
 //
 // Read fresh on every pick rather than watched or cached — a pick already
-// costs seconds of network, so one small read is free, and an edit lands on
-// the next song with no restart and no reload command. An absent, empty, or
+// costs seconds of network, so one small read is free, and an edit reaches the
+// next pick with no restart and no reload command. Next PICK, not always next
+// song: the Director chooses ahead of the boundary (spec 04 look-ahead), so an
+// edit made after a pick was already primed lands on the song after it. An absent, empty, or
 // unreadable file is simply the built-in policy: the radio plays exactly as it
 // did before the file existed.
 
@@ -19,14 +21,28 @@ const COMMENTS = /<!--[\s\S]*?-->/g
 const TEMPLATE = `<!--
 murmur music policy.
 
-This is the taste half of the instruction murmur gives the brain when it goes
-looking for the next song. Edit it however you like -- it is re-read before
-every pick, so a change lands on the next song. No restart, no reload.
+This is the half of the pick instruction that is yours. murmur re-reads it
+every time it goes looking for a song, so an edit takes effect on its own --
+no restart, no reload. It chooses a song shortly before it needs one, so an
+edit reaches the next song, or the one after if that choice was already made.
+Delete the file to go back to the default below. Anything inside an HTML
+comment (like this) is stripped before the text reaches the brain, so notes to
+yourself are free.
 
-Delete the file to go back to the defaults below. Text in HTML comments (like
-this) is stripped, so notes to yourself cost nothing.
+What you are writing is taste and method: what to reach for, what to avoid,
+how to look. What you cannot change from here is the mechanism -- murmur
+always searches, judges, and commits to one track with a spoken intro.
 
-How murmur picks a track never changes here: that half lives in the code.
+The tools your policy can direct:
+  search_music   find candidates by query (it executes your words literally)
+  similar_music  what real listeners play alongside an artist or track
+  top_tracks     what they actually play the most BY an artist
+The last two exist only when MURMUR_LASTFM_API_KEY is set; without it, say
+what you want in words and let search do the rest.
+
+Rewrite freely. Some things worth saying: a language or region to favour, a
+decade to live in, artists you never want to hear again, how far off your
+usual taste to wander, what a weeknight should sound like versus a Sunday.
 -->
 
 ${DEFAULT_MUSIC_POLICY}

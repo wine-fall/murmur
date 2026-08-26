@@ -14,7 +14,7 @@
 
 import { z } from 'zod'
 
-import type { SimilarMusic, SimilarTrack } from './contracts.ts'
+import type { ListeningData, SimilarTrack } from './contracts.ts'
 
 const ENDPOINT = 'https://ws.audioscrobbler.com/2.0/'
 
@@ -36,13 +36,17 @@ const TracksSchema = z.object({
 
 const TrackSchema = z.object({ name: z.string().min(1), artist: NamedSchema })
 
+const TopTracksSchema = z.object({
+  toptracks: z.object({ track: z.array(z.unknown()).optional() }),
+})
+
 export type LastfmOptions = {
   apiKey: string
   fetch?: typeof fetch | undefined
   timeoutMs?: number | undefined
 }
 
-export class LastfmSimilar implements SimilarMusic {
+export class LastfmSimilar implements ListeningData {
   private opts: LastfmOptions
   private fetch: typeof fetch
 
@@ -69,6 +73,16 @@ export class LastfmSimilar implements SimilarMusic {
       .map((hit) => TrackSchema.safeParse(hit))
       .filter((parsed) => parsed.success)
       .map((parsed) => ({ title: parsed.data.name, artist: parsed.data.artist.name }))
+  }
+
+  async topTracks(artist: string, limit: number): Promise<string[]> {
+    const json = await this.call('artist.gettoptracks', { artist, limit: String(limit) })
+    const hits = TopTracksSchema.safeParse(json)
+    if (!hits.success) return []
+    return (hits.data.toptracks.track ?? [])
+      .map((hit) => NamedSchema.safeParse(hit))
+      .filter((parsed) => parsed.success)
+      .map((parsed) => parsed.data.name)
   }
 
   private async call(method: string, params: Record<string, string>): Promise<unknown> {

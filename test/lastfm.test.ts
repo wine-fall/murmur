@@ -71,6 +71,34 @@ describe('LastfmSimilar.tracks', () => {
   })
 })
 
+// The trap the artist-level lookup leaves open: a fresh artist whose ONE
+// famous song is what the model would have named anyway.
+describe('LastfmSimilar.topTracks', () => {
+  it('asks artist.gettoptracks and returns the titles people actually play', async () => {
+    const { calls, client } = similar({
+      toptracks: {
+        track: [
+          { name: 'Blue Ridge Mountains', playcount: '900000' },
+          { name: 'Mykonos', playcount: '800000' },
+        ],
+      },
+    })
+
+    expect(await client.topTracks('Fleet Foxes', 2)).toEqual(['Blue Ridge Mountains', 'Mykonos'])
+    const url = new URL(calls[0]!)
+    expect(url.searchParams.get('method')).toBe('artist.gettoptracks')
+    expect(url.searchParams.get('artist')).toBe('Fleet Foxes')
+    expect(url.searchParams.get('limit')).toBe('2')
+  })
+
+  it('skips malformed hits and survives an empty result', async () => {
+    const { client } = similar({ toptracks: { track: [{ name: '' }, { name: 'Tiger Mountain Peasant Song' }] } })
+    expect(await client.topTracks('Fleet Foxes', 5)).toEqual(['Tiger Mountain Peasant Song'])
+    const { client: empty } = similar({ toptracks: {} })
+    expect(await empty.topTracks('Fleet Foxes', 5)).toEqual([])
+  })
+})
+
 describe('a Last.fm that will not answer', () => {
   it('raises the API error message rather than a silent empty list', async () => {
     const { client } = similar({ error: 6, message: 'The artist you supplied could not be found' })

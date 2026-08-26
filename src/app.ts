@@ -219,14 +219,14 @@ function buildMusic(
   // Co-listening data widens the candidate pool past the model's own memory
   // (spec 03-01 §2.3). No key configured = no tool, and discovery is exactly
   // its pre-key self.
-  const similar = config.lastfmApiKey === '' ? undefined : new LastfmSimilar({ apiKey: config.lastfmApiKey })
+  const listening = config.lastfmApiKey === '' ? undefined : new LastfmSimilar({ apiKey: config.lastfmApiKey })
   const source = new MusicProgrammer({
     brain: harness,
     provider,
     model: config.musicModel,
     probe: (s) => probeStream(s, config.ffmpegCmd),
     instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath)),
-    ...(similar !== undefined && { similar }),
+    ...(listening !== undefined && { listening }),
     // Discovery stage timings land in the dev log (issue #76).
     ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })

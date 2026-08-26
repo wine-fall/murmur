@@ -11,7 +11,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { MusicProvider, SimilarMusic, TaskTool, TrackPick } from './contracts.ts'
+import type { ListeningData, MusicProvider, TaskTool, TrackPick } from './contracts.ts'
 
 // Pull-time playability check: given a resolved stream source, does it actually
 // decode? Injected — the real one belongs to the audio engine (Phase 3), so this
@@ -35,7 +35,7 @@ export function musicTools(
   provider: MusicProvider,
   finish: (pick: TrackPick) => void,
   probe?: StreamProbe,
-  similar?: SimilarMusic,
+  listening?: ListeningData,
 ): TaskTool[] {
   const searchMusic = tool(
     'search_music',
@@ -98,7 +98,7 @@ export function musicTools(
 
   // Offered only when a data source is wired (spec 03-01 §2.3): with no key
   // configured the task is exactly its two-tool self.
-  if (similar === undefined) return [searchMusic, submitPick]
+  if (listening === undefined) return [searchMusic, submitPick]
 
   const similarMusic = tool(
     'similar_music',
@@ -118,13 +118,33 @@ export function musicTools(
         // A lookup that fails is a lost turn, never a lost song: the model
         // still has search_music and can submit without ever widening.
         return track === undefined
-          ? reply({ artists: await similar.artists(args.artist, limit) })
-          : reply({ tracks: await similar.tracks(args.artist, track, limit) })
+          ? reply({ artists: await listening.artists(args.artist, limit) })
+          : reply({ tracks: await listening.tracks(args.artist, track, limit) })
       } catch (err) {
         return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
       }
     },
   )
 
-  return [searchMusic, similarMusic, submitPick]
+  // Widening to a fresh artist and then playing their one famous song is the
+  // same habit one level down; this answers "which of theirs" with play counts.
+  const topTracks = tool(
+    'top_tracks',
+    'What listeners actually play most by an artist, most-played first. Use it ' +
+      'after finding an artist, so which of their songs airs is not decided by ' +
+      'whichever title you happen to remember.',
+    {
+      artist: z.string().describe('the artist'),
+      limit: z.number().int().min(1).max(20).optional().describe(`max tracks (default ${SIMILAR_LIMIT})`),
+    },
+    async (args) => {
+      try {
+        return reply({ tracks: await listening.topTracks(args.artist, args.limit ?? SIMILAR_LIMIT) })
+      } catch (err) {
+        return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  )
+
+  return [searchMusic, similarMusic, topTracks, submitPick]
 }
