@@ -15,11 +15,12 @@ export const WORDMARK = [0, 1, 2].map((row) =>
 
 export const TAGLINE = 'a companion radio - always on the air'
 
-// Whether the ident stands pinned between the scene band and the log, so a
-// busy program (the guide's tool narration) cannot scroll the wordmark away.
-// Wide composition only, and only when the log can spare the ident's rows
-// (wordmark + tagline + margins) and still hold a readable tail.
-const IDENT_ROWS = 6
-export function identPinned(wide: boolean, logRows: number): boolean {
-  return wide && logRows >= IDENT_ROWS * 2
+// The width of the ident's own column in the wide composition, where the
+// lower half stands as two columns: the log on the left, the wordmark and its
+// tagline on the right (spec 10 §3.3). The log takes about two thirds of the
+// frame — unless that would shear the mark, which is fixed-width art and wins.
+const IDENT_AIR = 4
+const LOG_SHARE = 0.65
+export function identColumn(cols: number): number {
+  return Math.max(WORDMARK[0]!.length + IDENT_AIR, cols - Math.round(cols * LOG_SHARE))
 }

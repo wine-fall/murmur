@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { identPinned, TAGLINE, WORDMARK } from '../tui/src/logo.ts'
+import { identColumn, TAGLINE, WORDMARK } from '../tui/src/logo.ts'
 
 describe('WORDMARK', () => {
   it('is a rectangular block — every row the same width', () => {
@@ -19,20 +19,18 @@ describe('WORDMARK', () => {
   })
 })
 
-describe('identPinned (the wordmark must not scroll away under a busy program)', () => {
-  it('pins the ident above the log in the wide composition when the log has room', () => {
-    expect(identPinned(true, 20)).toBe(true)
+describe('identColumn (the ident stands in its own column beside the log)', () => {
+  it('never squeezes the wordmark — the column always holds the mark plus its air', () => {
+    // The narrowest wide composition: two thirds of 96 columns would leave the
+    // ident 34, shearing a 40-cell mark.
+    expect(identColumn(96)).toBeGreaterThanOrEqual(WORDMARK[0]!.length + 4)
   })
 
-  it('never pins in the narrow band — the classic in-log ident stands', () => {
-    expect(identPinned(false, 40)).toBe(false)
-  })
-
-  it('yields to a cramped log rather than starve it of rows', () => {
-    // sceneSplit floors the log at 6; a pinned ident there would leave a
-    // one-row transcript.
-    expect(identPinned(true, 6)).toBe(false)
-    expect(identPinned(true, 11)).toBe(false)
-    expect(identPinned(true, 12)).toBe(true)
+  it('leaves the log about two thirds of the frame once there is room', () => {
+    for (const cols of [120, 160, 184]) {
+      const share = (cols - identColumn(cols)) / cols
+      expect(share).toBeGreaterThanOrEqual(0.6)
+      expect(share).toBeLessThanOrEqual(0.7)
+    }
   })
 })

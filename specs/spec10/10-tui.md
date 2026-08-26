@@ -456,11 +456,19 @@ focus, and the broadcast never pauses under it.
 **Station ident (2026-08-11, user-asked):** the murmur wordmark
 (`tui/src/logo.ts`, half-block letters + tagline) opens every program log —
 the first thing a boot shows, scrolled away by the program itself.
-**Amended (2026-08-19, user report: the guide's tool flood scrolled the
+~~**Amended (2026-08-19, user report: the guide's tool flood scrolled the
 wordmark away):** in the wide composition the ident is PINNED between the
-scene band and the log (`identPinned` in `logo.ts`) whenever the log region
-can spare its rows and still hold a readable tail (log ≥ 2× the ident's six
-rows); a cramped log and the narrow band keep the classic in-log ident.
+scene band and the log whenever the log region can spare its rows.~~
+**Superseded (2026-08-26, design session): in the wide composition the region
+below the scene band is TWO COLUMNS** — the log on the left, the ident
+standing in its own column on the right, centered on the region's height and
+present at every terminal size. `identColumn` (`logo.ts`) sizes that column:
+the log takes about two thirds of the frame, unless that would shear the
+fixed-width mark, which wins. The log's column keeps a row of air above and
+below (it no longer runs the region's full height) and its newest line still
+sticks to the bottom. The height switch is gone with the pin — nothing can
+scroll the wordmark away in the wide composition, at any height. The narrow
+band keeps the classic in-log ident that the program scrolls away itself.
 
 **As built (2026-08-12, stacked recomposition — supersedes the 2026-08-07
 side-panel): composition has one breakpoint, one max width, and one vertical
