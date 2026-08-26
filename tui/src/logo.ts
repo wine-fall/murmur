@@ -15,12 +15,27 @@ export const WORDMARK = [0, 1, 2].map((row) =>
 
 export const TAGLINE = 'a companion radio - always on the air'
 
-// The width of the ident's own column in the wide composition, where the
-// lower half stands as two columns: the log on the left, the wordmark and its
-// tagline on the right (spec 10 §3.3). The log takes about two thirds of the
-// frame — unless that would shear the mark, which is fixed-width art and wins.
-const IDENT_AIR = 4
-const LOG_SHARE = 0.65
-export function identColumn(cols: number): number {
-  return Math.max(WORDMARK[0]!.length + IDENT_AIR, cols - Math.round(cols * LOG_SHARE))
+// How much of the ident the wide composition can afford between the scene band
+// and the log (spec 10 §3.3). The FIGURE never enters this trade — it keeps the
+// scene band at every height; only the title yields, and it yields in steps:
+// the full mark while the log can spare six rows and still hold a readable
+// tail, one small line when it cannot, and nothing at all in a cramped log,
+// where the status strip is already carrying the station's name.
+export type IdentSize = 'full' | 'line' | 'none'
+
+// The one-line form: the mark's words without its letterforms.
+export const IDENT_LINE = 'murmur · a companion radio'
+
+// What each step costs the region, margins included — the renderer spends
+// exactly this, so the ladder can promise what it leaves behind.
+export const IDENT_ROWS: Record<IdentSize, number> = { full: 6, line: 2, none: 0 }
+
+// The readable tail `sceneSplit` floors the log at. The ident never spends it.
+export const LOG_FLOOR = 6
+
+export function identSize(wide: boolean, logRows: number): IdentSize {
+  if (!wide) return 'none'
+  if (logRows - IDENT_ROWS.full >= LOG_FLOOR) return 'full'
+  if (logRows - IDENT_ROWS.line >= LOG_FLOOR) return 'line'
+  return 'none'
 }

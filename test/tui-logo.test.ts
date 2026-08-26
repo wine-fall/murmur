@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { identColumn, TAGLINE, WORDMARK } from '../tui/src/logo.ts'
+import { IDENT_ROWS, identSize, IDENT_LINE, LOG_FLOOR, TAGLINE, WORDMARK } from '../tui/src/logo.ts'
 
 describe('WORDMARK', () => {
   it('is a rectangular block — every row the same width', () => {
@@ -19,18 +19,35 @@ describe('WORDMARK', () => {
   })
 })
 
-describe('identColumn (the ident stands in its own column beside the log)', () => {
-  it('never squeezes the wordmark — the column always holds the mark plus its air', () => {
-    // The narrowest wide composition: two thirds of 96 columns would leave the
-    // ident 34, shearing a 40-cell mark.
-    expect(identColumn(96)).toBeGreaterThanOrEqual(WORDMARK[0]!.length + 4)
+describe('identSize (the ident yields rows, the figure never does)', () => {
+  it('stands full — wordmark and tagline — when the log can spare the rows', () => {
+    expect(identSize(true, 20)).toBe('full')
+    expect(identSize(true, 12)).toBe('full')
   })
 
-  it('leaves the log about two thirds of the frame once there is room', () => {
-    for (const cols of [120, 160, 184]) {
-      const share = (cols - identColumn(cols)) / cols
-      expect(share).toBeGreaterThanOrEqual(0.6)
-      expect(share).toBeLessThanOrEqual(0.7)
+  it('steps down to one small line rather than starve the transcript', () => {
+    expect(identSize(true, 11)).toBe('line')
+    expect(identSize(true, 8)).toBe('line')
+  })
+
+  it('steps off entirely in a cramped log — the status strip still names the station', () => {
+    expect(identSize(true, 7)).toBe('none')
+    expect(identSize(true, 6)).toBe('none')
+  })
+
+  it('never stands in the narrow band — the classic in-log ident holds there', () => {
+    expect(identSize(false, 40)).toBe('none')
+  })
+
+  it('never eats into the log floor sceneSplit defends', () => {
+    // Whatever the ident spends, the transcript keeps its six readable rows —
+    // the floor `sceneSplit` exists to hold.
+    for (let logRows = 6; logRows <= 40; logRows++) {
+      expect(logRows - IDENT_ROWS[identSize(true, logRows)]).toBeGreaterThanOrEqual(LOG_FLOOR)
     }
+  })
+
+  it('keeps the one-line form inside a narrow column', () => {
+    expect(IDENT_LINE.length).toBeLessThanOrEqual(WORDMARK[0]!.length)
   })
 })
