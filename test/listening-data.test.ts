@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { LastfmSimilar } from '../src/lastfm.ts'
+import { LastfmListening } from '../src/listening-data.ts'
 
 function fake(payload: unknown, status = 200): { calls: string[]; fetch: typeof fetch } {
   const calls: string[] = []
@@ -17,10 +17,10 @@ function fake(payload: unknown, status = 200): { calls: string[]; fetch: typeof 
 
 const similar = (payload: unknown, status = 200) => {
   const { calls, fetch: f } = fake(payload, status)
-  return { calls, client: new LastfmSimilar({ apiKey: 'KEY', fetch: f }) }
+  return { calls, client: new LastfmListening({ apiKey: 'KEY', fetch: f }) }
 }
 
-describe('LastfmSimilar.artists', () => {
+describe('LastfmListening.artists', () => {
   it('asks artist.getsimilar with the key and limit, and returns the names', async () => {
     const { calls, client } = similar({
       similarartists: {
@@ -49,7 +49,7 @@ describe('LastfmSimilar.artists', () => {
   })
 })
 
-describe('LastfmSimilar.tracks', () => {
+describe('LastfmListening.tracks', () => {
   it('asks track.getsimilar and returns title + artist pairs', async () => {
     const { calls, client } = similar({
       similartracks: {
@@ -73,7 +73,7 @@ describe('LastfmSimilar.tracks', () => {
 
 // The trap the artist-level lookup leaves open: a fresh artist whose ONE
 // famous song is what the model would have named anyway.
-describe('LastfmSimilar.topTracks', () => {
+describe('LastfmListening.topTracks', () => {
   it('asks artist.gettoptracks and returns the titles people actually play', async () => {
     const { calls, client } = similar({
       toptracks: {

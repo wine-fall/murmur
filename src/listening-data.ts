@@ -1,13 +1,19 @@
-// Similar-music lookups over Last.fm's public API (spec 03-01 §2.3).
+// The listening-data source behind similar_music / top_tracks (spec 03-01
+// §2.3) — the `ListeningData` contract's one adapter, as `music.ts` is the
+// `MusicProvider`'s.
 //
-// Why this exists: search_music EXECUTES a search, it does not recommend, so
-// the candidate list is only ever as wide as what the model remembers first —
-// which is how a personal radio ends up playing the same few famous songs
-// forever. artist.getsimilar / track.getsimilar answer from what real people
-// actually play together, which is a different source than the model's memory.
+// Why the seam exists: search_music EXECUTES a search, it does not recommend,
+// so the candidate list is only ever as wide as what the model remembers
+// first — which is how a personal radio ends up playing the same few famous
+// songs forever. Real play data is a different source than the model's memory,
+// at both levels: which artist, and which of theirs.
 //
-// Read-only and account-free: it needs a (free) API key, never a listener's
-// Last.fm login. No key = the tool is not offered at all.
+// The adapter here is Last.fm's public API (artist.getsimilar,
+// track.getsimilar, artist.gettoptracks), read-only and account-free: it needs
+// a free API key, never a listener's Last.fm login. No key = the tools are not
+// offered at all, and discovery runs on search alone. Another catalogue with
+// the same three answers would implement the same contract and change nothing
+// above it.
 //
 // The API is an untrusted boundary (issue #54 rule): every hit is zod-parsed,
 // and a hit that does not fit is skipped rather than coerced.
@@ -46,7 +52,7 @@ export type LastfmOptions = {
   timeoutMs?: number | undefined
 }
 
-export class LastfmSimilar implements ListeningData {
+export class LastfmListening implements ListeningData {
   private opts: LastfmOptions
   private fetch: typeof fetch
 
