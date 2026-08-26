@@ -11,7 +11,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { MusicProvider, TaskTool, TrackPick } from './contracts.ts'
+import type { ListeningData, MusicProvider, TaskTool, TrackPick } from './contracts.ts'
 
 // Pull-time playability check: given a resolved stream source, does it actually
 // decode? Injected — the real one belongs to the audio engine (Phase 3), so this
@@ -27,10 +27,15 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
+// How many names one widening call brings back: enough to break out of the
+// first thing that came to mind, small enough to stay a cheap turn.
+const SIMILAR_LIMIT = 8
+
 export function musicTools(
   provider: MusicProvider,
   finish: (pick: TrackPick) => void,
   probe?: StreamProbe,
+  listening?: ListeningData,
 ): TaskTool[] {
   const searchMusic = tool(
     'search_music',
@@ -91,5 +96,55 @@ export function musicTools(
     },
   )
 
-  return [searchMusic, submitPick]
+  // Offered only when a data source is wired (spec 03-01 §2.3): with no key
+  // configured the task is exactly its two-tool self.
+  if (listening === undefined) return [searchMusic, submitPick]
+
+  const similarMusic = tool(
+    'similar_music',
+    'Find what real listeners play alongside an artist or a track (co-listening ' +
+      'data, not your own recollection). Pass artist alone for similar artists, ' +
+      'or artist AND track for similar tracks. Widen with this before searching ' +
+      'so the pick is not limited to what comes to mind first.',
+    {
+      artist: z.string().describe('the seed artist'),
+      track: z.string().optional().describe('the seed track, for track-level neighbours'),
+      limit: z.number().int().min(1).max(20).optional().describe(`max results (default ${SIMILAR_LIMIT})`),
+    },
+    async (args) => {
+      const limit = args.limit ?? SIMILAR_LIMIT
+      const track = trimmed(args.track)
+      try {
+        // A lookup that fails is a lost turn, never a lost song: the model
+        // still has search_music and can submit without ever widening.
+        return track === undefined
+          ? reply({ artists: await listening.artists(args.artist, limit) })
+          : reply({ tracks: await listening.tracks(args.artist, track, limit) })
+      } catch (err) {
+        return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  )
+
+  // Widening to a fresh artist and then playing their one famous song is the
+  // same habit one level down; this answers "which of theirs" with play counts.
+  const topTracks = tool(
+    'top_tracks',
+    'What listeners actually play most by an artist, most-played first. Use it ' +
+      'after finding an artist, so which of their songs airs is not decided by ' +
+      'whichever title you happen to remember.',
+    {
+      artist: z.string().describe('the artist'),
+      limit: z.number().int().min(1).max(20).optional().describe(`max tracks (default ${SIMILAR_LIMIT})`),
+    },
+    async (args) => {
+      try {
+        return reply({ tracks: await listening.topTracks(args.artist, args.limit ?? SIMILAR_LIMIT) })
+      } catch (err) {
+        return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+    },
+  )
+
+  return [searchMusic, similarMusic, topTracks, submitPick]
 }

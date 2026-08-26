@@ -154,6 +154,21 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     expect(source.contexts[0]!.situation).toContain('Old Favorite — X')
   })
 
+  // spec 03-01 §2.3: a shallow avoid-list is why a favourite comes back every
+  // other evening. The ledger keeps hundreds; the list must reach back far
+  // enough to cover more than one session.
+  it('the avoid-list reaches back past a single evening of songs', async () => {
+    const memory = new InProcessMemoryStore()
+    for (let i = 1; i <= 24; i++) memory.recordEvent('song', `Song ${i} — X`)
+    const { director, player, source } = build({ memory })
+    source.picks = [pickOf('https://stream/a', { title: 'Fresh', artist: 'B' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    expect(source.contexts[0]!.situation).toContain('Song 1 — X')
+  })
+
   it('the avoid-list carries songs already played this session', async () => {
     const { director, player, source } = build()
     source.picks = [

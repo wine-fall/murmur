@@ -32,13 +32,16 @@ import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
 import { CliHost, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
+import { LastfmSimilar } from './lastfm.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
+import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLine } from './persona.ts'
 import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
+import { buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import { preflightBun } from './startup.ts'
@@ -210,11 +213,20 @@ function buildMusic(
   host: Host,
 ): MusicWiring {
   const provider = new YtDlpMusicProvider({ binary: config.ytdlpCmd })
+  // The listener's policy file, seeded once so it is discoverable and read
+  // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).
+  if (seedMusicPolicy(config.musicPolicyPath)) host.debug?.(`music.policy seeded ${config.musicPolicyPath}`)
+  // Co-listening data widens the candidate pool past the model's own memory
+  // (spec 03-01 §2.3). No key configured = no tool, and discovery is exactly
+  // its pre-key self.
+  const listening = config.lastfmApiKey === '' ? undefined : new LastfmSimilar({ apiKey: config.lastfmApiKey })
   const source = new MusicProgrammer({
     brain: harness,
     provider,
     model: config.musicModel,
     probe: (s) => probeStream(s, config.ffmpegCmd),
+    instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath)),
+    ...(listening !== undefined && { listening }),
     // Discovery stage timings land in the dev log (issue #76).
     ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })

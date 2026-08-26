@@ -5,7 +5,16 @@
 // does not play, schedule, or announce it — that is the Phase 3 audio engine
 // (spec 03-02).
 
-import type { AudioClip, Harness, MusicContext, MusicProvider, TrackCandidate, TrackPick, TrackSource } from './contracts.ts'
+import type {
+  AudioClip,
+  Harness,
+  MusicContext,
+  MusicProvider,
+  ListeningData,
+  TrackCandidate,
+  TrackPick,
+  TrackSource,
+} from './contracts.ts'
 import { musicTools, type StreamProbe } from './music-tools.ts'
 import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER } from './prompts.ts'
 
@@ -27,8 +36,13 @@ export type MusicProgrammerDeps = {
   provider: MusicProvider
   model: string
   maxTurns?: number
-  instruction?: string
+  // The pick instruction, re-read per call (spec 03-01 §2.3): the listener's
+  // policy file is hot, so an edit lands on the next song without a restart.
+  instruction?: () => string
   probe?: StreamProbe
+  // Real listening data behind similar_music / top_tracks (spec 03-01 §2.3).
+  // Absent when no key is configured; the pick then runs on search alone.
+  listening?: ListeningData
   // Per-stage discovery timing (spec 04 §3.1, issue #76): dev-log-only lines
   // that say where a pick's wall-clock goes. Optional — absent means silent.
   debug?: (message: string) => void
@@ -92,10 +106,10 @@ export class MusicProgrammer implements TrackSource {
     debug?.(`music.pick start situation=${ctx.situation.length}ch`)
     const pick = await this.deps.brain.runTask<TrackPick>({
       systemPrompt,
-      prompt: `${this.deps.instruction ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
+      prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
-      tools: (finish) => musicTools(provider, finish, wiredProbe),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.listening),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

@@ -60,3 +60,11 @@ export function voiceConfigPath(env: NodeJS.ProcessEnv = process.env): string {
 export function settingsPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'settings.json')
 }
+
+// The listener's music policy (spec 03-01 §2.3): the taste half of the pick
+// instruction, as a file they own. Beside settings.json for the same reason —
+// configuration, re-obtainable from the built-in default, not irreplaceable
+// state.
+export function musicPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'music-policy.md')
+}

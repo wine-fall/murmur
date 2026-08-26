@@ -12,7 +12,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { dataRoot, homeRoot, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
+import { dataRoot, homeRoot, musicPolicyPath, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 import { readSettingsFile } from './settings.ts'
 import { readVoiceConfig, type VoiceConfig } from './voice-config.ts'
@@ -64,6 +64,12 @@ export const ConfigSchema = z.object({
   // Cheap tier for the music-discovery task and the opt-in brain cadence
   // (master §7 pillar 3).
   musicModel: z.string().default('claude-haiku-4-5-20251001'),
+  // The listener-owned taste half of the pick instruction (spec 03-01 §2.3),
+  // under the one murmur home. Absent = the built-in policy.
+  musicPolicyPath: z.string().default(() => musicPolicyPath()),
+  // Last.fm's public API key (spec 03-01 §2.3), env-only like every other
+  // secret. Empty = no similar_music tool, and discovery degrades to search.
+  lastfmApiKey: z.string().default(''),
   // Talk<->music scheduling mode (spec 03-02 §2.3).
   cadenceMode: z.enum(['every_n', 'random', 'brain']).default('every_n'),
   musicEveryN: z.coerce.number().int().positive().default(2),
@@ -228,6 +234,8 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...tts,
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
+    musicPolicyPath: musicPolicyPath(env),
+    lastfmApiKey: env.MURMUR_LASTFM_API_KEY?.trim() ?? '',
     tuiSocket: tuiSocketPath(env),
     // Having an endpoint IS the reason to speak with it: a voice configured
     // through the setup conversation (spec 03-03 §7.2) would otherwise be

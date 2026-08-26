@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { cacheRoot, claudeCodeRoot, dataRoot, homeRoot, settingsPath, tuiSocketPath } from '../src/paths.ts'
+import {
+  cacheRoot,
+  claudeCodeRoot,
+  dataRoot,
+  homeRoot,
+  musicPolicyPath,
+  settingsPath,
+  tuiSocketPath,
+} from '../src/paths.ts'
 
 describe('paths', () => {
   it('defaults to ~/.murmur with data/ and cache/ beneath', () => {
@@ -60,5 +68,14 @@ describe('the settings file', () => {
   it('lives at the home root and moves with MURMUR_HOME', () => {
     expect(settingsPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/settings.json')
     expect(settingsPath({}).endsWith('/.murmur/settings.json')).toBe(true)
+  })
+})
+
+// spec 03-01 §2.3: the listener's music policy sits beside settings.json --
+// configuration they own, not irreplaceable state.
+describe('the music policy file', () => {
+  it('lives at the home root and moves with MURMUR_HOME', () => {
+    expect(musicPolicyPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/music-policy.md')
+    expect(musicPolicyPath({}).endsWith('/.murmur/music-policy.md')).toBe(true)
   })
 })

@@ -14,6 +14,8 @@ import {
   buildSteerPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
+  buildFindMusicInstruction,
+  DEFAULT_MUSIC_POLICY,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
   PERSONA_CHAR_CAP,
@@ -64,7 +66,57 @@ describe('music prompts', () => {
     expect(FIND_MUSIC_INSTRUCTION).toContain('search_music')
     expect(FIND_MUSIC_INSTRUCTION).toContain('submit_pick')
     expect(FIND_MUSIC_INSTRUCTION).toContain('announce')
-    expect(FIND_MUSIC_INSTRUCTION).toContain('vocals')
+    expect(FIND_MUSIC_INSTRUCTION).toContain('Someone has to be singing')
+  })
+
+  // spec 03-01 §2.3: the listener owns the taste half, the code owns the
+  // contract half. A policy that forgets to ask for an announce must not be
+  // able to produce a pick with no announce.
+  it('lets a listener policy replace the taste rules but never the contract', () => {
+    const mine = '- only cantopop, nothing else'
+    const instruction = buildFindMusicInstruction(mine)
+    expect(instruction).toContain(mine)
+    expect(instruction).not.toContain('Someone has to be singing') // the built-in taste is gone
+    expect(instruction).toContain('search_music')
+    expect(instruction).toContain('submit_pick')
+    expect(instruction).toContain('announce')
+  })
+
+  it('falls back to the built-in policy when there is no file', () => {
+    expect(buildFindMusicInstruction()).toBe(FIND_MUSIC_INSTRUCTION)
+    expect(FIND_MUSIC_INSTRUCTION).toContain(DEFAULT_MUSIC_POLICY)
+  })
+
+  // The whole point of the data source (spec 03-01 §2.3): left to its own
+  // memory the model plays the same handful of songs forever.
+  it('tells the task not to lean on the songs it already remembers', () => {
+    expect(DEFAULT_MUSIC_POLICY).toContain('Do not choose out of memory')
+  })
+
+  // The default policy is the shipped answer to the habit, so it must name
+  // every widening tool that exists -- a doc that drifts behind the tool list
+  // silently stops being the playbook it claims to be.
+  it('names each widening tool, at both the artist and the song level', () => {
+    expect(DEFAULT_MUSIC_POLICY).toContain('similar_music')
+    expect(DEFAULT_MUSIC_POLICY).toContain('top_tracks')
+    expect(DEFAULT_MUSIC_POLICY).toContain('search_music')
+  })
+
+  // Found by smoke, locked here: compressed to a clause inside another step,
+  // "someone singing" lost to a solo-piano track that fit the hour. The
+  // exclusion has to name what it excludes.
+  it('rules out instrumentals by name, in a step of its own', () => {
+    expect(DEFAULT_MUSIC_POLICY).toContain('Someone has to be singing')
+    for (const trap of ['ambient', 'piano', 'lofi', 'soundtrack']) {
+      expect(DEFAULT_MUSIC_POLICY).toContain(trap)
+    }
+  })
+
+  // A playbook, not a ban list: it has to say what to DO, in order.
+  it('reads as ordered steps', () => {
+    for (const step of ['1.', '2.', '3.', '4.', '5.', '6.', '7.', '8.']) {
+      expect(DEFAULT_MUSIC_POLICY).toContain(step)
+    }
   })
 
   it('renders the recent turns and the music-break intent', () => {
@@ -81,10 +133,20 @@ describe('music prompts', () => {
     expect(buildMusicSituation([])).toContain('just started')
   })
 
-  it('renders an avoid list only when there is one', () => {
-    expect(buildMusicSituation([], [])).not.toContain('do not repeat')
+  // The situation states facts; the RULE about them lives in the replaceable
+  // policy (step 8). Otherwise a listener whose policy welcomes repeats still
+  // gets a code-owned "do not repeat" in the same prompt, contradicting them.
+  it('renders the recently-played list as a fact, not as an instruction', () => {
     const s = buildMusicSituation([], ['Song A -- Label'])
-    expect(s).toContain('do not repeat')
+    expect(s).toContain('Recently played')
+    expect(s).toContain('- Song A -- Label')
+    expect(s).not.toContain('do not repeat')
+    expect(DEFAULT_MUSIC_POLICY).toContain('recently played')
+  })
+
+  it('renders an avoid list only when there is one', () => {
+    expect(buildMusicSituation([], [])).not.toContain('Recently played')
+    const s = buildMusicSituation([], ['Song A -- Label'])
     expect(s).toContain('- Song A -- Label')
   })
 })

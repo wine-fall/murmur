@@ -161,6 +161,21 @@ describe('pacing flags', () => {
   })
 })
 
+// spec 03-01 §2.3: the pick policy is a file the listener owns, at the home
+// root; the Last.fm key is a secret, so it only ever comes from env.
+describe('music discovery config', () => {
+  it('defaults musicPolicyPath under the (relocatable) home', () => {
+    expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.musicPolicyPath).toBe('/tmp/mh/music-policy.md')
+    expect(parseCli([], NO_ENV).config.musicPolicyPath.endsWith('/.murmur/music-policy.md')).toBe(true)
+  })
+
+  it('takes the Last.fm key from env only, and treats a blank one as absent', () => {
+    expect(parseCli([], { ...NO_ENV, MURMUR_LASTFM_API_KEY: ' abc ' }).config.lastfmApiKey).toBe('abc')
+    expect(parseCli([], { ...NO_ENV, MURMUR_LASTFM_API_KEY: '  ' }).config.lastfmApiKey).toBe('')
+    expect(parseCli([], NO_ENV).config.lastfmApiKey).toBe('')
+  })
+})
+
 // spec 05 §2.3: memory lives under dataRoot()/memory, relocatable with
 // MURMUR_HOME; compaction runs on the cheap tier.
 describe('memory config', () => {
