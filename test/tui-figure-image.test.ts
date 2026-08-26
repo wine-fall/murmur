@@ -12,6 +12,7 @@ import {
   figurePen,
   figureRaster,
   figureScale,
+  figureSprite,
   placeFigure,
   stagePlan,
 } from '../tui/src/figure-image.ts'
@@ -44,6 +45,27 @@ describe('figureRaster (the raster needs a pixel pitch, not just a claim)', () =
 
   it('never grants the raster to a sprite terminal', () => {
     expect(figureRaster('sprite', { width: 9, height: 25 })).toBe(false)
+  })
+})
+
+describe('figureSprite (who draws the figure, and when)', () => {
+  it('draws at once on a sprite terminal — it never had a raster to wait for', () => {
+    expect(figureSprite('sprite', false)).toBe(true)
+    expect(figureSprite('sprite', true)).toBe(true)
+  })
+
+  it('stays dark on an image terminal until the raster is ruled out', () => {
+    // The entry flash: a sprite drawn during the settle window is a size
+    // larger than the PNG that replaces it, so the figure visibly shrinks a
+    // beat after the TUI comes up. Nothing at all is the honest picture until
+    // the terminal has answered about its cell pitch.
+    expect(figureSprite('image', false)).toBe(false)
+  })
+
+  it('takes the figure back when the image terminal never reported its cells', () => {
+    // tmux/ssh claim kitty by env and never answer the window-pixel query;
+    // figureRaster says no, and the sprite has to carry the sky.
+    expect(figureSprite('image', true)).toBe(true)
   })
 })
 

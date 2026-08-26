@@ -38,6 +38,15 @@ export function figureRaster(
   return pen === 'image' && cell !== null
 }
 
+// Whether the sprite draws the figure. A sprite-pen terminal never had a
+// raster to wait for, so it draws at once; an image-pen one shows nothing
+// until `figureRaster` has ruled on its cell pitch, because a sprite drawn in
+// the meantime is a size larger than the PNG that replaces it — the swap reads
+// as the figure shrinking a beat after the TUI comes up.
+export function figureSprite(pen: FigurePen, rasterRuledOut: boolean): boolean {
+  return pen !== 'image' || rasterRuledOut
+}
+
 // The raster's inks are the design's own sampled colors — brighter than the
 // log's text cream on purpose, the way the concept's figure pops off the sky.
 const RGBA: Record<string, [number, number, number, number]> = {
