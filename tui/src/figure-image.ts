@@ -25,6 +25,19 @@ export function figurePen(env: NodeJS.ProcessEnv): FigurePen {
   return 'sprite'
 }
 
+// Whether the figure actually gets to be a raster. The pen above reads the
+// terminal's CLAIM (env), which tmux, ssh and anything ignoring the
+// window-pixel query keep making while never reporting a cell pitch — and a
+// PNG such a terminal will not render leaves the sky empty, with the sprite
+// suppressed behind it. The wave already demands the pitch before arming its
+// raster; the figure demands the same, and falls back to the sprite otherwise.
+export function figureRaster(
+  pen: FigurePen,
+  cell: { width: number; height: number } | null,
+): cell is { width: number; height: number } {
+  return pen === 'image' && cell !== null
+}
+
 // The raster's inks are the design's own sampled colors — brighter than the
 // log's text cream on purpose, the way the concept's figure pops off the sky.
 const RGBA: Record<string, [number, number, number, number]> = {

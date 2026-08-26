@@ -10,6 +10,7 @@ import {
   deleteFigures,
   encodeFigurePng,
   figurePen,
+  figureRaster,
   figureScale,
   placeFigure,
   stagePlan,
@@ -26,6 +27,23 @@ describe('figurePen (who can hold a raster at all)', () => {
     expect(figurePen({ TERM: 'xterm-kitty' })).toBe('image')
     expect(figurePen({ TERM_PROGRAM: 'Apple_Terminal' })).toBe('sprite')
     expect(figurePen({})).toBe('sprite')
+  })
+})
+
+describe('figureRaster (the raster needs a pixel pitch, not just a claim)', () => {
+  it('holds the raster when the terminal both speaks kitty and reported its cells', () => {
+    expect(figureRaster('image', { width: 9, height: 25 })).toBe(true)
+  })
+
+  it('falls back to the sprite when the terminal never reported its cell size', () => {
+    // tmux, ssh, any terminal ignoring the window-pixel query: TERM_PROGRAM
+    // still says ghostty, so the pen says image — but a PNG nothing renders
+    // leaves an EMPTY sky, and the sprite has to take the figure back.
+    expect(figureRaster('image', null)).toBe(false)
+  })
+
+  it('never grants the raster to a sprite terminal', () => {
+    expect(figureRaster('sprite', { width: 9, height: 25 })).toBe(false)
   })
 })
 

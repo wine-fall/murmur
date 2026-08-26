@@ -20,12 +20,13 @@ import {
   deleteFigures,
   encodeFigurePng,
   figurePen,
+  figureRaster,
   figureScale,
   placeFigure,
   stagePlan,
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
-import { identColumn, TAGLINE, WORDMARK } from './logo.ts'
+import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
@@ -549,7 +550,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // Rows left once the strip, its rule, now-playing, identity, and input take
   // theirs, split scene-over-log at 2:1. The scene spans the frame minus its
   // one-cell side padding.
-  const { scene: sceneRows } = sceneSplit(Math.max(dims.height - 5, 10))
+  const { scene: sceneRows, log: logRows } = sceneSplit(Math.max(dims.height - 5, 10))
   const sceneWidth = cols - 2
   // Whether the scene band holds the stage. The settings pane always reclaims
   // its rows (a mode the listener opened is their own full attention). The
@@ -557,6 +558,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // stays on stage dimmed beneath it — only the raster layers yield, and only
   // where the card's own rows reach (stagePlan / waveRowsFor via the refs).
   const sceneShown = wide && !paneOpen
+  // How much of the station ident the wide composition can afford between the
+  // scene band and the log. The figure is not in this trade — it holds the
+  // scene band at every height; only the title steps down (spec 10 §3.3).
+  const ident = identSize(wide, logRows)
   const sceneShownRef = useRef(sceneShown)
   sceneShownRef.current = sceneShown
   // The newest broadcast line carries the bullet (concept 04); older lines
@@ -582,13 +587,20 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // start-of-broadcast flash. Only a real relayout re-runs the effect.
   const poseRef = useRef(pose)
   poseRef.current = pose
+  // The sprite holds the figure until the raster proves it can run. A terminal
+  // that only CLAIMS kitty by env — tmux, ssh, anything ignoring the
+  // window-pixel query — would otherwise be handed a PNG it never renders
+  // while the sprite stayed suppressed behind it, and the sky came up empty.
+  const [rasterFigure, setRasterFigure] = useState(false)
   useEffect(() => {
     if (!wide || figMode !== 'image' || !band.pet) return
     let loop: ReturnType<typeof setInterval> | undefined
     const settle = setTimeout(() => {
       const cell = cellSizeFrom(renderer.resolution, dims.width, dims.height)
+      if (!figureRaster(figMode, cell)) return
+      setRasterFigure(true)
       const spriteCols = POSES.idle[0]![0]!.length
-      const scale = figureScale(cell?.width ?? 0, spriteCols)
+      const scale = figureScale(cell.width, spriteCols)
       // Every pose shares the sprite grid, so geometry is computed once and a
       // pose's PNGs are encoded on first use.
       const pngCache = new Map<string, Buffer[]>()
@@ -602,8 +614,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         }
         return pngs
       }
-      const imgCols = Math.ceil((spriteCols * scale) / (cell?.width ?? 8))
-      const imgRows = Math.ceil((POSES.idle[0]!.length * scale) / (cell?.height ?? 16))
+      const imgCols = Math.ceil((spriteCols * scale) / cell.width)
+      const imgRows = Math.ceil((POSES.idle[0]!.length * scale) / cell.height)
       const centerRow = 2 + circleOf(sceneWidth * 2, sceneRows * 4).cy / 4
       const sceneLeft = gutter + 1
       const col = Math.max(1, Math.round(sceneLeft + sceneWidth / 2 - imgCols / 2) + 1)
@@ -638,6 +650,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     return () => {
       clearTimeout(settle)
       clearInterval(loop)
+      setRasterFigure(false)
       rawOut.writeOut(deleteFigures())
     }
   }, [wide, cols, gutter, sceneRows, sceneWidth, figMode, band.pet, renderer, dims.width, dims.height])
@@ -761,7 +774,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             sink={vizSink}
             accent={roomAccent}
             pose={pose}
-            showPet={band.pet && figMode === 'sprite'}
+            showPet={band.pet && !rasterFigure}
             charWave={!rasterWave}
             width={sceneWidth}
             rows={sceneRows}
@@ -853,24 +866,38 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           <text style={{ fg: INK.dim }}>{'  ↑↓ move · ←→/space adjust · esc back'}</text>
         </box>
       ) : (
-        <>
-        {/* The wide composition's lower half is two columns (§3.3): the log
-            on the left, and the station ident standing in its own column on
-            the right, centered on the region's height. */}
-        <box
-          style={{
-            flexGrow: 1,
-            flexDirection: 'column',
-            justifyContent: 'center',
-            paddingRight: wide ? identColumn(cols) : 0,
-          }}
-        >
-        {/* A row of air above and below, so the log reads as a block centered
-            beside the ident rather than a column running the region's full
-            height. Shrinkable boxes, not padding: padding is unshrinkable, and
-            a terminal short enough to leave the region one row would then push
-            the log's last line onto the identity strip. */}
-        {wide && <box style={{ height: 1, flexShrink: 1 }} />}
+        <box style={{ flexGrow: 1, flexDirection: 'column' }}>
+        {/* The station ident, pinned between the scene band and the log so no
+            program can scroll it away (§3.3). It is the only thing here that
+            yields rows: `identSize` steps it from the full mark down to one
+            small line and then off, and the figure keeps the scene band
+            throughout. */}
+        {ident !== 'none' && (
+          <box
+            style={{
+              flexDirection: 'column',
+              alignItems: 'center',
+              marginTop: 1,
+              // What the ladder budgets (IDENT_ROWS): the mark spends six rows
+              // with air on both sides, the one-line form spends two.
+              marginBottom: ident === 'full' ? 1 : 0,
+              flexShrink: 0,
+            }}
+          >
+            {ident === 'full' ? (
+              <>
+                {WORDMARK.map((row, at) => (
+                  <text key={at} style={{ fg: lit(INK.text) }}>
+                    {row}
+                  </text>
+                ))}
+                <text style={{ fg: lit(INK.dim) }}>{TAGLINE}</text>
+              </>
+            ) : (
+              <text style={{ fg: lit(INK.dim) }}>{IDENT_LINE}</text>
+            )}
+          </box>
+        )}
         <scrollbox
           stickyScroll
           stickyStart="bottom"
@@ -884,8 +911,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         >
           {/* The station ident (§3.3 as built): the narrow band opens its log
               with the wordmark — scrolled away by the program itself; the wide
-              composition stands it in its own column instead, where nothing
-              can scroll it away. */}
+              composition pins it above instead. */}
           {!wide && (
           <box
             style={{
@@ -938,39 +964,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             </box>
           ))}
         </scrollbox>
-        {wide && <box style={{ height: 1, flexShrink: 1 }} />}
         </box>
-        {wide && (
-          // The ident FLOATS in its column (yoga absolute), the way the
-          // spotlight card floats over the room: the wordmark is fixed-height
-          // art that cannot shrink, and in flow it would force the whole
-          // lower region taller than its rows — the log's last line then
-          // lands on the identity strip in a short terminal. Out of flow it
-          // costs the composition nothing and clips instead of shearing.
-          <box
-            style={{
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              right: 0,
-              width: identColumn(cols),
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-            }}
-          >
-            {WORDMARK.map((row, at) => (
-              <text key={at} style={{ flexShrink: 0, fg: lit(INK.text) }}>
-                {row}
-              </text>
-            ))}
-            <box style={{ marginTop: 1, flexShrink: 0 }}>
-              <text style={{ fg: lit(INK.dim) }}>{TAGLINE}</text>
-            </box>
-          </box>
-        )}
-        </>
       )}
 
       </box>

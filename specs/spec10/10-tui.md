@@ -456,19 +456,27 @@ focus, and the broadcast never pauses under it.
 **Station ident (2026-08-11, user-asked):** the murmur wordmark
 (`tui/src/logo.ts`, half-block letters + tagline) opens every program log —
 the first thing a boot shows, scrolled away by the program itself.
-~~**Amended (2026-08-19, user report: the guide's tool flood scrolled the
-wordmark away):** in the wide composition the ident is PINNED between the
-scene band and the log whenever the log region can spare its rows.~~
-**Superseded (2026-08-26, design session): in the wide composition the region
-below the scene band is TWO COLUMNS** — the log on the left, the ident
-standing in its own column on the right, centered on the region's height and
-present at every terminal size. `identColumn` (`logo.ts`) sizes that column:
-the log takes about two thirds of the frame, unless that would shear the
-fixed-width mark, which wins. The log's column keeps a row of air above and
-below (it no longer runs the region's full height) and its newest line still
-sticks to the bottom. The height switch is gone with the pin — nothing can
-scroll the wordmark away in the wide composition, at any height. The narrow
-band keeps the classic in-log ident that the program scrolls away itself.
+~~**Amended (2026-08-19):** in the wide composition the ident is PINNED between
+the scene band and the log whenever the log region can spare its rows.~~
+~~**Superseded (2026-08-26): the region below the scene band is two columns —
+log left, ident right.**~~ **Superseded again (2026-08-26, after seeing it: the
+side-by-side split cost the log its width and put the mark where the eye does
+not look for a station name.) The composition stays vertical — scene band,
+ident, log — and the ident is PINNED between the band and the log at every
+height in the wide composition.** What changes with height is how much of the
+ident there is, and the ladder has one rule behind it: **the figure never
+yields rows; only the title does.**
+
+| the log can spare | the ident is |
+| --- | --- |
+| >= 12 rows | the full mark: three-row wordmark + tagline |
+| >= 8 rows | one small line — `murmur · a companion radio` |
+| below that | nothing — the status strip is already carrying the name |
+
+`identSize` (`tui/src/logo.ts`) is that ladder. The old switch traded the whole
+ident for log rows and dropped it back into the scrollbox, where the program
+scrolled it away — the one thing the pin existed to prevent. The narrow band
+keeps the classic in-log ident that the program scrolls away itself.
 
 **As built (2026-08-12, stacked recomposition — supersedes the 2026-08-07
 side-panel): composition has one breakpoint, one max width, and one vertical
@@ -657,6 +665,14 @@ provides them):
    the tty's real cell pixel size, pose frames streamed under one image id,
    doze fading the inks toward the ground. Character terminals and the
    narrow band keep the text-sprite path unchanged.
+   **Amended (2026-08-26, user report: an empty sky band):** the pen reads the
+   terminal's CLAIM, and tmux, ssh and anything else ignoring the window-pixel
+   query keep making it while never reporting a cell pitch. Such a terminal was
+   handed a PNG it does not render, with the sprite suppressed behind it — the
+   figure vanished entirely, while the wave, which already demanded the pitch
+   before arming its own raster, fell back to characters and looked fine. The
+   figure now demands the same evidence (`figureRaster`): raster only when the
+   terminal both speaks kitty AND reported its cell size, sprite otherwise.
    **The wave joined it (2026-08-10)**: on the same channel the spectrum
    renders as **stardust** (`tui/src/wave-image.ts`) — grains blown outward
    from the figure, each direction around the circle carrying one band (bass
