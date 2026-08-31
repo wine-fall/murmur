@@ -41,8 +41,17 @@ export function cacheRoot(env: NodeJS.ProcessEnv = process.env): string {
 // Runtime state of a live process — nothing here outlives a run. The TUI's unix
 // socket (spec 10 §2.3) is the only tenant; names stay short because the OS caps
 // a socket path at ~104 bytes.
+const RUN_DIR = 'run'
+
 export function runRoot(env: NodeJS.ProcessEnv = process.env): string {
-  return join(homeRoot(env), 'run')
+  return join(homeRoot(env), RUN_DIR)
+}
+
+// The same directory, resolved from the home a RUN already decided (config.home)
+// rather than the ambient env — the crash sentinels (src/sentinel.ts) have to
+// land in the home this instance is actually using.
+export function sentinelRoot(home: string): string {
+  return join(home, RUN_DIR)
 }
 
 // The diagnostics the dev log holds (src/dev-log.ts). Rebuildable in spirit —
