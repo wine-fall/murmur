@@ -479,6 +479,36 @@ never inside a multi-byte sequence. What was cut, and how much of it
 survived, comes back as a return value: the listener is told, never handed a
 silently shortened report.
 
+**The headless road (as built, parts only)**: the browser is the main road —
+the listener reviews the prefilled form and presses Create themselves. `gh` is
+for a box with no browser to press it in (ssh, a headless machine).
+`ghReady()` answers in three states, because each has a different next step:
+gh is not installed, gh is installed but nobody is logged in, or ready — **and
+who as**. The account name is not decoration: a machine can hold more than one
+GitHub identity, and filing a report as the wrong one is only noticed
+afterwards, so the confirm line says whose name goes on it. A status gh prints
+but we cannot parse an ACTIVE account out of is NOT "ready" — filing as an
+identity we cannot name is the mistake the probe exists to prevent, and gh can
+exit 0 with the active credential broken and a saved one healthy, so a listed
+account is never taken for the active one. The probe is scoped to
+`--hostname github.com`: a bare status walks every configured host, where a
+stale Enterprise credential could fail it outright or hand back an identity
+that cannot file this report at all. `createIssueWithGh`
+files it, body through `--body-file` (a report carries a log tail, and an
+argument list has a length limit).
+
+**Measured, not assumed** — the two roads do not produce identical issues.
+Verified against the real API (wine-fall/murmur#171, gh 2.52.0, an issue
+created and closed for this purpose): an issue filed through `gh issue create`
+does **not** pick up the `labels: ['bug']` declared in `bug.yml`. Those labels
+are applied by the web form submission; gh posts through the REST API, where
+the template never participates (`--template` seeds body text only). `--label`
+cannot close the gap either — it needs triage rights on the repo that an
+ordinary reporter does not have, and asking for one would fail the whole
+filing. So the gh road sends no label at all, and the **title prefix**
+(`[bug] ` / `[feat] `, the same prefixes the forms set) carries the
+classification instead.
+
 This piece stops at one line in the transcript (`last time I went off the air
 without saying goodbye.`, through `host.info` — not the voice); the offer to
 actually file it waits on the report flow.
