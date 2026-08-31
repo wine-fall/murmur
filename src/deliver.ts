@@ -48,12 +48,16 @@ export interface CopyResult {
   reason: string
 }
 
+// `spawn` is required, with no default behind it: a caller that forgot one
+// would write the listener's real clipboard — from a test, silently. Every
+// dependency here that touches the machine is injected for the same reason;
+// `spawnClipboard` below is the one production wiring.
 export async function copyToClipboard(
   text: string,
-  opts: { platform?: NodeJS.Platform; spawn?: ClipboardSpawn } = {},
+  opts: { platform?: NodeJS.Platform; spawn: ClipboardSpawn },
 ): Promise<CopyResult> {
   const platform = opts.platform ?? process.platform
-  const run = opts.spawn ?? defaultSpawn
+  const run = opts.spawn
   let reason = 'no clipboard tool is known for this platform'
   for (const tool of clipboardCandidates(platform)) {
     const failure = await attemptCopy(run, tool, text)
@@ -65,7 +69,7 @@ export async function copyToClipboard(
   return { ok: false, command: null, reason }
 }
 
-const defaultSpawn: ClipboardSpawn = (command, args) =>
+export const spawnClipboard: ClipboardSpawn = (command, args) =>
   nodeSpawn(command, args, { stdio: ['pipe', 'ignore', 'ignore'] })
 
 // Resolves null when the tool took the text, else the reason it did not.
@@ -105,6 +109,28 @@ function attemptCopy(spawn: ClipboardSpawn, tool: ClipboardTool, text: string): 
       }
     })
   })
+}
+
+// --- which road ----------------------------------------------------------- //
+
+// Is there a browser here for the listener to press Create in?
+//
+// Decided from the ENVIRONMENT, not from a result: `openUrl` spawns the
+// platform opener detached and swallows its error (src/director.ts), so
+// "did it open" is not a question this process can ever get an answer to.
+// Pure, so the decision is testable without a desktop.
+export function canOpenBrowser(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  // The listener is sitting at a terminal somewhere else entirely; a browser
+  // opened on THIS machine opens on a screen nobody is looking at.
+  if ((env.SSH_CONNECTION ?? '') !== '' || (env.SSH_TTY ?? '') !== '') return false
+  // macOS and Windows always have a way to show a page. Linux only has one
+  // when a display server is actually up — a headless box exports neither, or
+  // exports one empty.
+  if (platform !== 'linux') return true
+  return (env.DISPLAY ?? '') !== '' || (env.WAYLAND_DISPLAY ?? '') !== ''
 }
 
 // --- the prefilled issue form --------------------------------------------- //
@@ -222,7 +248,9 @@ export interface GhResult {
 
 export type GhRunner = (args: string[]) => Promise<GhResult>
 
-const runGh: GhRunner = (args) =>
+// The one production `gh`. Exported rather than defaulted for the reason
+// above: a forgotten runner would file a real issue on the real repo.
+export const runGh: GhRunner = (args) =>
   new Promise((resolve) => {
     execFile('gh', args, { timeout: 30_000 }, (err, stdout, stderr) => {
       if (err === null) return resolve({ ok: true, missing: false, stdout, stderr })
@@ -242,7 +270,7 @@ export type GhStatus =
   | { kind: 'logged-out'; reason: string }
   | { kind: 'ready'; user: string }
 
-export async function ghReady(run: GhRunner = runGh): Promise<GhStatus> {
+export async function ghReady(run: GhRunner): Promise<GhStatus> {
   // Scoped to github.com: a bare status walks every configured host, so a
   // stale Enterprise credential could fail the probe — or worse, hand back an
   // Enterprise identity that cannot file this report at all.
@@ -315,7 +343,7 @@ export interface GhCreated {
   reason: string
 }
 
-export async function createIssueWithGh(draft: GhDraft, run: GhRunner = runGh): Promise<GhCreated> {
+export async function createIssueWithGh(draft: GhDraft, run: GhRunner): Promise<GhCreated> {
   const result = await run([
     'issue',
     'create',

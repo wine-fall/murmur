@@ -65,7 +65,10 @@ const FORM_URL: Record<'bug' | 'feature', string> = { bug: BUG_FORM_URL, feature
 // form is deprecated (DEP0190) and would print a warning over the TUI.
 export function openerFor(platform: NodeJS.Platform, url: string): { command: string; args: string[] } {
   if (platform === 'darwin') return { command: 'open', args: [url] }
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', url] }
+  // The URL is quoted because cmd re-parses its own command line and treats a
+  // bare `&` as a command separator — a prefilled issue form is nothing but
+  // `&`, and unquoted the browser would get only the part before the first one.
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', `"${url}"`] }
   return { command: 'xdg-open', args: [url] }
 }
 

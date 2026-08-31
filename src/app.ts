@@ -25,6 +25,14 @@ import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
 import { packageVersion, type Config } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
+import {
+  canOpenBrowser,
+  copyToClipboard,
+  createIssueWithGh,
+  ghReady,
+  runGh,
+  spawnClipboard,
+} from './deliver.ts'
 import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
@@ -686,6 +694,16 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
                 return Promise.resolve()
               }
             : spawnEditor,
+        // The only place the real clipboard, browser and gh are wired in.
+        // Every one of them is required on ReportDeps with no default, so a
+        // test cannot write a clipboard or file an issue by forgetting one.
+        deliver: {
+          hasBrowser: () => canOpenBrowser(process.env),
+          copy: (text) => copyToClipboard(text, { spawn: spawnClipboard }),
+          openUrl: openInBrowser,
+          ghReady: () => ghReady(runGh),
+          ghCreate: (draft) => createIssueWithGh(draft, runGh),
+        },
         ...(claude !== null && { guide: claude }),
         model: config.model,
       },

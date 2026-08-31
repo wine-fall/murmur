@@ -135,9 +135,13 @@ describe('Director — /bug and /feature-request', () => {
     // warning would land on the TUI's own terminal.
     expect(openerFor('darwin', BUG_FORM_URL)).toEqual({ command: 'open', args: [BUG_FORM_URL] })
     expect(openerFor('linux', BUG_FORM_URL)).toEqual({ command: 'xdg-open', args: [BUG_FORM_URL] })
-    expect(openerFor('win32', BUG_FORM_URL)).toEqual({
+    // cmd re-parses its own command line, and a prefilled issue URL is full of
+    // `&` — unquoted, the browser would receive only the part before the first
+    // one and every prefilled field would be lost.
+    const prefilled = `${BUG_FORM_URL}&version=0.1.2&platform=darwin`
+    expect(openerFor('win32', prefilled)).toEqual({
       command: 'cmd',
-      args: ['/c', 'start', '', BUG_FORM_URL],
+      args: ['/c', 'start', '', `"${prefilled}"`],
     })
   })
 
