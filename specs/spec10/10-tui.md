@@ -399,7 +399,8 @@ placeholder examples and per-flow option copy, and step metadata for a real
 `n/total` — the counter and the generic option row cost zero wire changes.
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
-mid-broadcast recall). The engine parses
+mid-broadcast recall), `/bug` and `/feature-request` (the feedback channel
+below). The engine parses
 all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
@@ -415,6 +416,17 @@ ember. List order is menu order only, harmless-first (`/settings` leads, so a
 stray Enter on a fresh menu never quits) — the parser binds meanings to its
 own literals. Adding an entry lands it in the parser and the menu at once;
 the guide-mode grammar (`/done`) stays the guide's own.
+
+**The feedback channel (as built)**: `/bug` and `/feature-request` open the
+matching prefilled GitHub issue form
+(`https://github.com/wine-fall/murmur/issues/new?template=bug.yml`,
+`…?template=feature-request.yml`) in the desktop browser — `open` on darwin,
+`xdg-open` on linux, `start` on win32, injected as `openUrl` so a test can
+watch it. The label rides on the form (`.github/ISSUE_TEMPLATE/*.yml`), not on
+a `?labels=` parameter, because GitHub drops that parameter for a submitter
+without triage rights. A failed opener is silent; the URL is printed to the
+log either way, so a headless box still gets something to click. Like
+`/settings`, neither command composes a reply or touches what is on air.
 
 **D. Display-state inventory** (everything the engine can tell the TUI, and
 where it lands):

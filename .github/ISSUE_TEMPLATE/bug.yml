@@ -1,0 +1,43 @@
+name: Bug report
+description: Something in murmur misbehaved — a crash, a wrong sound, a stuck screen.
+title: '[bug] '
+labels: ['bug']
+body:
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you did, and what murmur did back.
+      placeholder: I typed /settings while a song was playing and the pane never opened.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: murmur version
+      description: The version in package.json, or the commit you are running.
+      placeholder: 0.1.2
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: OS and terminal.
+      placeholder: macOS 15.5, Ghostty
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log excerpt (optional)
+      description: The relevant lines from `.dev/dev.log`. Rendered as a code block — no backticks needed.
+      render: text
+    validations:
+      required: false

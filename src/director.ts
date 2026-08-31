@@ -13,6 +13,7 @@
 // is discarded — the wasted call is the cost of merge-anytime, and merges are
 // rare.
 
+import { spawn } from 'node:child_process'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import { currentActivity, type Activity, type ActivitySensor } from './activity.ts'
@@ -47,6 +48,32 @@ import type { AnchorId, Scheduler } from './scheduler.ts'
 const QUIT_COMMAND: (typeof COMMANDS)[number]['name'] = '/quit'
 const SETUP_COMMAND: (typeof COMMANDS)[number]['name'] = '/setup'
 const SETTINGS_COMMAND: (typeof COMMANDS)[number]['name'] = '/settings'
+const BUG_COMMAND: (typeof COMMANDS)[number]['name'] = '/bug'
+const FEATURE_COMMAND: (typeof COMMANDS)[number]['name'] = '/feature-request'
+
+// The prefilled GitHub issue forms (.github/ISSUE_TEMPLATE): the template
+// itself carries the label, which is why the command points at a template
+// rather than appending ?labels= — a URL label parameter is dropped for any
+// submitter without triage rights.
+export const BUG_FORM_URL = 'https://github.com/wine-fall/murmur/issues/new?template=bug.yml'
+export const FEATURE_FORM_URL = 'https://github.com/wine-fall/murmur/issues/new?template=feature-request.yml'
+const FORM_URL: Record<'bug' | 'feature', string> = { bug: BUG_FORM_URL, feature: FEATURE_FORM_URL }
+
+// The desktop's own way to open a URL. `start` is a cmd builtin rather than an
+// executable, so Windows goes through cmd explicitly — spawn's shell-plus-argv
+// form is deprecated (DEP0190) and would print a warning over the TUI.
+export function openerFor(platform: NodeJS.Platform, url: string): { command: string; args: string[] } {
+  if (platform === 'darwin') return { command: 'open', args: [url] }
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', url] }
+  return { command: 'xdg-open', args: [url] }
+}
+
+function openInBrowser(url: string): void {
+  const { command, args } = openerFor(process.platform, url)
+  const child = spawn(command, args, { stdio: 'ignore', detached: true })
+  child.on('error', () => {}) // a missing opener is not a crash; the printed URL stands in
+  child.unref()
+}
 
 // Bounded attempts for a Brain/synth call before it degrades (lose the beat,
 // never the radio).
@@ -83,6 +110,8 @@ export type Steer =
   | { intent: 'quit' }
   | { intent: 'settings' }
   | { intent: 'setup' }
+  | { intent: 'bug' }
+  | { intent: 'feature' }
   | { intent: 'talkback'; text: string }
 
 export function steerFromLine(line: string): Steer {
@@ -90,6 +119,8 @@ export function steerFromLine(line: string): Steer {
   if (trimmed === QUIT_COMMAND) return { intent: 'quit' }
   if (trimmed === SETTINGS_COMMAND) return { intent: 'settings' }
   if (trimmed === SETUP_COMMAND) return { intent: 'setup' }
+  if (trimmed === BUG_COMMAND) return { intent: 'bug' }
+  if (trimmed === FEATURE_COMMAND) return { intent: 'feature' }
   return { intent: 'talkback', text: line }
 }
 
@@ -161,6 +192,9 @@ export type DirectorDeps = {
   // loop inside this call — the engine keeps playing — and the loop resumes
   // when it returns. Absent (stub runs): /setup answers with the shell pointer.
   setupRecall?: () => Promise<void>
+  // How /bug and /feature-request reach a browser (spec 10 §3.2-C). Injected
+  // so tests can watch it; absent = the platform opener.
+  openUrl?: (url: string) => void
   // An auth-shaped voice failure, raised so the app can mark the endpoint as
   // failing — detectGaps then treats the configured endpoint as a gap (#97).
   onVoiceAuthFailure?: () => void
@@ -251,6 +285,19 @@ export class Director {
     } finally {
       this.inSetup = false
     }
+  }
+
+  // A feedback command (spec 10 §3.2-C): open the prefilled form, and print
+  // the URL either way — over ssh, or with a dead opener, the printed line is
+  // the whole affordance.
+  private openIssueForm(kind: 'bug' | 'feature'): void {
+    const url = FORM_URL[kind]
+    try {
+      ;(this.deps.openUrl ?? openInBrowser)(url)
+    } catch {
+      // silent: the info line below is the fallback
+    }
+    this.deps.host.info(`file it at ${url}`)
   }
 
   // Every way a quit begins routes through here, so the listener hears the
@@ -369,6 +416,10 @@ export class Director {
       if (steer.intent === 'setup') {
         await this.recallSetup()
         if (this.quit) return null // a /quit landed inside the conversation
+        continue
+      }
+      if (steer.intent === 'bug' || steer.intent === 'feature') {
+        this.openIssueForm(steer.intent)
         continue
       }
       if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
@@ -917,6 +968,11 @@ export class Director {
           steer = null
           continue
         }
+        if (steer.intent === 'bug' || steer.intent === 'feature') {
+          this.openIssueForm(steer.intent)
+          steer = null
+          continue
+        }
         this.discardTalkAhead() // buffered look-ahead predates this user turn -> stale
         const composed = await this.compose(steer.text)
         steer = null
@@ -992,6 +1048,11 @@ export class Director {
         // (or the pointer) and keep composing the reply already in flight.
         if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
         else this.deps.host.info('settings live in settings.json under the murmur home.')
+        continue
+      }
+      if (merged.intent === 'bug' || merged.intent === 'feature') {
+        // Same rule: a command mid-compose does not become part of the turn.
+        this.openIssueForm(merged.intent)
         continue
       }
       texts.push(merged.text)

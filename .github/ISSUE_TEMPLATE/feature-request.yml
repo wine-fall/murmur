@@ -1,0 +1,19 @@
+name: Feature request
+description: Something you want murmur to do.
+title: '[feat] '
+labels: ['feature-request']
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want
+      description: The thing murmur should do, as concretely as you can put it.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What you are trying to do, and how the radio gets in the way today.
+    validations:
+      required: true
