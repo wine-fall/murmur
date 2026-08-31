@@ -6,8 +6,10 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 // A quoted .env value like MURMUR_HOME=~/murmur arrives with the ~ literal;
-// unexpanded it would silently become a relative "./~" directory.
-function expand(path: string): string {
+// unexpanded it would silently become a relative "./~" directory. Exported for
+// the other listener-typed path, $MURMUR_DEV_LOG (spec 05 §2.3): honoring a ~
+// the user typed is not hardcoding a location.
+export function expandUser(path: string): string {
   if (path === '~') return homedir()
   if (path.startsWith('~/')) return join(homedir(), path.slice(2))
   return path
@@ -15,7 +17,7 @@ function expand(path: string): string {
 
 export function homeRoot(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.MURMUR_HOME?.trim()
-  return override ? expand(override) : join(homedir(), '.murmur')
+  return override ? expandUser(override) : join(homedir(), '.murmur')
 }
 
 // The user's Claude Code data root — read-only, and read ONLY by the consented
@@ -23,7 +25,7 @@ export function homeRoot(env: NodeJS.ProcessEnv = process.env): string {
 // this is the single module allowed to resolve user-level paths (spec 05 §2.3).
 export function claudeCodeRoot(env: NodeJS.ProcessEnv = process.env): string {
   const override = env.CLAUDE_CONFIG_DIR?.trim()
-  return override ? expand(override) : join(homedir(), '.claude')
+  return override ? expandUser(override) : join(homedir(), '.claude')
 }
 
 // Irreplaceable user state (spec 05 memory/, incl. the persona). Back it up.
@@ -41,6 +43,13 @@ export function cacheRoot(env: NodeJS.ProcessEnv = process.env): string {
 // a socket path at ~104 bytes.
 export function runRoot(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'run')
+}
+
+// The diagnostics the dev log holds (src/dev-log.ts). Rebuildable in spirit —
+// a sweep drops what has aged out — but kept beside the home rather than under
+// cache/ so a listener reporting a bug can find it without knowing the layout.
+export function logRoot(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'log')
 }
 
 export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {

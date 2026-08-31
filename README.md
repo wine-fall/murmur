@@ -99,6 +99,8 @@ Left to its own memory a model plays the same handful of famous songs forever, b
 
 Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats) and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
 
+**When something goes wrong**, murmur has already written it down: every run mirrors its timeline to `~/.murmur/log/murmur-<date>.log`, one file per day, the last two weeks kept and older days swept at startup. Attach the day's file to a bug report. Point `MURMUR_DEV_LOG` somewhere else to move it, or set it to an empty string to write no log at all.
+
 ## Development
 
 One command sets up and runs the app; a second terminal tails a live debug log:

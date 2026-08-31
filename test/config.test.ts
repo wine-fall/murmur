@@ -185,6 +185,20 @@ describe('music discovery config', () => {
   })
 })
 
+// spec 05 §2.3: an installed murmur logs by default, under the one home; only
+// an explicit MURMUR_DEV_LOG moves it (make dev) or silences it.
+describe('dev log config', () => {
+  it('defaults to a dated file under the (relocatable) home', () => {
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
+    expect(config.devLog).toMatch(/^\/tmp\/mh\/log\/murmur-\d{4}-\d{2}-\d{2}\.log$/)
+  })
+
+  it('honours an explicit MURMUR_DEV_LOG, empty string included', () => {
+    expect(parseCli([], { MURMUR_DEV_LOG: '.dev/dev.log' }).config.devLog).toBe('.dev/dev.log')
+    expect(parseCli([], { MURMUR_DEV_LOG: '' }).config.devLog).toBe('')
+  })
+})
+
 // spec 05 §2.3: memory lives under dataRoot()/memory, relocatable with
 // MURMUR_HOME; compaction runs on the cheap tier.
 describe('memory config', () => {
