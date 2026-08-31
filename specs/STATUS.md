@@ -42,6 +42,9 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 - **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
+- **#153** (bug, eng) First-run onboarding keeps asking after /quit and never says the answers were dropped.
+- **#163** (enhancement, eng) The director never interjects a talk beat over a ducked song — the engine seam is already there.
+- **#164** (watch, bug) Music picks failing and running long in one real session — dead probes, source health suspected.
 
 ## Pinned — do not relitigate
 
