@@ -13,7 +13,17 @@ import type { InputRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
-import { cardLines, cardTitle, cardTopRow, commandMatches, isCommand, outbound, type Ask } from './dock.ts'
+import {
+  cardLines,
+  cardTitle,
+  cardTopRow,
+  commandMatches,
+  HINT_ROTATE_MS,
+  INPUT_HINTS,
+  isCommand,
+  outbound,
+  type Ask,
+} from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
 import {
   cellSizeFrom,
@@ -534,6 +544,15 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     state?.kind === 'music' && state.startedAt !== undefined && (state.durationS ?? 0) > 0
       ? { startedAt: state.startedAt, durationS: state.durationS! }
       : null
+  // The resting invitation rotates through INPUT_HINTS (spec 10 §3.2-C), so a
+  // listener who never opens the menu still meets /bug and /feature-request.
+  // The lap runs regardless of the floor: it only shows where the placeholder
+  // is the idle one, and a returning listener should not restart at row 0.
+  const [hint, setHint] = useState(0)
+  useEffect(() => {
+    const timer = setInterval(() => setHint((i) => (i + 1) % INPUT_HINTS.length), HINT_ROTATE_MS)
+    return () => clearInterval(timer)
+  }, [])
   useEffect(() => {
     if (track === null) return
     setNow(Date.now())
@@ -1171,7 +1190,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 ? 'settings open — esc to return'
                 : guideFloor
                   ? 'talking to the setup guide · esc interrupts · /done hands back'
-                  : 'type to talk back · / for commands'
+                  : INPUT_HINTS[hint]
             }
             style={{
               // The sky composition bounds the field and lets a quiet rule carry

@@ -164,6 +164,7 @@ export class CliHost implements Host {
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
+    console.log('│ something broken or missing? /bug or /feature-request opens the form.')
     console.log('└──────────────────────────────────────────────────────────────')
   }
 

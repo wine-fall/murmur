@@ -103,6 +103,23 @@ export function commandMatches(typed: string): readonly Command[] {
   return COMMANDS.filter((command) => command.name.startsWith(line))
 }
 
+// The resting input's invitation (spec 10 §3.2-C), rotated slowly so the
+// feedback commands are eventually seen without a hint line ever entering the
+// transcript. The rows after the first are DERIVED from COMMANDS — the menu
+// and the invitation can never drift into two different wordings.
+const HINTED: readonly string[] = ['/bug', '/feature-request']
+export const INPUT_HINTS: readonly string[] = [
+  'type to talk back · / for commands',
+  // Name first, blurb after — the menu's own column order, and the half that
+  // survives when a narrow terminal clips the field (codex review).
+  ...COMMANDS.filter((command) => HINTED.includes(command.name)).map(
+    (command) => `${command.name} · ${command.blurb}`,
+  ),
+]
+
+// A lap slow enough to read as furniture rather than a blinking sign.
+export const HINT_ROTATE_MS = 3 * 60_000
+
 export function isCommand(typed: string): boolean {
   const line = typed.trim()
   return COMMANDS.some((command) => command.name === line)

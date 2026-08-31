@@ -12,6 +12,8 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  HINT_ROTATE_MS,
+  INPUT_HINTS,
   isCommand,
   outbound,
 } from '../tui/src/dock.ts'
@@ -79,6 +81,29 @@ describe('isCommand', () => {
 describe('the command list', () => {
   it('leads with the harmless command: a stray Enter on the fresh menu opens settings, never quits', () => {
     expect(COMMANDS[0]!.name).toBe('/settings')
+  })
+})
+
+// spec 10 §3.2-C: the resting input rotates its invitation so the feedback
+// commands are eventually seen without a line ever entering the transcript.
+describe('the input hints', () => {
+  it('rests on the talk-back invitation first', () => {
+    expect(INPUT_HINTS[0]).toBe('type to talk back · / for commands')
+  })
+
+  it('derives the feedback rows from COMMANDS rather than keeping a second copy', () => {
+    for (const name of ['/bug', '/feature-request']) {
+      const command = COMMANDS.find((c) => c.name === name)!
+      // Command first: a narrow field clips the tail, and the command is the
+      // half worth keeping (codex review).
+      expect(INPUT_HINTS).toContain(`${command.name} · ${command.blurb}`)
+      expect(INPUT_HINTS.some((hint) => hint.startsWith(name))).toBe(true)
+    }
+    expect(INPUT_HINTS).toHaveLength(3)
+  })
+
+  it('rotates on a lap of minutes, not seconds — a blinking prompt is noise', () => {
+    expect(HINT_ROTATE_MS).toBeGreaterThanOrEqual(60_000)
   })
 })
 
