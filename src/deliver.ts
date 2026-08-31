@@ -1,9 +1,10 @@
-// The two delivery primitives behind the one-key bug report (spec 10 §3.2-C):
-// putting the draft where the listener can paste it, and handing GitHub a form
-// that is already filled in. Both are parts, not wiring — the flow that decides
-// when to use them lives with the report conversation.
+// The delivery primitives behind the one-key bug report (spec 10 §3.2-C):
+// putting the draft where the listener can paste it, handing GitHub a form that
+// is already filled in, and — for a box with no browser to press Create in —
+// filing it through `gh`. Parts, not wiring: the flow that decides which road
+// to take lives with the report conversation.
 
-import { spawn as nodeSpawn } from 'node:child_process'
+import { execFile, spawn as nodeSpawn } from 'node:child_process'
 
 // --- the clipboard -------------------------------------------------------- //
 
@@ -194,3 +195,148 @@ function longestTail(text: string, budget: number): string {
   }
   return chars.slice(chars.length - taken).join('')
 }
+
+// --- the headless fallback ------------------------------------------------ //
+//
+// The browser is the main road: the listener reviews the prefilled form and
+// presses Create themselves. `gh` is for the boxes with no browser to press it
+// in — ssh, a headless machine — where murmur files the issue directly.
+//
+// VERIFIED (wine-fall/murmur#171, gh 2.52.0): an issue created this way does
+// NOT pick up the `labels: ['bug']` declared in the issue form. Those labels
+// are applied by the web form submission; `gh issue create` posts through the
+// REST API, where the template never participates. `--label` cannot make up
+// the difference either — it needs triage rights on the repo, which an ordinary
+// reporter does not have, and asking for one would fail the whole filing. So
+// the gh path deliberately sends no label, and the title prefix carries the
+// classification instead (see `issueTitle`).
+
+// The little of a `gh` run the callers here need. `missing` is separate from a
+// failed run because "install gh" and "gh said no" are different next steps.
+export interface GhResult {
+  ok: boolean
+  missing: boolean
+  stdout: string
+  stderr: string
+}
+
+export type GhRunner = (args: string[]) => Promise<GhResult>
+
+const runGh: GhRunner = (args) =>
+  new Promise((resolve) => {
+    execFile('gh', args, { timeout: 30_000 }, (err, stdout, stderr) => {
+      if (err === null) return resolve({ ok: true, missing: false, stdout, stderr })
+      const code = (err as NodeJS.ErrnoException).code
+      const missing = code === 'ENOENT' || code === 'ENOTDIR'
+      resolve({ ok: false, missing, stdout, stderr })
+    })
+  })
+
+// Three answers, because each has its own next step: install gh, log in, or go
+// ahead — as this named account. The name matters: a machine can hold more than
+// one GitHub identity, and filing a report as the wrong one is the kind of
+// mistake that is only noticed afterwards. The caller shows it in the confirm
+// line.
+export type GhStatus =
+  | { kind: 'missing'; reason: string }
+  | { kind: 'logged-out'; reason: string }
+  | { kind: 'ready'; user: string }
+
+export async function ghReady(run: GhRunner = runGh): Promise<GhStatus> {
+  // Scoped to github.com: a bare status walks every configured host, so a
+  // stale Enterprise credential could fail the probe — or worse, hand back an
+  // Enterprise identity that cannot file this report at all.
+  const result = await run(['auth', 'status', '--hostname', GITHUB_HOST])
+  if (result.missing) return { kind: 'missing', reason: 'the gh command-line tool is not installed' }
+  // gh has printed this on stdout in some versions and stderr in others; both
+  // are read so the probe does not hinge on which one this build chose.
+  const text = `${result.stdout}\n${result.stderr}`
+  if (!result.ok) return { kind: 'logged-out', reason: firstLine(text) || 'gh is not logged in' }
+  const user = activeAccount(text)
+  // Filing as an identity we cannot name is exactly the mistake this probe
+  // exists to prevent, so an unreadable status is not "ready" — and the next
+  // step is the logged-out one either way: sort gh's auth out first.
+  if (user === null) return { kind: 'logged-out', reason: 'gh did not name the account it is logged in as' }
+  return { kind: 'ready', user }
+}
+
+const GITHUB_HOST = 'github.com'
+
+// "Logged in to github.com account NAME" (current) or "... as NAME" (older).
+const ACCOUNT = /Logged in to \S+ (?:account|as) ([\w-]+)/
+const MARKER = /Active account:/
+const ACTIVE = /Active account:\s*true/
+
+// With several accounts known, the active one is whichever the marker follows —
+// never simply the first listed: gh can exit 0 with the ACTIVE credential
+// broken and another one healthy, and naming that other account would promise
+// an identity `gh issue create` is not going to use. The first-account fallback
+// is only for the legacy output that carries no markers at all.
+function activeAccount(text: string): string | null {
+  const lines = text.split('\n')
+  const marked = lines.some((line) => MARKER.test(line))
+  let candidate: string | null = null
+  for (const line of lines) {
+    const named = ACCOUNT.exec(line)
+    if (named !== null) {
+      if (!marked) return named[1]!
+      candidate = named[1]!
+      continue
+    }
+    if (ACTIVE.test(line) && candidate !== null) return candidate
+  }
+  return null
+}
+
+function firstLine(text: string): string {
+  return text.trim().split('\n')[0]?.trim() ?? ''
+}
+
+// The classification the labels cannot carry on this path, matching the `title`
+// prefixes the issue forms themselves set.
+const TITLE_PREFIX = { bug: '[bug] ', feature: '[feat] ' } as const
+
+export function issueTitle(template: IssueTemplate, summary: string): string {
+  const prefix = TITLE_PREFIX[template]
+  return summary.startsWith(prefix) ? summary : prefix + summary
+}
+
+export interface GhDraft {
+  repo: string
+  title: string
+  // The body goes through a FILE: a report carries a log tail, and an argument
+  // list has a length limit a draft can pass.
+  bodyFile: string
+}
+
+export interface GhCreated {
+  ok: boolean
+  url: string
+  reason: string
+}
+
+export async function createIssueWithGh(draft: GhDraft, run: GhRunner = runGh): Promise<GhCreated> {
+  const result = await run([
+    'issue',
+    'create',
+    '--repo',
+    draft.repo,
+    '--title',
+    draft.title,
+    '--body-file',
+    draft.bodyFile,
+  ])
+  if (result.missing) {
+    return { ok: false, url: '', reason: 'the gh command-line tool is not installed' }
+  }
+  if (!result.ok) {
+    return { ok: false, url: '', reason: firstLine(result.stderr) || 'gh could not file the issue' }
+  }
+  const url = ISSUE_URL.exec(result.stdout)?.[0] ?? ''
+  // gh exits 0 having printed the new issue's URL. No URL means something else
+  // happened, and reporting a filing we cannot point at would be a lie.
+  if (url === '') return { ok: false, url: '', reason: 'gh filed no issue URL to point at' }
+  return { ok: true, url, reason: '' }
+}
+
+const ISSUE_URL = /https:\/\/\S+\/issues\/\d+/

@@ -5,8 +5,13 @@ import {
   buildIssueUrl,
   clipboardCandidates,
   copyToClipboard,
+  createIssueWithGh,
+  ghReady,
+  issueTitle,
   type ClipboardProcess,
   type ClipboardSpawn,
+  type GhResult,
+  type GhRunner,
 } from '../src/deliver.ts'
 
 // A clipboard tool that behaves as told: 'ok' takes the text, 'missing' is not
@@ -229,5 +234,153 @@ describe('buildIssueUrl', () => {
     const value = new URL(built.url).searchParams.get('logs')
     expect(value).toMatch(/^\u{1F399}+$/u)
     expect(built.bytes).toBeLessThanOrEqual(URL_BUDGET)
+  })
+})
+
+// --- the headless fallback ------------------------------------------------ //
+
+function fakeGh(result: Partial<GhResult>): { run: GhRunner; calls: string[][] } {
+  const calls: string[][] = []
+  const run: GhRunner = (args) => {
+    calls.push(args)
+    return Promise.resolve({ ok: false, missing: false, stdout: '', stderr: '', ...result })
+  }
+  return { run, calls }
+}
+
+// The shape `gh auth status` prints when more than one account is known: the
+// active one is whichever carries the marker, not the first listed.
+const TWO_ACCOUNTS = [
+  'github.com',
+  '  x Logged in to github.com account octocat (keyring)',
+  '  - Active account: false',
+  '  x Logged in to github.com account hubot (keyring)',
+  '  - Active account: true',
+].join('\n')
+
+describe('ghReady', () => {
+  it('knows when gh is not installed at all', async () => {
+    const { run } = fakeGh({ missing: true })
+    const status = await ghReady(run)
+    expect(status.kind).toBe('missing')
+  })
+
+  it('knows when gh is installed but nobody is logged in', async () => {
+    const { run } = fakeGh({
+      ok: false,
+      stderr: 'You are not logged into any GitHub hosts. To log in, run: gh auth login',
+    })
+    const status = await ghReady(run)
+    expect(status.kind).toBe('logged-out')
+    expect(status.kind === 'logged-out' && status.reason).toContain('not logged into')
+  })
+
+  it('names the account an issue would be filed as', async () => {
+    const { run, calls } = fakeGh({ ok: true, stdout: TWO_ACCOUNTS })
+    const status = await ghReady(run)
+    expect(status).toEqual({ kind: 'ready', user: 'hubot' })
+    // Scoped to github.com: an Enterprise identity cannot file this report.
+    expect(calls).toEqual([['auth', 'status', '--hostname', 'github.com']])
+  })
+
+  it('reads the older single-account wording too', async () => {
+    const { run } = fakeGh({ ok: true, stdout: '  x Logged in to github.com as octocat (oauth_token)' })
+    expect(await ghReady(run)).toEqual({ kind: 'ready', user: 'octocat' })
+  })
+
+  it('reads the status wherever gh printed it', async () => {
+    const { run } = fakeGh({ ok: true, stderr: TWO_ACCOUNTS })
+    expect(await ghReady(run)).toEqual({ kind: 'ready', user: 'hubot' })
+  })
+
+  // gh can exit 0 with the ACTIVE credential broken and a saved one healthy.
+  // Naming that saved account would promise an identity gh will not use.
+  it('refuses an account that is listed but not the active one', async () => {
+    const inactiveOnly = [
+      'github.com',
+      '  x Logged in to github.com account octocat (keyring)',
+      '  - Active account: false',
+    ].join('\n')
+    const { run } = fakeGh({ ok: true, stdout: inactiveOnly })
+    expect((await ghReady(run)).kind).toBe('logged-out')
+  })
+
+  // Filing as an identity we cannot name is the mistake this whole probe
+  // exists to prevent, so an unreadable status is not "ready".
+  it('refuses to call itself ready when it cannot name the account', async () => {
+    const { run } = fakeGh({ ok: true, stdout: 'github.com\n  something new and unparsed' })
+    const status = await ghReady(run)
+    expect(status.kind).toBe('logged-out')
+    expect(status.kind === 'logged-out' && status.reason).toContain('account')
+  })
+})
+
+describe('issueTitle', () => {
+  it('carries the classification the labels cannot', () => {
+    expect(issueTitle('bug', 'the pane never opened')).toBe('[bug] the pane never opened')
+    expect(issueTitle('feature', 'a sleep timer')).toBe('[feat] a sleep timer')
+  })
+
+  it('does not double the prefix on a summary that already has one', () => {
+    expect(issueTitle('bug', '[bug] the pane never opened')).toBe('[bug] the pane never opened')
+  })
+})
+
+describe('createIssueWithGh', () => {
+  const draft = { repo: 'wine-fall/murmur', title: '[bug] it stopped', bodyFile: '/tmp/draft.md' }
+
+  it('files the issue with the body in a file, and hands back the URL', async () => {
+    const { run, calls } = fakeGh({
+      ok: true,
+      stdout: 'https://github.com/wine-fall/murmur/issues/171\n',
+    })
+    const created = await createIssueWithGh(draft, run)
+    expect(created).toEqual({
+      ok: true,
+      url: 'https://github.com/wine-fall/murmur/issues/171',
+      reason: '',
+    })
+    expect(calls[0]).toEqual([
+      'issue',
+      'create',
+      '--repo',
+      'wine-fall/murmur',
+      '--title',
+      '[bug] it stopped',
+      '--body-file',
+      '/tmp/draft.md',
+    ])
+  })
+
+  // Verified against the real API (issue #171): an issue form's labels are
+  // applied by the web submission, never by the REST call gh makes, and --label
+  // needs triage rights the reporter does not have. Asking for one would only
+  // fail the whole filing.
+  it('never asks for a label', async () => {
+    const { run, calls } = fakeGh({ ok: true, stdout: 'https://github.com/wine-fall/murmur/issues/1' })
+    await createIssueWithGh(draft, run)
+    expect(calls[0]).not.toContain('--label')
+  })
+
+  it('reports the failure instead of pretending it filed', async () => {
+    const { run } = fakeGh({ ok: false, stderr: 'HTTP 410: Issues are disabled' })
+    const created = await createIssueWithGh(draft, run)
+    expect(created.ok).toBe(false)
+    expect(created.url).toBe('')
+    expect(created.reason).toContain('Issues are disabled')
+  })
+
+  it('says so when gh is not there', async () => {
+    const { run } = fakeGh({ missing: true })
+    const created = await createIssueWithGh(draft, run)
+    expect(created.ok).toBe(false)
+    expect(created.reason).toContain('not installed')
+  })
+
+  it('does not claim success when gh printed no URL', async () => {
+    const { run } = fakeGh({ ok: true, stdout: 'Creating issue in wine-fall/murmur\n' })
+    const created = await createIssueWithGh(draft, run)
+    expect(created.ok).toBe(false)
+    expect(created.reason).toContain('URL')
   })
 })
