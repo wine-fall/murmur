@@ -36,20 +36,35 @@ export type TalkBeat = {
 
 // The compact context handed to the Brain per call (master §6). Beyond the
 // spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
-// spec 05 §2.2); `profile` and `coveredTopics` are the tier-①/③ memory reads
-// (spec 05 §3.5 — coveredTopics is cross-day, the issue-#44 anti-repeat).
-// `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
-// and `cue` the per-call intent the Director asks the prompt to carry (an
-// anchor — spec 07 §3.4).
+// spec 05 §2.2); `now` is the compose-time clock the prompt states to the
+// minute — the bucket is a mood, not a schedule; `profile` and `coveredTopics`
+// are the tier-①/③ memory reads (spec 05 §3.5 — coveredTopics is cross-day,
+// the issue-#44 anti-repeat). `activity` is the spec-07 §2.2 presence signal
+// (the field spec 05 reserved), and `cue` the per-call intent the Director
+// asks the prompt to carry (an anchor — spec 07 §3.4).
 // All optional: absent renders nothing, so spec-01 call sites stay valid.
 export type ContextPack = {
   readonly persona: string
   readonly recent: readonly Turn[]
   readonly scene?: string
+  readonly now?: Date
   readonly profile?: string
   readonly coveredTopics?: readonly string[]
   readonly activity?: Activity
   readonly cue?: string
+  // Ground truth about the music program, which the model cannot hear and
+  // will otherwise re-narrate from its own announcements. An object with no
+  // `onAir` = a music session between tracks; absent = a talk-only session.
+  readonly air?: {
+    readonly onAir?: {
+      readonly track: string
+      // Seconds played at compose time, and the track's full length when the
+      // source knew it (spec 10 §3.3's startedAt+durationS arithmetic; an
+      // absent durationS is an open-ended stream).
+      readonly elapsedS?: number
+      readonly durationS?: number
+    }
+  }
 }
 
 export interface VoiceProvider {

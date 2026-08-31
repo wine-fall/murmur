@@ -48,6 +48,55 @@ function sceneLine(ctx: ContextPack): string {
   return cue === undefined ? '' : `\n${cue}`
 }
 
+// The clock beside the scene cue: the bucket is coarse on purpose (late-night
+// spans 23:00-04:59), so the prompt also states the actual date-time to the
+// minute — 01:00 must not read as almost-dawn. Local timezone, the same clock
+// sceneFor buckets.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+export function formatClock(now: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0')
+  const date = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`
+  return `${WEEKDAYS[now.getDay()]} ${date}, ${two(now.getHours())}:${two(now.getMinutes())}`
+}
+
+function clockLine(ctx: ContextPack): string {
+  return ctx.now === undefined ? '' : `\nLocal time: ${formatClock(ctx.now)}.`
+}
+
+// m:ss. Minutes are not bounded by 60 — a track can outlast an hour.
+function mmss(totalS: number): string {
+  return `${Math.floor(totalS / 60)}:${String(Math.floor(totalS) % 60).padStart(2, '0')}`
+}
+
+// Wall-clock progress: what has played to the second, what is left floored to
+// five — the numbers come from a stamp plus the clock (spec 10 §3.3), so a
+// finer remainder would be false precision.
+export function formatProgress(elapsedS: number, durationS: number): string {
+  const played = Math.min(Math.max(0, Math.floor(elapsedS)), durationS)
+  const left = Math.floor((durationS - played) / 5) * 5
+  const base = `${mmss(played)} of ${mmss(durationS)} played`
+  return left > 0 ? `${base}, about ${mmss(left)} left` : base
+}
+
+// What is actually on air, stated as fact: the model cannot see the engine,
+// so these facts are trusted over anything it remembers having announced. A
+// track whose length is unknown (a live stream) is named without progress.
+// `air` with no `onAir` is a music session between tracks; absent `air` is a
+// talk-only session and renders nothing.
+function programFacts(ctx: ContextPack): string {
+  const air = ctx.air
+  if (air === undefined) return ''
+  const onAir = air.onAir
+  const line =
+    onAir === undefined
+      ? 'No track is on air right now — never say a song is playing or has just finished.'
+      : onAir.elapsedS !== undefined && onAir.durationS !== undefined
+        ? `On air now: ${onAir.track} (${formatProgress(onAir.elapsedS, onAir.durationS)}).`
+        : `On air now: ${onAir.track}.`
+  return `\n(Program facts about the music — trust these over anything you remember saying)\n${line}`
+}
+
 // Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
 // narrates the sensing — the listener is kept company, not observed. An absent
 // or unmapped value renders nothing.
@@ -114,7 +163,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${clockLine(ctx)}${pacingLines(ctx)}${programFacts(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -126,7 +175,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n` +
+    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${clockLine(ctx)}${pacingLines(ctx)}${programFacts(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
@@ -592,7 +641,7 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
   return (
     `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n` +
-    `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
+    `Respond in character, then ease back into the program.${clockLine(ctx)}${programFacts(ctx)}\n${OUTPUT_RULES}`
   )
 }
 
@@ -651,7 +700,7 @@ export function buildSteerPrompt(
   return (
     `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n\n` +
     `Decide whether their words ask the program to DO something; act with the ` +
-    `tools if so, then answer them.\n${rules}${armed}`
+    `tools if so, then answer them.\n${rules}${clockLine(ctx)}${programFacts(ctx)}${armed}`
   )
 }
 

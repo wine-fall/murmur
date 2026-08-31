@@ -26,14 +26,16 @@ import {
 // script stands in for a task still running after its compose was discarded.
 class FakeSteer implements SteerBrain {
   calls: { userText: string; armed: boolean }[] = []
+  contexts: ContextPack[] = []
   private script: (userText: string, actions: SteerActions) => string | null | Promise<string | null>
 
   constructor(script: (userText: string, actions: SteerActions) => string | null | Promise<string | null>) {
     this.script = script
   }
 
-  async respond(userText: string, _ctx: ContextPack, actions: SteerActions): Promise<string | null> {
+  async respond(userText: string, ctx: ContextPack, actions: SteerActions): Promise<string | null> {
     this.calls.push({ userText, armed: actions.shutdown.armed() })
+    this.contexts.push(ctx)
     return this.script(userText, actions)
   }
 }
@@ -161,6 +163,14 @@ describe('the agentic reply path', () => {
     await director.run(2)
     expect(brain.respondCalls).toEqual(['hey'])
     expect(host.radio).toContain('re:hey')
+  })
+
+  it('the steer context carries the compose-time clock (spec 04 §3.4)', async () => {
+    const steer = new FakeSteer(() => 'right here.')
+    const { director, host } = build(steer, { music: false })
+    host.type('hey')
+    await director.run(1)
+    expect(steer.contexts[0]!.now).toBeInstanceOf(Date)
   })
 })
 

@@ -419,6 +419,59 @@ describe('program state during music (spec 10)', () => {
   })
 })
 
+// The compose-time air facts (the segue seam): what a reply's context knows
+// about the music is ground truth from the segment state, not something the
+// model reconstructs from its own announcements.
+describe('the air facts in the reply context', () => {
+  it('a reply composed mid-song carries the track and its wall-clock progress', async () => {
+    const { director, player, host, source, brain } = build()
+    source.picks = [pickOf('https://stream/song1', { title: 'Song', artist: 'Artist', durationS: 245 })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    host.type('loving this one')
+    await until(() => brain.respondContexts.length === 1, 'reply composed')
+    const onAir = brain.respondContexts[0]!.air?.onAir
+    expect(onAir?.track).toBe('Song — Artist')
+    expect(onAir?.durationS).toBe(245)
+    // elapsedS is wall clock off the air-time stamp: small, but present.
+    expect(onAir?.elapsedS ?? -1).toBeGreaterThanOrEqual(0)
+    expect(onAir?.elapsedS ?? 999).toBeLessThanOrEqual(10)
+    expect(brain.respondContexts[0]!.now).toBeInstanceOf(Date)
+    player.handles[0]!.end()
+    host.type('/quit')
+    await run
+  })
+
+  it('a music session between tracks says nothing is on air', async () => {
+    const { director, brain, host } = build()
+    const run = director.run(2)
+    host.type('still there?') // the first segment is talk: music wired, nothing on air
+    await until(() => brain.respondContexts.length === 1, 'reply composed')
+    expect(brain.respondContexts[0]!.air).toEqual({})
+    await run
+  })
+
+  it('a talk-only session carries no air state at all', async () => {
+    const brain = new FakeBrain()
+    brain.batches = [['talk one', 'talk two']]
+    const host = new FakeHost()
+    const director = new Director({
+      persona: 'persona',
+      brain,
+      voice: new FakeVoice(),
+      player: new FakeMixingPlayer(),
+      memory: new InProcessMemoryStore(),
+      host,
+      settings: () => directorSettings({}),
+    })
+    const run = director.run(1)
+    host.type('hello')
+    await until(() => brain.respondContexts.length === 1, 'reply composed')
+    expect(brain.respondContexts[0]!.air).toBeUndefined()
+    await run
+  })
+})
+
 // spec 12 §3.2: the music switch is live at the scheduling site — flipping it
 // off makes the very next boundary talk (pure talk radio), flipping it back on
 // lets the cadence schedule again. The pipeline is never torn down.

@@ -54,7 +54,9 @@ class Turn:
 @dataclass(frozen=True)
 class ContextPack:
     """The compact context handed to the Brain per call (master §6).
-    L0 fields only; spec 05/07 add profile/ledger/time/activity fields."""
+    L0 fields only; spec 04 adds the scene bucket, the compose-time clock
+    (`now`), and the music program's air facts (`air`); spec 05/07 add
+    profile/ledger/activity fields."""
     persona: str
     recent: list[Turn]
 ```

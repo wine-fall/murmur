@@ -493,9 +493,11 @@ export class Director {
   }
 
   // The real clock lives here; currentScene applies a MURMUR_SCENE override
-  // (by-ear) over the pure, unit-tested bucketing. Profile + recent topics come
-  // from the persistent store (spec 05 §3.5): profile is the stable-prefix
-  // block, coveredTopics the cross-day anti-repeat cue.
+  // (by-ear) over the pure, unit-tested bucketing. The clock is sampled once
+  // per compose and rides the pack beside the bucket: the scene is a mood, not
+  // a schedule, so the prompt states the actual date-time too. Profile +
+  // recent topics come from the persistent store (spec 05 §3.5): profile is
+  // the stable-prefix block, coveredTopics the cross-day anti-repeat cue.
   // `queued` are look-ahead beats already generated but not yet aired (spec 04
   // §3.3): appended as the host's own prior turns so a refill continues AFTER
   // them instead of regenerating the same beat — the buffered text lives here
@@ -505,15 +507,34 @@ export class Director {
     const window = this.deps.settings().recentWindow
     const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
+    const now = new Date()
+    const air = this.airFacts()
     return {
       persona: this.persona(),
       recent: queued.length === 0 ? recent : [...recent, ...turns],
-      scene: currentScene(new Date()),
+      scene: currentScene(now),
+      now,
       profile: this.deps.memory.profile(),
       coveredTopics: this.deps.memory.recentTopics(window),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
+      ...(air !== undefined && { air }),
     }
+  }
+
+  // What is actually on air at compose time, off the same stamp the front-end's
+  // progress bar runs on (spec 10 §3.3): wall clock since `startedAt`, clamped
+  // to the track's length. A music session between tracks still gets an (empty)
+  // facts object, so the prompt can say nothing is playing instead of letting
+  // the model re-narrate a song that already ended; a talk-only session gets
+  // no facts at all.
+  private airFacts(): ContextPack['air'] {
+    if (this.deps.music === undefined) return undefined
+    const { nowPlaying, startedAt, durationS } = this.segment
+    if (this.segment.kind !== 'music' || nowPlaying === undefined) return {}
+    if (startedAt === undefined || durationS === undefined) return { onAir: { track: nowPlaying } }
+    const elapsedS = Math.min(durationS, Math.max(0, Math.round((Date.now() - startedAt) / 1000)))
+    return { onAir: { track: nowPlaying, elapsedS, durationS } }
   }
 
   private async talkSegment(): Promise<void> {

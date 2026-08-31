@@ -77,6 +77,16 @@ field (additive, default `None`) — the time-of-day bucket. Derivation is a pur
 function `scene.scene_for(now: datetime) -> str`; the Director supplies the real
 local clock, so the bucketing is unit-testable without `datetime.now()`.
 
+Two later context enrichments ride the same pattern (both additive, both
+optional, both stamped by the Director where the pack is built):
+
+- `now: Date` — the compose-time clock itself. The bucket is a mood, not a
+  schedule; the prompt states the actual date-time beside the cue (§3.4).
+- `air` — ground truth about the music program: the on-air track label plus
+  its wall-clock progress (`elapsedS`/`durationS`, spec 10 §3.3's stamp
+  arithmetic). An `air` object with no `onAir` = a music session between
+  tracks; absent `air` = a talk-only session (§3.4).
+
 ---
 
 ## 3. Design
@@ -292,6 +302,27 @@ this makes the host speak to the actual local time.
   English scaffolding as always — the persona still produces Chinese.
 - **Persona seed:** generalized from its hard "late-night" framing to be
   time-neutral, so the per-scene cue (not a night-locked seed) sets the mood.
+- **The clock beside the bucket (amended 2026-08-31):** the bucket is a mood,
+  not a schedule — late-night spans 23:00–04:59, and a model reading only the
+  cue cannot tell 01:00 (hours to dawn) from 04:00. The Director stamps the
+  compose time on the pack (`ctx.now`), and the prompt renders it beside the
+  cue as a local date-time to the minute (`formatClock` in `prompts.ts`, pure,
+  the same local clock `scene_for` buckets). It rides **every** prompt that
+  speaks aloud — the two self-initiated builders, the reply builder, and the
+  steer task — because a reply is exactly where a misread hour shows. As with
+  `scene_for`, the formatter takes the `Date`, so tests pin the string with
+  injected values.
+- **Air facts (amended 2026-08-31):** the model cannot hear the engine, so it
+  re-narrates its own announcements as the air — a song "finishes" because the
+  host said it would. Every speaking prompt now carries a facts block built at
+  compose time from the Director's segment state: the on-air track and its
+  wall-clock progress (`(2:10 of 4:05 played, about 1:55 left)` — the same
+  `startedAt`+`durationS` arithmetic the spec-10 progress rail runs on; a
+  track of unknown length is named without progress). A music session between
+  tracks gets the block with "No track is on air right now"; a talk-only
+  session gets no block at all. The facts are unit assertions on the prompt
+  strings and on the pack the Director builds; whether the host stops
+  promising songs is a by-ear / eval item.
 - **Stochastic quality is eval-track:** *that the scene reaches the prompt* is a
   deterministic unit assertion; *whether the host's phrasing actually reads as
   morning vs. late-night* is a by-ear / eval concern (DESIGN §10.3), not a unit
@@ -356,6 +387,17 @@ this makes the host speak to the actual local time.
     empty/unset value derives from the clock; a non-empty invalid value degrades
     to the clock (never raises). Verified with a fixed clock whose derived bucket
     differs from the override, so the env is proven to win.
+13. **§3.4 (the clock, 2026-08-31):** a set `ctx.now` renders as a local
+    date-time to the minute in all four speaking prompts (the two
+    self-initiated builders, the reply, the steer task); an absent `now`
+    renders nothing. `formatClock` pinned with injected `Date` values (weekday,
+    zero-padded month/day/minute).
+14. **§3.4 (air facts, 2026-08-31):** a reply composed mid-song carries the
+    on-air label, its length, and a small non-negative `elapsedS`; a music
+    session between tracks carries an empty `air` (rendered "No track is on
+    air right now"); a talk-only session carries none. Progress renders as
+    played-of-total with the time left floored to 5s, and never reads past the
+    track's total.
 
 ---
 

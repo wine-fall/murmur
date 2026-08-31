@@ -17,6 +17,8 @@ import {
   buildFindMusicInstruction,
   DEFAULT_MUSIC_POLICY,
   FIND_MUSIC_INSTRUCTION,
+  formatClock,
+  formatProgress,
   GUIDE_PERSONA,
   PERSONA_CHAR_CAP,
   PROFILE_CHAR_CAP,
@@ -192,6 +194,70 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
   it('the respond prompt carries the profile block too', () => {
     const p = buildRespondPrompt('hey', { persona: 'p', recent: [], profile: 'night owl' })
     expect(p).toContain('(What you know about the listener)\nnight owl')
+  })
+})
+
+describe('the clock line (spec 04 §3.4)', () => {
+  // The scene bucket is a mood, not a schedule: late-night spans 23:00-04:59,
+  // so the prompt must also state the actual date-time — 01:00 must not read
+  // as almost-dawn.
+  const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo - 1, d, h, mi)
+  const withClock: ContextPack = { ...ctx([]), now: at(2026, 8, 31, 1, 23) }
+
+  it('formats the local time to the minute, weekday and date spelled out', () => {
+    expect(formatClock(at(2026, 8, 31, 1, 23))).toBe('Monday 2026-08-31, 01:23')
+    expect(formatClock(at(2026, 12, 31, 0, 5))).toBe('Thursday 2026-12-31, 00:05')
+    expect(formatClock(at(2027, 1, 1, 23, 0))).toBe('Friday 2027-01-01, 23:00')
+  })
+
+  it('rides every prompt that speaks aloud, beside the scene cue', () => {
+    expect(buildNextTalkPrompt(withClock)).toContain('Local time: Monday 2026-08-31, 01:23.')
+    expect(buildNextTalksPrompt(withClock, 2)).toContain('Local time: Monday 2026-08-31, 01:23.')
+    expect(buildRespondPrompt('hi', withClock)).toContain('Local time: Monday 2026-08-31, 01:23.')
+    expect(
+      buildSteerPrompt('hi', withClock, { musicWired: false, shutdownArmed: false, settingsWired: false }),
+    ).toContain('Local time: Monday 2026-08-31, 01:23.')
+  })
+
+  it('an absent clock renders no line', () => {
+    expect(buildNextTalkPrompt(ctx([]))).not.toContain('Local time:')
+    expect(buildRespondPrompt('hi', ctx([]))).not.toContain('Local time:')
+  })
+})
+
+describe('the air facts in the prompt (the segue seam)', () => {
+  it('formats progress as played-of-total, the time left floored to 5s', () => {
+    expect(formatProgress(130, 245)).toBe('2:10 of 4:05 played, about 1:55 left')
+    expect(formatProgress(61, 125)).toBe('1:01 of 2:05 played, about 1:00 left')
+    // A track that outlived its nominal length never reads past its total.
+    expect(formatProgress(400, 245)).toBe('4:05 of 4:05 played')
+  })
+
+  it('states the on-air track with its progress, trusted over remembered narration', () => {
+    const withAir: ContextPack = {
+      ...ctx([]),
+      air: { onAir: { track: 'Song — Artist', elapsedS: 130, durationS: 245 } },
+    }
+    expect(buildNextTalkPrompt(withAir)).toContain('Program facts about the music')
+    expect(buildNextTalkPrompt(withAir)).toContain('On air now: Song — Artist (2:10 of 4:05 played, about 1:55 left).')
+  })
+
+  it('a track whose length is unknown is named without claiming progress', () => {
+    const live: ContextPack = { ...ctx([]), air: { onAir: { track: 'Live Wire' } } }
+    const p = buildRespondPrompt('hi', live)
+    expect(p).toContain('On air now: Live Wire.')
+    expect(p).not.toContain('played')
+  })
+
+  it('a music session with nothing on air says so', () => {
+    const between: ContextPack = { ...ctx([]), air: {} }
+    const p = buildSteerPrompt('hi', between, { musicWired: true, shutdownArmed: false, settingsWired: false })
+    expect(p).toContain('No track is on air right now')
+  })
+
+  it('a talk-only session renders no facts block', () => {
+    const p = buildSteerPrompt('hi', ctx([]), { musicWired: false, shutdownArmed: false, settingsWired: false })
+    expect(p).not.toContain('Program facts')
   })
 })
 
