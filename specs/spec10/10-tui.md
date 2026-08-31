@@ -459,6 +459,26 @@ live process, never a crash); a live pid is a neighbour and is left alone.
 Reporting and clearing are one act, so a crash is mentioned exactly once.
 Only a real broadcast arms one — `--setup`, `--setup-music` and
 `--bootstrap-profile` are too short-lived to tell a crash from a neighbour.
+**The delivery primitives (as built, parts only)**: `src/deliver.ts`.
+`copyToClipboard` puts the draft where a listener can paste it — `pbcopy` on
+darwin, `clip` on win32, and on linux `wl-copy` then `xclip -selection
+clipboard`, since either stack may be absent and neither is a dependency we
+provision. The platform decision is a pure function shaped like `openerFor`;
+a thin executor (with an injectable spawn) runs it and, crucially, **answers
+whether the text actually landed**, so the caller can fall back to "the draft
+is at <path>, copy it yourself". `buildIssueUrl` prefills the GitHub issue
+form by field id — measured against the real forms, all five bug fields
+including the `logs` textarea prefill correctly, so the earlier worry about
+inconsistent form prefill does not apply here. The one real constraint is
+length: the WHOLE URL is budgeted at 8000 bytes, and `logs` is the only field
+that may be sacrificed to fit (what happened, what was expected, the version
+and the platform are what make a report actionable, and are kept even when
+keeping them costs the budget). A trim drops the FRONT of the excerpt — the
+lines nearest the failure are what a maintainer reads — on whole characters,
+never inside a multi-byte sequence. What was cut, and how much of it
+survived, comes back as a return value: the listener is told, never handed a
+silently shortened report.
+
 This piece stops at one line in the transcript (`last time I went off the air
 without saying goodbye.`, through `host.info` — not the voice); the offer to
 actually file it waits on the report flow.
