@@ -46,16 +46,23 @@ import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { logRoot, sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
 import { MusicProgrammer } from './music-programmer.ts'
-import { startReport, type ReportSession } from './report.ts'
+import { startReport, type ReportDeps, type ReportSession } from './report.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLine } from './persona.ts'
-import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
+import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
 import { buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
-import { armSentinel, collectCrashed, uncleanExitNotice } from './sentinel.ts'
+import {
+  armSentinel,
+  collectCrashed,
+  crashDescription,
+  offerCrashReport,
+  readCrashWindow,
+  uncleanExitNotice,
+} from './sentinel.ts'
 import { preflightBun, preflightFfmpeg, preflightYtdlp } from './startup.ts'
 import { VizFeed } from './viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
@@ -442,6 +449,10 @@ export function escalatingSigint(host: Host, onFirst: () => void, onForce: () =>
 }
 
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
+  // Read before anything of this run's own reaches the log: it is the upper
+  // bound of a crashed run's log window below, and every line under it belongs
+  // to the run that died, not to this one.
+  const bootedAt = new Date()
   // The front-end is chosen (and, for the TUI, spawned) FIRST: everything the
   // startup checks and the first run ask has to reach whoever is watching.
   const { host, close: closeFrontEnd } = await buildHost(config)
@@ -450,8 +461,15 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // neighbour. Read BEFORE arming, so a reused pid cannot overwrite the record
   // its predecessor left behind.
   const sentinelDir = sentinelRoot(config.home)
-  const uncleanExit = uncleanExitNotice(collectCrashed(sentinelDir))
-  if (uncleanExit !== null) host.info(uncleanExit)
+  // Collected — and so cleared — here, before this run arms its own: whatever
+  // happens next, a lost run is raised exactly once. The offer that follows it
+  // waits until the report floor exists (below); a stub run has no brain to
+  // write the description with and degrades to the notice alone, said now.
+  const crashed = collectCrashed(sentinelDir)
+  if (config.brain !== 'claude') {
+    const uncleanExit = uncleanExitNotice(crashed)
+    if (uncleanExit !== null) host.info(uncleanExit)
+  }
   const disarm = armSentinel(sentinelDir)
   // Disarming is deliberate, never a `finally`: a run that throws its way out
   // is exactly the crash the next boot has to notice, so only the paths that
@@ -664,51 +682,75 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The report floor (spec 10 §3.2-C): a feedback command opens a short
   // conversation that leaves a draft on disk. Always wired — a stub run just
   // skips the question and renders the draft from the log alone.
-  const reportRecall = (kind: 'bug' | 'feature'): ReportSession =>
-    startReport(
-      {
-        host,
-        home: resolved.home,
-        logDir: logRoot(),
-        facts: {
-          version: packageVersion(),
-          platform: `${process.platform} ${process.arch}`,
-          brain: { actual: claude !== null ? 'claude' : 'stub', requested: config.brain },
-          voice: { actual: resolved.voice, requested: config.voice },
-          frontEnd: { actual: host instanceof IpcHost ? 'tui' : 'plain', requested: config.frontEnd },
-        },
-        // The machine as it is right now, not as it was at boot: a listener
-        // files a report because something changed under them.
-        probes: async () => [
-          { name: 'bun', ...(await preflightBun(config.bunCmd)) },
-          { name: 'ffmpeg', ...(await preflightFfmpeg(config.ffmpegCmd)) },
-          { name: 'yt-dlp', ...(await preflightYtdlp(config.ytdlpCmd)) },
-        ],
-        // Only the plain host leaves the terminal free. The TUI client holds
-        // it in raw mode and keeps drawing, so an editor spawned into it would
-        // fight it for the screen — there, the path is the affordance.
-        openEditor:
-          host instanceof IpcHost
-            ? (path) => {
-                host.info(`open it in your editor: ${path}`)
-                return Promise.resolve()
-              }
-            : spawnEditor,
-        // The only place the real clipboard, browser and gh are wired in.
-        // Every one of them is required on ReportDeps with no default, so a
-        // test cannot write a clipboard or file an issue by forgetting one.
-        deliver: {
-          hasBrowser: () => canOpenBrowser(process.env),
-          copy: (text) => copyToClipboard(text, { spawn: spawnClipboard }),
-          openUrl: openInBrowser,
-          ghReady: () => ghReady(runGh),
-          ghCreate: (draft) => createIssueWithGh(draft, runGh),
-        },
-        ...(claude !== null && { guide: claude }),
-        model: config.model,
-      },
-      kind,
-    )
+  const reportDeps: ReportDeps = {
+    host,
+    home: resolved.home,
+    logDir: logRoot(),
+    facts: {
+      version: packageVersion(),
+      platform: `${process.platform} ${process.arch}`,
+      brain: { actual: claude !== null ? 'claude' : 'stub', requested: config.brain },
+      voice: { actual: resolved.voice, requested: config.voice },
+      frontEnd: { actual: host instanceof IpcHost ? 'tui' : 'plain', requested: config.frontEnd },
+    },
+    // The machine as it is right now, not as it was at boot: a listener files a
+    // report because something changed under them.
+    probes: async () => [
+      { name: 'bun', ...(await preflightBun(config.bunCmd)) },
+      { name: 'ffmpeg', ...(await preflightFfmpeg(config.ffmpegCmd)) },
+      { name: 'yt-dlp', ...(await preflightYtdlp(config.ytdlpCmd)) },
+    ],
+    // Only the plain host leaves the terminal free. The TUI client holds it in
+    // raw mode and keeps drawing, so an editor spawned into it would fight it
+    // for the screen — there, the path is the affordance.
+    openEditor:
+      host instanceof IpcHost
+        ? (path) => {
+            host.info(`open it in your editor: ${path}`)
+            return Promise.resolve()
+          }
+        : spawnEditor,
+    // The only place the real clipboard, browser and gh are wired in. Every one
+    // of them is required on ReportDeps with no default, so a test cannot write
+    // a clipboard or file an issue by forgetting one.
+    deliver: {
+      hasBrowser: () => canOpenBrowser(process.env),
+      copy: (text) => copyToClipboard(text, { spawn: spawnClipboard }),
+      openUrl: openInBrowser,
+      ghReady: () => ghReady(runGh),
+      ghCreate: (draft) => createIssueWithGh(draft, runGh),
+    },
+    ...(claude !== null && { guide: claude }),
+    model: config.model,
+  }
+  const reportRecall = (kind: 'bug' | 'feature'): ReportSession => startReport(reportDeps, kind)
+
+  // The crash sentinel's follow-up (spec 10 §3.2-C): murmur raised the lost run
+  // itself, so it writes the description too — a boot later, the listener has
+  // no memory of it to draw on — and the evidence is THAT run's log window, not
+  // this boot's first few lines. It goes out through the same deps as a typed
+  // /bug, delivery included, so both roads reach GitHub the same way.
+  //
+  // Pre-broadcast on purpose: the radio has not gone on the air yet, so this is
+  // the one stretch where the keyboard is free and the report floor's own
+  // "never stop the program" rule has nothing to stop. The listener's answer is
+  // read through the same reader the onboarding flows use, so a /quit leaves.
+  if (crashed.length > 0 && claude !== null && !quit.requested) {
+    const found = crashed[crashed.length - 1]!
+    const window = readCrashWindow(logRoot(), found, bootedAt)
+    // Idempotent, and the only thing that attaches the plain host's readline:
+    // a boot whose onboarding had nothing to ask has never started it, and the
+    // question below would wait on a keyboard nobody is reading.
+    host.start()
+    await offerCrashReport({
+      host,
+      crashed,
+      read: lineReader(host, quit),
+      quit,
+      startSession: () =>
+        startReport(reportDeps, 'bug', { said: crashDescription(found, window), tail: window }),
+    })
+  }
 
   const director = new Director({
     persona,
