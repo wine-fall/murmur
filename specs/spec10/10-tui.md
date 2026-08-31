@@ -428,6 +428,15 @@ without triage rights. A failed opener is silent; the URL is printed to the
 log either way, so a headless box still gets something to click. Like
 `/settings`, neither command composes a reply or touches what is on air.
 
+The resting input carries the invitation: its placeholder rotates every three
+minutes through the talk-back line and one row per feedback command
+(`/bug · report a bug on GitHub`), so a listener who never opens the menu
+still meets them. The rows are derived from `COMMANDS` — no second copy of
+the wording — and lead with the command, which is the half worth keeping when
+a narrow field clips the tail. The plain host says the same thing once, in
+its banner. Deliberately NOT an engine-side periodic line: a hint in the
+transcript is the program talking about itself.
+
 **D. Display-state inventory** (everything the engine can tell the TUI, and
 where it lands):
 
