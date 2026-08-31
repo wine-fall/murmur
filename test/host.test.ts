@@ -3,8 +3,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { PassThrough } from 'node:stream'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
+import { packageVersion } from '../src/config.ts'
 import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host.ts'
 
 describe('LineQueue', () => {
@@ -128,5 +129,17 @@ describe('CliHost', () => {
   it('writes no dev log when the knob is unset', () => {
     const host = new CliHost(new PassThrough())
     host.info('quiet') // must not throw or create files
+  })
+
+  it('names its own version in the banner (the bug form asks for it)', () => {
+    const host = new CliHost(new PassThrough())
+    const lines: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line))
+    try {
+      host.banner('a night host', { brain: 'stub', voice: 'stub' })
+    } finally {
+      log.mockRestore()
+    }
+    expect(lines.join('\n')).toContain(`v${packageVersion()}`)
   })
 })

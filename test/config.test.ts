@@ -1,10 +1,11 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { parseCli } from '../src/config.ts'
+import { packageVersion, parseCli } from '../src/config.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 
 // No MURMUR_TTS_* in the ambient env: every test states the env it means.
@@ -433,5 +434,40 @@ describe('front-end config', () => {
 
   it('resolves the wire socket under the (relocatable) murmur home', () => {
     expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.tuiSocket).toBe('/tmp/mh/run/tui.sock')
+  })
+})
+
+// The runtime must be able to answer "which murmur is this?" — the bug-report
+// form asks for a version, and an npm-installed listener has no repo to read.
+describe('packageVersion', () => {
+  it('reads the version from the package root beside the code', () => {
+    const manifest = JSON.parse(
+      readFileSync(join(import.meta.dirname, '..', 'package.json'), 'utf8'),
+    ) as { version: string }
+    expect(packageVersion()).toBe(manifest.version)
+  })
+
+  it('falls back to "unknown" when no manifest sits beside the code', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-version-'))
+    expect(packageVersion(pathToFileURL(join(dir, 'dist', 'config.js')))).toBe('unknown')
+  })
+
+  it('falls back to "unknown" when the manifest is corrupt or versionless', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-version-'))
+    writeFileSync(join(dir, 'package.json'), '{ not json at all')
+    const from = pathToFileURL(join(dir, 'dist', 'config.js'))
+    expect(packageVersion(from)).toBe('unknown')
+    writeFileSync(join(dir, 'package.json'), JSON.stringify({ name: 'murmur-radio' }))
+    expect(packageVersion(from)).toBe('unknown')
+  })
+})
+
+describe('--version entry', () => {
+  it('is off unless asked for', () => {
+    expect(parseCli([], NO_ENV).version).toBe(false)
+  })
+
+  it('is requested by --version', () => {
+    expect(parseCli(['--version'], NO_ENV).version).toBe(true)
   })
 })

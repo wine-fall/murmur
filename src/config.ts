@@ -7,6 +7,7 @@
 // hardcoded; the CLI overrides all of them except the API key, which never
 // takes a flag — a secret does not belong on the command line.
 
+import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 
@@ -132,6 +133,21 @@ export const ConfigSchema = z.object({
 
 export type Config = z.infer<typeof ConfigSchema>
 
+// Which murmur is this? The bug-report form (spec 10) asks the listener for a
+// version, and an `npm i -g` install has no repo to look it up in. The manifest
+// is one hop above the code in both layouts — src/config.ts in a dev run,
+// dist/config.js in a published one — so resolve it relative to this module
+// rather than the cwd. An unreadable manifest costs the banner a token, never
+// the boot: the failure is reported as a value, not thrown.
+export function packageVersion(from: string | URL = import.meta.url): string {
+  try {
+    const manifest: unknown = JSON.parse(readFileSync(new URL('../package.json', from), 'utf8'))
+    return z.object({ version: z.string() }).parse(manifest).version
+  } catch {
+    return 'unknown'
+  }
+}
+
 export type CliInvocation = {
   config: Config
   maxSegments: number | undefined
@@ -143,6 +159,8 @@ export type CliInvocation = {
   // Run the profile bootstrap standalone and exit (spec 06 §3.4's re-entry for
   // a listener who declined it on the first run).
   bootstrapProfile: boolean
+  // Print the version and exit, like every other CLI.
+  version: boolean
 }
 
 // A misconfigured number in a .env must not abort Config construction (and with
@@ -227,6 +245,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       setup: { type: 'boolean' },
       'setup-music': { type: 'boolean' },
       'bootstrap-profile': { type: 'boolean' },
+      version: { type: 'boolean' },
       cadence: { type: 'string' },
       'max-segments': { type: 'string' },
     },
@@ -281,5 +300,6 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     setupMusic: values['setup-music'] === true,
     setup: values.setup === true,
     bootstrapProfile: values['bootstrap-profile'] === true,
+    version: values.version === true,
   }
 }
