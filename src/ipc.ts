@@ -22,6 +22,8 @@ export const PROTOCOL = 2
 export const COMMANDS = [
   { name: '/settings', blurb: 'open the settings pane' },
   { name: '/setup', blurb: 'call the setup guide' },
+  { name: '/bug', blurb: 'report a bug on GitHub' },
+  { name: '/feature-request', blurb: 'ask for a feature on GitHub' },
   { name: '/quit', blurb: 'end the broadcast' },
 ] as const
 

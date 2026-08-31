@@ -503,6 +503,10 @@ describe('master mute (spec 12)', () => {
     const { context, engine } = build(2, dcChunks(0.5, 2))
     const handle = await engine.playMusic(MUSIC)
     await handle.waitStarted(1)
+    // The chunk feed is async: started != fed. Rendering before the DC has
+    // landed reads an empty mix (a slow CI runner failed here, main and PR
+    // alike), which is why the sibling test settles too.
+    await settle()
     engine.setMuted(true)
     engine.setMuted(false)
     const rendered = await context.startRendering()

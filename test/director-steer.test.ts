@@ -75,6 +75,14 @@ describe('the command grammar', () => {
     expect(steerFromLine('/quit').intent).toBe('quit')
     expect(steerFromLine('/settings').intent).toBe('settings')
   })
+
+  it('lists the feedback commands ahead of /quit (harmless-first menu order)', () => {
+    const names = COMMANDS.map((command) => command.name)
+    expect(names).toContain('/bug')
+    expect(names).toContain('/feature-request')
+    expect(names.indexOf('/bug')).toBeLessThan(names.indexOf('/quit'))
+    expect(names.indexOf('/feature-request')).toBeLessThan(names.indexOf('/quit'))
+  })
 })
 
 describe('commands short-circuit line-blind waits (user report: /quit waited out a spinning stream)', () => {

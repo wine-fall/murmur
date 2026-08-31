@@ -5,7 +5,14 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
-import { Director, steerFromLine, type DirectorDeps } from '../src/director.ts'
+import {
+  BUG_FORM_URL,
+  Director,
+  FEATURE_FORM_URL,
+  openerFor,
+  steerFromLine,
+  type DirectorDeps,
+} from '../src/director.ts'
 import { SCENES } from '../src/scene.ts'
 import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
@@ -36,6 +43,78 @@ describe('steerFromLine', () => {
     expect(steerFromLine('/settings')).toEqual({ intent: 'settings' })
     expect(steerFromLine('/setup')).toEqual({ intent: 'setup' })
     expect(steerFromLine('hello')).toEqual({ intent: 'talkback', text: 'hello' })
+  })
+
+  it('classifies the two feedback commands', () => {
+    expect(steerFromLine('/bug')).toEqual({ intent: 'bug' })
+    expect(steerFromLine(' /feature-request ')).toEqual({ intent: 'feature' })
+  })
+})
+
+// spec 10 §3.2-C: the feedback commands are the listener's way out to GitHub.
+// They open the prefilled issue form in a browser and ALWAYS print the URL, so
+// a headless box (or a dead opener) still leaves something to click.
+describe('Director — /bug and /feature-request', () => {
+  const openings = (): { urls: string[]; open: (url: string) => void } => {
+    const urls: string[] = []
+    return { urls, open: (url) => void urls.push(url) }
+  }
+
+  it('opens the bug form and prints its URL, without composing a reply', async () => {
+    const { urls, open } = openings()
+    const { brain, host, director } = setup({ gapSeconds: 3, openUrl: open })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => urls.length === 1, 'bug form opened')
+    expect(urls[0]).toBe(BUG_FORM_URL)
+    expect(host.infos.some((m) => m.includes(BUG_FORM_URL))).toBe(true)
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([]) // a command is never a turn
+    expect(host.user).toEqual([])
+  })
+
+  it('opens the feature form on /feature-request', async () => {
+    const { urls, open } = openings()
+    const { brain, host, director } = setup({ gapSeconds: 3, openUrl: open })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/feature-request')
+    await until(() => urls.length === 1, 'feature form opened')
+    expect(urls[0]).toBe(FEATURE_FORM_URL)
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([])
+  })
+
+  it('picks the desktop opener per platform, never spawn\'s deprecated shell form', () => {
+    // DEP0190 (codex review): args + `shell: true` warns on Node 24 and the
+    // warning would land on the TUI's own terminal.
+    expect(openerFor('darwin', BUG_FORM_URL)).toEqual({ command: 'open', args: [BUG_FORM_URL] })
+    expect(openerFor('linux', BUG_FORM_URL)).toEqual({ command: 'xdg-open', args: [BUG_FORM_URL] })
+    expect(openerFor('win32', BUG_FORM_URL)).toEqual({
+      command: 'cmd',
+      args: ['/c', 'start', '', BUG_FORM_URL],
+    })
+  })
+
+  it('still prints the URL when the opener fails (no browser on the box)', async () => {
+    const { brain, host, director } = setup({
+      gapSeconds: 3,
+      openUrl: () => {
+        throw new Error('no opener')
+      },
+    })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => host.infos.some((m) => m.includes(BUG_FORM_URL)), 'URL printed anyway')
+    host.type('/quit')
+    await run
   })
 })
 
