@@ -19,6 +19,7 @@ import {
   parseLogLines,
   readLogTail,
   render,
+  type LogTail,
   type ProbeReport,
   type Selection,
 } from './diagnostics.ts'
@@ -162,7 +163,19 @@ function describe(kind: ReportKind, said: string): string {
   return `# ${TITLE[kind]}\n\n${body}\n\n## diagnostics\n\n`
 }
 
-export function startReport(deps: ReportDeps, kind: ReportKind): ReportSession {
+// A report the caller already knows the shape of — murmur's own, not the
+// listener's. The crash path fills both in: it knows what happened (the
+// listener does not, a boot later) and which log window it happened in.
+export interface ReportOpening {
+  said: string
+  tail?: LogTail
+}
+
+export function startReport(
+  deps: ReportDeps,
+  kind: ReportKind,
+  given?: ReportOpening,
+): ReportSession {
   const { host } = deps
   const queue = new LineQueue()
   // Esc answers the read that is waiting with '' — which, on every prompt this
@@ -190,11 +203,11 @@ export function startReport(deps: ReportDeps, kind: ReportKind): ReportSession {
     host.onInterrupt?.(drop)
     let path: string | null = null
     try {
-      const said = await opening(deps, kind, read, () => dropped)
+      const said = given?.said ?? (await opening(deps, kind, read, () => dropped))
       if (dropped) return void host.info('dropped it — nothing kept.', 'flow')
       const dir = reportsDir(deps.home)
       prepareReports(dir, now())
-      const tail = readLogTail(deps.logDir)
+      const tail = given?.tail ?? readLogTail(deps.logDir)
       const input = {
         ...deps.facts,
         probes: (await deps.probes?.()) ?? [],

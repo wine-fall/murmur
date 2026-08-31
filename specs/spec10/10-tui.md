@@ -599,9 +599,43 @@ filing. So the gh road sends no label at all, and the **title prefix**
 (`[bug] ` / `[feat] `, the same prefixes the forms set) carries the
 classification instead.
 
-This piece stops at one line in the transcript (`last time I went off the air
-without saying goodbye.`, through `host.info` — not the voice); the offer to
-actually file it waits on the report flow.
+**The crash's own report (as built)**: noticing is only half of it — a lost
+run that nobody writes up is still an unreported bug, so murmur offers to
+write it up itself (`want me to write that up as a bug report? [y/N]`).
+
+The crash road asks a DIFFERENT question from `/bug`'s. `/bug` opens with
+"what broke?" because the listener came to report something they just saw. A
+crash is murmur raising it, a boot later, about a run the listener has no
+memory of — so it does not ask them what happened. **murmur writes the
+description**, from what the sentinel and the log can actually show, and the
+listener edits it in the draft (`startReport` takes an optional third
+argument: a description the caller already has, and the log window it belongs
+to). The wording claims only what a sentinel proves — the run took none of
+its own exits — names when it started and what it last wrote, and says
+outright that why it ended is not visible from here. No guessing on the
+listener's behalf.
+
+The evidence window is different too. `/bug` takes the last 500 lines, which
+for a crash would be this boot's opening lines and nothing about the run that
+died. `readCrashWindow` uses the sentinel's start time to take **that run's
+own window** out of the day it started in (a run that spans midnight keeps
+writing to its start day, so one file holds it), bounded above by this boot's
+start, and keeps the END when it is too long. A run that exited cleanly in
+between leaves no marker and falls inside the window — bounded and named,
+not hidden.
+
+Pre-broadcast on purpose: the radio has not gone on the air yet, so the
+report floor's "never stop the program" rule has nothing to stop, and it is
+the one stretch where the keyboard is free. The offer reads through the same
+`lineReader` the onboarding flows use, so `/quit` still leaves, and the
+draft's own keyboard hand-off peeks to wait and takes only what it delivers —
+a race lost on a consuming read would swallow the line it was racing for.
+
+A no is answered once and dropped. Either way the run is never raised again:
+the sentinel was cleared when it was collected, before this run armed its
+own, so the report-once contract holds whichever way the listener answers —
+including a listener who leaves before the offer. A `--brain stub` run has no
+brain behind the report floor and degrades to the notice alone.
 
 The resting input carries the invitation: its placeholder rotates every three
 minutes through the talk-back line and one row per feedback command
