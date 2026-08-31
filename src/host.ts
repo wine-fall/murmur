@@ -12,6 +12,7 @@
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
+import { packageVersion } from './config.ts'
 import type { ProgramState } from './ipc.ts'
 
 export interface Host {
@@ -161,7 +162,7 @@ export class CliHost implements Host {
 
   banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {
     console.log('┌─ murmur ─────────────────────────────────────────────────────')
-    console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}`)
+    console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}   v${packageVersion()}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
     console.log('│ something broken or missing? /bug or /feature-request opens the form.')
