@@ -227,6 +227,34 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     expect(source.contexts[1]!.situation).toContain('- listener request: rainy jazz')
   })
 
+  it('an abandoned pick resolving late never overwrites the fresh search outcome (codex review)', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack('rainy jazz')
+      return 'good call.'
+    })
+    const { deps, brain, host, source } = build(steer)
+    const knobs = directorSettings({ recentWindow: 6 })
+    const director = new Director({ ...deps, settings: () => knobs })
+    // Call 1 (the startup prime) hangs until the test releases it; call 2 (the
+    // hinted re-prime) finds nothing.
+    let releasePrime!: (pick: ReturnType<typeof pickOf>) => void
+    const primeGate = new Promise<ReturnType<typeof pickOf>>((r) => (releasePrime = r))
+    source.nextTrack = async () => {
+      source.calls++
+      return source.calls === 1 ? primeGate : null
+    }
+    host.type('put on some rainy jazz')
+    await director.run(2) // the hinted switch fires, its pick comes back empty
+    expect(host.debugs).toContain('music.switch failed')
+    knobs.musicEnabled = false // no further searches; the stale prime is the only writer left
+    releasePrime(pickOf('https://stream/stale', { title: 'Stale' }))
+    await new Promise((r) => setTimeout(r, 10))
+    await director.run(1) // one more talk boundary builds a fresh context
+    // The latest real search failed; the abandoned prime's late success must
+    // not repaint the prompt's music status.
+    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'pickFailed' })
+  })
+
   it('with no track playing, the switch forces the next boundary to music past the cadence', async () => {
     const steer = new FakeSteer((_text, actions) => {
       actions.music!.switchTrack()

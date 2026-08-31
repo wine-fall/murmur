@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { EveryNCadence } from '../src/cadence.ts'
 import { Director, type DirectorDeps } from '../src/director.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
+import { sceneFor } from '../src/scene.ts'
 import {
   directorSettings,
   FakeBrain,
@@ -463,5 +464,67 @@ describe('live musicEnabled (spec 12)', () => {
     await until(() => player.handles.length === 1, 'music on air after the toggle')
     player.handles[0]!.end()
     await run
+  })
+})
+
+describe('the talk context carries the real music state (spec 04 bugfix)', () => {
+  it('a pick still resolving reads as picking, and the real clock rides along', async () => {
+    const { deps, brain, source } = build()
+    source.nextTrack = () => new Promise(() => {}) // in flight forever
+    await new Director(deps).run(1)
+    expect(brain.talkContexts[0]!.music).toEqual({ kind: 'picking' })
+    expect(brain.talkContexts[0]!.time).toMatch(/^\d{1,2}:\d{2} [ap]m$/)
+  })
+
+  it('a song on air reads as playing, by its now-playing label', async () => {
+    const { director, player, host, source, brain } = build()
+    source.picks = [pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' })]
+    const run = director.run(3)
+    await until(() => player.handles.length === 1, 'song on air')
+    host.type('hello')
+    await until(() => host.radio.includes('re:hello'), 'reply aired over the song')
+    player.handles[0]!.end()
+    await run
+    expect(brain.respondContexts[0]!.music).toEqual({ kind: 'playing', track: 'Song — Artist' })
+  })
+
+  it('a pick that came back empty reads as pickFailed', async () => {
+    const { director, brain, host } = build() // no picks scripted -> every pick null
+    await director.run(3)
+    expect(host.infos.some((m) => m.includes('nothing suitable'))).toBe(true)
+    expect(brain.talkContexts.some((c) => c.music?.kind === 'pickFailed')).toBe(true)
+  })
+
+  it('after the song ends the context names the last track, nothing playing', async () => {
+    const { director, knobs, player, brain, source } = build()
+    source.picks = [pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' })]
+    const run = director.run(3) // talk, music, talk
+    await until(() => player.handles.length === 1, 'song on air')
+    knobs.musicEnabled = false // no fresh prefetch after the song ends
+    player.handles[0]!.end()
+    await run
+    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'quiet', lastTrack: 'Song — Artist' })
+  })
+
+  it('a pick ready but not yet aired still grounds the beat: quiet, nothing playing (codex review)', async () => {
+    const { deps, brain, source } = build()
+    deps.music!.cadence = new EveryNCadence(99) // music never due; the primed pick just waits
+    source.picks = [pickOf('https://stream/ready', { title: 'Ready' })]
+    await new Director(deps).run(2)
+    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'quiet' })
+  })
+
+  it('a forced MURMUR_SCENE drops the clock line rather than contradict it (codex review)', async () => {
+    const { deps, brain } = build()
+    const real = sceneFor(new Date())
+    const forced = real === 'morning' ? 'evening' : 'morning'
+    process.env.MURMUR_SCENE = forced
+    try {
+      await new Director(deps).run(1)
+    } finally {
+      delete process.env.MURMUR_SCENE
+    }
+    expect(brain.talkContexts[0]!.scene).toBe(forced)
+    expect(brain.talkContexts[0]!.time).toBeUndefined()
   })
 })

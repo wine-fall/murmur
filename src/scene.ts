@@ -17,6 +17,15 @@ export function sceneFor(now: Date): Scene {
   return 'late-night'
 }
 
+// The clock as the talk prompt renders it ("2:28 pm"). Hand-rolled rather than
+// toLocaleTimeString: ICU inserts a narrow no-break space before am/pm on some
+// builds, and prompt text must be byte-stable across machines.
+export function formatClock(now: Date): string {
+  const hour = now.getHours() % 12 || 12
+  const minute = String(now.getMinutes()).padStart(2, '0')
+  return `${hour}:${minute} ${now.getHours() < 12 ? 'am' : 'pm'}`
+}
+
 // A non-empty but invalid override warns and degrades to the clock — a typo
 // must never break the radio (same posture as the Config env knobs).
 export function currentScene(now: Date, env: NodeJS.ProcessEnv = process.env): Scene {

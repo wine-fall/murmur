@@ -196,6 +196,79 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
   })
 })
 
+describe('music state + clock grounding (spec 04 bugfix)', () => {
+  const base = { persona: 'p', recent: [] }
+
+  it('renders the on-air track', () => {
+    const p = buildNextTalkPrompt({ ...base, music: { kind: 'playing', track: 'Song — Artist' } })
+    expect(p).toContain('"Song — Artist" is playing right now')
+  })
+
+  it('renders the between-songs state with the last track', () => {
+    const p = buildNextTalkPrompt({ ...base, music: { kind: 'quiet', lastTrack: 'Song — Artist' } })
+    expect(p).toContain('No music is playing')
+    expect(p).toContain('the last song was "Song — Artist"')
+  })
+
+  it('renders the quiet state before any song has aired', () => {
+    const p = buildNextTalkPrompt({ ...base, music: { kind: 'quiet' } })
+    expect(p).toContain('No music is playing right now')
+    expect(p).not.toContain('last song')
+  })
+
+  it('renders the background-search state', () => {
+    const p = buildNextTalksPrompt({ ...base, music: { kind: 'picking' } }, 2)
+    expect(p).toContain('No music is playing')
+    expect(p).toContain('looking for the next track')
+  })
+
+  it('renders the failed-search state', () => {
+    const p = buildNextTalksPrompt({ ...base, music: { kind: 'pickFailed' } }, 2)
+    expect(p).toContain('No music is playing')
+    expect(p).toContain('came up empty')
+  })
+
+  it('an absent music state renders nothing about music', () => {
+    const p = buildNextTalkPrompt(base)
+    expect(p).not.toContain('No music')
+    expect(p).not.toContain('is playing right now')
+  })
+
+  it('renders the real clock alongside the scene cue', () => {
+    const p = buildNextTalkPrompt({ ...base, time: '2:28 pm', scene: 'afternoon' })
+    expect(p).toContain("It's 2:28 pm")
+    expect(p).toContain('afternoon')
+  })
+
+  it('an absent time renders no clock line', () => {
+    expect(buildNextTalkPrompt(base)).not.toContain("It's ")
+  })
+
+  it('the respond and steer prompts carry the same clock and music facts (codex review)', () => {
+    const ctx = {
+      ...base,
+      time: '2:28 pm',
+      music: { kind: 'playing', track: 'Song — Artist' },
+    } as const
+    const prompts = [
+      buildRespondPrompt('hey', ctx),
+      buildSteerPrompt('hey', ctx, { musicWired: true, shutdownArmed: false, settingsWired: false }),
+    ]
+    for (const p of prompts) {
+      expect(p).toContain("It's 2:28 pm")
+      expect(p).toContain('"Song — Artist" is playing right now')
+    }
+  })
+
+  it('both talk builders carry the anti-fabrication red lines', () => {
+    for (const p of [buildNextTalkPrompt(base), buildNextTalksPrompt(base, 2)]) {
+      expect(p).toContain('never announce, promise, or narrate')
+      expect(p).toContain("sounds from the listener's side")
+      expect(p).toContain('never narrate time passing')
+    }
+  })
+})
+
 describe('guide prompts (spec 03-03)', () => {
   it('the persona shapes behavior: authorized to act, conversational stops only at real forks', () => {
     expect(GUIDE_PERSONA).toContain('setup assistant')

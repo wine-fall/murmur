@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { currentScene, sceneFor } from '../src/scene.ts'
+import { currentScene, formatClock, sceneFor } from '../src/scene.ts'
 
 const at = (hour: number) => new Date(2026, 6, 28, hour, 30)
 
@@ -35,5 +35,14 @@ describe('currentScene', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+describe('formatClock', () => {
+  it('renders a 12-hour local clock, ICU-free', () => {
+    expect(formatClock(new Date(2026, 7, 31, 14, 28))).toBe('2:28 pm')
+    expect(formatClock(new Date(2026, 7, 31, 0, 5))).toBe('12:05 am')
+    expect(formatClock(new Date(2026, 7, 31, 12, 0))).toBe('12:00 pm')
+    expect(formatClock(new Date(2026, 7, 31, 11, 59))).toBe('11:59 am')
   })
 })
