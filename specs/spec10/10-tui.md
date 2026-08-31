@@ -428,6 +428,19 @@ without triage rights. A failed opener is silent; the URL is printed to the
 log either way, so a headless box still gets something to click. Like
 `/settings`, neither command composes a reply or touches what is on air.
 
+**The attachable report (as built, renderer only)**: `src/diagnostics.ts`
+builds the text a listener pastes into that form — a header (version,
+platform, the brain/voice/front-end a run actually wired up beside what it was
+asked for, the startup probes, and a small data-driven table of known failure
+signatures), then the log tail **verbatim**, then the footer naming the files
+and line ranges it came from. The tail is a fixed 500 lines (a module
+constant, not a knob) read backwards across the dated daily logs by
+`readLogTail`. Conversation lines (the `radio`/`user` names `devLogMirror`
+writes) are kept and marked by default, with an option to drop them whole —
+continuations of a multi-line message included. `render` is pure: every fact
+is injected, so the report is deterministically testable. Carrying it to the
+form — the command, the clipboard, the browser — is not in this piece.
+
 The resting input carries the invitation: its placeholder rotates every three
 minutes through the talk-back line and one row per feedback command
 (`/bug · report a bug on GitHub`), so a listener who never opens the menu

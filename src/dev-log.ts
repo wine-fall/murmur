@@ -12,7 +12,8 @@ import { expandUser, logRoot } from './paths.ts'
 // rotation. A run that spans midnight keeps writing to the day it started.
 // Add size-based rotation only if a single day's log ever gets unwieldy.
 const RETENTION_DAYS = 14
-const DAILY_LOG = /^murmur-(\d{4}-\d{2}-\d{2})\.log$/
+// Exported because the bug report reads the same dated set (src/diagnostics.ts).
+export const DAILY_LOG = /^murmur-(\d{4}-\d{2}-\d{2})\.log$/
 
 function stamp(at: Date): string {
   const pad = (n: number): string => String(n).padStart(2, '0')
