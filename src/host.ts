@@ -131,7 +131,7 @@ export class CliHost implements Host {
 
   constructor(
     input: NodeJS.ReadableStream = process.stdin,
-    opts: { devLog?: string | undefined } = { devLog: process.env.MURMUR_DEV_LOG },
+    opts: { devLog?: string | undefined } = {},
   ) {
     this.input = input
     this.mirror = devLogMirror(opts.devLog)

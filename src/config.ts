@@ -12,6 +12,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
+import { resolveDevLog } from './dev-log.ts'
 import { dataRoot, homeRoot, musicPolicyPath, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 import { readSettingsFile } from './settings.ts'
@@ -114,6 +115,12 @@ export const ConfigSchema = z.object({
   // from the ambient env deeper in: it scopes the guide-written voice config
   // (spec 03-03 §7.2), so it must be the SAME home the rest of the run uses.
   home: z.string().default(() => homeRoot()),
+
+  // Where diagnostics are mirrored (src/dev-log.ts). Resolved once here, at the
+  // boundary, so the hosts take a decided path instead of re-reading the env;
+  // empty = no dev log at all. The default is a dated file under the home, so a
+  // plain `npm i -g` install has something to attach to a bug report.
+  devLog: z.string().default(''),
 
   // --- memory (spec 05) --------------------------------------------------- //
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
@@ -241,6 +248,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     listeningApiKey: env.MURMUR_LISTENING_API_KEY?.trim() ?? '',
     listeningUrl: env.MURMUR_LISTENING_URL?.trim() ?? '',
     tuiSocket: tuiSocketPath(env),
+    devLog: resolveDevLog(env),
     // Having an endpoint IS the reason to speak with it: a voice configured
     // through the setup conversation (spec 03-03 §7.2) would otherwise be
     // written, validated, and then silently ignored because the knob still

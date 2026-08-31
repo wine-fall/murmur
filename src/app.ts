@@ -29,6 +29,7 @@ import { Director, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
+import { prepareDevLog } from './dev-log.ts'
 import { CliHost, type Host } from './host.ts'
 import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
@@ -86,8 +87,19 @@ export function ensureTuiDeps(bunCmd: string, tuiDir: string): boolean {
   return false
 }
 
+// The dev log's one assembly point: config decided the path (src/dev-log.ts),
+// here the directory is made and the aged-out days swept, and a host is only
+// ever handed the path. Idempotent, so every entry point can open it.
+function openDevLog(config: Config): string {
+  prepareDevLog(config.devLog)
+  return config.devLog
+}
+
 export async function buildHost(config: Config): Promise<HostBundle> {
-  const plain = (): HostBundle => ({ host: new CliHost(), close: () => Promise.resolve() })
+  const plain = (): HostBundle => ({
+    host: new CliHost(process.stdin, { devLog: openDevLog(config) }),
+    close: () => Promise.resolve(),
+  })
   if (config.frontEnd === 'plain') return plain()
 
   // Bun absent = the TUI is not offered at all (spec 10 §5.10): a half-started
@@ -110,6 +122,7 @@ export async function buildHost(config: Config): Promise<HostBundle> {
   const host = new IpcHost({
     socketPath: config.tuiSocket,
     identity: { brain: config.brain, voice: config.voice },
+    devLog: openDevLog(config),
   })
   await host.listen()
   const client = spawnTuiClient({
@@ -270,7 +283,7 @@ export function buildPacing(config: Config, memory: MemoryStore): PacingWiring |
 // first run (spec 06 §3.4): `murmur --bootstrap-profile` runs the same one-shot
 // task standalone, no broadcast. Returns whether a profile was written.
 export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
-  const host = new CliHost()
+  const host = new CliHost(process.stdin, { devLog: openDevLog(config) })
   if (config.brain !== 'claude') {
     host.info('the profile bootstrap needs the real brain: run again without --brain stub.')
     return false
@@ -363,7 +376,7 @@ export function voiceChanged(a: Config, b: Config): boolean {
 // onboarding surface and `murmur --setup-music` just the music binaries — each a
 // separate serial conversation, never woven into a first run. No broadcast.
 export async function runSetupCli(config: Config, { musicOnly = false } = {}): Promise<boolean> {
-  const host = new CliHost()
+  const host = new CliHost(process.stdin, { devLog: openDevLog(config) })
   if (config.brain !== 'claude') {
     host.info('the setup guide needs the real brain: run again without --brain stub.')
     return false

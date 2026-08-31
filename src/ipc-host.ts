@@ -76,7 +76,7 @@ export class IpcHost implements Host {
 
   constructor(opts: IpcHostOptions) {
     this.opts = opts
-    this.mirror = devLogMirror(opts.devLog ?? process.env.MURMUR_DEV_LOG)
+    this.mirror = devLogMirror(opts.devLog)
     this.eofSeen = new Promise((resolve) => (this.markEof = resolve))
   }
 

@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -488,6 +496,19 @@ describe('front-end wiring (spec 10)', () => {
     const bundle = await buildHost(config(['--plain']))
     expect(bundle.host).toBeInstanceOf(CliHost)
     await bundle.close()
+  })
+
+  it('opens the configured dev log for the host it hands back', async () => {
+    // The npm-installed default (src/dev-log.ts): nobody set MURMUR_DEV_LOG, so
+    // the run still leaves a log behind — directory made here, not in the host.
+    const home = mkdtempSync(join(tmpdir(), 'murmur-home-'))
+    const bundle = await buildHost(config(['--plain'], { MURMUR_HOME: home }))
+    bundle.host.info('on the air')
+    await bundle.close()
+    const dir = join(home, 'log')
+    const written = readdirSync(dir)
+    expect(written).toHaveLength(1)
+    expect(readFileSync(join(dir, written[0]!), 'utf8')).toContain('on the air')
   })
 
   it('binds the socket and hands back the IPC host when the TUI is asked for', async () => {
