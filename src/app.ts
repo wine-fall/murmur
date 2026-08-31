@@ -45,6 +45,8 @@ import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.t
 import { buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
+import { sentinelRoot } from './paths.ts'
+import { armSentinel, collectCrashed, uncleanExitNotice } from './sentinel.ts'
 import { preflightBun } from './startup.ts'
 import { VizFeed } from './viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
@@ -413,10 +415,15 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
 // fire the quit latch during onboarding, ask the Director to stop during the
 // broadcast — and a second press forces exit. Returns the dispose that hands
 // SIGINT to the next phase.
-export function escalatingSigint(host: Host, onFirst: () => void): () => void {
+export function escalatingSigint(host: Host, onFirst: () => void, onForce: () => void = () => {}): () => void {
   let interrupted = false
   const handler = (): void => {
-    if (interrupted) process.exit(1)
+    if (interrupted) {
+      // The forced exit is still the listener LEAVING, not a crash: whatever
+      // the phase has to put down before the process dies goes here.
+      onForce()
+      process.exit(1)
+    }
     interrupted = true
     host.info('stopping...')
     onFirst()
@@ -429,6 +436,18 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The front-end is chosen (and, for the TUI, spawned) FIRST: everything the
   // startup checks and the first run ask has to reach whoever is watching.
   const { host, close: closeFrontEnd } = await buildHost(config)
+  // The crash sentinel (spec 10 §3.2-C): only a real broadcast arms one — the
+  // short-lived entry points below come and go too often to tell a crash from a
+  // neighbour. Read BEFORE arming, so a reused pid cannot overwrite the record
+  // its predecessor left behind.
+  const sentinelDir = sentinelRoot(config.home)
+  const uncleanExit = uncleanExitNotice(collectCrashed(sentinelDir))
+  if (uncleanExit !== null) host.info(uncleanExit)
+  const disarm = armSentinel(sentinelDir)
+  // Disarming is deliberate, never a `finally`: a run that throws its way out
+  // is exactly the crash the next boot has to notice, so only the paths that
+  // END the broadcast on purpose put the sentinel down. It is idempotent, so
+  // several of them may fire.
   // A real (claude) run persists memory + homes the persona in the memory dir;
   // a stub run stays fully in-process (spec 05 §3.2/§3.7).
   const persistent = config.brain === 'claude'
@@ -470,7 +489,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // Armed from here until the Director's handler takes over, so a plain-mode
   // Ctrl-C anywhere in the pre-broadcast stretch (first-run, the setup
   // conversation, the bed pull) is a civilized exit, not a bare death.
-  const offOnboardingSigint = escalatingSigint(host, () => quit.fire())
+  const offOnboardingSigint = escalatingSigint(host, () => quit.fire(), disarm)
   // The default output language, read once from the machine (spec 06 §3.2).
   // Nothing re-reads it: from here the persona names the language it speaks.
   const language = detectLanguage()
@@ -514,6 +533,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   }
   if (quit.requested) {
     offOnboardingSigint()
+    disarm()
     host.info('stopped before the broadcast.')
     viz?.stop()
     await engine.aclose()
@@ -662,10 +682,14 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // SIGINT handover: the Director's quiesce replaces the onboarding latch on
   // adjacent lines, so no stretch of the boot is left with the bare default.
   offOnboardingSigint()
-  const offSigint = escalatingSigint(host, () => {
-    director.requestQuit()
-    void engine.stop()
-  })
+  const offSigint = escalatingSigint(
+    host,
+    () => {
+      director.requestQuit()
+      void engine.stop()
+    },
+    disarm,
+  )
 
   await voice.start()
   // How long the room was empty (spec 10 §3.7.3), for a front-end that greets
@@ -680,6 +704,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // A Ctrl-C during the bed pull or voice start fired the latch with nobody
     // left to read it: honor it here instead of going on the air.
     if (!quit.requested) await director.run(maxSegments)
+    // The broadcast ended on its own terms — a thrown one never reaches here,
+    // and leaves its sentinel for the next boot to find.
+    disarm()
   } finally {
     offSigint()
     // Frames stop before the graph they read does.

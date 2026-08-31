@@ -441,6 +441,28 @@ continuations of a multi-line message included. `render` is pure: every fact
 is injected, so the report is deterministically testable. Carrying it to the
 form — the command, the clipboard, the browser — is not in this piece.
 
+**The crash sentinel (as built, detection only)**: most bugs go unreported
+because nobody thinks to file one, so murmur notices for the listener. A
+broadcast run writes `run/session-<pid>.json` (pid + start time) under the
+murmur home when it goes on the air and puts it down on every way out it
+CHOSE — `/quit`, one Ctrl-C, a bounded run finishing, and the forced second
+Ctrl-C (`escalatingSigint` runs the phase's teardown before it exits).
+Disarming is never a `finally`: a run that throws its way out is exactly the
+crash the next boot has to notice, so a sentinel left behind is a run that
+died. **One file per instance, not one
+shared flag**: two radios can be on the air at once, and a single flag has
+them lying to each other — one instance's clean exit erasing the other's
+crash, or a second boot reading the first's live flag as a crash. So a boot
+sweeps `run/` and counts only the sentinels whose **pid the OS no longer
+knows** (`src/sentinel.ts`, probing with signal 0; EPERM means another user's
+live process, never a crash); a live pid is a neighbour and is left alone.
+Reporting and clearing are one act, so a crash is mentioned exactly once.
+Only a real broadcast arms one — `--setup`, `--setup-music` and
+`--bootstrap-profile` are too short-lived to tell a crash from a neighbour.
+This piece stops at one line in the transcript (`last time I went off the air
+without saying goodbye.`, through `host.info` — not the voice); the offer to
+actually file it waits on the report flow.
+
 The resting input carries the invitation: its placeholder rotates every three
 minutes through the talk-back line and one row per feedback command
 (`/bug · report a bug on GitHub`), so a listener who never opens the menu
