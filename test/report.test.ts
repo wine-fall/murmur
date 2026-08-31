@@ -5,7 +5,15 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { GuideCapable, GuideRequest } from '../src/contracts.ts'
-import { prepareReports, reportsDir, startReport, type ReportDeps } from '../src/report.ts'
+import {
+  prepareReports,
+  reportsDir,
+  startReport,
+  type DeliverTools,
+  type ReportDeps,
+  type ReportKind,
+} from '../src/report.ts'
+import type { GhDraft, GhStatus } from '../src/deliver.ts'
 import { FakeHost, until } from './fakes.ts'
 
 function home(): string {
@@ -40,10 +48,52 @@ function deps(root: string, over: Partial<ReportDeps> = {}): ReportDeps {
     // Never a real editor: the dep is required precisely so no test can spawn
     // one by forgetting it.
     openEditor: () => Promise.resolve(),
+    deliver: tools(),
     probes: () => Promise.resolve([{ name: 'ffmpeg', ok: false, reason: 'not found' }]),
     now: () => new Date('2026-08-31T21:04:00Z'),
     ...over,
   }
+}
+
+// Every executor that would touch the machine, faked. Nothing in this file can
+// reach a real clipboard, a real browser or a real GitHub issue: the types
+// require each one, so forgetting is a compile error rather than an accident.
+interface Tools extends DeliverTools {
+  copied: string[]
+  opened: string[]
+  created: GhDraft[]
+}
+
+function tools(over: Partial<DeliverTools> = {}): Tools {
+  const copied: string[] = []
+  const opened: string[] = []
+  const created: GhDraft[] = []
+  return {
+    copied,
+    opened,
+    created,
+    hasBrowser: () => true,
+    copy: (text) => {
+      copied.push(text)
+      return Promise.resolve({ ok: true, command: 'pbcopy', reason: '' })
+    },
+    openUrl: (url) => void opened.push(url),
+    ghReady: () => Promise.resolve({ kind: 'ready', user: 'wine-fall' }),
+    ghCreate: (draft) => {
+      created.push(draft)
+      return Promise.resolve({ ok: true, url: 'https://github.com/wine-fall/murmur/issues/9', reason: '' })
+    },
+    ...over,
+  }
+}
+
+// Drive a fresh report straight to the send option and return the harness.
+async function sendWith(root: string, host: FakeHost, deliver: Tools, kind: ReportKind = 'bug') {
+  const session = startReport(deps(root, { host, deliver }), kind)
+  await until(() => host.asks.length > 0, 'the options ask')
+  const path = draftPathFrom(host)
+  session.deliver('send')
+  return { session, path }
 }
 
 // The one line the flow prints once the draft is on disk, and the path in it.
@@ -133,13 +183,15 @@ describe('the report floor (spec 10 §3.2-C)', () => {
     await session.done
   })
 
-  it('view opens the draft in the editor, and send re-reads it from disk', async () => {
+  it('view opens the draft in the editor, and send hands over what it left there', async () => {
     const root = home()
     const host = new FakeHost()
     const opened: string[] = []
+    const deliver = tools()
     const session = startReport(
       deps(root, {
         host,
+        deliver,
         // The listener edits in the editor — the flow must not keep believing
         // the copy it rendered.
         openEditor: (path) => {
@@ -157,10 +209,9 @@ describe('the report floor (spec 10 §3.2-C)', () => {
     expect(opened).toEqual([path])
     session.deliver('send')
     await session.done
-    // The line count comes from the edited file, not the rendered draft.
-    const sent = host.infos.at(-1)!
-    expect(sent).toContain(path)
-    expect(sent).toContain('1 line')
+    // What travels is the EDITED file, re-read from disk — never the copy the
+    // flow rendered before the listener touched it.
+    expect(deliver.copied).toEqual(['I deleted almost all of it\n'])
   })
 
   // Every option is spelled out in the prompt, so the prompt's own words have
@@ -185,12 +236,13 @@ describe('the report floor (spec 10 §3.2-C)', () => {
   it('takes the option words the prompt actually offers', async () => {
     const root = home()
     const host = new FakeHost()
-    const session = startReport(deps(root, { host }), 'bug')
+    const deliver = tools()
+    const session = startReport(deps(root, { host, deliver }), 'bug')
     await until(() => host.asks.length > 0, 'the options ask')
     const path = draftPathFrom(host)
     session.deliver('send it')
     await session.done
-    expect(host.infos.at(-1)).toContain(path)
+    expect(deliver.copied).toHaveLength(1)
     expect(existsSync(path)).toBe(true)
   })
 
@@ -301,5 +353,236 @@ describe('the drafts directory', () => {
     expect(existsSync(dir)).toBe(false)
     prepareReports(dir, new Date())
     expect(existsSync(dir)).toBe(true)
+  })
+})
+
+// The three roads out, in order. The last press is ALWAYS the listener's on the
+// browser road: murmur fills the form in, it does not submit for them.
+describe('sending the report (spec 10 §3.2-C)', () => {
+  it('road 1: clipboard plus a prefilled form, and the listener presses Create', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools()
+    const { session, path } = await sendWith(root, host, deliver)
+    await session.done
+    // The body handed over is the one on DISK, whole.
+    expect(deliver.copied).toHaveLength(1)
+    expect(deliver.copied[0]).toBe(readFileSync(path, 'utf8'))
+    expect(deliver.opened).toHaveLength(1)
+    expect(deliver.opened[0]).toContain('template=bug.yml')
+    expect(deliver.opened[0]).toContain('version=0.1.2')
+    // Nothing was filed on the listener's behalf.
+    expect(deliver.created).toEqual([])
+    const told = host.infos.join('\n')
+    expect(told).toContain('clipboard')
+    expect(told.toLowerCase()).toContain('create')
+  })
+
+  it('road 1: a clipboard that refused says so, and points at the draft', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({
+      copy: () => Promise.resolve({ ok: false, command: null, reason: 'xclip is not installed' }),
+    })
+    const { session, path } = await sendWith(root, host, deliver)
+    await session.done
+    const told = host.infos.join('\n')
+    // Never a pretended success.
+    expect(told).toContain('xclip is not installed')
+    expect(told).toContain(path)
+    // The form still opens: a prefilled report beats no report.
+    expect(deliver.opened).toHaveLength(1)
+  })
+
+  it('road 1: says out loud how much of the log the form could not hold', async () => {
+    const root = home()
+    const host = new FakeHost()
+    // A log tail far past the URL budget, so the form has to give something up.
+    const dir = join(root, 'log')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'murmur-2026-08-31.log'),
+      Array.from({ length: 400 }, (_, i) => `21:03:0${String(i % 10)} INFO host: line ${String(i)} of a long night`).join('\n'),
+    )
+    const deliver = tools()
+    const { session } = await sendWith(root, host, deliver)
+    await session.done
+    const told = host.infos.join('\n')
+    expect(told).toMatch(/log/i)
+    // The listener is told the size of what was lost, not just that something was.
+    expect(told).toMatch(/\d+/)
+    expect(deliver.opened[0]!.length).toBeLessThanOrEqual(8000)
+  })
+
+  it('road 2: no browser, so gh files it — but only after the listener confirms who as', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({ hasBrowser: () => false })
+    const { session, path } = await sendWith(root, host, deliver)
+    await until(() => host.asks.length > 1, 'the confirm')
+    // The identity is in the question: this machine holds more than one.
+    expect(host.asks.at(-1)!.text).toContain('wine-fall')
+    expect(deliver.created).toEqual([])
+    session.deliver('y')
+    await session.done
+    expect(deliver.created).toHaveLength(1)
+    // The body travels as a FILE — the draft itself, re-read by gh.
+    expect(deliver.created[0]!.bodyFile).toBe(path)
+    expect(deliver.created[0]!.title).toContain('[bug]')
+    expect(deliver.created[0]!.repo).toContain('murmur')
+    expect(host.infos.join('\n')).toContain('https://github.com/wine-fall/murmur/issues/9')
+  })
+
+  it('road 2: is honest that this road carries no label', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({ hasBrowser: () => false })
+    const { session } = await sendWith(root, host, deliver)
+    await until(() => host.asks.length > 1, 'the confirm')
+    // The two roads are NOT equivalent and the listener is not told they are:
+    // the web form applies the label, the API path cannot.
+    expect(host.asks.at(-1)!.text).toContain('label')
+    session.deliver('n')
+    await session.done
+  })
+
+  it('road 2: a declined confirm files nothing and leaves the draft', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({ hasBrowser: () => false })
+    const { session, path } = await sendWith(root, host, deliver)
+    await until(() => host.asks.length > 1, 'the confirm')
+    session.deliver('n')
+    await session.done
+    expect(deliver.created).toEqual([])
+    expect(existsSync(path)).toBe(true)
+    expect(host.infos.join('\n')).toContain(path)
+  })
+
+  it('road 2: a failed filing does not swallow the reason', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({
+      hasBrowser: () => false,
+      ghCreate: () => Promise.resolve({ ok: false, url: '', reason: 'could not reach github.com' }),
+    })
+    const { session, path } = await sendWith(root, host, deliver)
+    await until(() => host.asks.length > 1, 'the confirm')
+    session.deliver('y')
+    await session.done
+    const told = host.infos.join('\n')
+    expect(told).toContain('could not reach github.com')
+    expect(told).toContain(path)
+    expect(existsSync(path)).toBe(true)
+  })
+
+  it('road 3: no browser and no gh leaves the listener the path and the form', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools({
+      hasBrowser: () => false,
+      ghReady: () => Promise.resolve({ kind: 'missing', reason: 'the gh command-line tool is not installed' }),
+    })
+    const { session, path } = await sendWith(root, host, deliver)
+    await session.done
+    const told = host.infos.join('\n')
+    expect(told).toContain('not installed')
+    expect(told).toContain(path)
+    expect(told).toContain('issues/new')
+    expect(deliver.created).toEqual([])
+    expect(deliver.copied).toEqual([])
+  })
+
+  it('road 3: the URL it prints is one a terminal can hand back', async () => {
+    const root = home()
+    const host = new FakeHost()
+    // A full night of log, so a log-bearing URL would be thousands of
+    // characters of percent-encoding printed over the program.
+    const dir = join(root, 'log')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      join(dir, 'murmur-2026-08-31.log'),
+      Array.from({ length: 200 }, (_, i) => `21:03:01 INFO host: line ${String(i)}`).join('\n'),
+    )
+    const deliver = tools({
+      hasBrowser: () => false,
+      ghReady: () => Promise.resolve({ kind: 'missing', reason: 'no gh' }),
+    })
+    const { session, path } = await sendWith(root, host, deliver)
+    await session.done
+    const printed = /(https:\/\/\S+)/.exec(host.infos.join('\n'))![1]!
+    // Nothing here reached a clipboard, so a URL carrying the whole log is a
+    // wall of text the listener would have to retype. The log is in the draft;
+    // the URL carries the rest.
+    expect(printed.length).toBeLessThan(600)
+    expect(printed).toContain('version=0.1.2')
+    expect(printed).not.toContain('logs=')
+    expect(host.infos.join('\n')).toContain(path)
+  })
+
+  // The form blocks Create until its required fields are filled, and murmur
+  // cannot honestly invent them from one write-up. So it says which ones are
+  // still the listener's to write, rather than "press Create" into a wall.
+  it('road 1: names the field the form still needs before Create will take it', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const { session } = await sendWith(root, host, tools())
+    await session.done
+    const told = host.infos.join('\n')
+    expect(told).toContain('What you expected instead')
+    expect(told).toContain('Log excerpt')
+  })
+
+  it('road 1: a feature request is told about ITS form, not the bug form', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const { session } = await sendWith(root, host, tools(), 'feature')
+    await session.done
+    const told = host.infos.join('\n')
+    // There is no Log excerpt on the feature form; telling someone to paste
+    // into a field that is not there is an instruction they cannot follow.
+    expect(told).not.toContain('Log excerpt')
+    expect(told).toContain('Why')
+  })
+
+  it('road 1: always leaves a URL, because an opener can fail silently', async () => {
+    const root = home()
+    const host = new FakeHost()
+    // DISPLAY is set but xdg-open is missing: hasBrowser says yes and the
+    // spawn dies without telling anyone. The listener needs the address.
+    const { session } = await sendWith(root, host, tools())
+    await session.done
+    expect(host.infos.join('\n')).toContain('issues/new')
+  })
+
+  it('esc while gh is still answering files nothing', async () => {
+    const root = home()
+    const host = new FakeHost()
+    let release!: (status: GhStatus) => void
+    const deliver = tools({
+      hasBrowser: () => false,
+      ghReady: () => new Promise<GhStatus>((resolve) => (release = resolve)),
+    })
+    const session = startReport(deps(root, { host, deliver }), 'bug')
+    await until(() => host.asks.length > 0, 'the options ask')
+    const asksBefore = host.asks.length
+    session.deliver('send')
+    await until(() => release !== undefined, 'gh was asked')
+    session.cancel()
+    release({ kind: 'ready', user: 'wine-fall' })
+    await session.done
+    // No confirm was ever put up, so no later line can answer one.
+    expect(host.asks).toHaveLength(asksBefore)
+    expect(deliver.created).toEqual([])
+  })
+
+  it('a feature request travels as its own form, with no log field', async () => {
+    const root = home()
+    const host = new FakeHost()
+    const deliver = tools()
+    const { session } = await sendWith(root, host, deliver, 'feature')
+    await session.done
+    expect(deliver.opened[0]).toContain('template=feature-request.yml')
+    expect(deliver.opened[0]).not.toContain('logs=')
   })
 })

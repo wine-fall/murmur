@@ -441,7 +441,7 @@ The flow (`src/report.ts`): one opening question, asked through the existing
 — skipped whole on a run with no brain, which goes straight to the machine's
 half; then the draft, rendered by `src/diagnostics.ts` and written to
 `$MURMUR_HOME/reports/<kind>-<timestamp>.md`; then four ways out — **send**
-(prints the path; joining it to `src/deliver.ts` is the next piece), **view**
+(the three roads below), **view**
 (`$EDITOR`),
 **clean** (re-render with the conversation lines dropped), **drop** (delete it,
 back to the program). Esc is drop. Because `view` hands the file to the
@@ -505,6 +505,50 @@ live process, never a crash); a live pid is a neighbour and is left alone.
 Reporting and clearing are one act, so a crash is mentioned exactly once.
 Only a real broadcast arms one — `--setup`, `--setup-music` and
 `--bootstrap-profile` are too short-lived to tell a crash from a neighbour.
+**Sending it (as built)**: three roads, tried in order, and the order is the
+point.
+
+**① A browser, which is the normal case.** The draft — re-read from disk, so
+what travels is whatever `view` left behind — goes on the clipboard, and
+`buildIssueUrl` opens the prefilled form. The description, version and platform
+always fit; the log rides along when the 8000-byte budget allows and is
+otherwise carried by the clipboard paste. **The listener presses Create.** That
+is a general rule and not a concession to this piece: murmur fills a form in and
+opens it, and never posts on someone's behalf while they can still read what is
+about to go out. A clipboard that refused says so and names the tool that
+refused — it never reports a success it did not have — and falls back to "the
+draft is at `<path>`, copy it in yourself".
+
+**② No browser, so `gh`.** The road for ssh and headless boxes. Whether a
+browser exists is decided by `canOpenBrowser` from the ENVIRONMENT — `SSH_TTY`
+/ `SSH_CONNECTION`, and on linux the absence of both `DISPLAY` and
+`WAYLAND_DISPLAY` — never from whether the opener appeared to work, because
+`openUrl` spawns detached and swallows its error. `ghReady` names the account
+first and the confirm line shows it: a machine can hold more than one GitHub
+identity, and a report filed under the wrong one is only noticed afterwards
+(verified against a box logged in as two). The same line says what this road
+cannot carry: an issue created through `gh` gets **no `bug` label**, because the
+form's labels are applied by the web submission and `--label` needs triage
+rights (#171). The title prefix carries the classification instead. The two
+roads are not equivalent and the wording does not pretend they are.
+
+**③ Neither.** The draft's path and a form URL, and out of the way. The URL
+printed here — and on a declined ② — deliberately omits the log: nothing
+reached a clipboard on these roads, so a log-bearing address would be thousands
+of characters of percent-encoding burying the one actionable line, and the log
+is already in the file the path points at.
+
+Whatever the form could not hold is said out loud, in bytes, with where the
+rest of it is — a shortened report that looks whole is worse than a short one
+that admits it.
+
+Every executor behind these roads (the clipboard spawn, the `gh` runner, the
+opener) is **required with no default**, wired once in `src/app.ts`. The rule
+generalizes the `openUrl` lesson: a dependency whose default has a real effect
+on the machine — a browser, an editor, a subprocess, someone's clipboard — is
+required, and the type collects the call sites. A test cannot file an issue or
+write a clipboard by forgetting an injection.
+
 **The delivery primitives (as built, parts only)**: `src/deliver.ts`.
 `copyToClipboard` puts the draft where a listener can paste it — `pbcopy` on
 darwin, `clip` on win32, and on linux `wl-copy` then `xclip -selection

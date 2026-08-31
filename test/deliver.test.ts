@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   URL_BUDGET,
   buildIssueUrl,
+  canOpenBrowser,
   clipboardCandidates,
   copyToClipboard,
   createIssueWithGh,
@@ -382,5 +383,31 @@ describe('createIssueWithGh', () => {
     const created = await createIssueWithGh(draft, run)
     expect(created.ok).toBe(false)
     expect(created.reason).toContain('URL')
+  })
+})
+
+// Which road the report takes is decided from the ENVIRONMENT, never from
+// whether opening a browser appeared to work: `openUrl` spawns detached and
+// swallows its error, so "it opened" is not an answer this process can get.
+describe('canOpenBrowser', () => {
+  it('trusts a desktop session', () => {
+    expect(canOpenBrowser({}, 'darwin')).toBe(true)
+    expect(canOpenBrowser({}, 'win32')).toBe(true)
+    expect(canOpenBrowser({ DISPLAY: ':0' }, 'linux')).toBe(true)
+    expect(canOpenBrowser({ WAYLAND_DISPLAY: 'wayland-0' }, 'linux')).toBe(true)
+  })
+
+  it('takes ssh at its word, on any platform', () => {
+    // The listener is looking at a terminal somewhere else; a browser opened
+    // here would open on a screen nobody is in front of.
+    expect(canOpenBrowser({ SSH_CONNECTION: '10.0.0.1 22 10.0.0.2 22' }, 'darwin')).toBe(false)
+    expect(canOpenBrowser({ SSH_TTY: '/dev/pts/0' }, 'darwin')).toBe(false)
+    expect(canOpenBrowser({ SSH_TTY: '/dev/pts/0', DISPLAY: ':0' }, 'linux')).toBe(false)
+  })
+
+  it('needs a display server on linux', () => {
+    expect(canOpenBrowser({}, 'linux')).toBe(false)
+    // Set but empty is not a display: a headless box exports it that way.
+    expect(canOpenBrowser({ DISPLAY: '' }, 'linux')).toBe(false)
   })
 })
