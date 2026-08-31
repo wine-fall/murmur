@@ -23,7 +23,7 @@ import type {
   Turn,
 } from '../src/contracts.ts'
 import type { DirectorSettings } from '../src/director.ts'
-import type { AskKind, Host } from '../src/host.ts'
+import type { AskKind, FloorMode, Host } from '../src/host.ts'
 import type { ProgramState } from '../src/ipc.ts'
 import { LineQueue } from '../src/host.ts'
 
@@ -282,9 +282,11 @@ export class FakeHost implements Host {
   debugs: string[] = []
   states: ProgramState[] = []
   banners: { personaFirstLine: string; brain: string; voice: string }[] = []
+  modes: FloorMode[] = []
   // Assign in a test to model a front-end with a settings pane (spec 12 §3.6);
   // left undefined, the host is the plain one and the Director degrades to info.
   showSettings?: () => void
+  private interrupt: (() => void) | null = null
 
   start(): void {}
 
@@ -332,6 +334,20 @@ export class FakeHost implements Host {
 
   onState(state: ProgramState): void {
     this.states.push(state)
+  }
+
+  setMode(who: FloorMode): void {
+    this.modes.push(who)
+  }
+
+  onInterrupt(handler: (() => void) | null): void {
+    this.interrupt = handler
+  }
+
+  // The listener's Esc. Noise when no flow has registered for it, exactly as
+  // in a real front-end.
+  pressEsc(): void {
+    this.interrupt?.()
   }
 
   banner(personaFirstLine: string, opts: { brain: string; voice: string }): void {

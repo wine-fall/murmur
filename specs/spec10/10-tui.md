@@ -418,15 +418,55 @@ own literals. Adding an entry lands it in the parser and the menu at once;
 the guide-mode grammar (`/done`) stays the guide's own.
 
 **The feedback channel (as built)**: `/bug` and `/feature-request` open the
-matching prefilled GitHub issue form
+**report floor** — a third value of the floor mode beside `radio` and `guide`
+(`FloorMode` in `src/host.ts`, the `mode`/`hello` messages in `src/ipc.ts`, the
+client's own copy in `tui/src/app.tsx`). Both commands share it: what they mean
+is "the listener is writing something to send", and only the draft's title
+differs.
+
+The floor's defining property, and the reason it is not a second guide: **it
+does not stop the radio.** The guide suspends the program because it is
+reconfiguring it, and there is nothing to broadcast until that settles
+(`recallSetup` is awaited inside the loop). A report changes nothing about the
+run, so the program keeps writing, playing and speaking underneath it; the only
+thing that changes hands is the KEYBOARD, because a typed line has to be either
+the bug description or talk-back and nothing can tell which. So `reportRecall`
+is started and never awaited, and the Director routes every taken line into the
+open session instead of reading it as a steer (`takeSteer` returns `consumed`).
+`/quit` is the one line the floor does not eat — a listener must always be able
+to leave.
+
+The flow (`src/report.ts`): one opening question, asked through the existing
+`GuideCapable` capability so the answer comes back written up for a maintainer
+— skipped whole on a run with no brain, which goes straight to the machine's
+half; then the draft, rendered by `src/diagnostics.ts` and written to
+`$MURMUR_HOME/reports/<kind>-<timestamp>.md`; then four ways out — **send**
+(prints the path; joining it to `src/deliver.ts` is the next piece), **view**
+(`$EDITOR`),
+**clean** (re-render with the conversation lines dropped), **drop** (delete it,
+back to the program). Esc is drop. Because `view` hands the file to the
+listener, **send re-reads it from disk** — the copy the flow rendered is a lie
+the moment they edit it. Drafts age out of the reports directory on the same
+fortnight clock the daily logs use.
+
+The client paints the floor from one mapping (`tui/src/floor.ts`) rather than a
+three-way branch at each site: the report's ink is a cold slate, chosen against
+the guide's warm brown (this is paperwork, not a conversation with murmur) and
+kept dimmer than the listener's own periwinkle (a side-errand must not
+out-shout the program it is a report about). Its copy never claims the radio
+stopped, because it has not.
+
+The browser form remains as the fallback for a Director built without a report
+floor: the matching prefilled GitHub issue form
 (`https://github.com/wine-fall/murmur/issues/new?template=bug.yml`,
-`…?template=feature-request.yml`) in the desktop browser — `open` on darwin,
-`xdg-open` on linux, `start` on win32, injected as `openUrl` so a test can
-watch it. The label rides on the form (`.github/ISSUE_TEMPLATE/*.yml`), not on
-a `?labels=` parameter, because GitHub drops that parameter for a submitter
-without triage rights. A failed opener is silent; the URL is printed to the
-log either way, so a headless box still gets something to click. Like
-`/settings`, neither command composes a reply or touches what is on air.
+`…?template=feature-request.yml`) — `open` on darwin, `xdg-open` on linux,
+`start` on win32, passed in as `openUrl`. That opener is **required** on
+`DirectorDeps` with no default behind it: while it was optional, a construction
+site that forgot it silently launched a real browser and `spawn`'s swallowed
+error left no trace. The label rides on the form
+(`.github/ISSUE_TEMPLATE/*.yml`), not on a `?labels=` parameter, because GitHub
+drops that parameter for a submitter without triage rights. Like `/settings`,
+neither command composes a reply or touches what is on air.
 
 **The attachable report (as built, renderer only)**: `src/diagnostics.ts`
 builds the text a listener pastes into that form — a header (version,
@@ -437,9 +477,15 @@ and line ranges it came from. The tail is a fixed 500 lines (a module
 constant, not a knob) read backwards across the dated daily logs by
 `readLogTail`. Conversation lines (the `radio`/`user` names `devLogMirror`
 writes) are kept and marked by default, with an option to drop them whole —
-continuations of a multi-line message included. `render` is pure: every fact
-is injected, so the report is deterministically testable. Carrying it to the
-form — the command, the clipboard, the browser — is not in this piece.
+continuations of a multi-line message included (this is what the floor's
+**clean** option turns off). `render` is pure: every fact is injected, so the
+report is deterministically testable. The floor above supplies those facts at
+report time — version, platform, the three selections, and the probes re-run
+right then rather than remembered from boot, because a listener files a report
+when something changed under them. The primitives that carry a finished draft
+to GitHub are built (the delivery primitives and the headless road below); what
+is not yet built is the wiring between them and the floor's **send**, which for
+now prints the draft's path.
 
 **The crash sentinel (as built, detection only)**: most bugs go unreported
 because nobody thinks to file one, so murmur notices for the listener. A

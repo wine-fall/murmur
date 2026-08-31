@@ -16,6 +16,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted' },
   { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted', away: 21_600 },
   { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted', mode: 'guide' },
+  { v: 1, type: 'hello', protocol: PROTOCOL, persona: 'a night host', brain: 'claude', voice: 'hosted', mode: 'report' },
   { v: 1, type: 'segment', text: 'still here, still awake.' },
   { v: 1, type: 'userLine', text: 'me too' },
   { v: 1, type: 'state', state: { kind: 'music', nowPlaying: 'a song', scene: 'late-night', activity: 'engaged' } },
@@ -27,6 +28,7 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' },
   { v: 1, type: 'askDrop' },
   { v: 1, type: 'mode', who: 'guide' },
+  { v: 1, type: 'mode', who: 'report' },
   { v: 1, type: 'mode', who: 'radio' },
   { v: 1, type: 'viz', bins: [0, 0.5, 1] },
   {

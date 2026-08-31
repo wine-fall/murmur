@@ -81,6 +81,9 @@ function build(
     memory,
     host,
     settings: () => knobs,
+    // Injected like every other harness: the Director has no default opener,
+    // so a browser can never be launched from a test.
+    openUrl: () => {},
     ...(pacing !== null && { pacing: { sensor, ...pacing } }),
     ...rest,
   }

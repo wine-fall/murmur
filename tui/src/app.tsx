@@ -38,6 +38,7 @@ import {
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
+import { floorFace } from './floor.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
@@ -270,10 +271,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // renders it and sends patches, never local optimism. Mirrored into a ref so
   // the keyboard handler always sees the current pane, not a stale closure.
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
-  // Who holds the floor (spec 10 §3.4): the radio, or the setup guide. The
-  // engine owns the switch; this client only paints it — strip, identity
-  // line, input ink — so the listener always knows who is listening.
-  const [mode, setMode] = useState<'radio' | 'guide'>('radio')
+  // Who holds the floor (spec 10 §3.4): the radio, the setup guide, or a
+  // report being written. The engine owns the switch; this client only paints
+  // it — strip, identity line, input ink — so the listener always knows who is
+  // listening.
+  const [mode, setMode] = useState<'radio' | 'guide' | 'report'>('radio')
   // The rail advances on this client's own clock (§3.3): the engine sends the
   // track's length and its start once, and a tick a second is all the traffic a
   // playing song costs. Nothing ticks when nothing is playing.
@@ -525,16 +527,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.
-  const guideFloor = mode === 'guide'
+  // null while the radio has the floor — the program's own face (§3.4).
+  const floor = floorFace(mode)
   const strip =
     !wide
-      ? [guideFloor ? 'in the workshop' : (greeting ?? microcopy ?? 'warming up...'), state?.nowPlaying]
+      ? [floor?.strip ?? greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
           .filter((part) => part !== undefined && part !== '')
           .join('  ♪ ')
       : [
-          guideFloor ? 'in the workshop' : (greeting ?? microcopy ?? 'murmur is on the air'),
-          guideFloor ? 'the setup guide has the floor' : state?.scene,
-          guideFloor ? undefined : (state?.activity ?? 'here'),
+          floor?.strip ?? greeting ?? microcopy ?? 'murmur is on the air',
+          floor?.sub ?? state?.scene,
+          floor === null ? (state?.activity ?? 'here') : undefined,
         ]
           .filter((part) => part !== undefined && part !== '')
           .join(' · ')
@@ -761,7 +764,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             backgroundColor: INK.bg,
           }}
         >
-          <text style={{ fg: guideFloor ? lit(WARM) : roomAccent.bright }}>{strip}</text>
+          <text style={{ fg: floor === null ? roomAccent.bright : lit(floor.ink) }}>{strip}</text>
           <text style={{ fg: lit(INK.dim) }}>
             {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
           </text>
@@ -769,7 +772,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       ) : (
         <box style={{ flexDirection: 'column' }}>
           <box style={{ flexDirection: 'row', justifyContent: 'center', height: 1 }}>
-            <text style={{ fg: guideFloor ? lit(WARM) : roomAccent.bright }}>{strip}</text>
+            <text style={{ fg: floor === null ? roomAccent.bright : lit(floor.ink) }}>{strip}</text>
           </box>
           <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
         </box>
@@ -1005,9 +1008,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       {/* Persona rides the identity line: the wide strip is the program's
           words, but WHO is on air must survive in the status region (§3.3). */}
       <box style={{ height: 1, paddingLeft: 1, paddingRight: 1 }}>
-        <text style={{ fg: guideFloor ? lit(WARM) : lit(INK.dim) }}>
-          {guideFloor
-            ? ['setup guide', identity.brain].filter(Boolean).join(' · ')
+        <text style={{ fg: lit(floor?.ink ?? INK.dim) }}>
+          {floor !== null
+            ? [floor.identity, identity.brain].filter(Boolean).join(' · ')
             : [identity.persona, identity.brain, identity.voice].filter(Boolean).join(' · ')}
         </text>
       </box>
@@ -1139,8 +1142,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               {/* The answer is typed INTO the card (user decision, 2026-08-11):
                   same single input, permanent focus — it just sits where the
                   question is while one is open. */}
+              {/* A floor that holds the keyboard owns THIS input too, not just
+                  the resting one below: while a flow is asking, the card IS
+                  where the listener types, so its ink and its invitation are
+                  the only ones they ever see. */}
               <box style={{ flexDirection: 'row', marginTop: 1 }}>
-                <text style={{ fg: PERIWINKLE }}>{'> '}</text>
+                <text style={{ fg: floor?.ink ?? PERIWINKLE }}>{'> '}</text>
                 <input
                   ref={input}
                   focused={!paneOpen}
@@ -1149,13 +1156,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                       ? facts
                         ? 'y / Enter / n - the options above'
                         : 'y or Enter - one key decides'
-                      : 'your answer - enter sends'
+                      : (floor?.placeholder ?? 'your answer - enter sends')
                   }
                   style={{
                     flexGrow: 1,
-                    textColor: PERIWINKLE,
-                    focusedTextColor: PERIWINKLE,
-                    placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+                    textColor: floor?.ink ?? PERIWINKLE,
+                    focusedTextColor: floor?.ink ?? PERIWINKLE,
+                    placeholderColor: mix(floor?.ink ?? PERIWINKLE, INK.bg, 0.4),
                     backgroundColor: CARD,
                     focusedBackgroundColor: CARD,
                   }}
@@ -1181,16 +1188,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           {/* The listener's channel is periwinkle — the room's one cold accent
               (§6.1): prompt, typed text, and the resting invitation alike. A
               line the engine will take as a command warms to ember instead. */}
-          <text style={{ fg: guideFloor ? WARM : PERIWINKLE }}>{'> '}</text>
+          <text style={{ fg: floor?.ink ?? PERIWINKLE }}>{'> '}</text>
           <input
             ref={input}
             focused={!paneOpen}
             placeholder={
               paneOpen
                 ? 'settings open — esc to return'
-                : guideFloor
-                  ? 'talking to the setup guide · esc interrupts · /done hands back'
-                  : INPUT_HINTS[hint]
+                : (floor?.placeholder ?? INPUT_HINTS[hint])
             }
             style={{
               // The sky composition bounds the field and lets a quiet rule carry
@@ -1199,9 +1204,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
               // The field is permanently focused (§3.2), so the focused pair is
               // the ink that actually paints; the base pair keeps them honest.
-              textColor: isCommand(typed) ? EMBER : guideFloor ? WARM : PERIWINKLE,
-              focusedTextColor: isCommand(typed) ? EMBER : guideFloor ? WARM : PERIWINKLE,
-              placeholderColor: mix(guideFloor ? WARM : PERIWINKLE, INK.bg, 0.4),
+              textColor: isCommand(typed) ? EMBER : (floor?.ink ?? PERIWINKLE),
+              focusedTextColor: isCommand(typed) ? EMBER : (floor?.ink ?? PERIWINKLE),
+              placeholderColor: mix(floor?.ink ?? PERIWINKLE, INK.bg, 0.4),
               backgroundColor: INK.bg,
               focusedBackgroundColor: INK.bg,
             }}

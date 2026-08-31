@@ -3,7 +3,7 @@
 // process, shut down cleanly. The engine is the sole audio authority — the
 // interim subprocess player is gone.
 
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { existsSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
@@ -23,9 +23,9 @@ import {
 import { ClaudeBrain, StubBrain } from './brain.ts'
 import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
-import type { Config } from './config.ts'
+import { packageVersion, type Config } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
-import { Director, type MusicWiring, type PacingWiring } from './director.ts'
+import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
@@ -35,8 +35,10 @@ import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
 import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
+import { logRoot, sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
 import { MusicProgrammer } from './music-programmer.ts'
+import { startReport, type ReportSession } from './report.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { detectLanguage } from './locale.ts'
@@ -45,9 +47,8 @@ import { quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.t
 import { buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
-import { sentinelRoot } from './paths.ts'
 import { armSentinel, collectCrashed, uncleanExitNotice } from './sentinel.ts'
-import { preflightBun } from './startup.ts'
+import { preflightBun, preflightFfmpeg, preflightYtdlp } from './startup.ts'
 import { VizFeed } from './viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
 import { StubVoice } from './voice.ts'
@@ -641,6 +642,56 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
         }
       : undefined
 
+  // $EDITOR over the terminal the plain host is already sharing with the
+  // listener: the radio keeps playing to it while they read.
+  const spawnEditor = (path: string): Promise<void> =>
+    new Promise<void>((resolve) => {
+      const child = spawn(process.env.EDITOR ?? process.env.VISUAL ?? 'vi', [path], {
+        stdio: 'inherit',
+      })
+      child.on('error', () => resolve())
+      child.on('close', () => resolve())
+    })
+
+  // The report floor (spec 10 §3.2-C): a feedback command opens a short
+  // conversation that leaves a draft on disk. Always wired — a stub run just
+  // skips the question and renders the draft from the log alone.
+  const reportRecall = (kind: 'bug' | 'feature'): ReportSession =>
+    startReport(
+      {
+        host,
+        home: resolved.home,
+        logDir: logRoot(),
+        facts: {
+          version: packageVersion(),
+          platform: `${process.platform} ${process.arch}`,
+          brain: { actual: claude !== null ? 'claude' : 'stub', requested: config.brain },
+          voice: { actual: resolved.voice, requested: config.voice },
+          frontEnd: { actual: host instanceof IpcHost ? 'tui' : 'plain', requested: config.frontEnd },
+        },
+        // The machine as it is right now, not as it was at boot: a listener
+        // files a report because something changed under them.
+        probes: async () => [
+          { name: 'bun', ...(await preflightBun(config.bunCmd)) },
+          { name: 'ffmpeg', ...(await preflightFfmpeg(config.ffmpegCmd)) },
+          { name: 'yt-dlp', ...(await preflightYtdlp(config.ytdlpCmd)) },
+        ],
+        // Only the plain host leaves the terminal free. The TUI client holds
+        // it in raw mode and keeps drawing, so an editor spawned into it would
+        // fight it for the screen — there, the path is the affordance.
+        openEditor:
+          host instanceof IpcHost
+            ? (path) => {
+                host.info(`open it in your editor: ${path}`)
+                return Promise.resolve()
+              }
+            : spawnEditor,
+        ...(claude !== null && { guide: claude }),
+        model: config.model,
+      },
+      kind,
+    )
+
   const director = new Director({
     persona,
     brain,
@@ -657,6 +708,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
     ...(setupRecall !== undefined && { setupRecall }),
+    // The one production wiring of the desktop opener: the Director has no
+    // default, so this is the only place a real browser can be launched from.
+    openUrl: openInBrowser,
+    reportRecall,
     onVoiceAuthFailure: () => (voiceAuthDown.current = true),
   })
   onSetupQuit = () => director.requestQuit()

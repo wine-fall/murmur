@@ -53,6 +53,9 @@ function build(steer: SteerBrain, opts: { music?: boolean } = {}) {
     player,
     memory,
     host,
+    // Injected like every other harness: the Director has no default opener,
+    // so a browser can never be launched from a test.
+    openUrl: () => {},
     settings: () => directorSettings({ recentWindow: 6 }),
     ...(opts.music !== false && {
       music: { source, cadence: new EveryNCadence(1), engine: player },

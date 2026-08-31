@@ -38,6 +38,7 @@ import type {
 } from './contracts.ts'
 import type { Host } from './host.ts'
 import { COMMANDS, type ProgramState } from './ipc.ts'
+import type { ReportSession } from './report.ts'
 import { buildMusicSituation, withLanguage } from './prompts.ts'
 import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
@@ -68,7 +69,9 @@ export function openerFor(platform: NodeJS.Platform, url: string): { command: st
   return { command: 'xdg-open', args: [url] }
 }
 
-function openInBrowser(url: string): void {
+// The desktop opener the app wires in. Exported rather than defaulted: the
+// Director must never be able to reach a real browser on its own.
+export function openInBrowser(url: string): void {
   const { command, args } = openerFor(process.platform, url)
   const child = spawn(command, args, { stdio: 'ignore', detached: true })
   child.on('error', () => {}) // a missing opener is not a crash; the printed URL stands in
@@ -113,6 +116,10 @@ export type Steer =
   | { intent: 'bug' }
   | { intent: 'feature' }
   | { intent: 'talkback'; text: string }
+  // A line the report floor took (§3.2-C): steerFromLine never returns this —
+  // takeSteer does, for a line it handed to a flow that owns the keyboard. The
+  // loop it came from just keeps going.
+  | { intent: 'consumed' }
 
 export function steerFromLine(line: string): Steer {
   const trimmed = line.trim()
@@ -192,9 +199,17 @@ export type DirectorDeps = {
   // loop inside this call — the engine keeps playing — and the loop resumes
   // when it returns. Absent (stub runs): /setup answers with the shell pointer.
   setupRecall?: () => Promise<void>
-  // How /bug and /feature-request reach a browser (spec 10 §3.2-C). Injected
-  // so tests can watch it; absent = the platform opener.
-  openUrl?: (url: string) => void
+  // How /bug and /feature-request reach a browser (spec 10 §3.2-C). Required,
+  // with no fallback behind it: every construction site must say which opener
+  // it means, because a spawned browser is invisible from in here — spawn's
+  // error is swallowed, so a wrong default would fail silently. The type is
+  // the guard.
+  openUrl: (url: string) => void
+  // The report floor (§3.2-C): a feedback command opens a short conversation
+  // that leaves a draft on disk. UNLIKE setupRecall this is never awaited — the
+  // program keeps going while it runs, and the Director only routes the
+  // keyboard to it. Absent: the commands fall back to the browser form.
+  reportRecall?: (kind: 'bug' | 'feature') => ReportSession
   // An auth-shaped voice failure, raised so the app can mark the endpoint as
   // failing — detectGaps then treats the configured endpoint as a gap (#97).
   onVoiceAuthFailure?: () => void
@@ -293,7 +308,7 @@ export class Director {
   private openIssueForm(kind: 'bug' | 'feature'): void {
     const url = FORM_URL[kind]
     try {
-      ;(this.deps.openUrl ?? openInBrowser)(url)
+      this.deps.openUrl(url)
     } catch {
       // silent: the info line below is the fallback
     }
@@ -307,6 +322,11 @@ export class Director {
   private beginQuit(): void {
     if (!this.quit) this.deps.host.info('going off the air...', 'flow')
     this.quit = true
+    // A report waiting on a prompt has nobody left to answer it: end it here
+    // rather than leave its read — and whatever the model still holds open —
+    // pending behind a listener who has gone.
+    this.report?.cancel()
+    this.report = null
   }
 
   async run(maxSegments?: number): Promise<void> {
@@ -377,7 +397,37 @@ export class Director {
     this.deps.pacing?.sensor.noteInput(this.now)
     this.readActivity()
     this.restate()
-    return steerFromLine(line)
+    const steer = steerFromLine(line)
+    // While a report is being written every line is its material: there is no
+    // way to tell a bug description from talk-back, so the floor that asked
+    // for the words gets them. /quit is the one exception — a listener must
+    // always be able to leave.
+    if (this.report !== null && steer.intent !== 'quit') {
+      this.report.deliver(line)
+      return { intent: 'consumed' }
+    }
+    return steer
+  }
+
+  // The open report floor (§3.2-C), or null when the radio has the keyboard.
+  private report: ReportSession | null = null
+
+  // A feedback command. The floor runs ALONGSIDE the program — nothing here is
+  // awaited — because writing a report changes nothing about the run; only the
+  // keyboard changes hands. Single-flight: a second /bug while one is open is
+  // already that report's material and never reaches this.
+  private openReport(kind: 'bug' | 'feature'): void {
+    const start = this.deps.reportRecall
+    if (start === undefined) {
+      this.openIssueForm(kind)
+      return
+    }
+    const session = start(kind)
+    this.report = session
+    void session.done.then(
+      () => (this.report = null),
+      () => (this.report = null),
+    )
   }
 
   // Commands are commands, not conversation: they must never wait out a
@@ -407,7 +457,10 @@ export class Director {
         return null
       }
       const intent = steerFromLine(winner.line).intent
-      if (intent === 'talkback') return work // queued for the on-air race
+      // A talkback line waits for the on-air race — unless a report holds the
+      // keyboard, in which case it is a sentence of the description and has no
+      // business sitting behind a synth.
+      if (intent === 'talkback' && this.report === null) return work // queued for the on-air race
       const steer = this.takeSteer()
       if (steer.intent === 'quit') {
         this.beginQuit()
@@ -419,9 +472,10 @@ export class Director {
         continue
       }
       if (steer.intent === 'bug' || steer.intent === 'feature') {
-        this.openIssueForm(steer.intent)
+        this.openReport(steer.intent)
         continue
       }
+      if (steer.intent === 'consumed') continue
       if (this.deps.host.showSettings !== undefined) this.deps.host.showSettings()
       else this.deps.host.info('settings live in settings.json under the murmur home.')
     }
@@ -883,11 +937,19 @@ export class Director {
       () => true,
       () => false,
     )
-    const line = this.deps.host.peekLine().then(() => false)
-    const finished = await Promise.race([slept, line])
-    if (finished) return
-    ac.abort()
-    await this.runVoice(null, undefined, this.takeSteer())
+    while (true) {
+      const line = this.deps.host.peekLine().then(() => false)
+      const finished = await Promise.race([slept, line])
+      if (finished) return
+      const steer = this.takeSteer()
+      // A line the report floor ate is not a reason to cut the gap short:
+      // writing out a bug description must not make the radio talk more often.
+      // The gap keeps running and the same sleep is re-raced.
+      if (steer.intent === 'consumed') continue
+      ac.abort()
+      await this.runVoice(null, undefined, steer)
+      return
+    }
   }
 
   // The single steer-arbitration loop (spec 01 §3.3 + 03-02 §3.5): races the
@@ -969,7 +1031,11 @@ export class Director {
           continue
         }
         if (steer.intent === 'bug' || steer.intent === 'feature') {
-          this.openIssueForm(steer.intent)
+          this.openReport(steer.intent)
+          steer = null
+          continue
+        }
+        if (steer.intent === 'consumed') {
           steer = null
           continue
         }
@@ -1052,9 +1118,10 @@ export class Director {
       }
       if (merged.intent === 'bug' || merged.intent === 'feature') {
         // Same rule: a command mid-compose does not become part of the turn.
-        this.openIssueForm(merged.intent)
+        this.openReport(merged.intent)
         continue
       }
+      if (merged.intent === 'consumed') continue
       texts.push(merged.text)
       this.deps.host.onUserLine(merged.text)
       this.deps.memory.record({ role: 'user', text: merged.text })
