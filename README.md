@@ -65,6 +65,9 @@ What remains is acceptance **by ear** — pacing over a real day, onboarding in
 a real terminal, how the steering feels — plus a few engineering debts. The
 live tracker is [`specs/STATUS.md`](specs/STATUS.md).
 
+Where it goes next — the five lines of work this round, in order — is
+[`ROADMAP.md`](ROADMAP.md).
+
 ## Requirements
 
 - Node.js ≥ 24 and **pnpm** (`corepack enable pnpm`, or `brew install pnpm`)

@@ -3,13 +3,15 @@
 _The single source of truth for "what are we building right now." Read it at
 the start of any build task. Update it when the focus moves; date-stamp it._
 
+_Direction and ordering live in [`ROADMAP.md`](../ROADMAP.md); this card is
+only the current focus._
+
 _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-25 (index synced against GitHub; the per-spec build
-history that used to sit under **Where we are** now lives where it belongs —
-each spec's own status header, and git)_
+_Last updated: 2026-08-31 (direction split out into ROADMAP.md; the #145
+input-drop bug moved there as roadmap line 0 and its issue closed)_
 
 ## Where we are
 
@@ -35,7 +37,6 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
 - **#81** (by-ear) A real day of pacing — spec 07 §5.16.
 - **#83** (watch) Enter during an uncommitted IME composition may submit the line.
-- **#145** (bug, eng) The first line a listener types in a session is silently dropped.
 - **#98** (eng) Steer tool-choice eval (Ollama) owed — the smoke is on-demand only; spec 11 §5.
 - **#102** (enhancement, eng) The voice guide's live policy check burns ~6 consent rounds before degrading.
 - **#104** (eng) DESIGN.md still claims fully-local / two hops / Claude-brain — stale vs what shipped.
