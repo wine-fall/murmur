@@ -43,6 +43,9 @@ function build(
     host,
     settings: () => knobs,
     music: { source, cadence: new EveryNCadence(1), engine: player },
+    // Injected like every other harness: the Director has no default opener,
+    // so a browser can never be launched from a test.
+    openUrl: () => {},
     ...rest,
   }
   return { deps, knobs, brain, voice, player, host, source, memory, director: new Director(deps) }

@@ -18,6 +18,9 @@ import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } f
 
 function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
   const { gapSeconds = 0, ...rest } = over
+  // Never the desktop's own opener: every harness injects one, so no test can
+  // reach a real browser by forgetting to.
+  const opened: string[] = []
   const brain = new FakeBrain()
   const voice = new FakeVoice()
   const player = new FakePlayer()
@@ -32,9 +35,10 @@ function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
     memory,
     host,
     settings: () => knobs,
+    openUrl: (url) => void opened.push(url),
     ...rest,
   })
-  return { brain, voice, player, host, memory, knobs, director }
+  return { brain, voice, player, host, memory, knobs, opened, director }
 }
 
 describe('steerFromLine', () => {
@@ -54,6 +58,42 @@ describe('steerFromLine', () => {
 // spec 10 §3.2-C: the feedback commands are the listener's way out to GitHub.
 // They open the prefilled issue form in a browser and ALWAYS print the URL, so
 // a headless box (or a dead opener) still leaves something to click.
+// A report floor the test drives by hand: it never finishes on its own, which
+// is what makes "the radio kept playing" a real assertion.
+function withReport(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
+  const started: string[] = []
+  const lines: string[] = []
+  let finish!: () => void
+  const done = new Promise<void>((resolve) => (finish = resolve))
+  const report = {
+    started,
+    lines,
+    cancels: 0,
+    finish: (): void => finish(),
+  }
+  const harness = setup({
+    ...over,
+    reportRecall: (kind) => {
+      started.push(kind)
+      return {
+        deliver: (line: string) => void lines.push(line),
+        cancel: () => {
+          report.cancels++
+          finish()
+        },
+        done,
+      }
+    },
+  })
+  return { ...harness, report }
+}
+
+// The report floor REPLACES the browser form: with one wired, a feedback
+// command must never reach the desktop. Every report test ends on this.
+function expectNoBrowser(opened: string[]): void {
+  expect(opened).toEqual([])
+}
+
 describe('Director — /bug and /feature-request', () => {
   const openings = (): { urls: string[]; open: (url: string) => void } => {
     const urls: string[] = []
@@ -99,6 +139,133 @@ describe('Director — /bug and /feature-request', () => {
       command: 'cmd',
       args: ['/c', 'start', '', BUG_FORM_URL],
     })
+  })
+
+  it('hands the whole flow to the report floor when one is wired', async () => {
+    const { brain, host, director, report, opened } = withReport({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    expect(report.started).toEqual(['bug'])
+    expectNoBrowser(opened)
+    report.finish()
+    host.type('/quit')
+    await run
+  })
+
+  // The whole reason report is its own floor and not a second guide: the setup
+  // guide parks the program because it is reconfiguring it, and a report
+  // changes nothing about the run. The radio must not go quiet while the
+  // listener types out what went wrong.
+  it('keeps the radio on the air for the whole report', async () => {
+    // A real gap, so the program is genuinely mid-run when /bug lands rather
+    // than already finished.
+    const { brain, host, player, director, report, opened } = withReport({ gapSeconds: 0.02 })
+    brain.batches = [['first'], ['second'], ['third']]
+    const run = director.run(3)
+    await until(() => host.radio.length >= 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    const airedSoFar = player.played.length
+    // Nothing resolves the report: the program has to keep going underneath it.
+    await until(() => host.radio.length >= 3, 'the program kept going under the report')
+    // Written AND spoken — the segments are reaching the player, not just the
+    // transcript. A silent radio would pass the line count alone.
+    expect(player.played.length).toBeGreaterThan(airedSoFar)
+    expectNoBrowser(opened)
+    report.finish()
+    await run
+  })
+
+  it('every typed line is the report\'s while it holds the floor', async () => {
+    const { brain, host, director, report, opened } = withReport({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b'], ['c']]
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    host.type('the voice died mid-song')
+    await until(() => report.lines.length === 1, 'the line reached the report')
+    expect(report.lines).toEqual(['the voice died mid-song'])
+    // Not a turn: no reply composed, nothing echoed as the listener talking.
+    expect(brain.respondCalls).toEqual([])
+    expect(host.user).toEqual([])
+    expectNoBrowser(opened)
+    report.finish()
+    host.type('/quit')
+    await run
+  })
+
+  it('gives the keyboard back once the report is done', async () => {
+    const { brain, host, director, report, opened } = withReport({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b'], ['c']]
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    report.finish()
+    // A macrotask, so the Director's own then-handler has cleared the floor
+    // before the next line is typed.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    host.type('are you still there')
+    await until(() => brain.respondCalls.length === 1, 'a reply, not report material')
+    expect(report.lines).toEqual([])
+    expectNoBrowser(opened)
+    host.type('/quit')
+    await run
+  })
+
+  // Typing out a bug description must not make the radio talk MORE: a line the
+  // report ate is not a reason to cut the inter-segment gap short.
+  it('a line the report ate does not shorten the gap', async () => {
+    const { brain, host, director, report, opened } = withReport({ gapSeconds: 0.4 })
+    brain.batches = [['a'], ['b'], ['c']]
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    // Into the NEXT gap, then type: an aborted gap would put the following
+    // segment on the air almost immediately.
+    await until(() => host.radio.length === 2, 'the second segment')
+    const typedAt = Date.now()
+    host.type('it went quiet')
+    await until(() => report.lines.length === 1, 'the line reached the report')
+    await until(() => host.radio.length === 3, 'the third segment')
+    expect(Date.now() - typedAt).toBeGreaterThanOrEqual(300)
+    expectNoBrowser(opened)
+    report.finish()
+    host.type('/quit')
+    await run
+  })
+
+  it('/quit cancels the open report on its way out', async () => {
+    // A budget the run does not reach, so /quit is what ends it.
+    const { brain, host, director, report } = withReport({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b'], ['c']]
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    host.type('/quit')
+    await run
+    // Left running, a report waiting on a read (or on the model) would hold
+    // work open behind a listener who has already left.
+    expect(report.cancels).toBe(1)
+  })
+
+  it('/quit leaves even with a report open — it is the one line the floor does not eat', async () => {
+    const { brain, host, director, report, opened } = withReport({ gapSeconds: 3 })
+    brain.batches = [['a'], ['b']]
+    const run = director.run(2)
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/bug')
+    await until(() => report.started.length === 1, 'the report floor opened')
+    host.type('/quit')
+    await run
+    expect(report.lines).toEqual([])
+    expectNoBrowser(opened)
   })
 
   it('still prints the URL when the opener fails (no browser on the box)', async () => {

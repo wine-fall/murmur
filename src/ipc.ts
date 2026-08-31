@@ -22,8 +22,8 @@ export const PROTOCOL = 2
 export const COMMANDS = [
   { name: '/settings', blurb: 'open the settings pane' },
   { name: '/setup', blurb: 'call the setup guide' },
-  { name: '/bug', blurb: 'report a bug on GitHub' },
-  { name: '/feature-request', blurb: 'ask for a feature on GitHub' },
+  { name: '/bug', blurb: 'write up a bug, log attached' },
+  { name: '/feature-request', blurb: 'write up something you wish it did' },
   { name: '/quit', blurb: 'end the broadcast' },
 ] as const
 
@@ -133,9 +133,9 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     // Seconds since murmur last heard anything, so the pet can acknowledge the
     // absence (spec 10 §3.7.3). Absent = no history to go on (a first run).
     away: z.number().optional(),
-    // Who holds the floor right now (§3.4): an attach mid-setup opens on the
-    // guide's face. Absent = radio (additive).
-    mode: z.enum(['radio', 'guide']).optional(),
+    // Who holds the floor right now (§3.4): an attach mid-setup or mid-report
+    // opens on that flow's face. Absent = radio (additive).
+    mode: z.enum(['radio', 'guide', 'report']).optional(),
   }),
   z.object({ v, type: z.literal('segment'), text: z.string() }),
   z.object({ v, type: z.literal('userLine'), text: z.string() }),
@@ -162,7 +162,7 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
   // the client paints the switch — strip, identity line, input. Stateful, not
   // replayed: the host resends the current mode on every attach.
-  z.object({ v, type: z.literal('mode'), who: z.enum(['radio', 'guide']) }),
+  z.object({ v, type: z.literal('mode'), who: z.enum(['radio', 'guide', 'report']) }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
   // after every settingsSet — the pane always renders truth, never local

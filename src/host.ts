@@ -40,9 +40,9 @@ export interface Host {
   // seam — or an engine with no flow registered — treats Esc as noise.
   onInterrupt?(handler: (() => void) | null): void
   // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
-  // the radio, or a foreground agent session (the setup guide). A front-end
-  // with a face paints the switch; the plain host reads fine without one —
-  // its transcript is serial anyway.
+  // the radio, the setup guide, or a report being written. A front-end with a
+  // face paints the switch; the plain host reads fine without one — its
+  // transcript is serial anyway.
   setMode?(who: FloorMode): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
@@ -64,9 +64,15 @@ export interface Host {
 // one line either way.
 export type AskKind = 'question' | 'consent'
 
-// At most one foreground agent session at a time (the boundary rule): 'guide'
-// while the setup guide holds the floor, 'radio' otherwise.
-export type FloorMode = 'radio' | 'guide'
+// Who the keyboard is talking to. 'guide' while the setup guide holds the
+// floor, 'report' while the listener is writing up a bug or a wish, 'radio'
+// otherwise.
+//
+// The boundary rule — at most one foreground agent session at a time — governs
+// the guide, which suspends the program to reconfigure it. 'report' is the
+// exception it allows: writing a report changes nothing about the run, so the
+// program keeps going underneath and only the keyboard changes hands.
+export type FloorMode = 'radio' | 'guide' | 'report'
 
 export type InfoTone = 'flow'
 
@@ -165,7 +171,7 @@ export class CliHost implements Host {
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}   v${packageVersion()}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
-    console.log('│ something broken or missing? /bug or /feature-request opens the form.')
+    console.log('│ something broken or missing? /bug or /feature-request writes it up.')
     console.log('└──────────────────────────────────────────────────────────────')
   }
 
