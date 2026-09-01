@@ -25,15 +25,21 @@ import {
 } from './brain.ts'
 import type { GuideCapable, GuideSession, LedgerKind } from './contracts.ts'
 import { ask, type Host } from './host.ts'
+import { expandUser } from './paths.ts'
 import { HostedVoice } from './hosted-voice.ts'
-import { buildSetupPrompt, GUIDE_PERSONA } from './prompts.ts'
+import { buildSetupPrompt, GUIDE_PERSONA, VISIT_PERSONA } from './prompts.ts'
 import {
   preflightBun,
   preflightMusic,
   preflightYtdlpFreshness,
   type PreflightResult,
 } from './startup.ts'
-import { type VoiceConfig, VOICE_PROBE_LINE, writeVoiceConfigTool } from './voice-config.ts'
+import {
+  createVoiceTool,
+  type VoiceConfig,
+  VOICE_PROBE_LINE,
+  writeVoiceConfigTool,
+} from './voice-config.ts'
 
 // Repair is judgment-heavy and occasional; the token cost amortizes (spec
 // 03-03 §3). Not a config knob until someone needs one.
@@ -296,6 +302,10 @@ export type SetupTargets = {
   // The saved config behind that URL, re-read the same way: what the run wires
   // its voice from once the conversation is over (issue #96).
   readonly voiceConfig: () => VoiceConfig | null
+  // The endpoint the run is speaking through (env and flags layered over the
+  // file), for the tools that must reach the LIVE one rather than the saved
+  // one. Optional: a bare target has only its file.
+  readonly effectiveVoice?: () => VoiceConfig | null
 }
 
 export type SetupProbes = {
@@ -512,9 +522,15 @@ export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
       host.info("not now, then — I'll offer again next boot; `murmur --setup` any time.")
       return outcomeFrom(targets, gaps)
     }
-    if (gaps.length === 0) {
-      // An explicit entry (make setup, the /setup recall) deserves an answer;
-      // the boot path stays quiet on a clean machine.
+    // The boot path stays quiet on a clean machine. An explicit entry (make
+    // setup, the /setup recall) is the listener walking in on purpose, and
+    // usually to CHANGE something that already works — the timbre most of all,
+    // which the guide itself tells them they can settle later. Answering that
+    // with one line and a closed door is the door this whole surface exists to
+    // open, so the conversation runs; there is simply nothing broken in it.
+    // A run that wants no voice at all has no tool to offer and nothing to
+    // change, so it keeps the one-line answer.
+    if (gaps.length === 0 && !(explicit && targets.wantsVoice)) {
       if (explicit) host.info('everything checks out — nothing to fix.')
       return outcomeFrom(targets, gaps)
     }
@@ -561,31 +577,37 @@ async function runSetupFlow(
   // Probe detail (the raw reason) is diagnostics, not card copy: the guide
   // gets it via its prompt, the dev log keeps it for humans.
   for (const gap of gaps) host.debug?.(`gap ${gap.kind}: ${gap.reason}`)
-  ask(host, setupOfferText(targets, gaps, explicit), 'consent')
+  // Nothing to fix and the listener came here themselves: the y would be a
+  // consent to repairs that do not exist. Opening the conversation IS the
+  // answer to `/setup` on a healthy machine.
+  if (gaps.length > 0) {
+    ask(host, setupOfferText(targets, gaps, explicit), 'consent')
 
-  const answer = await read()
-  if (!isYes(answer)) {
-    // Leaving is not answering (codex review): a /quit mid-offer must not
-    // become a standing decline that silences every later boot. An Esc lands
-    // in the "not now" branch below — the same non-answer a bare Enter is.
-    if (quit.requested) return outcomeFrom(targets, gaps)
-    // Only the boot-time offer records the standing answer — and only for an
-    // EXPLICIT no. Enter reads as the default-confirm to half the world, and
-    // an unrecognized answer is "not now", never "never again". Backing out
-    // of an explicit `make setup` is not "stop asking me" either.
-    if (!explicit && isNo(answer)) {
-      run.ledger?.recordEvent('setup', SETUP_DECLINED)
-      host.info("no problem — I won't ask again. `murmur --setup` reopens this any time.")
-    } else if (explicit) {
-      host.info('skipped setup.')
-    } else {
-      host.info("not now, then — I'll offer again next boot; `murmur --setup` any time.")
+    const answer = await read()
+    if (!isYes(answer)) {
+      // Leaving is not answering (codex review): a /quit mid-offer must not
+      // become a standing decline that silences every later boot. An Esc lands
+      // in the "not now" branch below — the same non-answer a bare Enter is.
+      if (quit.requested) return outcomeFrom(targets, gaps)
+      // Only the boot-time offer records the standing answer — and only for an
+      // EXPLICIT no. Enter reads as the default-confirm to half the world, and
+      // an unrecognized answer is "not now", never "never again". Backing out
+      // of an explicit `make setup` is not "stop asking me" either.
+      if (!explicit && isNo(answer)) {
+        run.ledger?.recordEvent('setup', SETUP_DECLINED)
+        host.info("no problem — I won't ask again. `murmur --setup` reopens this any time.")
+      } else if (explicit) {
+        host.info('skipped setup.')
+      } else {
+        host.info("not now, then — I'll offer again next boot; `murmur --setup` any time.")
+      }
+      return outcomeFrom(targets, gaps)
     }
-    return outcomeFrom(targets, gaps)
   }
 
-  // The y is taken: the setup guide holds the floor until the conversation
-  // ends — the front-end paints the boundary (spec 10 §3.4 face change).
+  // The floor is taken — by the y, or by an explicit entry with nothing to
+  // repair, where walking in WAS the consent. The setup guide holds it until
+  // the conversation ends; the front-end paints the boundary (spec 10 §3.4).
   flow.consented = true
   host.setMode?.('guide')
   // The first turn starts working immediately — the gap report is already on
@@ -595,8 +617,13 @@ async function runSetupFlow(
 
   // Tool uses whose OUTPUT must not be echoed (and thereby dev-logged).
   const secretUses = new Set<string>()
-  const wantsVoice = gaps.some((gap) => gap.kind === 'voice')
-  const tools = wantsVoice
+  // The voice tools ride the TARGET, not the gap. A listener who reopens setup
+  // is usually there to change something that already works — above all the
+  // timbre, which the guide itself invites them to pick later — and gating on
+  // "the endpoint is missing" left that invitation with no way to be taken up.
+  // They stay closure-scoped to one config path either way, so a session that
+  // has nothing to fix simply never calls them.
+  const tools = targets.wantsVoice
     ? [
         writeVoiceConfigTool({
           home: targets.home,
@@ -627,6 +654,21 @@ async function runSetupFlow(
           // The URL is public knowledge; the key is not. Print only this.
           onWritten: (config) => host.info(`voice endpoint saved: ${config.ttsUrl}`),
         }),
+        // The listener's own recording, cloned into a hosted voice. It reads
+        // the key from the config the tool above wrote, so the guide can
+        // finish the whole voice setup — timbre included — with the
+        // credential never entering the conversation.
+        createVoiceTool({
+          home: targets.home,
+          endpoint: () => targets.effectiveVoice?.() ?? targets.voiceConfig(),
+          expandPath: expandUser,
+          armAbort: () => {
+            const since = flow.escEpoch
+            return () => flow.escEpoch > since || quit.requested
+          },
+          onCreated: ({ referenceId, title }) =>
+            host.info(`voice created and pinned: ${title} (${referenceId})`),
+        }),
       ]
     : []
 
@@ -635,7 +677,9 @@ async function runSetupFlow(
   // the radio still launches (spec 03-03): absorb, say so once, re-probe.
   try {
     await guide.runGuide({
-    systemPrompt: GUIDE_PERSONA,
+    // Nothing to repair means nothing was authorized: the visit persona asks
+    // before it touches anything, where the repair persona is pre-authorized.
+    systemPrompt: gaps.length === 0 ? VISIT_PERSONA : GUIDE_PERSONA,
     prompt: buildSetupPrompt({
       gaps,
       ytdlp: targets.ytdlp,

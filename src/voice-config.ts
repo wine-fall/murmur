@@ -23,13 +23,15 @@
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   readFileSync,
   realpathSync,
   renameSync,
+  type Stats,
   writeFileSync,
 } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
@@ -222,6 +224,219 @@ export function writeVoiceConfigTool(deps: WriteVoiceConfigDeps): TaskTool {
       deps.onWritten?.(config)
       // The FACT of a key, never the key: this payload goes back to the model.
       return reply({ ok: true, path: target, keySaved: config.apiKey !== undefined })
+    },
+  )
+}
+
+// --- cloning a timbre from the listener's own recording -------------------- //
+
+// The fields the hosted create-model call requires, and the ones it answers
+// with. Probed against the live API (2026-09-01) rather than taken from a doc
+// page: `type` and `train_mode` are single-value constants there, and `fast`
+// is the mode whose model is usable the moment it is created.
+const MODEL_TYPE = 'tts'
+const TRAIN_MODE = 'fast'
+
+// What the listener can hand over as a recording. A closed list, not a check
+// for "not a config": the model picks this path out of what the listener typed,
+// and an upload sends whatever it names to a third party — so the failure to
+// design against is a credential file reaching fish.audio, not a wrong codec.
+const AUDIO_SUFFIX = /\.(wav|mp3|m4a|aac|flac|ogg|opus|webm)$/i
+
+// Long enough for any voice sample, short enough that a mistyped path pointing
+// at a video or an archive is refused before it is streamed anywhere.
+const MAX_AUDIO_BYTES = 50 * 1024 * 1024
+
+// How long an upload may run before it is cut loose, and how often the poll-
+// shaped abort watch is bridged onto the request's signal. Generous: the
+// recording is the listener's and the link is theirs, but not unbounded.
+const UPLOAD_TIMEOUT_MS = 120_000
+const ABORT_POLL_MS = 200
+
+const CreatedModelSchema = z.object({ _id: z.string().trim().min(1) })
+
+export type CreateVoiceDeps = {
+  // The murmur home: the one file this may repoint.
+  home: string
+  // The endpoint the RUN is actually speaking through — env and flags layered
+  // over voice.json, which is the order everything else resolves in. Absent
+  // falls back to the file, which is all a bare tool has. Without this a
+  // listener whose endpoint comes from .env (no voice.json at all) is told
+  // there is no endpoint while the radio is talking through one.
+  endpoint?: () => VoiceConfig | null
+  // Expand a listener-typed path (`~/Downloads/me.m4a`). The model is asked to
+  // pass the path along exactly as it was given, so the tilde arrives literal.
+  expandPath?: (path: string) => string
+  // Injected so the upload is testable without a network — and so the ONE
+  // place the key is attached to a request stays visible in this module.
+  fetchImpl?: typeof fetch
+  // Same per-call abort watch as write_voice_config: an Esc mid-upload must
+  // stop the listener's recording from leaving the machine.
+  armAbort?: () => () => boolean
+  // Fired after the new voice is pinned on disk. Receives the id and title —
+  // both public, unlike the config the other tool hands its callback.
+  onCreated?: (voice: { referenceId: string; title: string }) => void
+}
+
+// The second murmur-owned tool of the setup conversation. Like
+// write_voice_config it owns the secret channel: the model names a local file
+// and a title, and the KEY is read from the config this side of the boundary,
+// attached to the upload, and never returned — so the guide can finish the
+// whole voice setup, recording included, without a credential ever entering
+// the transcript (spec 03-03 §7.2).
+export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
+  return tool(
+    'create_voice',
+    'Create a hosted voice from a LOCAL audio file the user recorded or has on ' +
+      'disk, and pin murmur to it. Use this when the user wants their own voice ' +
+      '(or any recording of theirs) instead of one from the provider library — ' +
+      'you do not need their API key, this tool already has it. The endpoint ' +
+      'must be configured first (write_voice_config). Give the path exactly as ' +
+      'the user gave it to you.',
+    {
+      audioPath: z.string().describe('path to the local audio file the user named'),
+      title: z.string().describe('a short name for the new voice, for the provider library'),
+      text: z
+        .string()
+        .optional()
+        .describe('what is said in the recording, if the user told you — improves the clone'),
+    },
+    async (args) => {
+      const aborted = deps.armAbort?.() ?? (() => false)
+      const target = resolveVoiceConfigTarget(deps.home)
+      const saved = target === null ? null : readVoiceConfig(target)
+      const config = deps.endpoint?.() ?? saved
+      if (target === null || config === null) {
+        return reply({
+          ok: false,
+          error: 'no voice endpoint is configured yet — call write_voice_config first',
+        })
+      }
+      if (config.apiKey === undefined) {
+        return reply({
+          ok: false,
+          error:
+            'this endpoint has no API key saved, and creating a hosted voice needs one. A ' +
+            'self-hosted server clones voices its own way, not through this tool.',
+        })
+      }
+      const path = (deps.expandPath ?? ((given: string) => given))(args.audioPath.trim())
+      if (!AUDIO_SUFFIX.test(path)) {
+        return reply({
+          ok: false,
+          error:
+            'that is not an audio file. Upload sends the file to the provider, so this tool ' +
+            'takes only a recording (wav, mp3, m4a, aac, flac, ogg, opus, webm) — ask the ' +
+            'user for the path to their audio.',
+        })
+      }
+      // The suffix is what the file is CALLED. lstat is what it is: a link
+      // named sample.wav can point at voice.json, and this tool — exempt from
+      // the guard that refuses credential paths, because it owns the secret
+      // channel — would then upload the key to a third party itself. It also
+      // settles the size before a byte is read: a mistyped path at a video
+      // must be turned away, not allocated whole into a boot it is repairing.
+      let stat: Stats
+      try {
+        stat = lstatSync(path)
+      } catch {
+        return reply({ ok: false, error: `no file at ${path} — ask the user to check the path` })
+      }
+      if (stat.isSymbolicLink() || !stat.isFile()) {
+        return reply({
+          ok: false,
+          error: `${path} is not a regular file — give the path to the recording itself`,
+        })
+      }
+      if (stat.size === 0 || stat.size > MAX_AUDIO_BYTES) {
+        return reply({
+          ok: false,
+          error: `${path} is ${String(stat.size)} bytes, which is not a voice sample`,
+        })
+      }
+      let audio: Buffer
+      try {
+        audio = readFileSync(path)
+      } catch {
+        return reply({ ok: false, error: `${path} could not be read` })
+      }
+      // The listener's recording is about to leave their machine: a cut that
+      // landed since this call began stops it here, before the upload.
+      if (aborted()) return reply({ ok: false, error: 'the user stopped the setup' })
+
+      const key = config.apiKey
+      const scrub = (text: string): string => text.replaceAll(key, '<key>')
+      const body = new FormData()
+      body.set('type', MODEL_TYPE)
+      body.set('train_mode', TRAIN_MODE)
+      body.set('title', args.title)
+      body.set('voices', new Blob([new Uint8Array(audio)]), basename(path))
+      // The provider pairs each sample with its transcript; without one it
+      // trains on the audio alone, which is the shape when the user did not say.
+      if (args.text !== undefined && args.text.trim() !== '') body.set('texts', args.text.trim())
+
+      // Esc has to reach the REQUEST, not just the gaps around it: the upload
+      // can run for as long as the recording takes, and the abort watch is a
+      // poll, so it is bridged onto a signal for the duration. The timeout is
+      // the other half — a provider that never answers must not hold the
+      // setup (and the boot behind it) open forever.
+      const controller = new AbortController()
+      const watch = setInterval(() => {
+        if (aborted()) controller.abort()
+      }, ABORT_POLL_MS)
+      const expiry = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS)
+      let created: unknown
+      try {
+        const response = await (deps.fetchImpl ?? fetch)(
+          new URL('/model', config.ttsUrl).toString(),
+          {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${key}` },
+            body,
+            signal: controller.signal,
+          },
+        )
+        if (!response.ok) {
+          const detail = await response.text().catch(() => '')
+          return reply({
+            ok: false,
+            error: scrub(
+              `the provider refused the upload (${String(response.status)}): ${detail.slice(0, 300)}`,
+            ),
+          })
+        }
+        created = await response.json()
+      } catch (err) {
+        if (aborted()) return reply({ ok: false, error: 'the user stopped the setup' })
+        return reply({
+          ok: false,
+          error: scrub(`the upload did not go through: ${err instanceof Error ? err.message : String(err)}`),
+        })
+      } finally {
+        clearInterval(watch)
+        clearTimeout(expiry)
+      }
+      // A cut that landed while the request was in flight: the voice may exist
+      // at the provider, but the listener said stop, so nothing is pinned here.
+      if (aborted()) return reply({ ok: false, error: 'the user stopped the setup' })
+      const parsed = CreatedModelSchema.safeParse(created)
+      if (!parsed.success) {
+        return reply({ ok: false, error: 'the provider answered without a voice id' })
+      }
+      const referenceId = parsed.data._id
+      try {
+        writeVoiceConfig(target, { ...(saved ?? config), referenceId })
+      } catch (err) {
+        return reply({
+          ok: false,
+          error: scrub(
+            `the voice was created (${referenceId}) but pinning it failed: ` +
+              `${err instanceof Error ? err.message : String(err)}`,
+          ),
+        })
+      }
+      deps.onCreated?.({ referenceId, title: args.title })
+      return reply({ ok: true, referenceId, title: args.title })
     },
   )
 }

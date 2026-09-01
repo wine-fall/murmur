@@ -342,6 +342,21 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     // The file as written, for the run to wire itself from: a hosted endpoint
     // is a key and a model header too, not a URL alone (issue #96).
     voiceConfig: saved,
+    // The endpoint the run is actually SPEAKING through — the same layering
+    // parseCli did (voice.json < env < flags), collapsed back into one config.
+    // A tool that uploads to the endpoint has to reach this one, not the file:
+    // a .env-configured listener has no voice.json at all.
+    effectiveVoice: (): VoiceConfig | null => {
+      const file = saved()
+      if (config.ttsUrl === '') return file
+      return {
+        ttsUrl: config.ttsUrl,
+        ...(config.ttsModel !== '' && { model: config.ttsModel }),
+        ...(config.ttsReferenceId !== '' && { referenceId: config.ttsReferenceId }),
+        ...(config.ttsApiKey !== '' && { apiKey: config.ttsApiKey }),
+        ...(config.ttsSeed !== undefined && { seed: config.ttsSeed }),
+      }
+    },
     ...over,
   }
 }
@@ -360,12 +375,17 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
 // and the `model` header on every call (issue #96), so the knobs travel
 // together or the freshly configured voice cannot speak.
 export function voiceAfterSetup(config: Config, saved: VoiceConfig | null): Config {
-  if (saved === null || config.ttsUrl !== '') return config
-  // The endpoint is a fact about the world, so the fresh one is always taken —
-  // per knob, still behind whatever env or a flag already stated.
+  if (saved === null) return config
+  // Per knob, never all-or-nothing: "did this run boot with an endpoint" is a
+  // different question from "did the conversation change anything". A listener
+  // whose URL came from .env and who then created a voice of their own has
+  // changed exactly one knob, and gating on the URL kept them on the old
+  // timbre until the next boot — while setup said it had worked. Each knob the
+  // run did not already state is taken from the file; each one it did state
+  // stands (voice.json < env < flags).
   const next: Config = {
     ...config,
-    ttsUrl: saved.ttsUrl,
+    ...(config.ttsUrl === '' && { ttsUrl: saved.ttsUrl }),
     ...(config.ttsModel === '' && saved.model !== undefined && { ttsModel: saved.model }),
     ...(config.ttsReferenceId === '' &&
       saved.referenceId !== undefined && { ttsReferenceId: saved.referenceId }),

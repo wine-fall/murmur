@@ -5,6 +5,7 @@ import {
   realpathSync,
   statSync,
   symlinkSync,
+  truncateSync,
   writeFileSync,
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -14,6 +15,7 @@ import { describe, expect, it } from 'vitest'
 
 import { voiceConfigPath } from '../src/paths.ts'
 import {
+  createVoiceTool,
   readVoiceConfig,
   resolveVoiceConfigTarget,
   type VoiceConfig,
@@ -397,5 +399,255 @@ describe('write_voice_config tool (spec 03-03 §7.2)', () => {
     })
     await call(tool, { ttsUrl: 'https://bad.example' })
     expect(readVoiceConfig(join(dir, 'voice.json'))?.ttsUrl).toBe('https://good.example')
+  })
+})
+
+// --- create_voice (cloning a timbre from the listener's own recording) ------ //
+
+type CloneReply = { ok: boolean; error?: string; referenceId?: string; title?: string }
+type CloneArgs = { audioPath: string; title: string; text?: string }
+
+async function callClone(
+  tool: ReturnType<typeof createVoiceTool>,
+  args: CloneArgs,
+): Promise<{ reply: CloneReply; text: string }> {
+  const result = await tool.handler(args, {})
+  const block = result.content[0]
+  if (block === undefined || block.type !== 'text') throw new Error('tool returned no text')
+  return { reply: JSON.parse(block.text) as CloneReply, text: block.text }
+}
+
+// A configured endpoint with a key, as write_voice_config would have left it.
+function configured(dir: string, apiKey = 'sk-secret-value'): string {
+  const path = join(dir, 'voice.json')
+  writeVoiceConfig(path, { ttsUrl: 'https://api.fish.audio', model: 's2.1-pro-free', apiKey })
+  return path
+}
+
+function wav(dir: string, name = 'me.wav'): string {
+  const path = join(dir, name)
+  writeFileSync(path, Buffer.from('RIFF....WAVEfmt '))
+  return path
+}
+
+describe('create_voice tool (the guide clones a timbre for the listener)', () => {
+  it('uploads the file and pins the new voice, all without the model seeing the key', async () => {
+    const dir = home()
+    configured(dir)
+    const audio = wav(dir)
+    const sent: { url: string; auth: string | null; fields: string[] }[] = []
+    const tool = createVoiceTool({
+      home: dir,
+      fetchImpl: async (url, init) => {
+        const body = init?.body as FormData
+        sent.push({
+          url: String(url),
+          auth: new Headers(init?.headers).get('authorization'),
+          fields: [...body.keys()].sort(),
+        })
+        return new Response(JSON.stringify({ _id: 'abc123', state: 'trained' }), { status: 201 })
+      },
+    })
+    const { reply, text } = await callClone(tool, { audioPath: audio, title: 'my own voice' })
+    expect(reply.ok).toBe(true)
+    expect(reply.referenceId).toBe('abc123')
+    // The endpoint's own required fields (probed against the live API).
+    expect(sent[0]!.url).toBe('https://api.fish.audio/model')
+    expect(sent[0]!.fields).toEqual(['title', 'train_mode', 'type', 'voices'])
+    expect(sent[0]!.auth).toBe('Bearer sk-secret-value')
+    // The key travels tool -> endpoint and NEVER back into the conversation.
+    expect(text).not.toContain('sk-secret-value')
+    // The point of the whole call: the timbre is now pinned on disk.
+    expect(readVoiceConfig(join(dir, 'voice.json'))?.referenceId).toBe('abc123')
+  })
+
+  it('refuses a path that is not an audio file — a config is not a recording', async () => {
+    // The model chooses this path from what the listener typed. Handed
+    // voice.json or a .env it would upload the credential itself to a third
+    // party, which is the one thing the out-of-band capture exists to prevent.
+    const dir = home()
+    const secret = configured(dir)
+    let calls = 0
+    const tool = createVoiceTool({
+      home: dir,
+      fetchImpl: async () => {
+        calls++
+        return new Response('{}', { status: 201 })
+      },
+    })
+    for (const path of [secret, join(dir, '.env'), join(dir, 'notes.txt')]) {
+      writeFileSync(path, 'x', { flag: 'a' })
+      const { reply } = await callClone(tool, { audioPath: path, title: 'nope' })
+      expect(reply.ok).toBe(false)
+    }
+    expect(calls).toBe(0)
+  })
+
+  it('expands a ~ path, because that is how people write where their files are', async () => {
+    const dir = home()
+    configured(dir)
+    const audio = wav(dir, 'tilde.wav')
+    let uploaded = false
+    const tool = createVoiceTool({
+      home: dir,
+      expandPath: (path) => path.replace('~', dir),
+      fetchImpl: async () => {
+        uploaded = true
+        return new Response(JSON.stringify({ _id: 'ok-id' }), { status: 201 })
+      },
+    })
+    const { reply } = await callClone(tool, { audioPath: '~/tilde.wav', title: 'mine' })
+    expect(audio).toContain('tilde.wav')
+    expect(uploaded).toBe(true)
+    expect(reply.ok).toBe(true)
+  })
+
+  it('uploads to the endpoint the RUN is using, not just the one on disk', async () => {
+    // Precedence is voice.json < env < flags. A listener whose endpoint comes
+    // from .env has no voice.json at all — reading only the file would tell
+    // them no endpoint is configured while the radio is speaking through one.
+    const dir = home()
+    const seen: string[] = []
+    const tool = createVoiceTool({
+      home: dir,
+      endpoint: () => ({ ttsUrl: 'https://from-env.example', apiKey: 'env-key' }),
+      fetchImpl: async (url, init) => {
+        seen.push(`${String(url)} ${new Headers(init?.headers).get('authorization') ?? ''}`)
+        return new Response(JSON.stringify({ _id: 'env-id' }), { status: 201 })
+      },
+    })
+    const { reply } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(reply.ok).toBe(true)
+    expect(seen[0]).toBe('https://from-env.example/model Bearer env-key')
+    // The new voice still lands in the one file murmur may write.
+    expect(readVoiceConfig(join(dir, 'voice.json'))?.referenceId).toBe('env-id')
+  })
+
+  it('refuses a symlink, however audio-shaped its name is', async () => {
+    // The suffix is the model's word for what the file IS; a link is someone
+    // else's word. /tmp/sample.wav pointing at voice.json passes every name
+    // check and uploads the credential itself — and murmur's own tools are
+    // exempt from the generic secret guard, so this is the only place it can
+    // be caught.
+    const dir = home()
+    const secret = configured(dir)
+    const decoy = join(dir, 'sample.wav')
+    symlinkSync(secret, decoy)
+    let calls = 0
+    const tool = createVoiceTool({
+      home: dir,
+      fetchImpl: async () => {
+        calls++
+        return new Response('{}', { status: 201 })
+      },
+    })
+    const { reply } = await callClone(tool, { audioPath: decoy, title: 'nope' })
+    expect(reply.ok).toBe(false)
+    expect(calls).toBe(0)
+  })
+
+  it('refuses an oversize file without reading it into memory first', async () => {
+    // A mistyped path at a video (or an archive) must be turned away on its
+    // size, not after allocating it — a synchronous read of gigabytes freezes
+    // the boot it is supposed to be repairing, Esc included.
+    const dir = home()
+    configured(dir)
+    const big = join(dir, 'huge.wav')
+    writeFileSync(big, '')
+    truncateSync(big, 64 * 1024 * 1024)
+    const tool = createVoiceTool({ home: dir, fetchImpl: async () => new Response('{}') })
+    const { reply } = await callClone(tool, { audioPath: big, title: 'mine' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/large|size|bytes/i)
+  })
+
+  it('carries an abort signal, and pins nothing when the upload is cut', async () => {
+    // Esc after the request is in flight has to reach the request itself: the
+    // listener is stopping their own recording from being sent.
+    const dir = home()
+    configured(dir)
+    let cut = false
+    const seen: (AbortSignal | null | undefined)[] = []
+    const tool = createVoiceTool({
+      home: dir,
+      armAbort: () => () => cut,
+      fetchImpl: async (_url, init) => {
+        seen.push(init?.signal)
+        cut = true // the listener hits Esc while the upload is running
+        return new Response(JSON.stringify({ _id: 'late-id' }), { status: 201 })
+      },
+    })
+    const { reply } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(seen[0]).toBeInstanceOf(AbortSignal)
+    expect(reply.ok).toBe(false)
+    expect(readVoiceConfig(join(dir, 'voice.json'))?.referenceId).toBeUndefined()
+  })
+
+  it('says what to do first when no endpoint is configured yet', async () => {
+    const dir = home()
+    const audio = wav(dir)
+    const tool = createVoiceTool({ home: dir, fetchImpl: async () => new Response('{}') })
+    const { reply } = await callClone(tool, { audioPath: audio, title: 'mine' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/endpoint/i)
+  })
+
+  it('needs a key: a keyless endpoint cannot create a hosted voice', async () => {
+    const dir = home()
+    writeVoiceConfig(join(dir, 'voice.json'), { ttsUrl: 'https://self.hosted' })
+    const tool = createVoiceTool({ home: dir, fetchImpl: async () => new Response('{}') })
+    const { reply } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/key/i)
+  })
+
+  it('scrubs the key out of an endpoint error before it reaches the conversation', async () => {
+    const dir = home()
+    configured(dir, 'sk-leaky-key')
+    const tool = createVoiceTool({
+      home: dir,
+      fetchImpl: async () =>
+        new Response('bad token: sk-leaky-key', { status: 401, statusText: 'Unauthorized' }),
+    })
+    const { reply, text } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(reply.ok).toBe(false)
+    expect(text).not.toContain('sk-leaky-key')
+    expect(reply.error).toContain('401')
+    // A failed upload must not repoint the voice at nothing.
+    expect(readVoiceConfig(join(dir, 'voice.json'))?.referenceId).toBeUndefined()
+  })
+
+  it('carries the transcript when the listener gave one, and drops it when they did not', async () => {
+    const dir = home()
+    configured(dir)
+    const fields: string[][] = []
+    const tool = createVoiceTool({
+      home: dir,
+      fetchImpl: async (_url, init) => {
+        fields.push([...new FormData(), ...(init!.body as FormData)].map(([k]) => k).sort())
+        return new Response(JSON.stringify({ _id: 'id-1' }), { status: 201 })
+      },
+    })
+    await callClone(tool, { audioPath: wav(dir), title: 'mine', text: 'what I said' })
+    await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(fields[0]).toContain('texts')
+    expect(fields[1]).not.toContain('texts')
+  })
+
+  it('stops on the listener\'s esc instead of uploading their recording', async () => {
+    const dir = home()
+    configured(dir)
+    let calls = 0
+    const tool = createVoiceTool({
+      home: dir,
+      armAbort: () => () => true,
+      fetchImpl: async () => {
+        calls++
+        return new Response('{}', { status: 201 })
+      },
+    })
+    const { reply } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
+    expect(reply.ok).toBe(false)
+    expect(calls).toBe(0)
   })
 })

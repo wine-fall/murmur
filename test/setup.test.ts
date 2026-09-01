@@ -433,7 +433,25 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(uvAt).toBeGreaterThan(brewAt)
   })
 
-  it('hands the voice gap the write_voice_config tool, and only then', async () => {
+  it('offers the voice tools to a listener whose endpoint already works', async () => {
+    // The reason someone reopens setup is usually to CHANGE something that is
+    // already working — most of all the timbre, which the guide itself tells
+    // them they can pick later. Gating the tools on a voice GAP meant that
+    // path led to a guide with no way to act on it.
+    const { host } = fakeHost(['y'])
+    const { guide, requests } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, voiceUrl: () => 'https://tts.example' }),
+      ledger: fakeLedger(),
+      probes,
+      explicit: true,
+    })
+    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice'])
+  })
+
+  it('hands the voice gap both voice tools, and a music-only gap neither', async () => {
     const { host } = fakeHost(['y'])
     const { guide, requests } = fakeGuide()
     await runSetup({
@@ -443,7 +461,10 @@ describe('runSetup — the once-per-boot offer', () => {
       ledger: fakeLedger(),
       probes,
     })
-    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config'])
+    // The endpoint, and the listener's own recording turned into a voice on
+    // it (spec 03-03 §7.2): the pair is what lets one pasted key finish the
+    // whole voice setup without the key ever entering the conversation.
+    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice'])
 
     const music = fakeGuide()
     const { host: host2 } = fakeHost(['y'])
