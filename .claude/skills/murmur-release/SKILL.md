@@ -63,8 +63,33 @@ git log v0.1.2..main --oneline | cat
 
 **murmur is pre-1.0**, so the practical rule today is: features and fixes both
 go to **patch** (0.1.2 → 0.1.3) unless the release changes how an existing
-install behaves, which earns the minor. State the bump and the reason in one
-sentence before doing anything else.
+install behaves, which earns the minor.
+
+That "unless" is a judgement call, not a reading — it can override the commit
+type its author chose, which is exactly what happened when `chore(log)` (a
+default daily log an install had never written before) turned 0.1.3 into 0.2.0.
+
+### Stop here and get the number confirmed
+
+**The version number is the user's call. Propose it, wait for an explicit yes,
+and do not touch `package.json` until you have one** — this is a clarify-gate
+stop, the "material, hard-to-reverse fork" exception in `CLAUDE.md`'s
+decide-then-summarize rule. Everything downstream is named after this number:
+once the tag is pushed and the Release is up, changing it means deleting both
+and landing a version *decrease* on `main`.
+
+Put in the proposal, in this order:
+
+1. the bump and the number — `0.1.2 → 0.2.0 (minor)`;
+2. the commit-type count it rests on — e.g. "9 `feat`, 1 `fix`, rest meta";
+3. **if the number came from the "unless" clause, say so and name the commit** —
+   the user is being asked to ratify a judgement call, so give them the thing
+   being judged, not just the verdict;
+4. the alternative you did not pick, so a "no" has somewhere to land.
+
+A silent `sed` on `package.json` followed by "I picked minor because…" is the
+failure this gate exists to prevent: by then the branch, the commit and the PR
+all carry the number, and the user is arguing against sunk work.
 
 ## 1. The release PR
 
