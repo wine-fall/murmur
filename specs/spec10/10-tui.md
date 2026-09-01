@@ -865,6 +865,22 @@ contract (no framework until a second agent exists):
   actually taken from the queue is echoed, and a read that resolved through
   some other arm of its race (EOF, Esc, the quit fast-forward) echoes nothing,
   because there is no line behind it to put in the listener's mouth.
+- **Reading back through the log (2026-09-01, user report).** Until now
+  nothing could scroll it: mouse reporting is never armed (master §3.6 rules
+  out mouse dashboards, and not arming it is also the cheapest way not to leak
+  escape codes into the shell on a bad exit), the client runs on the alternate
+  screen so the terminal's own scrollback is not there either, and the
+  scrollbox — permanently unfocused, since the input line owns focus — was
+  only ever sticky-scrolled to the bottom. Anything that scrolled off was gone
+  for good, which is what made a third of the frame (above) so expensive. So
+  **PageUp/PageDown** are handed to the log by hand, a screenful minus a
+  two-row overlap at a time (`pageStep`), floored at one row so the key always
+  moves. They are read before the command menu and the cards, which have no
+  use for them; the settings pane is the exception, because it has reclaimed
+  the log's rows. `ScrollBoxRenderable` already suspends its own sticky-bottom
+  under a manual scroll and re-engages at the end, so nothing yanks the
+  listener back mid-read — and **submitting a line returns to the bottom**,
+  because speaking is a decision to be where the answer will land.
 - **The busy sign (2026-09-01, user report).** A guide turn is a real model
   call — seconds, sometimes a WebFetch — and until it returns the frame does
   not move. That is the same silence the quit teardown was fixed for above,

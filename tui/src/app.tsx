@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
-import type { InputRenderable } from '@opentui/core'
+import type { InputRenderable, ScrollBoxRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
@@ -22,6 +22,8 @@ import {
   INPUT_HINTS,
   isCommand,
   outbound,
+  pageStep,
+  visibleLogRows,
   type Ask,
 } from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
@@ -59,6 +61,12 @@ import type { Wire } from './wire.ts'
 // The program log is a view, not an archive — memory (spec 05) is where the
 // program actually lives. Keep the tail a terminal can scroll through.
 const LOG_MAX = 500
+
+// The cap while the listener is paged away from the end: trimming the head
+// there would slide their place out from under them, so the log holds more
+// instead — but it still holds a BOUND, because a reader who wandered off is
+// not a licence for the buffer to grow all night.
+const LOG_HELD_MAX = LOG_MAX * 4
 
 // How fast the busy sign breathes (§3.4). Slow enough to read as breathing
 // rather than blinking, fast enough that the frame is visibly alive.
@@ -308,6 +316,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
   const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
+  // The program log, so PageUp/PageDown can scroll a box that never has focus.
+  const log = useRef<ScrollBoxRenderable>(null)
+  // True while the listener is paged away from the end of the log. The head
+  // stops being trimmed for as long as it holds, so their place cannot move
+  // under them; a wider cap still bounds the hold.
+  const heldAway = useRef(false)
   // The line being typed, mirrored for the slash-command menu (§3.2-C): a `/`
   // prefix opens the engine's commands as a small panel over the input, and an
   // exact command warms the ink. Esc hides the menu until the line changes.
@@ -346,7 +360,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   useEffect(() => {
     const append = (kind: Entry['kind'], text: string): void =>
-      setEntries((prior) => [...prior, { id: nextId.current++, kind, text }].slice(-LOG_MAX))
+      setEntries((prior) =>
+        [...prior, { id: nextId.current++, kind, text }].slice(
+          -(heldAway.current ? LOG_HELD_MAX : LOG_MAX),
+        ),
+      )
     return subscribe((message) => {
       switch (message.type) {
         case 'hello':
@@ -440,6 +458,25 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   useKeyboard((key) => {
     if (key.ctrl && key.name === 'c') return wire.line('/quit')
+    // Reading back through the program log (§3.4). The input line owns focus
+    // permanently, so the scrollbox never receives a key of its own — these
+    // two are handed to it by hand. They come FIRST: a page key means the
+    // same thing whatever else is up, and neither the command menu nor the
+    // pane has any use for them. The pane is the one exception, because it
+    // has reclaimed the rows the log was in.
+    if (!pane.current.open && (key.name === 'pageup' || key.name === 'pagedown')) {
+      const box = log.current
+      if (box === null) return
+      const { y, height } = box.viewport
+      const step = pageStep(visibleLogRows(y, height, cardTopRef.current))
+      box.scrollBy(key.name === 'pageup' ? -step : step)
+      // Held away from the end, the log stops trimming its head: dropping the
+      // oldest entry shifts everything under it up by that entry's height,
+      // and a numeric scroll position cannot see it happen — the reader would
+      // silently skip forward while standing still.
+      heldAway.current = box.scrollTop + height < box.scrollHeight - 1
+      return
+    }
     // The command menu takes the arrows while it is up (the single-line input
     // has no use for them); Enter stays with the input's own submit, which
     // reads the selection from the ref. Tab completes the highlighted command
@@ -498,6 +535,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
+    // Speaking is a decision to be at the bottom: a listener who paged up to
+    // re-read something and then answered would otherwise be left staring at
+    // the old screen while the reply they asked for lands out of sight — the
+    // scrollbox holds a manual scroll until it is returned to the end.
+    if (log.current !== null) log.current.scrollTo(log.current.scrollHeight)
+    heldAway.current = false
     const chosen = menu.current.open ? menu.current.selected : null
     retype('')
     // Enter on the open menu runs the highlighted command, not the prefix.
@@ -952,6 +995,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           </box>
         )}
         <scrollbox
+          ref={log}
           stickyScroll
           stickyStart="bottom"
           scrollbarOptions={NO_SCROLLBAR}

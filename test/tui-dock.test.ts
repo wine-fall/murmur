@@ -16,6 +16,9 @@ import {
   INPUT_HINTS,
   isCommand,
   outbound,
+  PAGE_OVERLAP,
+  pageStep,
+  visibleLogRows,
 } from '../tui/src/dock.ts'
 
 describe('outbound', () => {
@@ -188,5 +191,42 @@ describe('cardRows / cardTopRow', () => {
   it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
     expect(cardTopRow(CONSENT, 200, 50)).toBe(50 - 1 - cardRows(CONSENT, 200))
     expect(cardTopRow(CONSENT, 200, 8)).toBe(1)
+  })
+})
+
+describe('pageStep (PageUp/PageDown through the program log)', () => {
+  it('moves a screenful minus an overlap, so the eye keeps its place', () => {
+    // A full-viewport jump leaves nothing in common between the two screens
+    // and the reader has to find their line again.
+    expect(pageStep(30)).toBe(30 - PAGE_OVERLAP)
+    expect(pageStep(12)).toBe(12 - PAGE_OVERLAP)
+  })
+
+  it('never stalls in a short log — a page always moves at least one row', () => {
+    // The overlap must not eat the whole step: a key that does nothing reads
+    // as a broken key, and the log floor is only six rows to begin with.
+    for (const rows of [0, 1, 2, 3]) expect(pageStep(rows)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('visibleLogRows (an overlay hides rows without taking them)', () => {
+  it('is the whole box when nothing is floating over it', () => {
+    expect(visibleLogRows(4, 20, null)).toBe(20)
+  })
+
+  it('stops at the overlay, so a page never steps past covered rows', () => {
+    // Log occupies screen rows 4..24; a card pinned at row 18 hides 18..24.
+    expect(visibleLogRows(4, 20, 18)).toBe(14)
+  })
+
+  it('ignores an overlay that starts below the log', () => {
+    expect(visibleLogRows(4, 20, 30)).toBe(20)
+  })
+
+  it('never reports zero, even under an overlay that covers everything', () => {
+    // A step of zero rows is a key that does nothing — the failure mode the
+    // page floor exists to rule out.
+    expect(visibleLogRows(4, 20, 4)).toBe(1)
+    expect(visibleLogRows(4, 20, 1)).toBe(1)
   })
 })
