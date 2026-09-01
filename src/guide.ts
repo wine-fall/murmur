@@ -90,7 +90,10 @@ export function isNo(line: string): boolean {
 // stdin pends forever (a non-interactive run would wedge startup). So reads
 // queue one behind the other, and EOF resolves '' — which every consumer
 // already treats as decline/skip/end.
-export type ReadLine = () => Promise<string>
+// `echo: false` reads a line the log must never see: the credential the
+// voice tool captures out of band (spec 03-03 §7.2). Every other read is a
+// half of a conversation and belongs in the program log (spec 10 §3.3).
+export type ReadLine = (opts?: { echo?: boolean }) => Promise<string>
 
 // The listener's way OUT of a Q&A flow (spec 01 §3.6 extended to onboarding):
 // Ctrl-C in the TUI arrives as a typed /quit, and a consuming reader must not
@@ -143,7 +146,7 @@ export function escPulse(): EscPulse {
 export function lineReader(host: Host, quit: QuitLatch, esc?: EscPulse): ReadLine {
   const eof: Promise<string> = host.eof?.().then(() => '') ?? new Promise<string>(() => {})
   let chain: Promise<unknown> = Promise.resolve()
-  return () => {
+  return ({ echo = true } = {}) => {
     const read = chain.then(() => {
       // `settled` marks this read as already resolved through EOF or the quit
       // latch: its peekLine callback is then a stale wake-up, and taking would
@@ -154,6 +157,14 @@ export function lineReader(host: Host, quit: QuitLatch, esc?: EscPulse): ReadLin
       const take = host.peekLine().then(() => {
         if (settled) return ''
         const line = host.takeLine() ?? ''
+        // The listener's own half of a foreground conversation (spec 10 §3.3:
+        // the program log is segments + user lines + info). The front-end
+        // paints only what the engine reports, and this reader — the guide,
+        // the first-run seeds, the crash-report offer — is the one keyboard
+        // path the Director's `onUserLine` never covered. A secret read is
+        // the one exception: an echo would put the credential on the wire,
+        // in the replay backlog, and in the dev log (spec 03-03 §7.2).
+        if (echo && line !== '') host.onUserLine(line)
         if (line.trim() === QUIT) {
           quit.fire()
           return ''
@@ -211,9 +222,18 @@ export function cliConversation(
     if (flow !== undefined) flow.turnAborted = false
     host.info('setup guide is listening — reply here; /done or esc hands back to the radio:')
     if (flow !== undefined) flow.waiting = true
+    // The busy sign follows the keyboard exactly (spec 10 §3.4): dark while
+    // the prompt holds it, lit again the moment the reply is in and the model
+    // has the turn back.
+    host.setBusy?.(false)
     try {
       const line = (await read()).trim()
-      return END.has(line.toLowerCase()) ? null : line
+      // A line that ENDS the conversation starts no turn: relighting here
+      // would leave the sign burning through the SDK teardown and the closing
+      // re-probe, with nothing left to clear it.
+      if (END.has(line.toLowerCase())) return null
+      host.setBusy?.(true)
+      return line
     } finally {
       if (flow !== undefined) flow.waiting = false
     }
@@ -568,6 +588,10 @@ async function runSetupFlow(
   // ends — the front-end paints the boundary (spec 10 §3.4 face change).
   flow.consented = true
   host.setMode?.('guide')
+  // The first turn starts working immediately — the gap report is already on
+  // screen and the model is being called. Every later turn's sign is flipped
+  // by cliConversation, which is where the keyboard changes hands.
+  host.setBusy?.(true)
 
   // Tool uses whose OUTPUT must not be echoed (and thereby dev-logged).
   const secretUses = new Set<string>()
@@ -590,7 +614,15 @@ async function runSetupFlow(
           // or the session transcript the SDK keeps (spec 03-03 §7.2).
           promptSecret: async (label) => {
             ask(host, `paste your ${label} and press enter (murmur reads it directly):`, 'question')
-            return await read()
+            // This read waits on the listener leaving for a browser, creating
+            // a key and coming back — minutes, not seconds. The sign has to
+            // say the keyboard is theirs, and never echo what they paste.
+            host.setBusy?.(false)
+            try {
+              return await read({ echo: false })
+            } finally {
+              host.setBusy?.(true)
+            }
           },
           // The URL is public knowledge; the key is not. Print only this.
           onWritten: (config) => host.info(`voice endpoint saved: ${config.ttsUrl}`),
@@ -647,6 +679,9 @@ async function runSetupFlow(
   flow.done = true
   flow.session = null
   host.setMode?.('radio')
+  // The closing re-probe below is the engine's own work, not a turn the
+  // listener is waiting on a partner for: the sign goes out with the floor.
+  host.setBusy?.(false)
 
   // Leaving mid-conversation: the app is shutting down, so the gaps we knew
   // ARE the outcome — a re-probe (a live network search) and a closing verdict

@@ -123,11 +123,17 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   }
 
   let persona: string
+  // Writing the persona is a model call the listener waits on with nothing
+  // else on screen — the one place in the first run where silence reads as a
+  // hang (spec 10 §3.4).
+  host.setBusy?.(true)
   try {
     persona = (await deps.brain.seedPersona(answers, deps.language)).trim()
   } catch (err) {
     host.info(`could not write a persona from those answers (${String(err)}); using the default voice.`)
     return useBundledSeed(deps)
+  } finally {
+    host.setBusy?.(false)
   }
   // Empty or a stray one-liner is a failed generation, not a persona (§3.3).
   if (persona.length < PERSONA_MIN_CHARS) {

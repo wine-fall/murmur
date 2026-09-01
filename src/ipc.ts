@@ -164,6 +164,12 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // the client paints the switch — strip, identity line, input. Stateful, not
   // replayed: the host resends the current mode on every attach.
   z.object({ v, type: z.literal('mode'), who: z.enum(['radio', 'guide', 'report']) }),
+  // The floor-holder is working rather than waiting on the keyboard (§3.4):
+  // the client shows a live sign for as long as it is true, so a model turn
+  // that takes seconds is visibly a turn and not a freeze. Stateful like
+  // `mode`, and NOT replayed — a backlog handed to a fresh attach must never
+  // start it under a busy sign for a turn that has already ended.
+  z.object({ v, type: z.literal('busy'), on: z.boolean() }),
   z.object({ v, type: z.literal('viz'), bins: z.array(z.number()) }),
   // The settings snapshot (spec 12 §2.5): sent after `hello` on attach and
   // after every settingsSet — the pane always renders truth, never local

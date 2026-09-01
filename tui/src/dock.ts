@@ -124,3 +124,26 @@ export function isCommand(typed: string): boolean {
   const line = typed.trim()
   return COMMANDS.some((command) => command.name === line)
 }
+
+// How much of the outgoing screen a PageUp/PageDown leaves behind (§3.4). A
+// full-viewport jump shares no line with the screen it replaced, and the
+// reader has to find their place again — two rows is enough to land on.
+export const PAGE_OVERLAP = 2
+
+// One page of the program log, in rows. Floored at a single row: in a log
+// already down to its six-row floor the overlap would otherwise eat the whole
+// step, and a key that moves nothing reads as a key that is broken.
+export function pageStep(viewportRows: number): number {
+  return Math.max(1, viewportRows - PAGE_OVERLAP)
+}
+
+// How many of the log's rows the listener can actually READ. An overlay — a
+// spotlight card, the command menu — floats above the text layer and takes no
+// rows from the composition (§3.3), so the scrollbox's own height overstates
+// what is visible by however far the overlay reaches into it. Paging by the
+// full height would then step past the covered rows and they would never be
+// shown: below the fold on the way down, above it on the way back.
+export function visibleLogRows(top: number, height: number, overlayTop: number | null): number {
+  if (overlayTop === null) return height
+  return Math.max(1, Math.min(height, overlayTop - top))
+}
