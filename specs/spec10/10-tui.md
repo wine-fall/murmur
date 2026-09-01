@@ -400,7 +400,7 @@ placeholder examples and per-flow option copy, and step metadata for a real
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
 mid-broadcast recall), `/bug` and `/feature-request` (the feedback channel
-below). The engine parses
+below), `/update` (the npm check below). The engine parses
 all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
@@ -467,6 +467,34 @@ error left no trace. The label rides on the form
 (`.github/ISSUE_TEMPLATE/*.yml`), not on a `?labels=` parameter, because GitHub
 drops that parameter for a submitter without triage rights. Like `/settings`,
 neither command composes a reply or touches what is on air.
+
+**The npm check (as built)**: `/update` answers the one question an installed
+murmur cannot otherwise be asked — is there a newer one? It reads the registry's
+dist-tag document for `murmur-radio` (`fetch`, no npm process, no auth),
+compares it with `packageVersion()` by the dotted numbers, and on a newer
+version runs `npm install -g murmur-radio@latest`, narrating through `info`
+lines: already-latest, updating-from, updated-restart-to-pick-it-up, or the
+one-line command to run by hand. Every degraded path ends by handing that
+command over — an unreachable registry, a missing npm, a non-zero exit.
+
+Like the report floor it is **started and never awaited** (npm takes as long as
+it takes and the program owes the listener its air throughout), and single-flight
+(a second `/update` while one runs means "is it working", not two installs over
+each other) — but unlike it nothing changes hands: the keyboard stays with the
+radio, because a version check asks the listener nothing. `npm`'s own output is
+swallowed (`stdio: 'ignore'`): the TUI owns that terminal and a progress bar
+drawn over it would corrupt the frame.
+
+Two things it deliberately does not do. It never checks on its own at startup —
+an unasked-for network call before the first word, and a notice nobody typed for.
+And it never restarts murmur; the new version is on disk, and the running process
+keeps its own code until the listener comes back. A run that is **not** the
+global install names the newer version and stops there — the test is npm's own
+prefix rule (this code under the global root of the node running it), not a
+`node_modules/murmur-radio/` match, because a checkout, an `npx` cache and a
+project-local dependency would all fail that weaker test the same way: an
+`npm i -g` from any of them installs a murmur that process is not running.
+The logic and its boundaries live in `src/update.ts`; the Director only routes.
 
 **The attachable report (as built, renderer only)**: `src/diagnostics.ts`
 builds the text a listener pastes into that form — a header (version,

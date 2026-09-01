@@ -14,6 +14,7 @@ import {
   type DirectorDeps,
 } from '../src/director.ts'
 import { SCENES } from '../src/scene.ts'
+import { INSTALL_COMMAND } from '../src/update.ts'
 import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
 function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
@@ -52,6 +53,10 @@ describe('steerFromLine', () => {
   it('classifies the two feedback commands', () => {
     expect(steerFromLine('/bug')).toEqual({ intent: 'bug' })
     expect(steerFromLine(' /feature-request ')).toEqual({ intent: 'feature' })
+  })
+
+  it('classifies /update', () => {
+    expect(steerFromLine('/update')).toEqual({ intent: 'update' })
   })
 })
 
@@ -286,6 +291,102 @@ describe('Director — /bug and /feature-request', () => {
     await until(() => host.infos.some((m) => m.includes(BUG_FORM_URL)), 'URL printed anyway')
     host.type('/quit')
     await run
+  })
+})
+
+// spec 10 §3.2-C: /update is a command like the rest — it checks npm for a
+// newer murmur beside the program, and never becomes a turn. The check itself
+// is `src/update.ts`; what is pinned here is that the Director routes to it.
+describe('Director — /update', () => {
+  function withUpdate(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
+    const calls: number[] = []
+    let finish!: () => void
+    const done = new Promise<void>((resolve) => (finish = resolve))
+    const harness = setup({
+      ...over,
+      updateRecall: () => {
+        calls.push(Date.now())
+        return done
+      },
+    })
+    // Unbounded runs below: a segment budget could retire the loop between two
+    // typed lines and pass a routing test for the wrong reason. /quit ends them.
+    harness.brain.batches = Array.from({ length: 12 }, (_, i) => [`talk ${i + 1}`])
+    return { ...harness, update: { calls, finish: (): void => finish() } }
+  }
+
+  it('starts the check without composing a reply or echoing the line', async () => {
+    const { brain, host, director, update } = withUpdate({ gapSeconds: 3 })
+    const run = director.run()
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/update')
+    await until(() => update.calls.length === 1, 'the check started')
+    update.finish()
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([]) // a command is never a turn
+    expect(host.user).toEqual([])
+  })
+
+  // npm is slow, and the check is never awaited: the radio owes the listener
+  // its program for the whole minute an install can take.
+  it('keeps the program on the air while the check runs', async () => {
+    const { host, player, director, update } = withUpdate({ gapSeconds: 0.02 })
+    const run = director.run()
+    await until(() => host.radio.length >= 1, 'first segment')
+    host.type('/update')
+    await until(() => update.calls.length === 1, 'the check started')
+    const airedSoFar = player.played.length
+    // Nothing resolves the check: the program has to keep going underneath it.
+    await until(() => host.radio.length >= 3, 'the program kept going under the check')
+    // Written AND spoken — a silent radio would pass the line count alone.
+    expect(player.played.length).toBeGreaterThan(airedSoFar)
+    update.finish()
+    host.type('/quit')
+    await run
+  })
+
+  it('runs one check at a time — a second /update is not a second npm', async () => {
+    const { host, director, update } = withUpdate({ gapSeconds: 3 })
+    const run = director.run()
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/update')
+    await until(() => update.calls.length === 1, 'the check started')
+    host.type('/update')
+    // Long enough for the impatient second line to reach the Director at all.
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(update.calls).toHaveLength(1)
+    update.finish()
+    host.type('/quit')
+    await run
+  })
+
+  it('takes the check again once the first one has finished', async () => {
+    const { host, director, update } = withUpdate({ gapSeconds: 3 })
+    const run = director.run()
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/update')
+    await until(() => update.calls.length === 1, 'the check started')
+    update.finish()
+    // A macrotask, so the Director's own then-handler has cleared the flag
+    // before the next line is typed.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    host.type('/update')
+    await until(() => update.calls.length === 2, 'a second check')
+    host.type('/quit')
+    await run
+  })
+
+  it('hands over the command when the run has no updater wired (stub runs)', async () => {
+    const { brain, host, director } = setup({ gapSeconds: 3 })
+    brain.batches = Array.from({ length: 12 }, (_, i) => [`talk ${i + 1}`])
+    const run = director.run()
+    await until(() => host.radio.length === 1, 'first segment')
+    host.type('/update')
+    await until(() => host.infos.some((m) => m.includes(INSTALL_COMMAND)), 'the manual command')
+    host.type('/quit')
+    await run
+    expect(brain.respondCalls).toEqual([])
   })
 })
 

@@ -85,6 +85,8 @@ describe('the command grammar', () => {
     expect(names).toContain('/feature-request')
     expect(names.indexOf('/bug')).toBeLessThan(names.indexOf('/quit'))
     expect(names.indexOf('/feature-request')).toBeLessThan(names.indexOf('/quit'))
+    expect(names).toContain('/update')
+    expect(names.indexOf('/update')).toBeLessThan(names.indexOf('/quit'))
   })
 })
 
