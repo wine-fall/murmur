@@ -328,6 +328,28 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.at(-1)).toEqual({ v: 1, type: 'mode', who: 'radio' })
   })
 
+  it('sends the busy sign live, and never replays a finished turn to a late attach', async () => {
+    // The sign says "the partner is working RIGHT NOW" (spec 10 §3.4). In the
+    // replay backlog it would be a lie with no expiry: a client attaching
+    // after the turn ended would open under a sign for work that is over,
+    // with nothing coming to clear it.
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.setBusy(true)
+    await first.settle()
+    expect(first.received.at(-1)).toEqual({ v: 1, type: 'busy', on: true })
+    host.setBusy(false)
+    await first.settle()
+    expect(first.received.at(-1)).toEqual({ v: 1, type: 'busy', on: false })
+
+    host.setBusy(true)
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.filter((m) => m.type === 'busy')).toEqual([])
+  })
+
   it('feeds a submitted line into the same queue the CLI host uses', async () => {
     const c = await client()
     c.attach()

@@ -44,6 +44,14 @@ export interface Host {
   // face paints the switch; the plain host reads fine without one — its
   // transcript is serial anyway.
   setMode?(who: FloorMode): void
+  // Whether the partner holding the floor is WORKING right now, as opposed to
+  // waiting on the keyboard (spec 10 §3.4). A guide turn is a real model call
+  // — seconds, sometimes a WebFetch — and a screen that does not move through
+  // it reads as a hang, the same way the silent quit teardown did. The engine
+  // already tracks the distinction for the Esc router; this is that state on
+  // the wire. Optional: the plain host's transcript is serial, so it has
+  // nothing to animate.
+  setBusy?(on: boolean): void
   // Dev-log-only diagnostics (spec 04 §3.3 look-ahead stages): never printed
   // over the program. Optional so bare hosts stay valid.
   debug?(message: string): void

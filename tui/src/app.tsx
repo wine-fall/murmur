@@ -38,7 +38,7 @@ import {
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
-import { floorFace } from './floor.ts'
+import { busyLine, floorFace } from './floor.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
@@ -59,6 +59,10 @@ import type { Wire } from './wire.ts'
 // The program log is a view, not an archive — memory (spec 05) is where the
 // program actually lives. Keep the tail a terminal can scroll through.
 const LOG_MAX = 500
+
+// How fast the busy sign breathes (§3.4). Slow enough to read as breathing
+// rather than blinking, fast enough that the frame is visibly alive.
+const BUSY_TICK_MS = 450
 
 // The log scrolls, but wears no rail: the sky composition (§6.1) is a night
 // with nothing in it but the program. It must ride in as a PROP — the
@@ -276,6 +280,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // it — strip, identity line, input ink — so the listener always knows who is
   // listening.
   const [mode, setMode] = useState<'radio' | 'guide' | 'report'>('radio')
+  // Whether the partner holding the floor is working right now (§3.4). A model
+  // turn is seconds long and produces nothing until it is done; without a sign
+  // that the wait is a turn, the frame is indistinguishable from a hang.
+  const [busy, setBusy] = useState(false)
+  const [busyPhase, setBusyPhase] = useState(0)
   // The rail advances on this client's own clock (§3.3): the engine sends the
   // track's length and its start once, and a tick a second is all the traffic a
   // playing song costs. Nothing ticks when nothing is playing.
@@ -321,6 +330,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     count: matches.length,
     selected: matches[menuSel]?.name ?? '',
   }
+  // The busy sign's own clock. It runs only while a turn is running, so an
+  // idle radio ticks nothing — the same bargain the rail makes.
+  useEffect(() => {
+    if (!busy) return
+    const tick = setInterval(() => setBusyPhase((phase) => phase + 1), BUSY_TICK_MS)
+    return () => clearInterval(tick)
+  }, [busy])
+
   const nextId = useRef(0)
   const vizSink = useRef<((bins: number[]) => void) | null>(null)
   // The ripple's own smoother: the raster wave paints on its own clock in an
@@ -357,6 +374,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           break
         case 'mode':
           setMode(message.who)
+          // A floor that just changed hands is nobody's turn yet; the engine
+          // lights the sign again when the new partner starts working.
+          setBusy(false)
+          break
+        case 'busy':
+          setBusy(message.on)
           break
         case 'askDrop':
           // The flow behind the cards was stopped (Esc): every pending
@@ -580,11 +603,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // spotlight card takes none: it floats over the room (§3.2-B), so the sky
   // stays on stage dimmed beneath it — only the raster layers yield, and only
   // where the card's own rows reach (stagePlan / waveRowsFor via the refs).
-  const sceneShown = wide && !paneOpen
+  // A floor that yields takes the band the same way the pane does (§3.3): the
+  // setup walkthrough is paragraphs to read and act on, and the sky it would
+  // be sharing the frame with is a radio that has stopped to wait for it.
+  const sceneShown = wide && !paneOpen && floor?.yieldsBand !== true
   // How much of the station ident the wide composition can afford between the
   // scene band and the log. The figure is not in this trade — it holds the
   // scene band at every height; only the title steps down (spec 10 §3.3).
-  const ident = identSize(wide, logRows)
+  const ident = identSize(wide, logRows, floor?.yieldsBand === true)
   const sceneShownRef = useRef(sceneShown)
   sceneShownRef.current = sceneShown
   // The newest broadcast line carries the bullet (concept 04); older lines
@@ -990,6 +1016,19 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               </text>
             </box>
           ))}
+          {/* The turn in progress, at the tail of the log where the answer
+              will land — sticky scroll keeps it in view, and it disappears
+              the moment the partner speaks (§3.4). Written in the floor's own
+              ink, stepped back from it: a sign that the wait is a turn, not a
+              line in the conversation. */}
+          {busy && (
+            <box style={{ marginBottom: !wide ? 0 : 1 }}>
+              <text style={{ fg: lit(mix(floor?.ink ?? INK.notice, INK.bg, 0.3)) }}>
+                {!wide ? MARKER.info : '  '}
+                {busyLine(mode, busyPhase)}
+              </text>
+            </box>
+          )}
         </scrollbox>
         </box>
       )}

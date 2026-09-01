@@ -40,12 +40,14 @@ function fakeHost(
   asks: { text: string; kind: AskKind }[]
   interrupts: { handler: (() => void) | null }
   modes: string[]
+  busy: boolean[]
 } {
   const infos: string[] = []
   const flows: string[] = []
   const asks: { text: string; kind: AskKind }[] = []
   const interrupts: { handler: (() => void) | null } = { handler: null }
   const modes: string[] = []
+  const busy: boolean[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
@@ -59,10 +61,11 @@ function fakeHost(
     },
     onInterrupt: (handler) => void (interrupts.handler = handler),
     setMode: (who) => void modes.push(who),
+    setBusy: (on) => void busy.push(on),
     banner: () => {},
   }
   if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
-  return { host, infos, flows, asks, interrupts, modes }
+  return { host, infos, flows, asks, interrupts, modes, busy }
 }
 
 function fakeGuide(): { guide: GuideCapable; requests: GuideRequest[] } {
@@ -958,6 +961,52 @@ describe('runSetup — declining, and what a decline costs later', () => {
     expect(modes).toEqual(['guide', 'radio'])
     // The floor went back BETWEEN the conversation and the closing probe.
     expect(events).toEqual(['probe', 'mode:guide', 'mode:radio', 'probe'])
+  })
+
+  it('lights the busy sign on the accepted y, and puts it out with the floor', async () => {
+    // The longest unexplained wait in the whole product sits right here: the
+    // y is taken, the gap report is on screen, and the first model turn runs
+    // for seconds with nothing moving. The sign has to be lit BEFORE that
+    // turn, not at the first reply prompt.
+    const { host, busy } = fakeHost(['y', 'ok, signed up', '/done'])
+    // A guide that actually takes its turns: it hands the keyboard back
+    // twice — once for a reply that starts a new turn, once for the /done
+    // that ends the conversation and must NOT relight the sign.
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        await req.nextUserInput?.()
+        await req.nextUserInput?.()
+        return 'explained.'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes,
+    })
+    // Lit on the y, out while each reply prompt holds the keyboard, lit again
+    // when a reply comes back — and NOT relit by the /done that ends it, which
+    // leaves the last flip as the floor's own.
+    expect(busy).toEqual([true, false, true, false, false])
+  })
+
+  it('never leaves the sign lit when the conversation dies on it', async () => {
+    // A crashed turn that left the sign burning would be the hang the sign
+    // exists to rule out — permanently, since nothing else clears it.
+    const { host, busy } = fakeHost(['y'])
+    const guide: GuideCapable = {
+      runGuide: async () => {
+        throw new Error('Claude Code returned an error result')
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false }),
+      probes,
+    })
+    expect(busy.at(-1)).toBe(false)
   })
 
   it('Esc during the validating synth still aborts, even after a new turn reset the flow flag', async () => {

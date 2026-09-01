@@ -138,6 +138,18 @@ export interface Host {
   the seam rather than a concrete host. A re-emit on a typed line reports the
   CURRENT segment, so a reply during a song keeps `nowPlaying` on the strip
   (§5.3).
+- **`setBusy?(on: boolean)` (2026-09-01, user report).** Whether the partner
+  holding the floor is WORKING right now, as opposed to waiting on the
+  keyboard. Optional like `setMode?`, and for the same reason: the plain
+  host's transcript is serial, so it has nothing to animate. The engine
+  already tracks this distinction for the Esc router (§3.4: Esc cuts the turn
+  while the guide works, ends the conversation while it waits) — the seam only
+  publishes what `ConversationFlow.waiting` already knows. Flipped at exactly
+  three sites: the accepted `y` in `runSetup` (lit — the first model turn
+  starts immediately), `cliConversation` (dark when the reply prompt opens,
+  lit when the reply is in), and the conversation's end (out with the floor,
+  including the crash path). The first run's `seedPersona` call is the fourth,
+  and the only one outside the guide.
 - Front-end selection is config-driven (`frontEnd: 'plain' | 'tui'`, default
   `'plain'`), mirroring the provider knobs. The core never imports a concrete
   host; a `buildHost(name)` factory returns the seam.
@@ -210,6 +222,7 @@ Engine → TUI:
 | `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
 | `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |
+| `busy` | `{ on: boolean }` | the floor-holder is working rather than waiting on the keyboard (§3.4): the client shows a live sign for as long as it is true. Additive (2026-09-01) — no protocol bump. Stateful and **not replayed**, unlike `mode`, and with no `hello` field either: a sign means "right now", so a backlog handed to a later attach would open it under a sign for a turn that has already ended, with nothing coming to clear it. A turn that began with no client attached simply has no sign |
 | `viz` | `{ bins: number[] }` | one FFT frame (§3.6); highest-frequency message |
 | `bye` | `{}` | engine is shutting down |
 
@@ -774,6 +787,22 @@ retired** (2026-08-12 design session): at character resolution the scatter
 read as noise, so the night behind the wave and the figure stays empty and
 the scene's texture budget goes to the wave alone.
 
+**A yielding floor (2026-09-01, user report).** The scene:log split above is
+written for a listener watching the radio. It is the wrong split for a
+listener **reading a walkthrough**: the setup guide's turns are paragraphs of
+instructions to act on — open this page, create a key, paste it — and a third
+of the frame scrolls them away as fast as they arrive, while two thirds paint
+a sky for a radio that has stopped to wait for the conversation. So a floor
+declares whether it yields the band (`FloorFace.yieldsBand`), and the guide's
+does: under it the band steps off and the log takes the whole frame, exactly
+the trade the settings pane already makes — a mode the listener opened is
+their own full attention. The **report floor does not**: it only borrowed the
+keyboard, the radio is still playing behind it, and the sky still has
+something to say. The narrow composition is unaffected (it has no band to
+yield), and nothing about the floor's ink, strip, identity, or placeholder
+changes — this is one more column in the same one mapping (§3.4), not a
+second switch to keep in sync.
+
 **As built (2026-08-06, issue #95): the pet is optional.** `MURMUR_TUI_PET=0`
 (also `off` / `false` / `no`) drops the creature from the alive band, and the
 gutter that separated it from the bars goes with it — the spectrum spans the
@@ -825,6 +854,28 @@ contract (no framework until a second agent exists):
   guide goes idle listening; while the guide **waits** it ends the
   conversation exactly like a typed `/done` (the Esc-Esc exit), with the
   normal closing re-probe and verdict. Only `/quit` kills the session.
+- **The listener's own half is in the log (2026-09-01, user report).** A
+  foreground conversation reads as a conversation only if both halves are in
+  it. The client never echoes its own keystrokes — the program log is painted
+  from what the ENGINE reports (§3.3: segments + user lines + info) — and
+  `onUserLine` was wired on the Director's path alone, so every line typed to
+  the guide, to the first-run seeds, or to the crash-report offer vanished at
+  the moment it was submitted. The echo belongs in `lineReader` (`src/guide.ts`),
+  the one keyboard path all three share, not at each caller: a line that was
+  actually taken from the queue is echoed, and a read that resolved through
+  some other arm of its race (EOF, Esc, the quit fast-forward) echoes nothing,
+  because there is no line behind it to put in the listener's mouth.
+- **The busy sign (2026-09-01, user report).** A guide turn is a real model
+  call — seconds, sometimes a WebFetch — and until it returns the frame does
+  not move. That is the same silence the quit teardown was fixed for above,
+  and it reads the same way: as a hang. So for as long as the floor-holder is
+  working, the log's tail carries a live sign naming the partner being waited
+  on (`the setup guide is thinking ···`), breathing on the client's own clock
+  and cleared by the next thing the partner says. A breathing ellipsis, not a
+  spinner: this is a night-time radio, and a machine-shop spinner would be the
+  loudest thing on the screen. The engine already knows which side of the turn
+  it is on (the Esc router's `waiting`); `setBusy` (§2.1) is that state on the
+  wire, and the sign is the one place the client renders it.
 - **No idle timeout.** A waiting guide waits — the exit affordance is
   written on the reply prompt and the placeholder; nothing switches the
   partner automatically.

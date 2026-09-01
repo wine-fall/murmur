@@ -17,21 +17,30 @@ import type { AskKind, Host } from '../src/host.ts'
 function fakeHost(
   lines: string[] = [],
   { atEof = false, docked = false } = {},
-): { host: Host; infos: string[]; asks: { text: string; kind: AskKind }[] } {
+): {
+  host: Host
+  infos: string[]
+  asks: { text: string; kind: AskKind }[]
+  echoed: string[]
+  busy: boolean[]
+} {
   const infos: string[] = []
   const asks: { text: string; kind: AskKind }[] = []
+  const echoed: string[] = []
+  const busy: boolean[] = []
   const host: Host = {
     start: () => {},
     peekLine: () => (lines.length > 0 ? Promise.resolve(lines[0]!) : new Promise(() => {})),
     takeLine: () => lines.shift(),
     eof: () => (atEof ? Promise.resolve() : new Promise(() => {})),
     onRadioSegment: () => {},
-    onUserLine: () => {},
+    onUserLine: (text) => void echoed.push(text),
     info: (m) => void infos.push(m),
     banner: () => {},
+    setBusy: (on) => void busy.push(on),
   }
   if (docked) host.ask = (text, kind) => void asks.push({ text, kind })
-  return { host, infos, asks }
+  return { host, infos, asks, echoed, busy }
 }
 
 const askOptions = {
@@ -74,6 +83,39 @@ describe('lineReader (codex-review regressions)', () => {
     const read = lineReader(host, quitLatch(), esc)
     lines.push('a real answer')
     expect(await read()).toBe('a real answer')
+  })
+
+  it('echoes the line it took, so a foreground conversation reads like one', async () => {
+    // The front-end paints the program log from what the ENGINE reports
+    // (spec 10 §3.3: segments + user lines + info) — the client never echoes
+    // its own keystrokes. onUserLine was wired on the Director's path only, so
+    // every answer typed to the guide or the first-run seeds vanished as it
+    // was submitted: the user's own half of the conversation was invisible.
+    const { host, echoed } = fakeHost(['fish.audio, I think'])
+    const read = lineReader(host, quitLatch())
+    expect(await read()).toBe('fish.audio, I think')
+    expect(echoed).toEqual(['fish.audio, I think'])
+  })
+
+  it('never echoes a line read as a secret — the credential channel stays out of band', async () => {
+    // The API key is read through this same reader (the tool's promptSecret,
+    // spec 03-03 §7.2). An echo would put it on the wire as a `userLine`:
+    // into the TUI's log, into the replay backlog a later attach receives,
+    // and into the dev log — the exact places the secret channel exists to
+    // keep it out of.
+    const { host, echoed } = fakeHost(['sk-live-not-a-real-key'])
+    const read = lineReader(host, quitLatch())
+    expect(await read({ echo: false })).toBe('sk-live-not-a-real-key')
+    expect(echoed).toEqual([])
+  })
+
+  it('echoes nothing when no line was typed (EOF, esc, the quit fast-forward)', async () => {
+    // A read that resolves through some OTHER race arm has no keyboard line
+    // behind it — an echo there would put words in the listener's mouth.
+    const { host, echoed } = fakeHost([], { atEof: true })
+    const read = lineReader(host, quitLatch())
+    expect(await read()).toBe('')
+    expect(echoed).toEqual([])
   })
 
   it('serializes concurrent reads: one typed line answers exactly one ask', async () => {
@@ -240,6 +282,29 @@ describe('cliConversation', () => {
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
     expect(await next()).toBeNull()
+  })
+
+  it('hands the busy light off with the keyboard: dark while it waits, lit while it works', async () => {
+    // The guide's turns run a real model (and its WebFetch calls), which is
+    // seconds of nothing on a screen that never moves — the same silence the
+    // quit teardown was fixed for (spec 10 §3.4). The engine already knows
+    // which side of the turn it is on; this is that knowledge on the wire.
+    const { host, busy } = fakeHost(['use fish.audio'])
+    const next = cliConversation(host, lineReader(host, quitLatch()), quitLatch())
+    expect(await next()).toBe('use fish.audio')
+    // Dark when the prompt opens (the listener is typing), lit again the
+    // moment the reply is in and the guide has the turn back.
+    expect(busy).toEqual([false, true])
+  })
+
+  it('does not relight the sign on the line that ENDS the conversation', async () => {
+    // /done, an empty line, esc, EOF: no turn follows any of them, so a sign
+    // lit here would burn through the SDK teardown and the closing re-probe
+    // with nothing coming to clear it.
+    const { host, busy } = fakeHost(['/done'])
+    const next = cliConversation(host, lineReader(host, quitLatch()), quitLatch())
+    expect(await next()).toBeNull()
+    expect(busy).toEqual([false])
   })
 
   it('a fired quit latch ends the conversation without prompting for a reply', async () => {

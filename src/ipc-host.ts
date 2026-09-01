@@ -340,6 +340,14 @@ export class IpcHost implements Host {
     this.mirror('tui', `floor: ${who}`)
   }
 
+  // The busy sign (spec 10 §3.4). Straight to the client for the same reason
+  // as the floor: it is a state, and a replayed "still thinking" would strand
+  // a later attach under a sign for a turn that ended long ago. A turn that
+  // began with no client attached simply has no sign to show.
+  setBusy(on: boolean): void {
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'busy', on })
+  }
+
   onState(state: ProgramState): void {
     // The strip's words ride along with the state that earns them (§3.7.4).
     this.send({ v: 1, type: 'state', state, microcopy: statusMicrocopy(state) })

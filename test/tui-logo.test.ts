@@ -47,6 +47,27 @@ describe('identSize (the ident yields rows, the figure never does)', () => {
     }
   })
 
+  it('takes the title down with the band when the floor yields', () => {
+    // The band steps off for a foreground conversation (§3.3), which hands the
+    // log the whole frame — and by the plain row ladder that would promote the
+    // wordmark to its full six rows, planting the biggest thing on screen on
+    // top of the walkthrough the listener is trying to read. A yielding floor
+    // yields the title too.
+    expect(identSize(true, 40, true)).toBe('line')
+    expect(identSize(true, 12, true)).toBe('line')
+  })
+
+  it('still keeps ONE line under a yielding floor — nothing else is naming the station', () => {
+    // The strip and the identity line are both wearing the guide's face while
+    // it holds the floor, so the 'none' step's premise ("the status strip is
+    // already carrying the name") is false exactly here.
+    expect(identSize(true, 7, true)).not.toBe('none')
+  })
+
+  it('has no pinned ident to yield in the narrow band', () => {
+    expect(identSize(false, 40, true)).toBe('none')
+  })
+
   it('keeps the one-line form inside a narrow column', () => {
     expect(IDENT_LINE.length).toBeLessThanOrEqual(WORDMARK[0]!.length)
   })
