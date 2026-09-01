@@ -10,7 +10,7 @@ murmur is always on the air. It finds a topic and chats with you on its own, pla
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
-> Open-source and non-commercial — but **not self-contained**. Three things come off the network: the brain is a Claude session, the music streams in, and the voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio), reached over a hosted endpoint. What runs on your machine is everything murmur itself owns — program logic, keyboard I/O, memory, persona, and audio mixing. A local TTS is a noted want, not current code.
+> Open-source and non-commercial — but **not self-contained**. Three things come off the network — the brain is a Claude session, the music streams in, and the voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio), reached over a hosted endpoint — and a fourth if you hand it a listening catalogue to find songs in. What runs on your machine is everything murmur itself owns — program logic, keyboard I/O, memory, persona, and audio mixing. A local TTS is a noted want, not current code.
 
 ## Core experience
 
@@ -19,14 +19,15 @@ Three things together define its character; none is optional:
 - **🎙️ A continuous radio stream** — not "you ask, I answer," but a program stream that never goes silent. It *spontaneously* picks topics and talks, alternates talk with music, and hits time anchors (morning / midday / night) on schedule.
 - **🔀 Hybrid proactive/passive** — mostly broadcasting (no reply required; it's that voice in the background), occasionally turning to you. Engage and you chat; stay quiet and it flows on.
 - **🌱 A host that stays, a rapport that grows** — one host, not a rack of preset channels. Its character comes from a few questions on the first run and then holds still; it's a plain text file you can open and rewrite whenever you like, and nothing changes it behind your back. What does change is the part that should: what it knows about you, and how the two of you get on.
+- **🔧 A machine you can open** — the parts that decide what you hear are yours to edit, not sealed behind a menu. The rules it picks songs by are a markdown file it re-reads before every song, so a change lands mid-broadcast; every setting has a pane, and also changes if you just say so on the air. It keeps an account of itself, too: a run that dies without saying goodnight is remembered and raised the next time you tune in, and one command turns "that was wrong" into a report that writes itself, log attached, and arrives at GitHub needing only your send.
 
 ## Architecture
 
-A single Node.js (TypeScript) process. One loop drives "speaking up," a readline reader owns the keyboard; both feed the brain.
+Two processes. A Node.js (TypeScript) **engine** owns the program and the audio; a **front-end** owns the screen and the keyboard — the TUI by default, a plain-text host where there is no `bun` or when you pass `--plain`. Inside the engine one loop drives "speaking up" while your typing arrives on its own channel; both feed the brain.
 
 | Component | Responsibility |
 |---|---|
-| **CLI Host** | render "now playing" + read keyboard input (proactive + typing share the terminal) |
+| **Front-end** | render the program — now playing, the log, the pet — and read what you type; the TUI runs out-of-process over IPC, the plain host in-process |
 | **Program Director** | the soul: continuously decide what plays next (talk / music / time-anchor); modulate pacing |
 | **Brain** | Claude session (via `@anthropic-ai/claude-agent-sdk`) — generate talk scripts, respond when you type; persona + memory injected. A *harnessed agent* with murmur-owned tools, isolated from your local Claude Code environment |
 | **VoiceProvider** | text → speech; hot-swappable TTS (v1 = a hosted [fish-speech](https://github.com/fishaudio/fish-speech) endpoint) |
@@ -47,32 +48,22 @@ See [`DESIGN.md`](specs/DESIGN.md) for the full master spec and rationale.
 
 ## Status
 
-**Every code spec on the roadmap is built.** Built in ordered sub-specs under
-[`specs/`](specs/), each step adding something audible:
+**Every code spec is built** — the L0 spine, the brain harness and the ducking
+mixer, the no-dead-air look-ahead, memory, presence, the TUI front-end, the
+settings surface, and the agentic reply turn, in ordered sub-specs under
+[`specs/`](specs/).
 
-- the L0 spine — host, director, brain, typed talk-back — with the hosted
-  fish-speech voice (01, 02);
-- the brain harness, the mixing engine with ducking, and the talking setup
-  guide (03);
-- the no-dead-air look-ahead (04), persistent three-tier memory (05),
-  first-run persona seed & rapport (06), presence — time anchors, going
-  quiet when you're away (07);
-- the TUI front-end with the visualizer and pixel pet, now the default (10);
-- the agentic reply turn — ask and it switches the music, tell it you're done
-  and it wraps up the broadcast properly (11).
-
-What remains is acceptance **by ear** — pacing over a real day, onboarding in
-a real terminal, how the steering feels — plus a few engineering debts. The
-live tracker is [`specs/STATUS.md`](specs/STATUS.md).
-
-Where it goes next — the five lines of work this round, in order — is
-[`ROADMAP.md`](ROADMAP.md).
+What remains is acceptance **by ear** — pacing over a real day, onboarding in a
+real terminal, how the steering feels — plus a handful of engineering debts.
+What is being built right now is [`specs/STATUS.md`](specs/STATUS.md); where it
+goes next, in order, is [`ROADMAP.md`](ROADMAP.md).
 
 ## Requirements
 
 - Node.js ≥ 24 and **pnpm** (`corepack enable pnpm`, or `brew install pnpm`)
 - A local **Claude Code** subscription login (for the real brain) — or run `--brain stub` fully offline
 - For a real voice: a hosted [fish-speech](https://github.com/fishaudio/fish-speech) endpoint (set `MURMUR_TTS_URL` — see `make dev-fishaudio`)
+- Optional, and murmur offers to install them for you: `ffmpeg` + `yt-dlp` for music, `bun` for the TUI. Missing any of them it runs degraded rather than refusing to start
 
 ## Install & run
 
@@ -87,22 +78,22 @@ pnpm install
 # run the loop
 node src/main.ts
 
-# fully offline / no network (canned brain + silent stub voice)
-node src/main.ts --brain stub --voice stub
+# fully offline / no network (canned brain, silent voice, no music or bed)
+node src/main.ts --brain stub --voice stub --no-music --no-bed
 
 # a real voice (hosted TTS endpoint from the environment / .env)
 node src/main.ts --voice hosted
 ```
 
-**Missing pieces are fixed by talking, not by following instructions.** murmur assumes you have Claude Code, so that is the one thing it takes as given — everything else it can walk you through installing itself, asking before each change. The radio always launches: without `ffmpeg`/`yt-dlp` it runs talk-only, without `bun` it uses the plain text front-end, without a voice endpoint it shows its lines instead of speaking. On a boot with any of those gaps it names them and offers to sort them out; decline once and it stops asking. `murmur --setup` (or `--setup-music`) reopens that conversation on demand. To provision by hand instead: `brew install ffmpeg yt-dlp`. `--no-music` skips music entirely.
+**Missing pieces are fixed by talking, not by following instructions.** murmur assumes you have Claude Code, so that is the one thing it takes as given — everything else it can walk you through installing itself, asking before each change. The radio always launches: without `ffmpeg`/`yt-dlp` it runs talk-only, without `bun` it uses the plain text front-end, without a voice endpoint it shows its lines instead of speaking. On a boot with any of those gaps it names them and offers to sort them out; decline once and it stops asking. `murmur --setup` reopens that conversation on demand, and `brew install ffmpeg yt-dlp` does it the old way.
 
 **What it plays is yours to rewrite.** The rules murmur uses to choose a song live in `~/.murmur/music-policy.md`, a plain markdown file it writes on first run and re-reads before every pick — edit it mid-broadcast and it takes effect on its own, no restart. (murmur lines a song up shortly before it needs one, so an edit reaches the next song or the one after.) Say you want more Cantonese, no covers, nothing you have heard this month; delete the file to go back to the defaults. What never changes there is *how* a pick works (search, judge, commit) — that half stays in the code, so a policy can be as loose as you like without breaking the radio.
 
-Left to its own memory a model plays the same handful of famous songs forever, because the search only ever executes what it already thought of. Point murmur at a listening catalogue — `MURMUR_LISTENING_API_KEY`, and `MURMUR_LISTENING_URL` if you want a host other than the default — and the pick task gets two more tools: `similar_music`, for what real people play alongside an artist or track, and `top_tracks`, for what they actually play most by an artist, because a fresh name whose one famous single gets aired is the same habit one level down. The default host is [Last.fm](https://www.last.fm/api/account/create), whose key is free and needs no listening account; the protocol is public, so anything else that speaks it works too. Without a key murmur behaves exactly as it did before.
+Left to its own memory a model plays the same handful of famous songs forever, because a search only ever executes what it already thought of. Give it a listening catalogue — an API key in `MURMUR_LISTENING_API_KEY` — and the pick gains two tools that ask what real people actually play: around an artist or track, and *by* an artist, since airing a fresh name's one famous single is the same habit a level down. It points at [Last.fm](https://www.last.fm/api/account/create) by default, whose key is free: the protocol is public and read-only, and it never touches an account of yours (point `MURMUR_LISTENING_URL` elsewhere and anything else speaking it works). Without a key, nothing changes.
 
-Useful flags: `--max-segments N` (produce N segments then stop), `--persona PATH`, `--gap SECONDS`, `--brain {claude,stub}`, `--voice {stub,hosted}`, `--no-music`, `--no-bed`, `--cadence {every_n,random,brain}`, plus the pacing switches `--no-anchors` (drop the good-morning / midday / good-night beats) and `--no-gating` (keep talking even when you are away). Stop cleanly with `Ctrl-C`.
+Worth knowing: `--plain` (skip the TUI), `--no-music`, `--persona PATH`, `--version`, and the four-flag offline run above. The rest — pacing, cadence, segment caps, TTS overrides — are the option table at the top of `src/config.ts`. In the TUI a `/` opens the list of what it takes — settings, the setup guide, a bug, a wish, and `/quit`; the plain host takes the same commands typed in full, and `Ctrl-C` is the same goodbye.
 
-**When something goes wrong**, murmur has already written it down: every run mirrors its timeline to `~/.murmur/log/murmur-<date>.log`, one file per day, the last two weeks kept and older days swept at startup. Attach the day's file to a bug report. Point `MURMUR_DEV_LOG` somewhere else to move it, or set it to an empty string to write no log at all.
+**When something goes wrong**, murmur has already written it down: every run mirrors its timeline to `~/.murmur/log/murmur-<date>.log`, one file per day, the last two weeks kept and older days swept at startup. You rarely have to go looking — `/bug` turns what just happened into a filled-in report with that log attached and hands it over however the machine allows: onto the clipboard, into a pre-filled GitHub form, or filed through `gh` on a box with no browser. A run that dies without saying goodnight is noticed on the next boot and offered up the same way. Point `MURMUR_DEV_LOG` somewhere else to move the log, or set it to an empty string to write none.
 
 ## Development
 
