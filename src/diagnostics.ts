@@ -13,7 +13,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { DAILY_LOG } from './dev-log.ts'
+import { DAILY_LOG, type LogEvidence } from './dev-log.ts'
 
 // How much log a report carries. A module constant, not a knob: a listener
 // filing a bug should not have to decide how much evidence is enough.
@@ -43,13 +43,20 @@ export interface LogTail {
   sources: LogSource[]
 }
 
-// Walk the dated daily logs backwards until `maxLines` are collected. Missing
-// or unreadable days are skipped rather than fatal: a report with a short tail
-// still beats no report.
+// The run's own diagnostics, newest `maxLines` of them, oldest first.
 //
-// ponytail: reads a whole day's file to take its last lines. A day's log is
-// small; switch to a reverse chunked read if that ever stops being true.
-export function readLogTail(dir: string, maxLines = LOG_TAIL_LINES): LogTail {
+// Takes the SHAPE the writer chose (src/dev-log.ts): the dated daily set, or
+// the single file MURMUR_DEV_LOG names. Both are read here rather than at the
+// call sites, so the report road and the crash road cannot drift apart about
+// where evidence comes from. Missing or unreadable files are skipped rather
+// than fatal: a report with a short tail still beats no report.
+//
+// ponytail: reads a whole file to take its last lines. A day's log is small;
+// switch to a reverse chunked read if that ever stops being true.
+export function readLogTail(source: LogEvidence, maxLines = LOG_TAIL_LINES): LogTail {
+  if (source.kind === 'none') return { lines: [], sources: [] }
+  if (source.kind === 'file') return tailOf(source.path, maxLines)
+  const dir = source.dir
   let names: string[]
   try {
     names = readdirSync(dir).filter((name) => DAILY_LOG.test(name)).sort()
@@ -79,6 +86,24 @@ export function readLogTail(dir: string, maxLines = LOG_TAIL_LINES): LogTail {
   return {
     lines: picked.flatMap((p) => p.lines),
     sources: picked.map((p) => p.source),
+  }
+}
+
+// One file's last `maxLines`, in the same shape a day's contribution takes.
+function tailOf(path: string, maxLines: number): LogTail {
+  let all: string[]
+  try {
+    all = readFileSync(path, 'utf8').split('\n')
+  } catch {
+    return { lines: [], sources: [] }
+  }
+  if (all.at(-1) === '') all.pop()
+  if (all.length === 0) return { lines: [], sources: [] }
+  const take = Math.min(maxLines, all.length)
+  const from = all.length - take + 1
+  return {
+    lines: all.slice(all.length - take),
+    sources: [{ path, from, to: all.length, count: take }],
   }
 }
 

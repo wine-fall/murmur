@@ -36,7 +36,7 @@ function deps(root: string, over: Partial<ReportDeps> = {}): ReportDeps {
   return {
     host: new FakeHost(),
     home: root,
-    logDir: seedLog(root),
+    logs: { kind: 'daily', dir: seedLog(root) },
     facts: {
       version: '0.1.2',
       platform: 'darwin arm64',

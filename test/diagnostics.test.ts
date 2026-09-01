@@ -226,7 +226,7 @@ describe('readLogTail', () => {
       'murmur-2026-08-30.log': day(4, 'b'),
       'murmur-2026-08-31.log': day(3, 'c'),
     })
-    const tail = readLogTail(dir, 5)
+    const tail = readLogTail({ kind: 'daily', dir: dir }, 5)
     expect(tail.lines).toEqual(['b-3', 'b-4', 'c-1', 'c-2', 'c-3'])
     expect(tail.sources).toEqual([
       { path: join(dir, 'murmur-2026-08-30.log'), from: 3, to: 4, count: 2 },
@@ -236,7 +236,7 @@ describe('readLogTail', () => {
 
   it('returns everything there is when the logs are shorter than N', () => {
     const dir = logDir({ 'murmur-2026-08-31.log': day(2, 'c') })
-    const tail = readLogTail(dir, 500)
+    const tail = readLogTail({ kind: 'daily', dir: dir }, 500)
     expect(tail.lines).toEqual(['c-1', 'c-2'])
     expect(tail.sources).toEqual([
       { path: join(dir, 'murmur-2026-08-31.log'), from: 1, to: 2, count: 2 },
@@ -249,17 +249,55 @@ describe('readLogTail', () => {
       'murmur-2026-08-31.log': day(2, 'c'),
       'notes.txt': day(9, 'x'),
     })
-    const tail = readLogTail(dir, 500)
+    const tail = readLogTail({ kind: 'daily', dir: dir }, 500)
     expect(tail.lines).toEqual(['c-1', 'c-2'])
     expect(tail.sources.map((s) => s.path)).toEqual([join(dir, 'murmur-2026-08-31.log')])
   })
 
   it('is empty for a directory that does not exist', () => {
-    expect(readLogTail(join(tmpdir(), 'murmur-no-such-dir-1'), 500)).toEqual({ lines: [], sources: [] })
+    expect(readLogTail({ kind: 'daily', dir: join(tmpdir(), 'murmur-no-such-dir-1') }, 500)).toEqual({ lines: [], sources: [] })
   })
 
   it('defaults to the tail size the module fixes', () => {
     const dir = logDir({ 'murmur-2026-08-31.log': day(LOG_TAIL_LINES + 7, 'c') })
-    expect(readLogTail(dir).lines.length).toBe(LOG_TAIL_LINES)
+    expect(readLogTail({ kind: 'daily', dir: dir }).lines.length).toBe(LOG_TAIL_LINES)
+  })
+})
+
+// MURMUR_DEV_LOG (spec 05 §2.3) — which is exactly what `make dev` sets —
+// redirects the run's diagnostics to ONE file with no dated rotation. A report
+// written on such a run has to quote that file, or it carries no evidence at
+// all about the run being reported.
+describe('readLogTail under a single-file override', () => {
+  const oneFile = (lines: string[]): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-devlog-'))
+    const path = join(dir, 'dev.log')
+    writeFileSync(path, lines.join('\n') + '\n')
+    return path
+  }
+
+  it('takes the tail of the named file', () => {
+    const path = oneFile(day(10, 'x'))
+    const tail = readLogTail({ kind: 'file', path }, 3)
+    expect(tail.lines).toEqual(['x-8', 'x-9', 'x-10'])
+    expect(tail.sources).toEqual([{ path, from: 8, to: 10, count: 3 }])
+  })
+
+  it('takes all of it when the file is shorter than N', () => {
+    const path = oneFile(day(2, 'x'))
+    const tail = readLogTail({ kind: 'file', path }, 500)
+    expect(tail.lines).toEqual(['x-1', 'x-2'])
+    expect(tail.sources).toEqual([{ path, from: 1, to: 2, count: 2 }])
+  })
+
+  it('is an honest empty window when the file is not there', () => {
+    // A run that has not written a line yet, or a path the listener typed
+    // wrong: a thin report, never a thrown one.
+    const tail = readLogTail({ kind: 'file', path: join(tmpdir(), 'murmur-nope', 'dev.log') }, 5)
+    expect(tail).toEqual({ lines: [], sources: [] })
+  })
+
+  it('reads nothing when the run keeps no log at all', () => {
+    expect(readLogTail({ kind: 'none' }, 5)).toEqual({ lines: [], sources: [] })
   })
 })

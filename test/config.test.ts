@@ -202,6 +202,28 @@ describe('dev log config', () => {
 
 // spec 05 §2.3: memory lives under dataRoot()/memory, relocatable with
 // MURMUR_HOME; compaction runs on the cheap tier.
+// The report and the crash road both read log evidence; both must be told
+// which SHAPE it takes, and the config boundary is where that is decided once.
+describe('log evidence config', () => {
+  it('is the dated set by default, under the resolved home', () => {
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
+    expect(config.logEvidence).toEqual({ kind: 'daily', dir: '/tmp/mh/log' })
+  })
+
+  it('is the single file MURMUR_DEV_LOG names', () => {
+    // What `make dev` sets: the run's diagnostics go to one undated file, and
+    // a report of that run has to quote it.
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh', MURMUR_DEV_LOG: '.dev/dev.log' })
+    expect(config.logEvidence).toEqual({ kind: 'file', path: '.dev/dev.log' })
+    expect(config.devLog).toBe('.dev/dev.log')
+  })
+
+  it('is nothing when the run is asked to keep no log', () => {
+    const { config } = parseCli([], { MURMUR_DEV_LOG: '' })
+    expect(config.logEvidence).toEqual({ kind: 'none' })
+  })
+})
+
 describe('memory config', () => {
   it('defaults memoryDir under the (relocatable) data root', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })

@@ -31,6 +31,7 @@ import {
   type GhDraft,
   type GhStatus,
 } from './deliver.ts'
+import type { LogEvidence } from './dev-log.ts'
 import { escPulse, isYes } from './guide.ts'
 import { ask, LineQueue, type Host } from './host.ts'
 import { REPORT_PROMPT, reportSystemPrompt } from './prompts.ts'
@@ -128,8 +129,10 @@ export interface ReportDeps {
   host: Host
   // The one murmur home, already resolved at the config boundary.
   home: string
-  // Where the dated daily logs live — the evidence half of the report.
-  logDir: string
+  // Where this run's own diagnostics are, in whatever shape the log writer
+  // chose (src/dev-log.ts). Not a directory: an overridden log is one file, and
+  // a report that assumed the dated set would quote another run or nothing.
+  logs: LogEvidence
   facts: ReportFacts
   // Borrowed for the opening question (spec 03-03 §2's capability, not a new
   // abstraction). Absent — a stub run, or no key — skips straight to the draft.
@@ -207,7 +210,7 @@ export function startReport(
       if (dropped) return void host.info('dropped it — nothing kept.', 'flow')
       const dir = reportsDir(deps.home)
       prepareReports(dir, now())
-      const tail = given?.tail ?? readLogTail(deps.logDir)
+      const tail = given?.tail ?? readLogTail(deps.logs)
       const input = {
         ...deps.facts,
         probes: (await deps.probes?.()) ?? [],

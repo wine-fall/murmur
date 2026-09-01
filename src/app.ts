@@ -43,7 +43,7 @@ import { HostedVoice } from './hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './ipc-host.ts'
 import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
-import { logRoot, sentinelRoot } from './paths.ts'
+import { sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './report.ts'
@@ -470,7 +470,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     const uncleanExit = uncleanExitNotice(crashed)
     if (uncleanExit !== null) host.info(uncleanExit)
   }
-  const disarm = armSentinel(sentinelDir)
+  const disarm = armSentinel(sentinelDir, config.logEvidence)
   // Disarming is deliberate, never a `finally`: a run that throws its way out
   // is exactly the crash the next boot has to notice, so only the paths that
   // END the broadcast on purpose put the sentinel down. It is idempotent, so
@@ -685,7 +685,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const reportDeps: ReportDeps = {
     host,
     home: resolved.home,
-    logDir: logRoot(),
+    logs: config.logEvidence,
     facts: {
       version: packageVersion(),
       platform: `${process.platform} ${process.arch}`,
@@ -737,7 +737,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // read through the same reader the onboarding flows use, so a /quit leaves.
   if (crashed.length > 0 && claude !== null && !quit.requested) {
     const found = crashed[crashed.length - 1]!
-    const window = readCrashWindow(logRoot(), found, bootedAt)
+    // The dead run's own source when it recorded one; this boot's only as the
+    // fallback for a sentinel written before that field existed.
+    const window = readCrashWindow(found.logs ?? config.logEvidence, found, bootedAt)
     // Idempotent, and the only thing that attaches the plain host's readline:
     // a boot whose onboarding had nothing to ask has never started it, and the
     // question below would wait on a keyboard nobody is reading.

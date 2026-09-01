@@ -37,20 +37,25 @@ function leave(dir: string, pid: number, startedAt: string): string {
 const dead = (): boolean => false
 const alive = (): boolean => true
 
+const DAILY_SOURCE = { kind: 'daily', dir: '/tmp/murmur-home/log' } as const
+
 describe('armSentinel', () => {
   it('writes one file per instance, naming the pid and when it started', () => {
     const dir = join(runDir(), 'nested')
-    armSentinel(dir, 4321, NOW)
+    armSentinel(dir, DAILY_SOURCE, 4321, NOW)
     const path = join(dir, 'session-4321.json')
     expect(JSON.parse(readFileSync(path, 'utf8'))).toEqual({
       pid: 4321,
       startedAt: '2026-08-31T10:00:00.000Z',
+      // Where this run is writing, so the boot that reads the record back
+      // looks where the dead run actually logged.
+      logs: DAILY_SOURCE,
     })
   })
 
   it('disarms by removing its own file, and does not mind being called twice', () => {
     const dir = runDir()
-    const disarm = armSentinel(dir, 4321, NOW)
+    const disarm = armSentinel(dir, DAILY_SOURCE, 4321, NOW)
     disarm()
     disarm()
     expect(existsSync(join(dir, 'session-4321.json'))).toBe(false)
@@ -59,7 +64,7 @@ describe('armSentinel', () => {
   it('leaves the sentinel of another instance alone when it disarms', () => {
     const dir = runDir()
     leave(dir, 999, NOW.toISOString())
-    armSentinel(dir, 4321, NOW)()
+    armSentinel(dir, DAILY_SOURCE, 4321, NOW)()
     expect(readdirSync(dir)).toEqual(['session-999.json'])
   })
 })
@@ -194,7 +199,7 @@ describe('escalatingSigint force press', () => {
 
   it('runs the teardown of the phase before it forces the process out', () => {
     const dir = runDir()
-    const disarm = armSentinel(dir, 4321, NOW)
+    const disarm = armSentinel(dir, DAILY_SOURCE, 4321, NOW)
     const off = escalatingSigint(bareHost(), () => {}, disarm)
     const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never)
     try {
@@ -258,7 +263,7 @@ describe('readCrashWindow', () => {
 
   it('takes the window of the run that died, not the tail of the log', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY)
-    const window = readCrashWindow(dir, crash, thisBoot)
+    const window = readCrashWindow({ kind: 'daily', dir: dir }, crash, thisBoot)
     expect(window.lines).toEqual([
       '22:10:00 INFO host: the run that died starts here',
       '22:10:05 INFO director: talk.refill got=2 depth=2',
@@ -269,21 +274,21 @@ describe('readCrashWindow', () => {
 
   it('reports which lines of which file it took', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY)
-    expect(readCrashWindow(dir, crash, thisBoot).sources).toEqual([
+    expect(readCrashWindow({ kind: 'daily', dir: dir }, crash, thisBoot).sources).toEqual([
       { path: join(dir, 'murmur-2026-08-30.log'), from: 3, to: 6, count: 4 },
     ])
   })
 
   it('runs to the end of the day when this boot is on a later one', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY)
-    const window = readCrashWindow(dir, crash, local(2026, 8, 31, 9, 0, 0))
+    const window = readCrashWindow({ kind: 'daily', dir: dir }, crash, local(2026, 8, 31, 9, 0, 0))
     expect(window.lines).toHaveLength(6)
     expect(window.lines.at(-1)).toBe('23:00:01 INFO host: and its second line')
   })
 
   it('keeps the end of a window too long to carry whole', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY)
-    const window = readCrashWindow(dir, crash, thisBoot, 2)
+    const window = readCrashWindow({ kind: 'daily', dir: dir }, crash, thisBoot, 2)
     expect(window.lines).toEqual([
       'a bare continuation with no stamp of its own',
       '22:11:30 INFO host: the last thing it ever said',
@@ -293,12 +298,12 @@ describe('readCrashWindow', () => {
 
   it('is empty when that day has no log at all', () => {
     const dir = logDirWith('murmur-2026-08-29.log', DAY)
-    expect(readCrashWindow(dir, crash, thisBoot)).toEqual({ lines: [], sources: [] })
+    expect(readCrashWindow({ kind: 'daily', dir: dir }, crash, thisBoot)).toEqual({ lines: [], sources: [] })
   })
 
   it('is empty when the run died before it wrote anything', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY.slice(0, 2))
-    expect(readCrashWindow(dir, crash, thisBoot)).toEqual({ lines: [], sources: [] })
+    expect(readCrashWindow({ kind: 'daily', dir: dir }, crash, thisBoot)).toEqual({ lines: [], sources: [] })
   })
 })
 
@@ -307,7 +312,7 @@ describe('crashDescription', () => {
 
   it('names the run, when it started, and what it last said', () => {
     const dir = logDirWith('murmur-2026-08-30.log', DAY)
-    const said = crashDescription(crash, readCrashWindow(dir, crash, local(2026, 8, 30, 23, 0, 0)))
+    const said = crashDescription(crash, readCrashWindow({ kind: 'daily', dir: dir }, crash, local(2026, 8, 30, 23, 0, 0)))
     expect(said).toContain('pid 4321')
     expect(said).toMatch(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/)
     expect(said).toContain('22:11:30 INFO host: the last thing it ever said')
@@ -498,5 +503,73 @@ describe('offerCrashReport', () => {
     })
     expect(said).toEqual([])
     expect(asked).toEqual([])
+  })
+})
+
+// The same override that redirects /bug's evidence redirects this road's, and
+// the two must agree: the crash window is derived from the shape the log
+// writer chose, never from a filename this module builds out of a date.
+// A crash is read back by a LATER boot, which may have been launched
+// differently — a default run dies, the developer restarts with `make dev`.
+// The evidence belongs to the run that died, so the run that died is what
+// records where it was writing.
+describe('the sentinel remembers its own log source', () => {
+  it('hands the crashed run its own source, not the reader\'s', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-sentinel-'))
+    const logs = { kind: 'file', path: '/tmp/that-run/dev.log' } as const
+    armSentinel(dir, logs, 4242, local(2026, 8, 30, 22, 10, 0))
+    const [found] = collectCrashed(dir, () => false, 999)
+    expect(found!.logs).toEqual(logs)
+  })
+
+  it('leaves it unset on a record written before the field existed', () => {
+    // An old sentinel on disk must still report a crash; the reading boot's
+    // own source is the only guess available, and a guess beats a lost report.
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-sentinel-'))
+    writeFileSync(
+      join(dir, 'session-4242.json'),
+      JSON.stringify({ pid: 4242, startedAt: local(2026, 8, 30, 22, 10, 0).toISOString() }),
+    )
+    const [found] = collectCrashed(dir, () => false, 999)
+    expect(found!.pid).toBe(4242)
+    expect(found!.logs).toBeUndefined()
+  })
+})
+
+describe('readCrashWindow under a single-file override', () => {
+  const crash = crashAt(local(2026, 8, 30, 22, 10, 0))
+  const thisBoot = local(2026, 8, 30, 23, 0, 0)
+
+  const oneFile = (lines: string[]): string => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-devlog-'))
+    const path = join(dir, 'dev.log')
+    writeFileSync(path, lines.join('\n') + '\n')
+    return path
+  }
+
+  it('windows the dead run inside the one file it was writing to', () => {
+    const path = oneFile(DAY)
+    const window = readCrashWindow({ kind: 'file', path }, crash, thisBoot)
+    // The same window as the dated road: from the dead run's start, stopping
+    // where this boot begins. Not the whole file, and not its bare tail.
+    expect(window.lines).toEqual([
+      '22:10:00 INFO host: the run that died starts here',
+      '22:10:05 INFO director: talk.refill got=2 depth=2',
+      'a bare continuation with no stamp of its own',
+      '22:11:30 INFO host: the last thing it ever said',
+    ])
+    expect(window.sources).toEqual([{ path, from: 3, to: 6, count: 4 }])
+  })
+
+  it('is an honest empty window when the override file is not there', () => {
+    const path = join(tmpdir(), 'murmur-nope', 'dev.log')
+    expect(readCrashWindow({ kind: 'file', path }, crash, thisBoot)).toEqual({
+      lines: [],
+      sources: [],
+    })
+  })
+
+  it('has no window at all when the run kept no log', () => {
+    expect(readCrashWindow({ kind: 'none' }, crash, thisBoot)).toEqual({ lines: [], sources: [] })
   })
 })

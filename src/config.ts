@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { resolveDevLog } from './dev-log.ts'
+import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './dev-log.ts'
 import { dataRoot, homeRoot, musicPolicyPath, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 import { readSettingsFile } from './settings.ts'
@@ -122,6 +122,13 @@ export const ConfigSchema = z.object({
   // empty = no dev log at all. The default is a dated file under the home, so a
   // plain `npm i -g` install has something to attach to a bug report.
   devLog: z.string().default(''),
+  // The other half of that same decision: what a READER has to walk to find
+  // those diagnostics again — the dated set, one named file, or nothing. It
+  // travels as its own field rather than being inferred from `devLog`, because
+  // recovering the shape by comparing that path against a default is a guess,
+  // and the two roads that carry log evidence into a report (spec 10 §3.2-C)
+  // would each be guessing separately.
+  logEvidence: LogEvidenceSchema.default({ kind: 'none' }),
 
   // --- memory (spec 05) --------------------------------------------------- //
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
@@ -224,6 +231,12 @@ function ttsFromFile(saved: VoiceConfig | null, endpoint: string): Partial<Confi
   }
 }
 
+// Both halves of the log decision, named as the config fields carry them.
+function logSource(env: NodeJS.ProcessEnv): { devLog: string; logEvidence: LogEvidence } {
+  const { path, evidence } = resolveLogSource(env)
+  return { devLog: path, logEvidence: evidence }
+}
+
 export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): CliInvocation {
   const { values } = parseArgs({
     args: argv,
@@ -267,7 +280,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     listeningApiKey: env.MURMUR_LISTENING_API_KEY?.trim() ?? '',
     listeningUrl: env.MURMUR_LISTENING_URL?.trim() ?? '',
     tuiSocket: tuiSocketPath(env),
-    devLog: resolveDevLog(env),
+    ...logSource(env),
     // Having an endpoint IS the reason to speak with it: a voice configured
     // through the setup conversation (spec 03-03 §7.2) would otherwise be
     // written, validated, and then silently ignored because the knob still
