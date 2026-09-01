@@ -4,6 +4,7 @@
 #   make dev-fishaudio  # remote voice via fish.audio (.env.fishaudio -> .env)
 #   make dev-opuslab    # remote voice via self-hosted opuslab (.env.opuslab; WARP on)
 #   make logs           # terminal 2: tail the dev log + memory while it runs
+#   make pack           # install this tree as a real user would, and run it
 #
 # Knobs:  VOICE=hosted|stub            (hosted TTS by default)
 #         STUB=1                       (full offline: canned brain, silent voice,
@@ -37,7 +38,7 @@ ifeq ($(TUI),0)
   PREFLIGHT_ARGS += --plain
 endif
 
-.PHONY: help dev dev-fishaudio dev-opuslab logs preflight setup setup-music install sync-env
+.PHONY: help dev dev-fishaudio dev-opuslab logs preflight setup setup-music install sync-env pack
 
 help:
 	@echo "murmur dev:"
@@ -51,6 +52,9 @@ help:
 	@echo "  make preflight    report music/voice/front-end deps without launching"
 	@echo "  make setup        talk murmur through everything that is missing"
 	@echo "  make setup-music  just the music binaries (yt-dlp/ffmpeg)"
+	@echo "  make pack         install this tree globally and run it as a listener"
+	@echo "                    does: the published package, no .env, no flags"
+	@echo "                    (MURMUR_HOME=/tmp/... for a first-boot instead)"
 	@echo ""
 	@echo "  knobs:  VOICE=hosted|stub   STUB=1 (full offline)   TUI=0 (plain stdout)"
 
@@ -148,3 +152,53 @@ setup: sync-env
 
 setup-music:
 	node src/main.ts --setup-music
+
+pack: install
+	@# The real-user rehearsal. `make dev` runs the SOURCE tree — devDependencies
+	@# present, tui/node_modules already installed by `make install`, cwd = the
+	@# repo — so it is structurally blind to everything an `npm i -g` install
+	@# does differently: a gap in package.json's `files` list, an asset prepack
+	@# forgets to copy (persona-seed.md travels as one hand-written line), a path
+	@# that resolves elsewhere from dist/, and the first-run `bun install` for
+	@# the TUI's packages (ensureTuiDeps, src/app.ts) which a dev checkout can
+	@# never reach because its node_modules already exists.
+	@# So: pack the very tarball `npm publish` would upload (same shasum, npm
+	@# publish IS pack + upload), install it, run it from $$HOME. Costs no
+	@# version number — the thing verified is the package, not a release.
+	@#
+	@# What makes it a LISTENER's run and not a dev one, deliberately:
+	@#  - .env is NOT loaded. A listener has no .env, and murmur never reads one
+	@#    (an onboarding-smoke assertion forbids even writing one). The endpoint
+	@#    comes from ~/.murmur/voice.json, written by the guide — and because env
+	@#    beats file per knob (spec 03-03 §7.2), sourcing .env here would mask
+	@#    exactly the config path a listener actually travels.
+	@#  - no RUN_ARGS. VOICE=/STUB=/TUI= are dev knobs for `make dev`; a listener
+	@#    types `murmur`, so this does too. They do not apply here.
+	@#  - ~/.murmur is the real one, so this is a RETURNING listener. For a first
+	@#    boot, hand it an empty home: MURMUR_HOME=/tmp/murmur-cold make pack.
+	@#  - diagnostics go where a listener's go (~/.murmur/log/murmur-DATE.log),
+	@#    NOT .dev/dev.log — `make logs` shows nothing for this run.
+	@# This REPLACES whatever murmur-radio is installed globally; the closing
+	@# lines say how to get back, naming the version that was there. They run
+	@# before the run's own status is handed back, because a bin that is missing
+	@# or dies on boot IS the packaging failure this target hunts, and `make
+	@# pack` must not report the last echo's zero in its place.
+	@leaked=$$(env | sed -n 's/^\(MURMUR_[A-Z_]*\)=.*/\1/p' | tr '\n' ' '); \
+	  [ -z "$$leaked" ] || echo "! your shell exports $$leaked — a listener's does not"; \
+	  prev=$$(npm ls -g --depth=0 --json murmur-radio 2>/dev/null \
+	    | node -pe "JSON.parse(require('fs').readFileSync(0,'utf8')).dependencies?.['murmur-radio']?.version ?? ''" 2>/dev/null); \
+	  tgz=$$(npm pack --silent) || exit 1; \
+	  npm install -g "./$$tgz" || { rm -f "$$tgz"; exit 1; }; \
+	  rm -f "$$tgz"; \
+	  echo ""; \
+	  echo "▶ this working tree is now the globally installed murmur-radio."; \
+	  echo "  running it from $$HOME with no .env and no flags, as a listener does"; \
+	  echo "  diagnostics -> $${MURMUR_HOME:-$$HOME/.murmur}/log/murmur-$$(date +%F).log"; \
+	  echo ""; \
+	  cd "$$HOME" && murmur; rc=$$?; \
+	  echo ""; \
+	  echo "▶ that was the packaged build, still installed globally."; \
+	  if [ -n "$$prev" ]; then echo "  back to what you had:  npm i -g murmur-radio@$$prev"; \
+	  else echo "  off this machine:      npm rm -g murmur-radio"; fi; \
+	  echo "  latest published:      npm i -g murmur-radio"; \
+	  exit $$rc

@@ -26,3 +26,6 @@ graphify-out/
 
 # prepack build output (npm tarball only)
 dist/
+
+# `make pack` tarball — removed once installed; a failed pack can leave one
+*.tgz
