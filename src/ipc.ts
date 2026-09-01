@@ -24,6 +24,7 @@ export const COMMANDS = [
   { name: '/setup', blurb: 'call the setup guide' },
   { name: '/bug', blurb: 'write up a bug, log attached' },
   { name: '/feature-request', blurb: 'write up something you wish it did' },
+  { name: '/update', blurb: 'check npm for a newer murmur' },
   { name: '/quit', blurb: 'end the broadcast' },
 ] as const
 
