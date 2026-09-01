@@ -17,6 +17,13 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 - `make preflight` — report the dependencies without launching.
 - `make setup` / `make setup-music` — the onboarding conversation on demand
   (whole surface / just the music binaries).
+- `make pack` — the real-user rehearsal: pack the tarball `npm publish` would
+  upload, install it globally, run it from `$HOME` **with no `.env` and no
+  flags**, as a listener does (endpoint from `~/.murmur/voice.json`, logs to
+  `~/.murmur/log/`, so `make logs` shows nothing). Catches what a source run
+  cannot see (`files` gaps, a prepack-missed asset, the TUI's first-run
+  `bun install`); costs no version number. `MURMUR_HOME=/tmp/...` for a
+  first-boot instead of a returning listener.
 - `STUB=1 make dev` — full offline: canned brain, silent voice, no music.
 - `TUI=0 make dev` — plain stdout instead of the spec-10 front-end, which is
   the default (without `bun` it falls back to plain on its own).
