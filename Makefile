@@ -108,6 +108,10 @@ dev: install
 	@# app-agnostic): it samples the process tree into mem.log for the whole run,
 	@# torn down when the app exits. Its crash can never take murmur down;
 	@# stderr lands in mem.log so a fatal crash is recorded, not swallowed.
+	@# The dev log is APPENDED, never truncated: a crash report is read back by
+	@# the NEXT boot (src/sentinel.ts), and emptying the file at launch would
+	@# leave that boot reading its own lines as the dead run's. `make logs`
+	@# tails, so history above costs nothing; delete .dev/dev.log to reclaim it.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \
 	  node -e "if (Number(process.versions.node.split('.')[0]) < 24) process.exit(1)" || { \
 	    echo ""; \
@@ -115,7 +119,7 @@ dev: install
 	    echo "install/upgrade Node and try again; everything else murmur fixes by talking."; \
 	    exit 1; \
 	  }; \
-	  mkdir -p .dev && : > $(DEV_LOG) && : > $(MEM_LOG); \
+	  mkdir -p .dev && : > $(MEM_LOG); \
 	  echo ""; \
 	  echo "▶ logs: open another terminal in this repo and run:  make logs"; \
 	  echo "  (diagnostics -> $(DEV_LOG); memory -> $(MEM_LOG))"; \

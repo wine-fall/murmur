@@ -15,6 +15,7 @@ import { join } from 'node:path'
 
 import { z } from 'zod'
 
+import { LogEvidenceSchema, type LogEvidence } from './dev-log.ts'
 import { LOG_TAIL_LINES, parseLogLine, type LogTail } from './diagnostics.ts'
 import { isYes, type QuitLatch } from './guide.ts'
 import { ask, type Host } from './host.ts'
@@ -27,6 +28,13 @@ const SENTINEL = /^session-\d+\.json$/
 const SentinelSchema = z.object({
   pid: z.number().int().positive(),
   startedAt: z.string(),
+  // Where THIS run was writing its diagnostics. Recorded by the run itself
+  // because the boot that reads the record back may have been launched
+  // differently — a default run dies and the developer restarts with
+  // `make dev` — and the evidence belongs to the run that died. Optional: a
+  // sentinel written before this field existed still reports its crash, on the
+  // reading boot's own source.
+  logs: LogEvidenceSchema.optional(),
 })
 
 export type CrashedSession = z.infer<typeof SentinelSchema>
@@ -34,11 +42,16 @@ export type CrashedSession = z.infer<typeof SentinelSchema>
 // Arm this run. The returned disarm is idempotent and synchronous, so an exit
 // handler can call it, and best-effort throughout: a sentinel that cannot be
 // written or removed costs a spurious notice at worst, never the broadcast.
-export function armSentinel(dir: string, pid = process.pid, now = new Date()): () => void {
+export function armSentinel(
+  dir: string,
+  logs: LogEvidence,
+  pid = process.pid,
+  now = new Date(),
+): () => void {
   const path = join(dir, `session-${String(pid)}.json`)
   try {
     mkdirSync(dir, { recursive: true })
-    writeFileSync(path, JSON.stringify({ pid, startedAt: now.toISOString() }))
+    writeFileSync(path, JSON.stringify({ pid, startedAt: now.toISOString(), logs }))
   } catch {
     // an unwritable home costs the reminder, not the radio
   }
@@ -165,13 +178,14 @@ function pad(n: number): string {
 // itself in the description, and the alternative is a boot marker in the log
 // format — worth it only if a report ever comes back muddled.
 export function readCrashWindow(
-  logDir: string,
+  source: LogEvidence,
   session: CrashedSession,
   until: Date,
   maxLines = LOG_TAIL_LINES,
 ): LogTail {
   const start = new Date(session.startedAt)
-  const path = join(logDir, `murmur-${dayStamp(start)}.log`)
+  const path = crashLogPath(source, start)
+  if (path === null) return { lines: [], sources: [] }
   let all: string[]
   try {
     all = readFileSync(path, 'utf8').split('\n')
@@ -181,7 +195,13 @@ export function readCrashWindow(
   if (all.at(-1) === '') all.pop()
   const from = clock(start)
   // An upper bound only when this boot is the same day: on a later day the
-  // dead run's file ends where the day did.
+  // dated file ends where the day did.
+  //
+  // ponytail: an override file does not end at midnight, so a crash read back
+  // on a LATER day carries the lines after it too — stamps are clock-only and
+  // nothing in the file marks where the day turned. Give the writer a dated
+  // marker if that ever matters; a same-day restart, which is what `make dev`
+  // produces, windows exactly.
   const to = dayStamp(until) === dayStamp(start) ? clock(until) : null
 
   let begin = -1
@@ -211,6 +231,14 @@ export function readCrashWindow(
     lines: kept,
     sources: [{ path, from: first, to: first + kept.length - 1, count: kept.length }],
   }
+}
+
+// Which file the dead run was writing to. The dated set names one file per day,
+// so the crash's own day picks it; an override is the single file it always
+// was. `none` is a run that kept no log — there is no window to read.
+function crashLogPath(source: LogEvidence, start: Date): string | null {
+  if (source.kind === 'none') return null
+  return source.kind === 'file' ? source.path : join(source.dir, `murmur-${dayStamp(start)}.log`)
 }
 
 // The description murmur writes for a report the listener did not start.

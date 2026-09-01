@@ -6,6 +6,8 @@
 import { mkdirSync, readdirSync, rmSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 
+import { z } from 'zod'
+
 import { expandUser, logRoot } from './paths.ts'
 
 // ponytail: one file per day, swept at startup — no size cap, no mid-run
@@ -20,12 +22,44 @@ function stamp(at: Date): string {
   return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`
 }
 
-// The knob is read for its PRESENCE, not its truthiness: an explicitly empty
-// MURMUR_DEV_LOG is the way to ask for no log at all (devLogMirror's no-op).
-export function resolveDevLog(env: NodeJS.ProcessEnv = process.env, at: Date = new Date()): string {
+// Where a report goes looking for the run's own diagnostics. The two shapes are
+// the two the writer can produce, and they are NOT interchangeable: the default
+// is a dated SET that rotates by day, while an override is one file that never
+// rotates. Every reader of log evidence takes this rather than a bare directory
+// (src/diagnostics.ts, src/sentinel.ts), so the two roads into a report cannot
+// disagree about where the evidence lives.
+export const LogEvidenceSchema = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('daily'), dir: z.string() }),
+  z.object({ kind: z.literal('file'), path: z.string() }),
+  // MURMUR_DEV_LOG was set to nothing: this run keeps no diagnostics, so there
+  // is no evidence to read. A named state, so a reader answers "none" instead
+  // of scanning whatever directory a fallback would have invented.
+  z.object({ kind: z.literal('none') }),
+])
+
+export type LogEvidence = z.infer<typeof LogEvidenceSchema>
+
+// The one branch. `path` is where the mirror appends; `evidence` is what a
+// reader must walk to find it again — decided HERE, by the code that chose the
+// path, rather than by an upper layer comparing a string against a default.
+export function resolveLogSource(
+  env: NodeJS.ProcessEnv = process.env,
+  at: Date = new Date(),
+): { path: string; evidence: LogEvidence } {
+  // The knob is read for its PRESENCE, not its truthiness: an explicitly empty
+  // MURMUR_DEV_LOG is the way to ask for no log at all (devLogMirror's no-op).
   const override = env.MURMUR_DEV_LOG
-  if (override === undefined) return join(logRoot(env), `murmur-${stamp(at)}.log`)
-  return override === '' ? '' : expandUser(override)
+  if (override === undefined) {
+    const dir = logRoot(env)
+    return { path: join(dir, `murmur-${stamp(at)}.log`), evidence: { kind: 'daily', dir } }
+  }
+  if (override === '') return { path: '', evidence: { kind: 'none' } }
+  const path = expandUser(override)
+  return { path, evidence: { kind: 'file', path } }
+}
+
+export function resolveDevLog(env: NodeJS.ProcessEnv = process.env, at: Date = new Date()): string {
+  return resolveLogSource(env, at).path
 }
 
 // Make the directory the mirror is about to append to, and drop the dated logs
