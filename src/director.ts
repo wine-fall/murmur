@@ -39,6 +39,7 @@ import type {
 import type { Host } from './host.ts'
 import { COMMANDS, type ProgramState } from './ipc.ts'
 import type { ReportSession } from './report.ts'
+import { INSTALL_COMMAND } from './update.ts'
 import { buildMusicSituation, withLanguage } from './prompts.ts'
 import { currentScene } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
@@ -51,6 +52,7 @@ const SETUP_COMMAND: (typeof COMMANDS)[number]['name'] = '/setup'
 const SETTINGS_COMMAND: (typeof COMMANDS)[number]['name'] = '/settings'
 const BUG_COMMAND: (typeof COMMANDS)[number]['name'] = '/bug'
 const FEATURE_COMMAND: (typeof COMMANDS)[number]['name'] = '/feature-request'
+const UPDATE_COMMAND: (typeof COMMANDS)[number]['name'] = '/update'
 
 // The prefilled GitHub issue forms (.github/ISSUE_TEMPLATE): the template
 // itself carries the label, which is why the command points at a template
@@ -118,6 +120,7 @@ export type Steer =
   | { intent: 'setup' }
   | { intent: 'bug' }
   | { intent: 'feature' }
+  | { intent: 'update' }
   | { intent: 'talkback'; text: string }
   // A line the report floor took (§3.2-C): steerFromLine never returns this —
   // takeSteer does, for a line it handed to a flow that owns the keyboard. The
@@ -131,6 +134,7 @@ export function steerFromLine(line: string): Steer {
   if (trimmed === SETUP_COMMAND) return { intent: 'setup' }
   if (trimmed === BUG_COMMAND) return { intent: 'bug' }
   if (trimmed === FEATURE_COMMAND) return { intent: 'feature' }
+  if (trimmed === UPDATE_COMMAND) return { intent: 'update' }
   return { intent: 'talkback', text: line }
 }
 
@@ -213,6 +217,12 @@ export type DirectorDeps = {
   // program keeps going while it runs, and the Director only routes the
   // keyboard to it. Absent: the commands fall back to the browser form.
   reportRecall?: (kind: 'bug' | 'feature') => ReportSession
+  // The /update command (spec 10 §3.2-C): check npm for a newer murmur and
+  // install it. Like reportRecall this is never awaited — npm takes as long as
+  // it takes and the program owes the listener its air throughout — but unlike
+  // it, nothing changes hands: the check only narrates through host.info.
+  // Absent (stub runs, tests): the command hands over the shell one-liner.
+  updateRecall?: () => Promise<void>
   // An auth-shaped voice failure, raised so the app can mark the endpoint as
   // failing — detectGaps then treats the configured endpoint as a gap (#97).
   onVoiceAuthFailure?: () => void
@@ -433,6 +443,27 @@ export class Director {
     )
   }
 
+  // Single-flight, for the same reason the report floor is: a listener who
+  // types /update twice while npm is running means "is it working", not "run
+  // two installs over each other".
+  private updating = false
+
+  // The /update side-errand. Never awaited (npm is slow and the program keeps
+  // going), and total — runUpdate narrates its own failures.
+  private startUpdate(): void {
+    const start = this.deps.updateRecall
+    if (start === undefined) {
+      this.deps.host.info(`this run updates with \`${INSTALL_COMMAND}\`.`)
+      return
+    }
+    if (this.updating) return
+    this.updating = true
+    void start().then(
+      () => (this.updating = false),
+      () => (this.updating = false),
+    )
+  }
+
   // Commands are commands, not conversation: they must never wait out a
   // compose or a spinning stream (user report — a /quit typed while a pick was
   // resolving sat unread for its whole tail). Every line-blind segment-prep
@@ -476,6 +507,10 @@ export class Director {
       }
       if (steer.intent === 'bug' || steer.intent === 'feature') {
         this.openReport(steer.intent)
+        continue
+      }
+      if (steer.intent === 'update') {
+        this.startUpdate()
         continue
       }
       if (steer.intent === 'consumed') continue
@@ -1038,6 +1073,11 @@ export class Director {
           steer = null
           continue
         }
+        if (steer.intent === 'update') {
+          this.startUpdate()
+          steer = null
+          continue
+        }
         if (steer.intent === 'consumed') {
           steer = null
           continue
@@ -1122,6 +1162,10 @@ export class Director {
       if (merged.intent === 'bug' || merged.intent === 'feature') {
         // Same rule: a command mid-compose does not become part of the turn.
         this.openReport(merged.intent)
+        continue
+      }
+      if (merged.intent === 'update') {
+        this.startUpdate()
         continue
       }
       if (merged.intent === 'consumed') continue

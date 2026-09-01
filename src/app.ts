@@ -34,6 +34,7 @@ import {
   spawnClipboard,
 } from './deliver.ts'
 import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director.ts'
+import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './update.ts'
 import { AudioEngine } from './engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
@@ -774,6 +775,17 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // default, so this is the only place a real browser can be launched from.
     openUrl: openInBrowser,
     reportRecall,
+    // The one production wiring of the updater: registry, npm and the
+    // where-did-this-run-come-from check all live behind these four functions,
+    // so no test can reach the network or the machine's global node_modules.
+    updateRecall: () =>
+      runUpdate({
+        current: packageVersion(),
+        latest: latestVersion,
+        install: installLatest,
+        isGlobal: isGlobalInstall,
+        info: (text) => host.info(text),
+      }),
     onVoiceAuthFailure: () => (voiceAuthDown.current = true),
   })
   onSetupQuit = () => director.requestQuit()
