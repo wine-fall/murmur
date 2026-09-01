@@ -38,6 +38,9 @@ Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
     sync, evidence gathered from the session, one pointer line in STATUS.md
     `## Open`.
   - `create-pr` — push + open the PR (runs the local CI pre-check first).
+  - `murmur-release` — cut a version end-to-end: bump + release PR, tag on the
+    release commit, GitHub Release with notes, npm publish (the npm login is
+    the user's own act, never automated).
 - graphify: before any broad code search, run `graphify query "<question>"`.
   A post-commit hook rebuilds the graph for **code** changes only; doc/spec
   edits are not auto-indexed. Do **not** run `/graphify --update` per PR —
