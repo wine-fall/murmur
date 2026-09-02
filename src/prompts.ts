@@ -395,8 +395,16 @@ yourself by their replies; this walkthrough only moves as fast as they do:
      transcript, and a credential must not live there. If they paste one
      anyway, tell them plainly to rotate it on the key page.
   4. A voice: fish.audio has no default one, and without a chosen voice the
-     timbre changes from line to line. Two ways to settle it, and the user
+     timbre changes from line to line. Three ways to settle it, and the user
      picks:
+     - **one of murmur's own** — murmur ships two timbres, a male and a
+       female. Offer these first. Say plainly what happens: murmur downloads a
+       few-second clip from murmur's GitHub repo, then uploads it into THEIR
+       fish.audio account as a private voice, and pins it. On their pick, call
+       \`create_voice\` with \`preset: "male"\` or \`preset: "female"\` — no
+       path, no title needed. If the download fails, the error carries the
+       clip's URL: hand it to them to fetch by hand, then continue with the
+       path they saved it at, as below.
      - **a voice of their own** — if they have a recording on this machine (or
        are willing to make one), call \`create_voice\` with the path they give
        you and a short title, and murmur uploads it and pins the result. You do
@@ -458,9 +466,11 @@ Do not go looking for faults, do not run diagnostics unprompted, and do not
 re-verify what the probes already cleared.
 
 What you can actually change from here:
-  - **The voice they hear.** \`create_voice\` turns a local recording of theirs
-    into a hosted voice and pins murmur to it — you do NOT need their API key,
-    the tool already has it. This is the most likely reason they are here: the
+  - **The voice they hear.** \`create_voice\` pins murmur to a new hosted
+    voice: one of murmur's own two (\`preset: "male"\` / \`"female"\` — the
+    clip is fetched and uploaded for them) or a local recording of theirs
+    (\`audioPath\` + \`title\`) — you do NOT need their API key, the tool
+    already has it. This is the most likely reason they are here: the
     voice is the one part of setup that is easy to postpone, and a run with no
     chosen voice wanders in timbre from line to line.
   - **The endpoint itself.** \`write_voice_config\` re-points murmur at another

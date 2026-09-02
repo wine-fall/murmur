@@ -1,0 +1,16 @@
+{
+  "male": {
+    "file": "male.mp3",
+    "url": "https://raw.githubusercontent.com/wine-fall/murmur/main/voices/male.mp3",
+    "sha256": "44e9ba00b60f1e536650fe4d3c492003f45b12096470871ace8e37002ba700a6",
+    "title": "murmur (male)",
+    "text": "早啊，新的一天。窗外的光刚好，先给你放首轻快的。"
+  },
+  "female": {
+    "file": "female.mp3",
+    "url": "https://raw.githubusercontent.com/wine-fall/murmur/main/voices/female.mp3",
+    "sha256": "717c7e7b5b0874fc3429c10bf2431140b98964666443e9ba37677f6f1e048c3e",
+    "title": "murmur (female)",
+    "text": "早啊，新的一天。窗外的光刚好，先给你放首轻快的。"
+  }
+}

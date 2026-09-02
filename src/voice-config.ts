@@ -31,7 +31,9 @@ import {
   type Stats,
   writeFileSync,
 } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { basename, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
@@ -255,6 +257,96 @@ const ABORT_POLL_MS = 200
 
 const CreatedModelSchema = z.object({ _id: z.string().trim().min(1) })
 
+// murmur's own two timbres. The clips are NOT in the npm package: a listener
+// with a voice of their own, or one picked from the provider library, should
+// not download a clip they will never use — so the clips live in the repo and
+// are fetched on demand, once, when the listener picks one. Each is pinned by
+// sha256 because the bytes are uploaded under the listener's key: a file
+// fetched from `main` is only trustworthy if it is the file this build
+// expects. That is also why a clip is never edited in place — a new timbre is
+// a new filename. The table itself is data beside the code (the transcript is
+// in the clip's own language, which the sources may not carry).
+const VoicePresetSchema = z.object({
+  file: z.string().min(1),
+  url: z.string().url(),
+  sha256: z.string().regex(/^[0-9a-f]{64}$/),
+  title: z.string().min(1),
+  // The clip's transcript: the provider pairs it with the audio, which
+  // improves the clone.
+  text: z.string().min(1),
+})
+const VoicePresetsSchema = z.object({ male: VoicePresetSchema, female: VoicePresetSchema })
+export const VOICE_PRESETS = VoicePresetsSchema.parse(
+  JSON.parse(
+    readFileSync(fileURLToPath(new URL('../assets/voice-presets.json', import.meta.url)), 'utf-8'),
+  ),
+)
+export type VoicePreset = keyof typeof VOICE_PRESETS
+
+// Where a fetched clip lands: under cache/, rebuildable — a deleted clip costs
+// one more download. Kept per home rather than per run so the second preset,
+// or a change of mind, does not go back to GitHub.
+const PRESET_CACHE_DIR = 'voices'
+const PRESET_FETCH_TIMEOUT_MS = 30_000
+
+// The clip for a preset: the cached copy if its bytes still match the pin, a
+// fresh download otherwise (verified the same way before it is kept). A miss
+// on either is an error that carries the URL, so the guide can hand the
+// listener the file to fetch by hand and finish through `audioPath`.
+async function presetClip(
+  preset: VoicePreset,
+  home: string,
+  fetchImpl: typeof fetch,
+  aborted: () => boolean,
+): Promise<{ audio: Buffer } | { error: string }> {
+  const spec = VOICE_PRESETS[preset]
+  const matches = (bytes: Buffer): boolean =>
+    createHash('sha256').update(bytes).digest('hex') === spec.sha256
+  const cached = join(home, 'cache', PRESET_CACHE_DIR, spec.file)
+  try {
+    const bytes = readFileSync(cached)
+    if (matches(bytes)) return { audio: bytes }
+  } catch {
+    // not cached yet
+  }
+  // Esc has to reach the download as well as the upload: the poll-shaped
+  // abort watch is bridged onto the request's signal beside the timeout.
+  const controller = new AbortController()
+  const watch = setInterval(() => {
+    if (aborted()) controller.abort()
+  }, ABORT_POLL_MS)
+  let bytes: Buffer
+  try {
+    const response = await fetchImpl(spec.url, {
+      signal: AbortSignal.any([controller.signal, AbortSignal.timeout(PRESET_FETCH_TIMEOUT_MS)]),
+    })
+    if (!response.ok) {
+      return { error: `the download failed (${String(response.status)}): ${spec.url}` }
+    }
+    bytes = Buffer.from(await response.arrayBuffer())
+  } catch (err) {
+    if (aborted()) return { error: 'the user stopped the setup' }
+    return {
+      error: `the download did not go through (${err instanceof Error ? err.message : String(err)}): ${spec.url}`,
+    }
+  } finally {
+    clearInterval(watch)
+  }
+  if (aborted()) return { error: 'the user stopped the setup' }
+  if (!matches(bytes)) {
+    return { error: `the downloaded clip did not match the one this murmur expects: ${spec.url}` }
+  }
+  // The cache is a convenience, not the deliverable: a home whose cache/ is
+  // not writable still gets its voice, at the price of the next download.
+  try {
+    mkdirSync(join(home, 'cache', PRESET_CACHE_DIR), { recursive: true })
+    writeFileSync(cached, bytes)
+  } catch {
+    // uncached
+  }
+  return { audio: bytes }
+}
+
 export type CreateVoiceDeps = {
   // The murmur home: the one file this may repoint.
   home: string
@@ -287,15 +379,24 @@ export type CreateVoiceDeps = {
 export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
   return tool(
     'create_voice',
-    'Create a hosted voice from a LOCAL audio file the user recorded or has on ' +
-      'disk, and pin murmur to it. Use this when the user wants their own voice ' +
-      '(or any recording of theirs) instead of one from the provider library — ' +
-      'you do not need their API key, this tool already has it. The endpoint ' +
-      'must be configured first (write_voice_config). Give the path exactly as ' +
-      'the user gave it to you.',
+    'Create a hosted voice and pin murmur to it — either one of murmur\'s own two ' +
+      'timbres (preset: male or female; murmur fetches the clip itself) or a LOCAL ' +
+      'audio file the user recorded or has on disk (audioPath + title, given exactly ' +
+      'as the user gave it). Either way you do not need their API key, this tool ' +
+      'already has it. The endpoint must be configured first (write_voice_config).',
     {
-      audioPath: z.string().describe('path to the local audio file the user named'),
-      title: z.string().describe('a short name for the new voice, for the provider library'),
+      preset: z
+        .enum(['male', 'female'])
+        .optional()
+        .describe("one of murmur's own voices; leave audioPath out when set"),
+      audioPath: z
+        .string()
+        .optional()
+        .describe('path to the local audio file the user named (when no preset)'),
+      title: z
+        .string()
+        .optional()
+        .describe('a short name for the new voice, for the provider library (required with audioPath)'),
       text: z
         .string()
         .optional()
@@ -320,45 +421,66 @@ export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
             'self-hosted server clones voices its own way, not through this tool.',
         })
       }
-      const path = (deps.expandPath ?? ((given: string) => given))(args.audioPath.trim())
-      if (!AUDIO_SUFFIX.test(path)) {
-        return reply({
-          ok: false,
-          error:
-            'that is not an audio file. Upload sends the file to the provider, so this tool ' +
-            'takes only a recording (wav, mp3, m4a, aac, flac, ogg, opus, webm) — ask the ' +
-            'user for the path to their audio.',
-        })
-      }
-      // The suffix is what the file is CALLED. lstat is what it is: a link
-      // named sample.wav can point at voice.json, and this tool — exempt from
-      // the guard that refuses credential paths, because it owns the secret
-      // channel — would then upload the key to a third party itself. It also
-      // settles the size before a byte is read: a mistyped path at a video
-      // must be turned away, not allocated whole into a boot it is repairing.
-      let stat: Stats
-      try {
-        stat = lstatSync(path)
-      } catch {
-        return reply({ ok: false, error: `no file at ${path} — ask the user to check the path` })
-      }
-      if (stat.isSymbolicLink() || !stat.isFile()) {
-        return reply({
-          ok: false,
-          error: `${path} is not a regular file — give the path to the recording itself`,
-        })
-      }
-      if (stat.size === 0 || stat.size > MAX_AUDIO_BYTES) {
-        return reply({
-          ok: false,
-          error: `${path} is ${String(stat.size)} bytes, which is not a voice sample`,
-        })
-      }
       let audio: Buffer
-      try {
-        audio = readFileSync(path)
-      } catch {
-        return reply({ ok: false, error: `${path} could not be read` })
+      let title: string
+      let text: string | undefined
+      let named: string
+      if (args.preset !== undefined) {
+        const clip = await presetClip(args.preset, deps.home, deps.fetchImpl ?? fetch, aborted)
+        if ('error' in clip) return reply({ ok: false, error: clip.error })
+        audio = clip.audio
+        title = args.title?.trim() || VOICE_PRESETS[args.preset].title
+        text = VOICE_PRESETS[args.preset].text
+        named = VOICE_PRESETS[args.preset].file
+      } else {
+        if (args.audioPath === undefined || args.title === undefined || args.title.trim() === '') {
+          return reply({
+            ok: false,
+            error: 'give either a preset (male / female) or an audioPath with a title',
+          })
+        }
+        title = args.title.trim()
+        text = args.text
+        const path = (deps.expandPath ?? ((given: string) => given))(args.audioPath.trim())
+        if (!AUDIO_SUFFIX.test(path)) {
+          return reply({
+            ok: false,
+            error:
+              'that is not an audio file. Upload sends the file to the provider, so this tool ' +
+              'takes only a recording (wav, mp3, m4a, aac, flac, ogg, opus, webm) — ask the ' +
+              'user for the path to their audio.',
+          })
+        }
+        // The suffix is what the file is CALLED. lstat is what it is: a link
+        // named sample.wav can point at voice.json, and this tool — exempt from
+        // the guard that refuses credential paths, because it owns the secret
+        // channel — would then upload the key to a third party itself. It also
+        // settles the size before a byte is read: a mistyped path at a video
+        // must be turned away, not allocated whole into a boot it is repairing.
+        let stat: Stats
+        try {
+          stat = lstatSync(path)
+        } catch {
+          return reply({ ok: false, error: `no file at ${path} — ask the user to check the path` })
+        }
+        if (stat.isSymbolicLink() || !stat.isFile()) {
+          return reply({
+            ok: false,
+            error: `${path} is not a regular file — give the path to the recording itself`,
+          })
+        }
+        if (stat.size === 0 || stat.size > MAX_AUDIO_BYTES) {
+          return reply({
+            ok: false,
+            error: `${path} is ${String(stat.size)} bytes, which is not a voice sample`,
+          })
+        }
+        try {
+          audio = readFileSync(path)
+        } catch {
+          return reply({ ok: false, error: `${path} could not be read` })
+        }
+        named = basename(path)
       }
       // The listener's recording is about to leave their machine: a cut that
       // landed since this call began stops it here, before the upload.
@@ -369,11 +491,11 @@ export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
       const body = new FormData()
       body.set('type', MODEL_TYPE)
       body.set('train_mode', TRAIN_MODE)
-      body.set('title', args.title)
-      body.set('voices', new Blob([new Uint8Array(audio)]), basename(path))
+      body.set('title', title)
+      body.set('voices', new Blob([new Uint8Array(audio)]), named)
       // The provider pairs each sample with its transcript; without one it
       // trains on the audio alone, which is the shape when the user did not say.
-      if (args.text !== undefined && args.text.trim() !== '') body.set('texts', args.text.trim())
+      if (text !== undefined && text.trim() !== '') body.set('texts', text.trim())
 
       // Esc has to reach the REQUEST, not just the gaps around it: the upload
       // can run for as long as the recording takes, and the abort watch is a
@@ -435,8 +557,8 @@ export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
           ),
         })
       }
-      deps.onCreated?.({ referenceId, title: args.title })
-      return reply({ ok: true, referenceId, title: args.title })
+      deps.onCreated?.({ referenceId, title })
+      return reply({ ok: true, referenceId, title })
     },
   )
 }
