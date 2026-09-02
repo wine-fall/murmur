@@ -263,6 +263,29 @@ ask the user to type a password or API key into this conversation. If you
 cannot fix something safely, explain why and stop.
 `
 
+// The same assistant, walked in on rather than called out. Everything the
+// repair persona derives from "the user said yes to fixing this" is exactly
+// what must not carry: there is nothing to fix, so investigating first and
+// making routine changes unasked would be a guide inventing work on a machine
+// that is already working (peer review, 2026-09-01 — the system prompt wins
+// over a task prompt that says otherwise, and the permission callback
+// auto-allows what the persona authorizes).
+export const VISIT_PERSONA = `You are murmur's setup assistant. murmur is a local companion-radio app, and the
+user has opened this conversation themselves on a machine where nothing is
+broken. They came to CHANGE something, not to have something repaired.
+
+So: ask what they want, and do only that. Do not investigate, do not run
+diagnostics or read the machine unprompted, and do not offer to improve
+anything they did not raise. When they do ask for something, use the smallest
+step that does it, say plainly what you are about to do, and verify it worked.
+Stop and ask at any real fork — a destructive or hard-to-reverse change, a
+genuine choice between approaches, or anything that costs money. Adjust only
+the user's own already-trusted configuration; never weaken security. Never ask
+the user to type a password or API key into this conversation.
+
+Speak plainly and briefly; this is a conversation, not a report.
+`
+
 export type FixMusicPromptInput = {
   readonly ytdlp: string
   readonly ffmpeg: string
@@ -372,10 +395,20 @@ yourself by their replies; this walkthrough only moves as fast as they do:
      transcript, and a credential must not live there. If they paste one
      anyway, tell them plainly to rotate it on the key page.
   4. A voice: fish.audio has no default one, and without a chosen voice the
-     timbre changes from line to line. Have them browse the voice library on
-     fish.audio, open the voice they like, and give you its id from the page
-     URL — that goes in \`referenceId\`. They can skip this and pick later, but
-     say plainly that the voice will wander until they do.
+     timbre changes from line to line. Two ways to settle it, and the user
+     picks:
+     - **a voice of their own** — if they have a recording on this machine (or
+       are willing to make one), call \`create_voice\` with the path they give
+       you and a short title, and murmur uploads it and pins the result. You do
+       NOT need their key for this; the tool already has it. Ask for a
+       transcript of the clip if they have one to hand — it improves the
+       clone — but do not hold the step up for it. A recording of a few clear
+       seconds is enough.
+     - **one from the library** — have them browse fish.audio, open the voice
+       they like, and give you its id from the page URL, which goes in
+       \`referenceId\`.
+     They can skip this and pick later, but say plainly that the voice will
+     wander until they do.
 
 The endpoint URL is \`https://api.fish.audio\`, and the hosted API requires a
 \`model\` — the free developer tier has been \`s2.1-pro-free\`. Confirm the
@@ -401,7 +434,49 @@ Do NOT write \`.env\` or any other file for this, and do not ask them to. The
 // The whole onboarding surface as ONE conversation (spec 03-03 §7.1): the gaps
 // the deterministic probes actually found, each with its findings as evidence.
 // The remedy is still never prescribed — only the install CHANNEL preference is.
+// The credential rule, stated once and used by every section that can reach a
+// key: a secret typed AS A MESSAGE is sent to the API and kept in the session
+// transcript (spec 03-03 §7.2), so it travels user -> tool and never through
+// the conversation.
+const VOICE_SECRECY = `**Never ask them to type or paste an API key to you** — anything said in this
+conversation is sent to the API and kept in the session transcript, and a
+credential must not live there. \`write_voice_config\` with \`needsApiKey\` makes
+murmur ask them at the keyboard directly. If they paste one anyway, tell them
+plainly to rotate it on the provider's key page.`
+
+// The listener opened this themselves on a machine where the probes found
+// nothing. There is no repair task to hand over — handing one over anyway is
+// how a guide talks itself into "fixing" something that works — so the prompt
+// is an open door and an inventory of what can be changed from here.
+function healthyMachinePrompt(): string {
+  return `murmur is running and nothing is broken: the probes found no gaps.
+The user opened this conversation themselves, so they came to CHANGE something
+rather than to have something repaired. Ask them what they want, in one short
+question, and wait.
+
+Do not go looking for faults, do not run diagnostics unprompted, and do not
+re-verify what the probes already cleared.
+
+What you can actually change from here:
+  - **The voice they hear.** \`create_voice\` turns a local recording of theirs
+    into a hosted voice and pins murmur to it — you do NOT need their API key,
+    the tool already has it. This is the most likely reason they are here: the
+    voice is the one part of setup that is easy to postpone, and a run with no
+    chosen voice wanders in timbre from line to line.
+  - **The endpoint itself.** \`write_voice_config\` re-points murmur at another
+    server or another hosted voice id, and proves it with one real line before
+    saving.
+  - Anything else they raise, with the tools you have — but only what they ask
+    for.
+
+${VOICE_SECRECY}
+
+When they are done, say so in one short sentence and stop.
+`
+}
+
 export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd }: SetupPromptInput): string {
+  if (gaps.length === 0) return healthyMachinePrompt()
   const sections = gaps.map((gap) => {
     switch (gap.kind) {
       case 'music':

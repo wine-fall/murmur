@@ -581,3 +581,42 @@ describe('buildSettingsStore carries the persisted language (spec 12 §3.9)', ()
     expect(store.current().language).toBeUndefined()
   })
 })
+
+// Peer review (codex, 2026-09-01): the early return keyed on "did this run
+// have an endpoint at boot", which is a different question from "did the
+// conversation change anything". A listener whose endpoint came from .env and
+// who then created a voice of their own kept hearing the old timbre until the
+// next boot — while setup reported success (AGENTS.md: prompt green is not the
+// engine delivering).
+describe('voiceAfterSetup — a run that already HAD an endpoint', () => {
+  const home = () => ({ MURMUR_HOME: emptyHome() })
+
+  it('takes a timbre the conversation just created, keeping the endpoint it had', () => {
+    const running = config([], { ...home(), MURMUR_TTS_URL: 'https://env.example' })
+    expect(running.ttsReferenceId).toBe('')
+    const after = voiceAfterSetup(running, {
+      ttsUrl: 'https://env.example',
+      referenceId: 'freshly-cloned',
+    })
+    expect(after.ttsReferenceId).toBe('freshly-cloned')
+    expect(after.ttsUrl).toBe('https://env.example')
+    expect(voiceChanged(running, after)).toBe(true)
+  })
+
+  it('still lets env and flags win the knobs they actually state', () => {
+    // The precedence is voice.json < env < flags, per knob — a file may fill a
+    // blank, never overrule something the listener stated for this run.
+    const pinned = config([], {
+      ...home(),
+      MURMUR_TTS_URL: 'https://env.example',
+      MURMUR_TTS_REFERENCE_ID: 'from-env',
+    })
+    const after = voiceAfterSetup(pinned, {
+      ttsUrl: 'https://file.example',
+      referenceId: 'from-file',
+    })
+    expect(after.ttsReferenceId).toBe('from-env')
+    expect(after.ttsUrl).toBe('https://env.example')
+    expect(voiceChanged(pinned, after)).toBe(false)
+  })
+})

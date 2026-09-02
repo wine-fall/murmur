@@ -11,6 +11,7 @@ import {
   buildRespondPrompt,
   buildSeedPersonaPrompt,
   buildSetupPrompt,
+  VISIT_PERSONA,
   buildSteerPrompt,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
@@ -542,5 +543,48 @@ describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
       settingsWired: false,
     })
     expect(p).not.toMatch(/change_settings/)
+  })
+})
+
+// A listener who types /setup on a machine with nothing wrong is not asking
+// for a diagnosis — they came to change something, and the timbre is what the
+// guide itself told them they could settle later (spec 03-03 §7.1).
+describe('the healthy-machine setup prompt', () => {
+  const text = buildSetupPrompt({ gaps: [], ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg', bunCmd: 'bun' })
+
+  it('opens by asking what they came to change, not by hunting for faults', () => {
+    expect(text).toMatch(/nothing (is )?(broken|wrong)|everything (checks out|works)/i)
+    expect(text).toMatch(/ask|what.*want/i)
+    // The failure to design against is a guide that "repairs" a working
+    // machine because its prompt handed it a repair task.
+    expect(text).not.toContain('the user has said yes to you fixing this')
+  })
+
+  it('names the thing they are most likely there for', () => {
+    expect(text).toContain('create_voice')
+    expect(text).toContain('write_voice_config')
+  })
+})
+
+// Peer review (codex): the healthy-run prompt was still sent under
+// GUIDE_PERSONA, which states the user already said yes to repairs, tells the
+// guide to "investigate first", and pre-authorizes routine shell and file
+// changes — and cliPermission auto-allows those. A lower-priority "do not run
+// diagnostics" line cannot hold against a system prompt saying the opposite.
+describe('the persona a setup conversation runs under', () => {
+  it('authorizes repairs only when there are repairs', () => {
+    expect(GUIDE_PERSONA).toMatch(/already given you the\s+go-ahead|authorized you/i)
+    expect(VISIT_PERSONA).not.toMatch(/already given you the\s+go-ahead|authorized you/i)
+  })
+
+  it('makes the healthy visit ask before it changes anything', () => {
+    expect(VISIT_PERSONA).toMatch(/ask/i)
+    expect(VISIT_PERSONA).toMatch(/nothing is broken|nothing to fix|came to change/i)
+  })
+
+  it('keeps the credential rule in BOTH — it is not a repair-time rule', () => {
+    for (const persona of [GUIDE_PERSONA, VISIT_PERSONA]) {
+      expect(persona.toLowerCase()).toContain('api key')
+    }
   })
 })

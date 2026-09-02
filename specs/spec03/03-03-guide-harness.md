@@ -238,11 +238,67 @@
   hands over the link. No such date is hardcoded anywhere
   in murmur — prompts included. Consequently `WebFetch` joins the guide's
   built-in surface; it is strictly narrower than the `Bash` already there.
-- **Tool surface**: this guide task gets ONE murmur-owned extra tool,
-  `write_voice_config` (zod input, realpath-scoped to that single config
-  path — the same trust-boundary posture as spec 06 slice B). The SDK
-  built-ins stay for diagnosis; the config write is ours so the path scope
-  is enforceable.
+- **Tool surface**: this guide task gets TWO murmur-owned extra tools (zod
+  input, realpath-scoped to the single config path — the same trust-boundary
+  posture as spec 06 slice B). The SDK built-ins stay for diagnosis; these two
+  are ours so the path scope is enforceable.
+  - `write_voice_config` — the endpoint, proven by one real synth first.
+  - `create_voice` (2026-09-01, user report) — the listener's OWN recording
+    turned into a hosted voice, and pinned. **The reason it exists is the rule
+    above.** A pasted key finishes the endpoint but not the timbre: the guide
+    holds `Bash` and could upload a sample itself, except that the key is
+    deliberately out of its reach (`SECRET_PATH` refuses any tool input naming
+    `voice.json`, `.env` or `.murmur`), so it could only ever tell the listener
+    to go do it on the provider's website by hand. That is a setup the guide
+    cannot finish. The fix is the same shape as the secret capture: the model
+    names a local file and a title, the HANDLER reads the key from the config
+    and attaches it to the upload, and only the new voice id comes back. One
+    pasted key now covers the whole voice setup.
+    - The path is the model's one free-form input and an upload SENDS it, so
+      the handler takes only an audio suffix and refuses everything else —
+      handed `voice.json` it would post the credential to a third party
+      itself. Size-bounded, aborts on Esc before the recording leaves the
+      machine, and scrubs the key from any provider error before it reaches
+      the conversation.
+    - Provider shape, probed against the live API rather than a doc page
+      (2026-09-01): `POST /model`, multipart, `type=tts`, `train_mode=fast`
+      (usable the instant it is created), `title`, `voices` (the file), and
+      optional `texts` (the clip's transcript, which improves the clone).
+      Answers `201` with `_id` — that is the `referenceId`. The free tier
+      allows it; a created model is deletable, which is how the probe left
+      nothing behind.
+  - **Both tools ride the TARGET, not the gap** — and an EXPLICIT entry with
+    no gaps opens the conversation instead of closing it. The two follow from
+    one observation: the listener who reopens setup is usually there to change
+    something that already WORKS, above all the timbre the guide itself invited
+    them to settle later. Gating on "the endpoint is missing" meant that
+    invitation led to a guide with no tool to act on it, and then to a machine
+    that answered `/setup` with `everything checks out` and shut the door. So a
+    clean explicit run gets a prompt of its own (`healthyMachinePrompt`) that
+    hands over no repair task at all — a guide told to fix things will find
+    things to fix — and asks what they came to change. No consent card is
+    shown there: the y is a consent to REPAIRS, and walking in was the consent.
+    The boot path is unchanged (silent on a clean machine), and a run that
+    wants no voice has no tool to offer, so it keeps the one-line answer.
+    A visit runs under its OWN system persona (`VISIT_PERSONA`): everything
+    the repair persona derives from "the user said yes to fixing this" — investigate
+    first, make routine changes unasked — is what must not carry when there is
+    nothing to fix, and a task prompt cannot hold that line against a system
+    prompt saying the opposite while the permission callback auto-allows what
+    the persona authorized. The credential rule is stated in both.
+  - **The tool reaches the EFFECTIVE endpoint**, not the file: `voice.json < env
+    < flags` is the precedence everything else resolves in, so a listener whose
+    endpoint comes from `.env` (and therefore has no `voice.json` at all) must
+    not be told there is no endpoint while the radio is speaking through one.
+    The new voice id is still written to the one file murmur may write, and it
+    is merged onto what that FILE holds — an env-only knob does not get
+    persisted as though the listener had chosen it.
+  - **A voice created mid-run is heard in that run.** `voiceAfterSetup` merges
+    per knob rather than returning early when the run booted with a URL: "did
+    this run have an endpoint" is a different question from "did the
+    conversation change anything", and the early return meant a listener who
+    created their own voice kept the old timbre until the next boot while setup
+    reported success. Each knob the run already stated still wins.
 
 ### 7.3 Acceptance (continues §5)
 
