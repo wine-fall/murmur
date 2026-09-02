@@ -399,7 +399,8 @@ detail quiet (design ref B1) — and the CC-bootstrap offer ships as one
 multi-line consent ask (question first, the why-lines as card notes, ref
 B2). Card text carries
 its hierarchy in-band (`cardLines()`): first line bright, later lines
-quieter, and ASCII role markers — `ok ` (sage) / `-- ` (notice) — mark the
+quieter, and ASCII role markers — `ok ` (sage) / `-- ` (ember, so a gap never
+reads as one more quiet hint beside the options) — mark the
 pre-broadcast checklist that the setup offer now ships as ONE ask
 (`setupOfferText()` in `src/guide.ts`: summary, ready rows, gap rows, then
 the y/N; probe detail demoted to the dev log), with a divider drawn between
