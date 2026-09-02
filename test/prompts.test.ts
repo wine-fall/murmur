@@ -235,8 +235,8 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
   })
 
   it('renders the real clock alongside the scene cue', () => {
-    const p = buildNextTalkPrompt({ ...base, time: '2:28 pm', scene: 'afternoon' })
-    expect(p).toContain("It's 2:28 pm")
+    const p = buildNextTalkPrompt({ ...base, time: 'Monday 2026-08-31, 2:28 pm', scene: 'afternoon' })
+    expect(p).toContain("It's Monday 2026-08-31, 2:28 pm")
     expect(p).toContain('afternoon')
   })
 
@@ -247,7 +247,7 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
   it('the respond and steer prompts carry the same clock and music facts (codex review)', () => {
     const ctx = {
       ...base,
-      time: '2:28 pm',
+      time: 'Monday 2026-08-31, 2:28 pm',
       music: { kind: 'playing', track: 'Song — Artist' },
     } as const
     const prompts = [
@@ -255,7 +255,7 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
       buildSteerPrompt('hey', ctx, { musicWired: true, shutdownArmed: false, settingsWired: false }),
     ]
     for (const p of prompts) {
-      expect(p).toContain("It's 2:28 pm")
+      expect(p).toContain("It's Monday 2026-08-31, 2:28 pm")
       expect(p).toContain('"Song — Artist" is playing right now')
     }
   })

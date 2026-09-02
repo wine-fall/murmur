@@ -473,7 +473,7 @@ describe('the talk context carries the real music state (spec 04 bugfix)', () =>
     source.nextTrack = () => new Promise(() => {}) // in flight forever
     await new Director(deps).run(1)
     expect(brain.talkContexts[0]!.music).toEqual({ kind: 'picking' })
-    expect(brain.talkContexts[0]!.time).toMatch(/^\d{1,2}:\d{2} [ap]m$/)
+    expect(brain.talkContexts[0]!.time).toMatch(/^\w+day \d{4}-\d{2}-\d{2}, \d{1,2}:\d{2} [ap]m$/)
   })
 
   it('a song on air reads as playing, by its now-playing label', async () => {

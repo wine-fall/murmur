@@ -39,10 +39,17 @@ describe('currentScene', () => {
 })
 
 describe('formatClock', () => {
-  it('renders a 12-hour local clock, ICU-free', () => {
-    expect(formatClock(new Date(2026, 7, 31, 14, 28))).toBe('2:28 pm')
-    expect(formatClock(new Date(2026, 7, 31, 0, 5))).toBe('12:05 am')
-    expect(formatClock(new Date(2026, 7, 31, 12, 0))).toBe('12:00 pm')
-    expect(formatClock(new Date(2026, 7, 31, 11, 59))).toBe('11:59 am')
+  // The weekday and date carry what the hour alone cannot: a Monday reads
+  // differently from a Saturday, and the bucket spans six hours besides.
+  it('names the weekday and date before the 12-hour local clock, ICU-free', () => {
+    expect(formatClock(new Date(2026, 7, 31, 14, 28))).toBe('Monday 2026-08-31, 2:28 pm')
+    expect(formatClock(new Date(2026, 7, 31, 0, 5))).toBe('Monday 2026-08-31, 12:05 am')
+    expect(formatClock(new Date(2026, 7, 31, 12, 0))).toBe('Monday 2026-08-31, 12:00 pm')
+    expect(formatClock(new Date(2026, 7, 31, 11, 59))).toBe('Monday 2026-08-31, 11:59 am')
+  })
+
+  it('zero-pads the month and day, and spans the week', () => {
+    expect(formatClock(new Date(2027, 0, 1, 23, 0))).toBe('Friday 2027-01-01, 11:00 pm')
+    expect(formatClock(new Date(2026, 11, 6, 9, 7))).toBe('Sunday 2026-12-06, 9:07 am')
   })
 })
