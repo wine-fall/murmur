@@ -892,6 +892,50 @@ contract (no framework until a second agent exists):
   loudest thing on the screen. The engine already knows which side of the turn
   it is on (the Esc router's `waiting`); `setBusy` (§2.1) is that state on the
   wire, and the sign is the one place the client renders it.
+- **The composer (2026-09-02, user report).** The input line was a
+  single-line field bounded at 56 columns with the quiet rule carrying the
+  rest of the row — concept 04's radio composition, where a typed line is a
+  short aside to a DJ. Under a floor that is the wrong shape: a reply to the
+  setup guide is a pasted path, a question with its context, a paragraph —
+  and OpenTUI's `<input>` cannot wrap at all (it pins its height to one row,
+  strips newlines from a paste, and refuses `newLine()`). So while an agent
+  holds the floor the bottom row is a **composer**: the same row, the whole
+  width, a `<textarea>` that word-wraps and grows with the draft
+  (`composerRows` in `tui/src/floor.ts`: one row per wrapped line, capped at
+  `COMPOSER_MAX_ROWS` and at a third of the frame, the rest scrolling
+  inside). Enter sends; shift+enter, opt+enter and ctrl-J break the line
+  (`COMPOSER_KEYS` — OpenTUI's own default is the reverse, an editor's
+  bargain rather than a chat composer's; under the kitty keyboard protocol
+  ctrl-J arrives as `j`+ctrl, not the raw linefeed the default names, so it
+  is bound explicitly). Growth is measured by the widget's own wrap
+  (`editorView.getTotalVirtualLineCount()`; `virtualLineCount` is the
+  viewport's rows, i.e. the height being decided), re-read after a resize
+  since a rewrap is not a content change. The log absorbs the rows — it is
+  the column's flex remainder — and the command menu anchors a gap row above
+  the composer whatever its height. The radio's field, its
+  56-column bound and its rule are untouched: that single row is what the
+  band composition's raster anchors are measured from, and a paragraph to a
+  DJ is not the interaction §3.2-A describes. The in-card answer field stays
+  single-line too — a card asks for a key or a `y`.
+- **The listener's own half, at the moment they typed it (2026-09-02, user
+  report).** The echo above lives in `lineReader`, which fires when a read
+  TAKES the line. A guide turn is seconds long with no read open, so a line
+  typed while the guide was thinking was fed to it — and vanished: gone
+  from the field, not yet in the log, until the turn ended and the next
+  read took it. `IpcHost` now echoes on arrival when the guide holds the
+  floor and no reader is parked on the queue (`LineQueue.hasReader`), and
+  swallows the take-echo behind it. The swallow travels WITH the line, not
+  as a count of echoes owed (codex review): the host records per queued
+  line whether it was echoed ahead and carries that flag from `takeLine` to
+  the `onUserLine` that follows, so a taker that echoes nothing — the secret
+  read consuming a line typed ahead of it — leaves no debt for a later line
+  to pay. Two cases stay exactly as they were: a read already open decides
+  for itself — the secret paste (spec 03-03 §7.2) opens its `echo: false`
+  read BEFORE the user types, so "nobody reading" is never that case — and
+  the other floors, whose takers never echo: the radio's Director (commands
+  are not turns, and its peek is pending almost always, so its echo was
+  never late) and the report's own queue (the line IS the report). The host
+  echoes ahead only where the taker would have echoed late.
 - **No idle timeout.** A waiting guide waits — the exit affordance is
   written on the reply prompt and the placeholder; nothing switches the
   partner automatically.

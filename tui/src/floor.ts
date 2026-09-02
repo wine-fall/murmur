@@ -74,3 +74,41 @@ export function busyLine(floor: Floor, phase: number): string {
   const who = floorFace(floor)?.identity ?? 'murmur'
   return `${who} is thinking ${BUSY_FRAMES[phase % BUSY_FRAMES.length]!}`
 }
+
+// The composer a floor gets in place of the radio's one-line field (§3.4). A
+// conversation with an agent is typed in paragraphs — a pasted path, a
+// question with its context — so the field wraps and grows with the draft,
+// and the radio keeps its single row (the band composition's raster anchors
+// are measured from it). Past the cap the rest scrolls inside the field.
+export const COMPOSER_MAX_ROWS = 8
+
+// `lines` is the widget's own wrapped-line count — the wrap is its math, not
+// ours; `height` is the terminal's. A third of the frame at most, so the
+// walkthrough being replied to stays readable above the reply.
+export function composerRows(lines: number, height: number): number {
+  return Math.max(1, Math.min(lines, COMPOSER_MAX_ROWS, Math.floor(height / 3)))
+}
+
+// Enter sends; shift+enter, opt+enter, and ctrl-J break the line. OpenTUI's
+// textarea ships the reverse (enter breaks, meta+enter sends), which is an
+// editor's bargain, not a chat composer's. Under the kitty keyboard protocol
+// (on by default — spec 10 §5.1) ctrl-J arrives as the letter with ctrl held,
+// not as the raw linefeed the default binding names; both are bound.
+// Structurally @opentui/core's textarea KeyBinding — declared here, like
+// figure-image.ts's PixelResolution, so the root suite's typecheck (which
+// reaches this file through its test) never has to resolve tui/node_modules.
+export type ComposerKey = {
+  name: string
+  ctrl?: boolean
+  shift?: boolean
+  meta?: boolean
+  action: 'submit' | 'newline'
+}
+
+export const COMPOSER_KEYS: ComposerKey[] = [
+  { name: 'return', action: 'submit' },
+  { name: 'kpenter', action: 'submit' },
+  { name: 'return', shift: true, action: 'newline' },
+  { name: 'return', meta: true, action: 'newline' },
+  { name: 'j', ctrl: true, action: 'newline' },
+]

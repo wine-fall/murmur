@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
-import type { InputRenderable, ScrollBoxRenderable } from '@opentui/core'
+import type { InputRenderable, ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
 
 import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
 import { Bars, render } from './bars.ts'
@@ -40,7 +40,7 @@ import {
 } from './figure-image.ts'
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
-import { busyLine, floorFace } from './floor.ts'
+import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
 import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
@@ -316,6 +316,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
   const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
+  // The composer a floor gets in place of the input line (§3.4): a real
+  // multi-line field. A textarea reports that its content changed, not what
+  // it is, so the draft and its wrapped height are read back off the ref.
+  const composer = useRef<TextareaRenderable>(null)
+  const [draftLines, setDraftLines] = useState(1)
   // The program log, so PageUp/PageDown can scroll a box that never has focus.
   const log = useRef<ScrollBoxRenderable>(null)
   // True while the listener is paged away from the end of the log. The head
@@ -332,6 +337,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     setTyped(value)
     setMenuAt(0)
     setMenuHidden(false)
+  }
+  const recompose = (): void => {
+    const area = composer.current
+    if (area === null) return
+    retype(area.plainText)
+    // The TOTAL wrapped rows, not `virtualLineCount` — that one is the rows
+    // the current viewport shows, which is the height being decided here.
+    setDraftLines(area.editorView.getTotalVirtualLineCount())
   }
   const matches = commandMatches(typed)
   const menuOpen = matches.length > 0 && !menuHidden && !paneOpen && asks.length === 0
@@ -488,6 +501,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       if (key.name === 'down') return setMenuAt(Math.min(menu.current.count - 1, menu.current.at + 1))
       if (key.name === 'tab') {
         if (input.current !== null) input.current.value = menu.current.selected
+        // The composer has no value setter: a fresh buffer, cursor at its end.
+        composer.current?.setText(menu.current.selected)
+        composer.current?.gotoBufferEnd()
         return retype(menu.current.selected)
       }
     }
@@ -535,6 +551,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
 
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
+    composer.current?.setText('')
+    setDraftLines(1)
     // Speaking is a decision to be at the bottom: a listener who paged up to
     // re-read something and then answered would otherwise be left staring at
     // the old screen while the reply they asked for lands out of sight — the
@@ -577,24 +595,34 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const cols = Math.min(dims.width, MAX_COLS)
   const gutter = Math.floor((dims.width - cols) / 2)
   const wide = cols >= WIDE_MIN
+  // Who holds the floor, as a face (§3.4): null while the radio has it.
+  const floor = floorFace(mode)
+  // The bottom row's height: the radio's field is one row (the band's raster
+  // anchors are measured from it); a floor's composer grows with the draft.
+  const rows = floor === null ? 1 : composerRows(draftLines, dims.height)
+  // A resize rewraps the draft without a content change (codex review): read
+  // the wrapped count again once the widget has its new width — after this
+  // commit's layout, hence the deferral.
+  useEffect(() => {
+    const later = setTimeout(recompose, 0)
+    return () => clearTimeout(later)
+  }, [dims.width])
   // Where the spotlight card begins, for the raster paint loops: they keep
   // the stage hushed above this row and yield it below (null = no card). The
   // command menu borrows the same yield — a kitty image composites above text
-  // cells, so its rows (matches + border + footer, anchored 2 above bottom)
-  // must be clear of rasters too.
+  // cells, so its rows (matches + border + footer, anchored a gap row above
+  // the input row) must be clear of rasters too.
   const cardTop =
     asks.length > 0
       ? cardTopRow(asks[0]!.text, cols, dims.height)
       : menuOpen
-        ? Math.max(1, dims.height - 2 - (matches.length + 3))
+        ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
         : null
   const cardTopRef = useRef(cardTop)
   cardTopRef.current = cardTop
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.
-  // null while the radio has the floor — the program's own face (§3.4).
-  const floor = floorFace(mode)
   const strip =
     !wide
       ? [floor?.strip ?? greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
@@ -1122,7 +1150,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 flexDirection: 'column',
                 position: 'absolute',
                 left: gutter + 1,
-                bottom: 2,
+                // A gap row above the input row, however tall its composer is.
+                bottom: 1 + rows,
                 zIndex: 100,
                 paddingLeft: 1,
                 paddingRight: 1,
@@ -1262,7 +1291,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         <box
           style={{
             flexDirection: 'row',
-            height: 1,
+            height: rows,
             paddingLeft: 1,
             paddingRight: 1,
             backgroundColor: INK.bg,
@@ -1272,37 +1301,66 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               (§6.1): prompt, typed text, and the resting invitation alike. A
               line the engine will take as a command warms to ember instead. */}
           <text style={{ fg: floor?.ink ?? PERIWINKLE }}>{'> '}</text>
-          <input
-            ref={input}
-            focused={!paneOpen}
-            placeholder={
-              paneOpen
-                ? 'settings open — esc to return'
-                : (floor?.placeholder ?? INPUT_HINTS[hint])
-            }
-            style={{
-              // The sky composition bounds the field and lets a quiet rule carry
-              // the rest of the row (concept 04's input line); long input scrolls
-              // inside the field. The band composition keeps the full width.
-              ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
-              // The field is permanently focused (§3.2), so the focused pair is
-              // the ink that actually paints; the base pair keeps them honest.
-              textColor: isCommand(typed) ? EMBER : (floor?.ink ?? PERIWINKLE),
-              focusedTextColor: isCommand(typed) ? EMBER : (floor?.ink ?? PERIWINKLE),
-              placeholderColor: mix(floor?.ink ?? PERIWINKLE, INK.bg, 0.4),
-              backgroundColor: INK.bg,
-              focusedBackgroundColor: INK.bg,
-            }}
-            onInput={retype}
-            // The reconciler wires an input's onSubmit to the ENTER event, which
-            // carries the submitted string; the declared prop type inherits
-            // Textarea's event-shaped signature on top of it (upstream, 0.4.5).
-            onSubmit={submit as InputProps['onSubmit']}
-          />
-          {wide && (
-            <box style={{ flexGrow: 1, paddingLeft: 1 }}>
-              <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
-            </box>
+          {floor !== null ? (
+            /* The composer (§3.4). Under a floor the line is a conversation
+               with an agent, typed in paragraphs — a pasted path, a question
+               with its context — so it takes the whole row, wraps, and grows
+               with the draft (composerRows); the radio's bounded field and
+               its quiet rule below are concept 04's composition and stay as
+               they are. Enter sends; shift/opt+enter breaks the line
+               (COMPOSER_KEYS). The ink is the floor's: a command here is the
+               agent's own grammar (/done), not the radio's. */
+            <textarea
+              ref={composer}
+              focused={!paneOpen}
+              placeholder={paneOpen ? 'settings open — esc to return' : floor.placeholder}
+              keyBindings={COMPOSER_KEYS}
+              onContentChange={recompose}
+              onSubmit={() => submit(composer.current?.plainText ?? '')}
+              style={{
+                flexGrow: 1,
+                wrapMode: 'word',
+                textColor: floor.ink,
+                focusedTextColor: floor.ink,
+                placeholderColor: mix(floor.ink, INK.bg, 0.4),
+                backgroundColor: INK.bg,
+                focusedBackgroundColor: INK.bg,
+              }}
+            />
+          ) : (
+            <>
+              <input
+                ref={input}
+                focused={!paneOpen}
+                placeholder={paneOpen ? 'settings open — esc to return' : INPUT_HINTS[hint]}
+                style={{
+                  // The sky composition bounds the field and lets a quiet rule
+                  // carry the rest of the row (concept 04's input line); long
+                  // input scrolls inside the field. The band composition keeps
+                  // the full width.
+                  ...(!wide ? { flexGrow: 1 } : { width: Math.min(56, cols - 8) }),
+                  // The field is permanently focused (§3.2), so the focused pair
+                  // is the ink that actually paints; the base pair keeps them
+                  // honest.
+                  textColor: isCommand(typed) ? EMBER : PERIWINKLE,
+                  focusedTextColor: isCommand(typed) ? EMBER : PERIWINKLE,
+                  placeholderColor: mix(PERIWINKLE, INK.bg, 0.4),
+                  backgroundColor: INK.bg,
+                  focusedBackgroundColor: INK.bg,
+                }}
+                onInput={retype}
+                // The reconciler wires an input's onSubmit to the ENTER event,
+                // which carries the submitted string; the declared prop type
+                // inherits Textarea's event-shaped signature on top of it
+                // (upstream, 0.4.5).
+                onSubmit={submit as InputProps['onSubmit']}
+              />
+              {wide && (
+                <box style={{ flexGrow: 1, paddingLeft: 1 }}>
+                  <text style={{ fg: lit(mix(INK.dim, INK.bg, 0.45)) }}>{'─'.repeat(cols)}</text>
+                </box>
+              )}
+            </>
           )}
         </box>
       ) : (

@@ -48,6 +48,24 @@ describe('LineQueue', () => {
     const first = q.peek()
     for (let i = 0; i < 100; i++) expect(q.peek()).toBe(first)
   })
+
+  it('hasReader is true only while the queue is empty and someone is parked on it', async () => {
+    // The echo timing in IpcHost (spec 10 §3.4) rests on this: a reader is
+    // parked only when there is nothing to hand it, so "a reader is waiting"
+    // means the next line typed is taken — and echoed — at once, and "no
+    // reader" means it will lie in the queue with its echo until one opens.
+    const q = new LineQueue()
+    expect(q.hasReader()).toBe(false)
+    const parked = q.peek()
+    expect(q.hasReader()).toBe(true)
+    q.push('first')
+    expect(await parked).toBe('first')
+    expect(q.hasReader()).toBe(false)
+    // A peek with a line already queued resolves outright: nobody parks
+    // behind a line that is waiting to be taken.
+    expect(await q.peek()).toBe('first')
+    expect(q.hasReader()).toBe(false)
+  })
 })
 
 describe('ask', () => {

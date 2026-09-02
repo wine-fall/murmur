@@ -70,6 +70,14 @@ export class IpcHost implements Host {
   private settingsBridge: SettingsBridge | null = null
   private interruptHandler: (() => void) | null = null
   private mode: FloorMode = 'radio'
+  // Per queued line, in queue order, whether the host already echoed it on
+  // arrival (§3.4) — this host is the queue's only writer and only taker, so
+  // the two stay aligned. `takenEchoed` carries the flag of the line just
+  // taken to the onUserLine that follows it; a taker that never echoes (the
+  // secret read, a report line) just leaves it for the next take to
+  // overwrite, so a stray flag can never fall on a later line.
+  private echoedAhead: boolean[] = []
+  private takenEchoed = false
   private mirror: (name: string, message: string) => void
   private markEof!: () => void
   private eofSeen: Promise<void>
@@ -137,6 +145,21 @@ export class IpcHost implements Host {
         // The oldest pending ask is what this line answers, if any is —
         // lineReader consumes in exactly this order.
         this.pendingAsks.shift()
+        // The listener's own half, at the moment they typed it (§3.4). The
+        // echo normally rides the guide's `lineReader`, which fires when a
+        // read TAKES the line — but a guide turn runs for seconds with no
+        // read open, so the line lay in the queue with its echo still inside
+        // it, and the conversation lost the half the listener had just
+        // written. While the guide holds the floor and nobody is reading, the
+        // host says it now and the take-echo behind it is swallowed. A read
+        // already open decides for itself: the secret paste's `echo: false`
+        // (spec 03-03 §7.2) opens BEFORE the user types, so "nobody reading"
+        // is never that case. Only the guide's floor: its reader is the one
+        // that echoes on take — the radio's Director and the report's own
+        // queue never echo, and the host must not start to on their behalf.
+        const ahead = this.mode === 'guide' && !this.queue.hasReader()
+        if (ahead) this.echoUser(message.text)
+        this.echoedAhead.push(ahead)
         this.queue.push(message.text)
       }
       if (message.type === 'interrupt') {
@@ -280,7 +303,9 @@ export class IpcHost implements Host {
   }
 
   takeLine(): string | undefined {
-    return this.queue.take()
+    const line = this.queue.take()
+    if (line !== undefined) this.takenEchoed = this.echoedAhead.shift() ?? false
+    return line
   }
 
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void {
@@ -297,6 +322,16 @@ export class IpcHost implements Host {
   }
 
   onUserLine(text: string): void {
+    // Already said when it was typed: the reader that just took the line
+    // must not put it in the listener's mouth a second time.
+    if (this.takenEchoed) {
+      this.takenEchoed = false
+      return
+    }
+    this.echoUser(text)
+  }
+
+  private echoUser(text: string): void {
     this.send({ v: 1, type: 'userLine', text })
     this.mirror('user', text)
   }
