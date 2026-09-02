@@ -51,10 +51,16 @@ export function splitSentences(text: string): string[] {
 // The fish-speech /v1/tts body: one complete, normalized wav. `referenceId`
 // picks a server-side saved voice; `seed` pins the sampled timbre (fish-speech
 // has no preset voices, so without either, every call is a new voice). The
-// sampling values mirror fish-speech's own client.
+// sampling values mirror fish-speech's own client. `speed` is the speaking
+// rate (1.0 = as the reference reads); unset sends no prosody at all, so the
+// provider's own pacing is untouched.
 export function buildTtsPayload(
   text: string,
-  { referenceId, seed }: { referenceId?: string | undefined; seed?: number | undefined },
+  {
+    referenceId,
+    seed,
+    speed,
+  }: { referenceId?: string | undefined; seed?: number | undefined; speed?: number | undefined },
 ): Record<string, unknown> {
   return {
     text,
@@ -68,6 +74,7 @@ export function buildTtsPayload(
     temperature: 0.8,
     ...(referenceId !== undefined && { reference_id: referenceId }),
     ...(seed !== undefined && { seed }),
+    ...(speed !== undefined && { prosody: { speed, volume: 0 } }),
   }
 }
 
@@ -78,6 +85,7 @@ export type HostedVoiceOptions = {
   referenceId?: string | undefined
   apiKey?: string | undefined
   seed?: number | undefined
+  speed?: number | undefined
   model?: string | undefined
   sentencePadS?: number | undefined
   timeoutMs?: number | undefined
@@ -161,7 +169,9 @@ export class HostedVoice implements VoiceProvider {
         // e.g. fish.audio 's2.1-pro-free'; self-hosted fish-speech ignores it.
         ...(this.opts.model !== undefined && { model: this.opts.model }),
       },
-      body: JSON.stringify(buildTtsPayload(text, { referenceId: this.opts.referenceId, seed })),
+      body: JSON.stringify(
+        buildTtsPayload(text, { referenceId: this.opts.referenceId, seed, speed: this.opts.speed }),
+      ),
       signal: AbortSignal.timeout(this.opts.timeoutMs ?? DEFAULT_TIMEOUT_MS),
     })
     if (!response.ok) {

@@ -448,7 +448,7 @@ describe('runSetup — the once-per-boot offer', () => {
       probes,
       explicit: true,
     })
-    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice'])
+    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice', 'set_voice_speed'])
   })
 
   it('hands the voice gap both voice tools, and a music-only gap neither', async () => {
@@ -464,7 +464,7 @@ describe('runSetup — the once-per-boot offer', () => {
     // The endpoint, and the listener's own recording turned into a voice on
     // it (spec 03-03 §7.2): the pair is what lets one pasted key finish the
     // whole voice setup without the key ever entering the conversation.
-    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice'])
+    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['write_voice_config', 'create_voice', 'set_voice_speed'])
 
     const music = fakeGuide()
     const { host: host2 } = fakeHost(['y'])

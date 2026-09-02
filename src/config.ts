@@ -17,12 +17,23 @@ import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './dev-log
 import { dataRoot, homeRoot, musicPolicyPath, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 import { readSettingsFile } from './settings.ts'
-import { readVoiceConfig, type VoiceConfig } from './voice-config.ts'
+import { MAX_SPEED, MIN_SPEED, readVoiceConfig, type VoiceConfig } from './voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
 // by-ear knob: fish TTS runs sentences together and its own pause hints are
 // inert, so we insert the gap ourselves. 0 disables splitting entirely.
 const DEFAULT_SENTENCE_PAD_S = 0.8
+
+const TtsOverridesSchema = z
+  .object({
+    ttsUrl: z.string(),
+    ttsReferenceId: z.string(),
+    ttsApiKey: z.string(),
+    ttsModel: z.string(),
+    ttsSeed: z.coerce.number().int(),
+    ttsSpeed: z.coerce.number().min(MIN_SPEED).max(MAX_SPEED),
+  })
+  .partial()
 
 export const ConfigSchema = z.object({
   // Which Brain to construct: 'claude' (real, default) or 'stub' (canned, no network).
@@ -58,7 +69,14 @@ export const ConfigSchema = z.object({
   // Pins the sampled timbre — fish-speech has no preset voices, so an unset
   // seed with no reference means a fresh voice per call.
   ttsSeed: z.coerce.number().int().optional(),
+  // The speaking rate (fish.audio `prosody.speed`); unset = the voice's own.
+  ttsSpeed: z.coerce.number().min(MIN_SPEED).max(MAX_SPEED).optional(),
   ttsSentencePadS: z.coerce.number().min(0).default(DEFAULT_SENTENCE_PAD_S),
+  // The voice knobs env and flags stated for THIS run. A voice.json rewritten
+  // by the setup conversation is re-layered under exactly these (voiceAfterSetup),
+  // so a knob the run took from the file follows the file, and a knob it took
+  // from the environment stands.
+  ttsOverrides: TtsOverridesSchema.default({}),
 
   // --- music (specs 03-01/03-02) ----------------------------------------- //
   musicEnabled: z.boolean().default(true),
@@ -193,6 +211,7 @@ function envNumber(
 // whatever env does not state (spec 03-03 §7.2: env beats file, per knob).
 function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
   const seed = envNumber(env, 'MURMUR_TTS_SEED', z.coerce.number().int().nonnegative())
+  const speed = envNumber(env, 'MURMUR_TTS_SPEED', z.coerce.number().min(MIN_SPEED).max(MAX_SPEED))
   const padS = envNumber(env, 'MURMUR_TTS_SENTENCE_PAD_S', z.coerce.number().nonnegative())
   const text = (name: string): string | undefined => {
     const value = env[name]?.trim()
@@ -208,6 +227,7 @@ function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
     ...(apiKey !== undefined && { ttsApiKey: apiKey }),
     ...(model !== undefined && { ttsModel: model }),
     ...(seed !== undefined && { ttsSeed: seed }),
+    ...(speed !== undefined && { ttsSpeed: speed }),
     ...(padS !== undefined && { ttsSentencePadS: padS }),
   }
 }
@@ -219,7 +239,7 @@ function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
 // their say. The saved key belongs to the saved endpoint and travels nowhere
 // else — otherwise pointing a run at a self-hosted box with `--tts-url` would
 // hand that box a hosted provider's credential.
-function ttsFromFile(saved: VoiceConfig | null, endpoint: string): Partial<Config> {
+export function ttsFromFile(saved: VoiceConfig | null, endpoint: string): Partial<Config> {
   if (saved === null) return {}
   const sameEndpoint = saved.ttsUrl.trim() === endpoint
   return {
@@ -228,6 +248,7 @@ function ttsFromFile(saved: VoiceConfig | null, endpoint: string): Partial<Confi
     ...(saved.referenceId !== undefined && { ttsReferenceId: saved.referenceId }),
     ...(saved.apiKey !== undefined && sameEndpoint && { ttsApiKey: saved.apiKey }),
     ...(saved.seed !== undefined && { ttsSeed: saved.seed }),
+    ...(saved.speed !== undefined && { ttsSpeed: saved.speed }),
   }
 }
 
@@ -249,6 +270,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'tts-url': { type: 'string' },
       'tts-model': { type: 'string' },
       'tts-reference': { type: 'string' },
+      'tts-speed': { type: 'string' },
       'no-music': { type: 'boolean' },
       'no-bed': { type: 'boolean' },
       'no-anchors': { type: 'boolean' },
@@ -267,7 +289,13 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
   const saved = readVoiceConfig(voiceConfigPath(env))
   const fromEnv = ttsFromEnv(env)
   const endpoint = (values['tts-url'] ?? fromEnv.ttsUrl ?? saved?.ttsUrl ?? '').trim()
-  const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv }
+  const flagTts = {
+    ...(values['tts-url'] !== undefined && { ttsUrl: values['tts-url'] }),
+    ...(values['tts-model'] !== undefined && { ttsModel: values['tts-model'] }),
+    ...(values['tts-reference'] !== undefined && { ttsReferenceId: values['tts-reference'] }),
+    ...(values['tts-speed'] !== undefined && { ttsSpeed: values['tts-speed'] }),
+  }
+  const tts = { ...ttsFromFile(saved, endpoint), ...fromEnv, ...flagTts }
   // The listener's persisted knobs (spec 12 §2.2): the lowest layer, per knob.
   const fromSettings = readSettingsFile(settingsPath(env), (m) => console.warn(`warning: ${m}`))
 
@@ -291,9 +319,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values.model !== undefined && { model: values.model }),
     ...(values.persona !== undefined && { personaPath: values.persona }),
     ...(values.gap !== undefined && { gapSeconds: values.gap }),
-    ...(values['tts-url'] !== undefined && { ttsUrl: values['tts-url'] }),
-    ...(values['tts-model'] !== undefined && { ttsModel: values['tts-model'] }),
-    ...(values['tts-reference'] !== undefined && { ttsReferenceId: values['tts-reference'] }),
+    ttsOverrides: { ...fromEnv, ...flagTts },
     ...(values['no-music'] === true && { musicEnabled: false }),
     ...(values['no-bed'] === true && { bedEnabled: false }),
     ...(values['no-anchors'] === true && { anchorsEnabled: false }),

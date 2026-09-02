@@ -67,6 +67,7 @@ describe('hosted-voice config', () => {
     MURMUR_TTS_API_KEY: 'secret',
     MURMUR_TTS_MODEL: 's2.1-pro-free',
     MURMUR_TTS_SEED: '4242',
+    MURMUR_TTS_SPEED: '0.85',
     MURMUR_TTS_SENTENCE_PAD_S: '0.5',
   }
 
@@ -79,6 +80,23 @@ describe('hosted-voice config', () => {
     expect(config.ttsModel).toBe('s2.1-pro-free')
     expect(config.ttsSeed).toBe(4242)
     expect(config.ttsSentencePadS).toBe(0.5)
+    expect(config.ttsSpeed).toBe(0.85)
+  })
+
+  // spec 02 §3.6: the speaking rate is one more knob on the same chain.
+  it('--tts-speed wins over env, and an unset speed stays unset', () => {
+    expect(parseCli(['--tts-speed', '0.9'], env).config.ttsSpeed).toBe(0.9)
+    const empty = { MURMUR_HOME: mkdtempSync(join(tmpdir(), 'murmur-cfg-')) }
+    expect(parseCli([], empty).config.ttsSpeed).toBeUndefined()
+  })
+
+  it('warns and degrades on an unusable speed instead of throwing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    for (const bad of ['fast', '0', '9']) {
+      expect(parseCli([], { MURMUR_TTS_SPEED: bad }).config.ttsSpeed).toBeUndefined()
+    }
+    expect(warn).toHaveBeenCalledTimes(3)
+    warn.mockRestore()
   })
 
   it('lets CLI flags win over env', () => {
@@ -271,12 +289,19 @@ describe('voice config file precedence', () => {
   })
 
   it('env beats the file', () => {
-    const env = { ...home({ ttsUrl: 'https://file.example', seed: 9 }) }
+    const env = { ...home({ ttsUrl: 'https://file.example', seed: 9, speed: 0.85 }) }
     env.MURMUR_TTS_URL = 'https://env.example'
     env.MURMUR_TTS_SEED = '1'
+    env.MURMUR_TTS_SPEED = '1.1'
     const { config } = parseCli([], env)
     expect(config.ttsUrl).toBe('https://env.example')
     expect(config.ttsSeed).toBe(1)
+    expect(config.ttsSpeed).toBe(1.1)
+  })
+
+  it('reads the speed the guide wrote when the env says nothing', () => {
+    const { config } = parseCli([], home({ ttsUrl: 'https://file.example', speed: 0.85 }))
+    expect(config.ttsSpeed).toBe(0.85)
   })
 
   // Issue #96: the file mirrors the MURMUR_TTS_* surface, so a conversation

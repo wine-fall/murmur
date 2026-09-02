@@ -649,6 +649,9 @@ describe('the healthy-machine setup prompt', () => {
     expect(text).toContain('write_voice_config')
     // Switching to the other bundled timbre is the likeliest change of all.
     expect(text).toMatch(/preset/)
+    // A voice that reads too fast is the other thing a listener walks in for.
+    expect(text).toContain('set_voice_speed')
+    expect(text).toMatch(/slow|fast|pace|speed/i)
   })
 })
 

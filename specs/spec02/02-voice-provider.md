@@ -179,11 +179,22 @@ so it sits beside `SidecarVoiceProvider` on the **same seam** (`start` /
   `reference_id` is the only thing that keeps one voice across calls.
 - **The guide-written file mirrors this env surface knob for knob**
   (spec 03-03 §7.2): `$MURMUR_HOME/voice.json` holds
-  `{ ttsUrl, model?, referenceId?, apiKey?, seed? }`, layered *under* env and
+  `{ ttsUrl, model?, referenceId?, apiKey?, seed?, speed? }`, layered *under* env and
   flags per knob. A URL alone is a complete config only for a self-hosted
   server; the hosted API requires the key and the `model` header on every
   request, so an endpoint configured by conversation carries all of them —
   through the validation synth and into the run.
+- **Speaking rate (2026-09-02, user report):** a cloned voice reads at its
+  reference clip's pace and the model drifts faster still — the bundled
+  female preset (4.1 chars/s in the clip) came back at 4.8 chars/s, which the
+  listener heard as "too fast". The rate is a request-level knob on hosted
+  fish.audio (`prosody.speed`, 1.0 = as recorded), so it is one more knob on
+  the same chain: `MURMUR_TTS_SPEED` / `--tts-speed` / voice.json `speed`,
+  bounded 0.5–2.0, **unset sends no `prosody` at all** (a run without one is
+  byte-identical to before). Measured on `s2.1-pro-free`: 0.85 → 3.6 chars/s,
+  0.75 → 3.3; synthesis time is unchanged. The guide sets it by conversation
+  (`set_voice_speed`, spec 03-03 §7.2). Self-hosted fish-speech is unverified
+  for this field; the hosted API is the shipped backend.
 - **Wire protocol — fish-speech native `/v1/tts`** (the chosen server): `POST`
   a JSON body (`text`, `reference_id`, `format:"wav"`, `streaming:false`,
   `normalize:true`, and the sampling defaults) with `content-type:

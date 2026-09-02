@@ -19,6 +19,7 @@ import { voiceConfigPath } from '../src/paths.ts'
 import {
   createVoiceTool,
   readVoiceConfig,
+  setVoiceSpeedTool,
   VOICE_PRESETS,
   resolveVoiceConfigTarget,
   type VoiceConfig,
@@ -840,5 +841,105 @@ describe('create_voice preset (bundled male/female timbre, fetched on demand)', 
       expect(createHash('sha256').update(bytes).digest('hex')).toBe(preset.sha256)
       expect(preset.url.endsWith('/voices/' + preset.file)).toBe(true)
     }
+  })
+})
+
+// spec 03-03 §7.2, the third tool: the speaking rate. Same posture as
+// write_voice_config — proven by one real synth at the new rate before the
+// file changes, and nothing else in the saved config is touched.
+describe('set_voice_speed tool (spec 03-03 §7.2)', () => {
+  type SpeedReply = { ok: boolean; error?: string; speed?: number }
+  const say = async (
+    tool: ReturnType<typeof setVoiceSpeedTool>,
+    speed: number,
+  ): Promise<SpeedReply> => {
+    const result = await tool.handler({ speed }, {})
+    const block = result.content[0]
+    if (block === undefined || block.type !== 'text') throw new Error('tool returned no text')
+    return JSON.parse(block.text) as SpeedReply
+  }
+  const SAVED: VoiceConfig = {
+    ttsUrl: 'https://api.fish.audio',
+    model: 's2.1-pro-free',
+    referenceId: 'ref-1',
+    apiKey: 'sk-saved',
+  }
+
+  it('validates with ONE synth at the new rate, then writes only the speed', async () => {
+    const dir = home()
+    writeVoiceConfig(join(dir, 'voice.json'), SAVED)
+    const probed: VoiceConfig[] = []
+    const written: number[] = []
+    const tool = setVoiceSpeedTool({
+      home: dir,
+      validate: async (config) => void probed.push(config),
+      onWritten: (speed) => void written.push(speed),
+    })
+    expect(await say(tool, 0.85)).toEqual({ ok: true, speed: 0.85 })
+    expect(probed).toEqual([{ ...SAVED, speed: 0.85 }])
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toEqual({ ...SAVED, speed: 0.85 })
+    expect(written).toEqual([0.85])
+  })
+
+  it('refuses when there is no endpoint to speak through', async () => {
+    const tool = setVoiceSpeedTool({ home: home(), validate: async () => {} })
+    const reply = await say(tool, 0.85)
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/endpoint/)
+  })
+
+  it('a failed synth writes nothing and explains', async () => {
+    const dir = home()
+    writeVoiceConfig(join(dir, 'voice.json'), SAVED)
+    const tool = setVoiceSpeedTool({
+      home: dir,
+      validate: () => Promise.reject(new Error('TTS request failed (422): prosody')),
+    })
+    const reply = await say(tool, 0.85)
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toContain('422')
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toEqual(SAVED)
+  })
+
+  it('bounds the rate: outside 0.5..2.0 is refused before any synth', async () => {
+    const dir = home()
+    writeVoiceConfig(join(dir, 'voice.json'), SAVED)
+    let synths = 0
+    const tool = setVoiceSpeedTool({ home: dir, validate: async () => void synths++ })
+    for (const bad of [0.2, 3, Number.NaN]) expect((await say(tool, bad)).ok).toBe(false)
+    expect(synths).toBe(0)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toEqual(SAVED)
+  })
+
+  it('speaks through the LIVE endpoint (env over file) but writes the file', async () => {
+    // A .env-configured listener has no voice.json at all: the probe has to
+    // reach the endpoint the run is actually using, and the file it leaves
+    // behind must be a complete config (the same shape create_voice writes).
+    const dir = home()
+    const probed: VoiceConfig[] = []
+    const live: VoiceConfig = { ttsUrl: 'https://from-env.example', apiKey: 'env-key' }
+    const tool = setVoiceSpeedTool({
+      home: dir,
+      endpoint: () => live,
+      validate: async (config) => void probed.push(config),
+    })
+    expect((await say(tool, 0.9)).ok).toBe(true)
+    expect(probed).toEqual([{ ...live, speed: 0.9 }])
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toEqual({ ...live, speed: 0.9 })
+  })
+
+  it('an abort during the validating synth writes nothing', async () => {
+    const dir = home()
+    writeVoiceConfig(join(dir, 'voice.json'), SAVED)
+    let stopped = false
+    const tool = setVoiceSpeedTool({
+      home: dir,
+      validate: async () => {
+        stopped = true
+      },
+      armAbort: () => () => stopped,
+    })
+    expect((await say(tool, 0.85)).ok).toBe(false)
+    expect(readVoiceConfig(join(dir, 'voice.json'))).toEqual(SAVED)
   })
 })

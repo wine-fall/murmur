@@ -187,7 +187,7 @@
 - **Config home**: guide-written config lives under `$MURMUR_HOME` via
   `src/paths.ts` (path governance applies): `voice.json`, zod-validated, and
   **mirroring the `MURMUR_TTS_*` env surface knob for knob** —
-  `{ ttsUrl, model?, referenceId?, apiKey?, seed? }`. Everything but the URL is
+  `{ ttsUrl, model?, referenceId?, apiKey?, seed?, speed? }`. Everything but the URL is
   optional, so a self-hosted server stays a one-field config; a hosted API needs
   the rest (below). Environment variables keep precedence **per knob** — `make
   dev` still loads `.env`, and env beats file — so `.env` stays a dev-time
@@ -206,7 +206,10 @@
   before writing anything; a failed validation is explained and nothing is
   written. A configuration written mid-conversation is wired into **this** boot
   in full, not just its URL, or the freshly configured voice stays silent (§7.3
-  criterion 5).
+  criterion 5): the rewritten file is re-layered under exactly the knobs env
+  and flags stated for this run (`Config.ttsOverrides`), so a run that booted
+  from voice.json follows the file's new id or pace at once, and a knob the
+  environment stated stands — per knob, the same rule as boot.
 - **Registration walkthrough** (hosted): murmur cannot click for the user, so
   the guide narrates and **opens** each page as the walkthrough reaches it —
   the signup page, then the API-keys page — and names what to click there,
@@ -241,9 +244,9 @@
   hands over the link. No such date is hardcoded anywhere
   in murmur — prompts included. Consequently `WebFetch` joins the guide's
   built-in surface; it is strictly narrower than the `Bash` already there.
-- **Tool surface**: this guide task gets TWO murmur-owned extra tools (zod
+- **Tool surface**: this guide task gets THREE murmur-owned extra tools (zod
   input, realpath-scoped to the single config path — the same trust-boundary
-  posture as spec 06 slice B). The SDK built-ins stay for diagnosis; these two
+  posture as spec 06 slice B). The SDK built-ins stay for diagnosis; these three
   are ours so the path scope is enforceable.
   - `write_voice_config` — the endpoint, proven by one real synth first.
   - `create_voice` (2026-09-01, user report) — the listener's OWN recording
@@ -287,7 +290,18 @@
       `audioPath`. No mirror, no retry queue: GitHub reachability is the one
       known soft spot (listeners in mainland China), and the by-hand path is
       the fallback until it is measured to matter.
-  - **Both tools ride the TARGET, not the gap** — and an EXPLICIT entry with
+  - `set_voice_speed` (2026-09-02, user report) — the speaking rate, one
+    number in (spec 02 §3.6: fish.audio `prosody.speed`, bounded 0.5–2.0).
+    The listener's "too fast" arrives right after the timbre is settled, and
+    a clone inherits its clip's pace and drifts faster, so the guide needs a
+    hand for it that is not "re-record the clip". Same posture as
+    `write_voice_config`: the handler reads the LIVE endpoint (env over file),
+    proves the rate with one real line through it, and only then writes the
+    one field into the saved config — every other field stays as it was. The
+    healthy-visit prompt names it next to the timbre, with 0.85 as the
+    reference point and "a step of ~0.1, then let them hear a line" as the
+    way to land on a number, because a listener has no feel for the scale.
+  - **All three tools ride the TARGET, not the gap** — and an EXPLICIT entry with
     no gaps opens the conversation instead of closing it. The two follow from
     one observation: the listener who reopens setup is usually there to change
     something that already WORKS, above all the timbre the guide itself invited
