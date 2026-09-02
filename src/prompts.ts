@@ -516,6 +516,12 @@ What you can actually change from here:
     already has it. This is the most likely reason they are here: the
     voice is the one part of setup that is easy to postpone, and a run with no
     chosen voice wanders in timbre from line to line.
+  - **How fast it reads.** \`set_voice_speed\` — a clone reads at its
+    reference clip's pace and often a little faster; "slower" or "too fast" is
+    this. 1.0 is unchanged; 0.85 is a clearly calmer read; go in steps of about
+    0.1. The tool proves the rate silently — nothing plays here; they hear the
+    new pace on the air once they hand back — so say that, and offer to adjust
+    again next time rather than guessing a number.
   - **The endpoint itself.** \`write_voice_config\` re-points murmur at another
     server or another hosted voice id, and proves it with one real line before
     saving.

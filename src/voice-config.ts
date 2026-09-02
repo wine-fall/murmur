@@ -54,12 +54,20 @@ export const API_KEY_LABEL = 'API key'
 // must read as "still a gap" rather than as a config that silently does nothing.
 // Everything else is optional: a self-hosted server is fully described by its
 // URL, and only a hosted API needs the model/reference/key knobs.
+// The speaking rate fish.audio accepts (`prosody.speed`); 1.0 = the reference
+// clip's own pace. On s2.1-pro-free, 0.85 takes a clone reading at 4.8 chars/s
+// down to 3.6 (spec 02 §3.6).
+export const MIN_SPEED = 0.5
+export const MAX_SPEED = 2
+export const SpeedSchema = z.number().min(MIN_SPEED).max(MAX_SPEED)
+
 export const VoiceConfigSchema = z.object({
   ttsUrl: z.string().trim().min(1),
   model: z.string().trim().min(1).optional(),
   referenceId: z.string().trim().min(1).optional(),
   apiKey: z.string().trim().min(1).optional(),
   seed: z.coerce.number().int().nonnegative().optional(),
+  speed: z.coerce.number().min(MIN_SPEED).max(MAX_SPEED).optional(),
 })
 
 export type VoiceConfig = z.infer<typeof VoiceConfigSchema>
@@ -559,6 +567,80 @@ export function createVoiceTool(deps: CreateVoiceDeps): TaskTool {
       }
       deps.onCreated?.({ referenceId, title })
       return reply({ ok: true, referenceId, title })
+    },
+  )
+}
+
+export type SetVoiceSpeedDeps = {
+  home: string
+  // One real line at the new rate, through the live endpoint, before anything
+  // is written — the same proof write_voice_config demands.
+  validate: (config: VoiceConfig) => Promise<void>
+  // The endpoint the run is speaking through (env and flags over the file);
+  // absent, the saved file is the endpoint.
+  endpoint?: () => VoiceConfig | null
+  armAbort?: () => () => boolean
+  onWritten?: (speed: number) => void
+}
+
+// The third murmur-owned setup tool (spec 03-03 §7.2): the speaking rate. A
+// clone inherits its reference clip's pace and the model drifts faster still,
+// so "slower" is the one change a listener asks for after the timbre is
+// settled. Proven by one synth at the new rate, then the one field is written
+// into the saved config — nothing else in it moves.
+export function setVoiceSpeedTool(deps: SetVoiceSpeedDeps): TaskTool {
+  return tool(
+    'set_voice_speed',
+    "Change how fast murmur's voice reads, and prove it with one real line before " +
+      'saving. 1.0 is the voice as recorded; 0.85 reads noticeably calmer; 1.15 ' +
+      'brisker. Applies to the endpoint already configured — you do not need the ' +
+      'API key, this tool has it.',
+    {
+      speed: z
+        .number()
+        .describe(`the speaking rate, ${String(MIN_SPEED)} to ${String(MAX_SPEED)}; 1.0 = unchanged`),
+    },
+    async (args) => {
+      const aborted = deps.armAbort?.() ?? (() => false)
+      const speed = SpeedSchema.safeParse(args.speed)
+      if (!speed.success) {
+        return reply({
+          ok: false,
+          error: `speed must be a number between ${String(MIN_SPEED)} and ${String(MAX_SPEED)} (1.0 = the voice as recorded)`,
+        })
+      }
+      const target = resolveVoiceConfigTarget(deps.home)
+      const saved = target === null ? null : readVoiceConfig(target)
+      const live = deps.endpoint?.() ?? saved
+      if (target === null || live === null) {
+        return reply({
+          ok: false,
+          error: 'no voice endpoint is configured yet — call write_voice_config first',
+        })
+      }
+      const scrub = (text: string): string =>
+        live.apiKey === undefined ? text : text.replaceAll(live.apiKey, '<key>')
+      try {
+        await deps.validate({ ...live, speed: speed.data })
+      } catch (err) {
+        return reply({
+          ok: false,
+          error: scrub(
+            `the endpoint did not answer at that speed: ${err instanceof Error ? err.message : String(err)}`,
+          ),
+        })
+      }
+      if (aborted()) return reply({ ok: false, error: 'the user stopped the setup' })
+      try {
+        writeVoiceConfig(target, { ...(saved ?? live), speed: speed.data })
+      } catch (err) {
+        return reply({
+          ok: false,
+          error: scrub(`could not save the speed: ${err instanceof Error ? err.message : String(err)}`),
+        })
+      }
+      deps.onWritten?.(speed.data)
+      return reply({ ok: true, speed: speed.data })
     },
   )
 }

@@ -76,6 +76,16 @@ describe('buildTtsPayload', () => {
   })
 })
 
+// spec 02 §3.6: the speaking rate is a request-level knob (fish.audio
+// `prosody.speed`); unset sends no prosody at all, so today's requests are
+// byte-identical.
+describe('buildTtsPayload speed', () => {
+  it('sends prosody.speed only when a speed is configured', () => {
+    expect(buildTtsPayload('hi', {})).not.toHaveProperty('prosody')
+    expect(buildTtsPayload('hi', { speed: 0.85 })).toMatchObject({ prosody: { speed: 0.85 } })
+  })
+})
+
 describe('HostedVoice', () => {
   it('posts one fish-speech request for a single-sentence beat', async () => {
     const { calls, impl } = fakeFetch()
@@ -116,6 +126,15 @@ describe('HostedVoice', () => {
     expect(seeds[1]).toBe(seeds[0])
     // 2 clips + one pad between them, and only between them.
     expect(wavSeconds(await readFile(clip.source))).toBeCloseTo(0.05 * 2 + 0.1, 2)
+    await voice.close()
+  })
+
+  it('carries a configured speed into every sentence of a split beat', async () => {
+    const { calls, impl } = fakeFetch()
+    const voice = new HostedVoice({ baseUrl: 'https://tts.example', speed: 0.85, fetch: impl })
+    await voice.synthesize(`first${FULL_STOP}second${BANG}`)
+    expect(calls).toHaveLength(2)
+    for (const call of calls) expect(call.body).toMatchObject({ prosody: { speed: 0.85 } })
     await voice.close()
   })
 

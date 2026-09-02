@@ -23,7 +23,7 @@ import {
 import { ClaudeBrain, StubBrain } from './brain.ts'
 import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
-import { packageVersion, type Config } from './config.ts'
+import { packageVersion, type Config, ttsFromFile } from './config.ts'
 import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
 import {
   canOpenBrowser,
@@ -189,6 +189,7 @@ export function buildVoice(config: Config, notify: (message: string) => void = (
         ...(config.ttsApiKey !== '' && { apiKey: config.ttsApiKey }),
         ...(config.ttsModel !== '' && { model: config.ttsModel }),
         ...(config.ttsSeed !== undefined && { seed: config.ttsSeed }),
+        ...(config.ttsSpeed !== undefined && { speed: config.ttsSpeed }),
       })
   }
 }
@@ -355,6 +356,7 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
         ...(config.ttsReferenceId !== '' && { referenceId: config.ttsReferenceId }),
         ...(config.ttsApiKey !== '' && { apiKey: config.ttsApiKey }),
         ...(config.ttsSeed !== undefined && { seed: config.ttsSeed }),
+        ...(config.ttsSpeed !== undefined && { speed: config.ttsSpeed }),
       }
     },
     ...over,
@@ -376,21 +378,25 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
 // together or the freshly configured voice cannot speak.
 export function voiceAfterSetup(config: Config, saved: VoiceConfig | null): Config {
   if (saved === null) return config
-  // Per knob, never all-or-nothing: "did this run boot with an endpoint" is a
-  // different question from "did the conversation change anything". A listener
-  // whose URL came from .env and who then created a voice of their own has
-  // changed exactly one knob, and gating on the URL kept them on the old
-  // timbre until the next boot — while setup said it had worked. Each knob the
-  // run did not already state is taken from the file; each one it did state
-  // stands (voice.json < env < flags).
+  // The layering boot used, re-run over the rewritten file: every knob the
+  // file states follows the file, and only what env or a flag stated for THIS
+  // run stands over it (voice.json < env < flags, per knob). Filling only the
+  // knobs the run had empty looked the same on a first setup, but a run that
+  // BOOTED from voice.json already held the file's old id, so a conversation
+  // that pinned a new voice or pace changed nothing this run could hear.
+  const stated = config.ttsOverrides
+  const endpoint = stated.ttsUrl ?? saved.ttsUrl.trim()
+  // Spelled out per knob: zod types a partial's members `T | undefined`, and
+  // a bare spread would widen Config's strings.
   const next: Config = {
     ...config,
-    ...(config.ttsUrl === '' && { ttsUrl: saved.ttsUrl }),
-    ...(config.ttsModel === '' && saved.model !== undefined && { ttsModel: saved.model }),
-    ...(config.ttsReferenceId === '' &&
-      saved.referenceId !== undefined && { ttsReferenceId: saved.referenceId }),
-    ...(config.ttsApiKey === '' && saved.apiKey !== undefined && { ttsApiKey: saved.apiKey }),
-    ...(config.ttsSeed === undefined && saved.seed !== undefined && { ttsSeed: saved.seed }),
+    ...ttsFromFile(saved, endpoint),
+    ...(stated.ttsUrl !== undefined && { ttsUrl: stated.ttsUrl }),
+    ...(stated.ttsModel !== undefined && { ttsModel: stated.ttsModel }),
+    ...(stated.ttsReferenceId !== undefined && { ttsReferenceId: stated.ttsReferenceId }),
+    ...(stated.ttsApiKey !== undefined && { ttsApiKey: stated.ttsApiKey }),
+    ...(stated.ttsSeed !== undefined && { ttsSeed: stated.ttsSeed }),
+    ...(stated.ttsSpeed !== undefined && { ttsSpeed: stated.ttsSpeed }),
   }
   // WHICH provider speaks is a preference, so only a stub nobody asked for is
   // promoted — `--voice hosted` still gets the new endpoint, `--voice stub`
@@ -407,7 +413,8 @@ export function voiceChanged(a: Config, b: Config): boolean {
     a.ttsApiKey !== b.ttsApiKey ||
     a.ttsReferenceId !== b.ttsReferenceId ||
     a.ttsModel !== b.ttsModel ||
-    a.ttsSeed !== b.ttsSeed
+    a.ttsSeed !== b.ttsSeed ||
+    a.ttsSpeed !== b.ttsSpeed
   )
 }
 

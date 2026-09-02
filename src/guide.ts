@@ -36,6 +36,7 @@ import {
 } from './startup.ts'
 import {
   createVoiceTool,
+  setVoiceSpeedTool,
   type VoiceConfig,
   VOICE_PROBE_LINE,
   writeVoiceConfigTool,
@@ -669,6 +670,18 @@ async function runSetupFlow(
           onCreated: ({ referenceId, title }) =>
             host.info(`voice created and pinned: ${title} (${referenceId})`),
         }),
+        // The pace of whichever voice is pinned. Same proof-then-write posture,
+        // one number in, so the listener's "a bit slower" lands in one turn.
+        setVoiceSpeedTool({
+          home: targets.home,
+          endpoint: () => targets.effectiveVoice?.() ?? targets.voiceConfig(),
+          validate: run.validateVoice ?? ((config) => validateEndpoint(config)),
+          armAbort: () => {
+            const since = flow.escEpoch
+            return () => flow.escEpoch > since || quit.requested
+          },
+          onWritten: (speed) => host.info(`voice speed saved: ${String(speed)}`),
+        }),
       ]
     : []
 
@@ -755,6 +768,7 @@ export async function validateEndpoint(
     ...(config.referenceId !== undefined && { referenceId: config.referenceId }),
     ...(config.apiKey !== undefined && { apiKey: config.apiKey }),
     ...(config.seed !== undefined && { seed: config.seed }),
+    ...(config.speed !== undefined && { speed: config.speed }),
     ...(fetchImpl !== undefined && { fetch: fetchImpl }),
   })
   try {

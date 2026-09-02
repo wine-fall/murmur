@@ -132,6 +132,7 @@ describe('voiceChanged', () => {
     expect(voiceChanged(before, after)).toBe(true)
     expect(voiceChanged(after, { ...after, ttsApiKey: 'sk-new' })).toBe(true)
     expect(voiceChanged(after, { ...after, voice: 'stub' })).toBe(true)
+    expect(voiceChanged(after, { ...after, ttsSpeed: 0.85 })).toBe(true)
   })
 
   it('an unchanged voice is not a change — non-voice knobs do not count', () => {
@@ -161,6 +162,47 @@ describe('voiceAfterSetup (issue #93)', () => {
     const silent = config(['--voice', 'stub'], { MURMUR_TTS_URL: 'https://env.example' })
     expect(voiceAfterSetup(silent, { ttsUrl: 'https://env.example' })).toEqual(silent)
     expect(buildVoice(voiceAfterSetup(silent, { ttsUrl: 'https://env.example' }))).toBeInstanceOf(StubVoice)
+  })
+
+  it('takes a speed the conversation just set, unless the run already stated one', () => {
+    const before = config([], home())
+    expect(voiceAfterSetup(before, { ttsUrl: 'https://w.example', speed: 0.85 }).ttsSpeed).toBe(0.85)
+    const pinned = config(['--tts-speed', '1.2'], home())
+    expect(voiceAfterSetup(pinned, { ttsUrl: 'https://w.example', speed: 0.85 }).ttsSpeed).toBe(1.2)
+  })
+
+  // Peer review (codex): the per-knob fill only covered knobs the run had
+  // EMPTY. A run booted from voice.json (a listener with no .env) already
+  // held the file's old id and speed, so a conversation that wrote new ones
+  // left the config untouched, voiceChanged saw nothing, and the "live" swap
+  // never happened. The file's knobs follow the file; only env/flags stand.
+  it('a knob the run took from voice.json follows the file after setup', () => {
+    const dir = emptyHome()
+    writeFileSync(
+      join(dir, 'voice.json'),
+      JSON.stringify({ ttsUrl: 'https://f.example', referenceId: 'old', speed: 1 }),
+    )
+    const before = config([], { MURMUR_HOME: dir })
+    expect(before.ttsReferenceId).toBe('old')
+    const after = voiceAfterSetup(before, { ttsUrl: 'https://f.example', referenceId: 'new', speed: 0.85 })
+    expect(after.ttsReferenceId).toBe('new')
+    expect(after.ttsSpeed).toBe(0.85)
+    expect(voiceChanged(before, after)).toBe(true)
+  })
+
+  it('a knob the env or a flag stated stands over the file, per knob', () => {
+    const dir = emptyHome()
+    writeFileSync(join(dir, 'voice.json'), JSON.stringify({ ttsUrl: 'https://f.example', referenceId: 'old' }))
+    const before = config(['--tts-speed', '1.2'], { MURMUR_HOME: dir, MURMUR_TTS_REFERENCE_ID: 'env-id' })
+    const after = voiceAfterSetup(before, {
+      ttsUrl: 'https://f.example',
+      referenceId: 'new',
+      speed: 0.85,
+      model: 'm',
+    })
+    expect(after.ttsReferenceId).toBe('env-id')
+    expect(after.ttsSpeed).toBe(1.2)
+    expect(after.ttsModel).toBe('m')
   })
 
   it('a declined or failed voice setup stays silent, not half-configured', () => {
