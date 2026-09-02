@@ -40,11 +40,12 @@ import { LedgerScheduler } from '../src/scheduler.ts'
 import { readSettingsFile } from '../src/settings.ts'
 import { StubVoice } from '../src/voice.ts'
 
-const config = (argv: string[], env: NodeJS.ProcessEnv = {}) => parseCli(argv, env).config
-
 // A murmur home with nothing in it — so a stray real ~/.murmur/voice.json on
-// the developer's machine can never decide what these tests see.
+// the developer's machine can never decide what these tests see. Every config
+// built here starts from one unless the test names its own.
 const emptyHome = (): string => mkdtempSync(join(tmpdir(), 'murmur-home-'))
+const config = (argv: string[], env: NodeJS.ProcessEnv = {}) =>
+  parseCli(argv, { MURMUR_HOME: emptyHome(), ...env }).config
 
 describe('app wiring', () => {
   it('builds the configured voice provider', () => {
