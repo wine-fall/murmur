@@ -44,9 +44,51 @@ const SCENE_GUIDANCE: Record<string, string> = {
 }
 
 function sceneLine(ctx: ContextPack): string {
+  const time = ctx.time === undefined ? '' : `\nIt's ${ctx.time}.`
   const cue = SCENE_GUIDANCE[ctx.scene ?? '']
-  return cue === undefined ? '' : `\n${cue}`
+  return `${time}${cue === undefined ? '' : `\n${cue}`}`
 }
+
+// The program's real music status (spec 04 bugfix): stated as fact so the beat
+// speaks from what the radio is actually doing, never an imagined program.
+// Absent renders nothing (music not wired).
+function musicLine(ctx: ContextPack): string {
+  const music = ctx.music
+  if (music === undefined) return ''
+  switch (music.kind) {
+    case 'playing':
+      return `\n(On the air: "${music.track}" is playing right now.)`
+    case 'quiet':
+      return music.lastTrack === undefined
+        ? '\n(No music is playing right now.)'
+        : `\n(No music is playing; the last song was "${music.lastTrack}".)`
+    case 'picking':
+      return '\n(No music is playing; the program is quietly looking for the next track.)'
+    case 'pickFailed':
+      return '\n(No music is playing; the last search for a track came up empty, so it stays talk for now.)'
+  }
+}
+
+// The live program facts a reply turn stands on (spec 04 bugfix): the same
+// clock and music status the talk builders render, minus the beat-shaped red
+// lines — the steer prompt has its own reply rules. Empty when neither fact
+// is present.
+function statusBlock(ctx: ContextPack): string {
+  const lines = `${sceneLine(ctx)}${musicLine(ctx)}`
+  return lines === '' ? '' : `(Right now)${lines}\n\n`
+}
+
+// Anti-fabrication red lines for the self-initiated beats (spec 04 bugfix):
+// the observed failure was a buffered beat inventing a whole program — songs
+// announced that never played, kettle sounds heard, an afternoon narrated to
+// its end in five real minutes.
+const GROUNDING_RULES =
+  'Stay true to the program state above. The program introduces each track ' +
+  'itself when one actually starts, so never announce, promise, or narrate ' +
+  'finding, choosing, or starting a song yourself. Never claim to hear ' +
+  "sounds from the listener's side. Your beat may go to air a few minutes " +
+  'after this moment: never narrate time passing, and say nothing that turns ' +
+  'false when the music above ends or changes.'
 
 // Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
 // narrates the sensing — the listener is kept company, not observed. An absent
@@ -114,7 +156,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${GROUNDING_RULES}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -126,7 +168,8 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${pacingLines(ctx)}\n` +
+    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n` +
+    `${GROUNDING_RULES}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
@@ -676,7 +719,7 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   const transcript = renderTranscript(ctx, userText)
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
   return (
-    `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n` +
+    `${profileBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n` +
     `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
   )
 }
@@ -734,7 +777,7 @@ export function buildSteerPrompt(
     `${STEER_END_RULE}${STEER_REPLY_RULE}`
   const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
   return (
-    `${profileBlock(ctx)}${head}The listener just said to you: "${userText}"\n\n` +
+    `${profileBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n\n` +
     `Decide whether their words ask the program to DO something; act with the ` +
     `tools if so, then answer them.\n${rules}${armed}`
   )

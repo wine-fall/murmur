@@ -34,10 +34,25 @@ export type TalkBeat = {
   readonly topic?: string
 }
 
+// The program's real music status at context-build time (spec 04 bugfix): the
+// grounding that keeps a talk beat from narrating an imagined program — a song
+// that is not playing, a pick that never happened. `track` is the now-playing
+// label the system announced.
+// 'quiet' is every nothing-on-air moment — before the first song (lastTrack
+// absent) and between songs (lastTrack names what just ended) — so a wired
+// radio always states a music fact, never silence the model can fill in.
+export type MusicState =
+  | { readonly kind: 'playing'; readonly track: string }
+  | { readonly kind: 'quiet'; readonly lastTrack?: string }
+  | { readonly kind: 'picking' }
+  | { readonly kind: 'pickFailed' }
+
 // The compact context handed to the Brain per call (master §6). Beyond the
 // spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
-// spec 05 §2.2); `profile` and `coveredTopics` are the tier-①/③ memory reads
-// (spec 05 §3.5 — coveredTopics is cross-day, the issue-#44 anti-repeat).
+// spec 05 §2.2) and `time` the real local clock rendered for the prompt;
+// `music` is the program's live music status (spec 04 bugfix); `profile` and
+// `coveredTopics` are the tier-①/③ memory reads (spec 05 §3.5 —
+// coveredTopics is cross-day, the issue-#44 anti-repeat).
 // `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
 // and `cue` the per-call intent the Director asks the prompt to carry (an
 // anchor — spec 07 §3.4).
@@ -46,6 +61,8 @@ export type ContextPack = {
   readonly persona: string
   readonly recent: readonly Turn[]
   readonly scene?: string
+  readonly time?: string
+  readonly music?: MusicState
   readonly profile?: string
   readonly coveredTopics?: readonly string[]
   readonly activity?: Activity

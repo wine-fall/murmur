@@ -26,6 +26,7 @@ import type {
   MixingPlayer,
   MusicContext,
   MusicHandle,
+  MusicState,
   Player,
   SteerActions,
   SteerSettingsActions,
@@ -41,7 +42,7 @@ import { COMMANDS, type ProgramState } from './ipc.ts'
 import type { ReportSession } from './report.ts'
 import { INSTALL_COMMAND } from './update.ts'
 import { buildMusicSituation, withLanguage } from './prompts.ts'
-import { currentScene } from './scene.ts'
+import { currentScene, formatClock, sceneFor } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
 // Literal, not destructured from COMMANDS: meaning must never depend on the
@@ -282,6 +283,15 @@ export class Director {
   // The track currently on air, for the steer tools' playing() — runVoice owns
   // its lifetime.
   private liveSong: MusicHandle | null = null
+  // The prompt's music grounding (spec 04 bugfix): the last track that aired,
+  // and whether the latest pick came back empty — together with the segment
+  // and the pick slot they derive the pack's real music status.
+  private lastTrack: string | null = null
+  private pickFailed = false
+  // A dropped pick's promise cannot be cancelled (the switch_music re-prime);
+  // the epoch keeps its late resolution from repainting pickFailed after a
+  // fresher search already spoke (mirrors talkEpoch).
+  private pickEpoch = 0
 
   private deps: DirectorDeps
 
@@ -597,15 +607,35 @@ export class Director {
     const window = this.deps.settings().recentWindow
     const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
+    const now = new Date()
+    const music = this.musicState()
+    const scene = currentScene(now)
     return {
       persona: this.persona(),
       recent: queued.length === 0 ? recent : [...recent, ...turns],
-      scene: currentScene(new Date()),
+      scene,
+      // A forced MURMUR_SCENE would contradict the real clock; the audition
+      // wins and the clock line is dropped (codex review).
+      ...(scene === sceneFor(now) && { time: formatClock(now) }),
+      ...(music !== undefined && { music }),
       profile: this.deps.memory.profile(),
       coveredTopics: this.deps.memory.recentTopics(window),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
     }
+  }
+
+  // The pack's real music status (spec 04 bugfix), most-live fact first: a
+  // track on air, a pick still resolving, the last pick's empty result, the
+  // last track that aired. Undefined when music is not wired (renders nothing).
+  private musicState(): MusicState | undefined {
+    if (this.deps.music === undefined) return undefined
+    if (this.segment.kind === 'music' && this.segment.nowPlaying !== undefined) {
+      return { kind: 'playing', track: this.segment.nowPlaying }
+    }
+    if (this.pendingPick !== null && !this.pendingPick.done()) return { kind: 'picking' }
+    if (this.pickFailed) return { kind: 'pickFailed' }
+    return { kind: 'quiet', ...(this.lastTrack !== null && { lastTrack: this.lastTrack }) }
   }
 
   private async talkSegment(): Promise<void> {
@@ -756,8 +786,24 @@ export class Director {
     const base = this.musicContext()
     const ctx =
       extraLine === undefined ? base : { ...base, situation: `${base.situation}\n${extraLine}` }
-    // A failed prefetch degrades like an empty pick at the boundary.
-    this.pendingPick = pending(music.source.nextTrack(ctx).catch(() => null))
+    // A failed prefetch degrades like an empty pick at the boundary. One
+    // two-handler then (not catch-then-then): the resolution stamps pickFailed
+    // so the prompt's music status tracks the latest search's real outcome
+    // (spec 04 bugfix) without deepening the chain the boundary races against.
+    // Epoch-guarded: only the newest search may write.
+    const epoch = ++this.pickEpoch
+    this.pendingPick = pending(
+      music.source.nextTrack(ctx).then(
+        (pick) => {
+          if (epoch === this.pickEpoch) this.pickFailed = pick === null
+          return pick
+        },
+        () => {
+          if (epoch === this.pickEpoch) this.pickFailed = true
+          return null
+        },
+      ),
+    )
   }
 
   // spec 11 §2.1: the listener asked for different music. A hinted request must
@@ -796,6 +842,7 @@ export class Director {
         const pick = await this.steerable(this.takePick())
         if (this.quit) return false
         if (pick === null) {
+          this.pickFailed = true
           if (this.switchDue) {
             this.switchDue = false
             this.deps.host.debug?.('music.switch failed')
@@ -828,6 +875,7 @@ export class Director {
   private noteTrackEnd(): void {
     const { nowPlaying, startedAt, durationS } = this.segment
     if (nowPlaying === undefined || startedAt === undefined) return
+    this.lastTrack = nowPlaying
     const played = Math.round((Date.now() - startedAt) / 1000)
     const expected = durationS === undefined ? 'unknown' : `${durationS}s`
     this.deps.host.debug?.(`music.end ${JSON.stringify(nowPlaying)} played=${played}s expected=${expected}`)
@@ -873,6 +921,7 @@ export class Director {
       return null
     }
     const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
+    this.pickFailed = false
     this.deps.host.info(`now playing: ${label}`)
     this.emitState('music', {
       label,
