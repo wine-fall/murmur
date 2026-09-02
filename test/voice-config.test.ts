@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto'
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,6 +19,7 @@ import { voiceConfigPath } from '../src/paths.ts'
 import {
   createVoiceTool,
   readVoiceConfig,
+  VOICE_PRESETS,
   resolveVoiceConfigTarget,
   type VoiceConfig,
   VOICE_PROBE_LINE,
@@ -405,7 +408,7 @@ describe('write_voice_config tool (spec 03-03 §7.2)', () => {
 // --- create_voice (cloning a timbre from the listener's own recording) ------ //
 
 type CloneReply = { ok: boolean; error?: string; referenceId?: string; title?: string }
-type CloneArgs = { audioPath: string; title: string; text?: string }
+type CloneArgs = { audioPath?: string; title?: string; text?: string; preset?: 'male' | 'female' }
 
 async function callClone(
   tool: ReturnType<typeof createVoiceTool>,
@@ -649,5 +652,193 @@ describe('create_voice tool (the guide clones a timbre for the listener)', () =>
     const { reply } = await callClone(tool, { audioPath: wav(dir), title: 'mine' })
     expect(reply.ok).toBe(false)
     expect(calls).toBe(0)
+  })
+})
+
+// --- create_voice with a bundled preset (murmur's own two timbres) ---------- //
+
+// A fake of the two networks the preset path touches: GitHub (the clip) and
+// the provider (the upload). Records what was fetched and what was uploaded.
+function presetNetwork(clip: Buffer, opts: { clipStatus?: number } = {}) {
+  const fetched: string[] = []
+  const uploads: { title: string | null; text: string | null; bytes: number }[] = []
+  const fetchImpl: typeof fetch = async (url, init) => {
+    const target = String(url)
+    if (target.endsWith('/model')) {
+      const body = init?.body as FormData
+      const voices = body.get('voices') as Blob
+      uploads.push({
+        title: body.get('title') as string | null,
+        text: body.get('texts') as string | null,
+        bytes: voices.size,
+      })
+      return new Response(JSON.stringify({ _id: 'preset-id' }), { status: 201 })
+    }
+    fetched.push(target)
+    return new Response(new Uint8Array(clip), { status: opts.clipStatus ?? 200 })
+  }
+  return { fetchImpl, fetched, uploads }
+}
+
+// The real clip bytes are not in the test; the preset's pinned hash is what
+// the tool checks, so the tests pin a hash of their own over the fake clip.
+const CLIP = Buffer.from('ID3 fake mp3 bytes')
+const CLIP_SHA = createHash('sha256').update(CLIP).digest('hex')
+function withFakeHash(): () => void {
+  const saved = { ...VOICE_PRESETS.male }
+  VOICE_PRESETS.male.sha256 = CLIP_SHA
+  return () => {
+    VOICE_PRESETS.male.sha256 = saved.sha256
+  }
+}
+
+describe('create_voice preset (bundled male/female timbre, fetched on demand)', () => {
+  it('downloads the clip, verifies it, caches it, and uploads it under the preset title', async () => {
+    const restore = withFakeHash()
+    try {
+      const dir = home()
+      configured(dir)
+      const net = presetNetwork(CLIP)
+      const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+      const { reply, text } = await callClone(tool, { preset: 'male' })
+      expect(reply.ok).toBe(true)
+      expect(reply.referenceId).toBe('preset-id')
+      expect(net.fetched).toEqual([VOICE_PRESETS.male.url])
+      expect(net.uploads).toEqual([
+        { title: VOICE_PRESETS.male.title, text: VOICE_PRESETS.male.text, bytes: CLIP.length },
+      ])
+      expect(text).not.toContain('sk-secret-value')
+      expect(readVoiceConfig(join(dir, 'voice.json'))?.referenceId).toBe('preset-id')
+      // Cached under the home, so the next pick (or the other preset later)
+      // does not go back to GitHub.
+      const cached = join(dir, 'cache', 'voices', 'male.mp3')
+      expect(readFileSync(cached).equals(CLIP)).toBe(true)
+    } finally {
+      restore()
+    }
+  })
+
+  it('serves the second call from the cache without touching GitHub', async () => {
+    const restore = withFakeHash()
+    try {
+      const dir = home()
+      configured(dir)
+      const net = presetNetwork(CLIP)
+      const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+      await callClone(tool, { preset: 'male' })
+      await callClone(tool, { preset: 'male' })
+      expect(net.fetched).toHaveLength(1)
+      expect(net.uploads).toHaveLength(2)
+    } finally {
+      restore()
+    }
+  })
+
+  it('refuses a clip whose bytes do not match the pinned hash — nothing is uploaded or cached', async () => {
+    const dir = home()
+    configured(dir)
+    // VOICE_PRESETS.male.sha256 is the real clip's hash; the fake bytes miss it.
+    const net = presetNetwork(CLIP)
+    const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+    const { reply } = await callClone(tool, { preset: 'male' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toMatch(/did not match/)
+    expect(net.uploads).toHaveLength(0)
+    expect(existsSync(join(dir, 'cache', 'voices', 'male.mp3'))).toBe(false)
+  })
+
+  it('a failed download names the URL so the guide can hand it to the listener', async () => {
+    const dir = home()
+    configured(dir)
+    const net = presetNetwork(CLIP, { clipStatus: 404 })
+    const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+    const { reply } = await callClone(tool, { preset: 'male' })
+    expect(reply.ok).toBe(false)
+    expect(reply.error).toContain(VOICE_PRESETS.male.url)
+    expect(net.uploads).toHaveLength(0)
+  })
+
+  it('a stale cached clip is re-fetched rather than uploaded', async () => {
+    const restore = withFakeHash()
+    try {
+      const dir = home()
+      configured(dir)
+      const cache = join(dir, 'cache', 'voices')
+      mkdirSync(cache, { recursive: true })
+      writeFileSync(join(cache, 'male.mp3'), 'not the clip')
+      const net = presetNetwork(CLIP)
+      const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+      const { reply } = await callClone(tool, { preset: 'male' })
+      expect(reply.ok).toBe(true)
+      expect(net.fetched).toHaveLength(1)
+      expect(net.uploads[0]!.bytes).toBe(CLIP.length)
+    } finally {
+      restore()
+    }
+  })
+
+  it('an Esc during the download stops it: nothing cached, nothing uploaded', async () => {
+    const restore = withFakeHash()
+    try {
+      const dir = home()
+      configured(dir)
+      let stopped = false
+      const uploads: string[] = []
+      const fetchImpl: typeof fetch = (url, init) =>
+        new Promise((resolve, reject) => {
+          if (String(url).endsWith('/model')) {
+            uploads.push(String(url))
+            resolve(new Response(JSON.stringify({ _id: 'x' }), { status: 201 }))
+            return
+          }
+          // The download hangs until the listener cuts it.
+          init?.signal?.addEventListener('abort', () => reject(new Error('aborted')))
+          stopped = true
+        })
+      const tool = createVoiceTool({ home: dir, fetchImpl, armAbort: () => () => stopped })
+      const { reply } = await callClone(tool, { preset: 'male' })
+      expect(reply.ok).toBe(false)
+      expect(reply.error).toMatch(/stopped/)
+      expect(uploads).toHaveLength(0)
+      expect(existsSync(join(dir, 'cache', 'voices', 'male.mp3'))).toBe(false)
+    } finally {
+      restore()
+    }
+  })
+
+  it('an unwritable cache degrades to an uncached upload, not a failure', async () => {
+    const restore = withFakeHash()
+    try {
+      const dir = home()
+      configured(dir)
+      // cache/voices is a FILE, so the clip cannot be written there.
+      mkdirSync(join(dir, 'cache'), { recursive: true })
+      writeFileSync(join(dir, 'cache', 'voices'), 'in the way')
+      const net = presetNetwork(CLIP)
+      const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+      const { reply } = await callClone(tool, { preset: 'male' })
+      expect(reply.ok).toBe(true)
+      expect(net.uploads).toHaveLength(1)
+    } finally {
+      restore()
+    }
+  })
+
+  it('needs either a preset or a recording, and a recording needs a title', async () => {
+    const dir = home()
+    configured(dir)
+    const net = presetNetwork(CLIP)
+    const tool = createVoiceTool({ home: dir, fetchImpl: net.fetchImpl })
+    expect((await callClone(tool, {})).reply.ok).toBe(false)
+    expect((await callClone(tool, { audioPath: wav(dir) })).reply.ok).toBe(false)
+    expect(net.uploads).toHaveLength(0)
+  })
+
+  it('the bundled clips in the repo are the bytes the presets pin', () => {
+    for (const preset of Object.values(VOICE_PRESETS)) {
+      const bytes = readFileSync(join(import.meta.dirname, '..', 'voices', preset.file))
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(preset.sha256)
+      expect(preset.url.endsWith('/voices/' + preset.file)).toBe(true)
+    }
   })
 })

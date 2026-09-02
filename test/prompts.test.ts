@@ -461,6 +461,17 @@ describe('the voice-endpoint walkthrough (spec 03-03 §7.2)', () => {
     expect(prompt()).toContain('referenceId')
   })
 
+  it("offers murmur's own two voices first, as a preset the tool fetches itself", () => {
+    const text = prompt()
+    // The listener is told there is a download and an upload before either moves.
+    expect(text).toMatch(/preset/)
+    expect(text).toMatch(/male/)
+    expect(text).toMatch(/female/)
+    expect(text).toMatch(/download/i)
+    // The presets come before the record-your-own and library options.
+    expect(text.indexOf('preset')).toBeLessThan(text.indexOf('a voice of their own'))
+  })
+
   it('states no policy from memory: the free tier is checked live or not claimed', () => {
     const text = prompt()
     expect(text.toLowerCase()).toContain('webfetch')
@@ -563,6 +574,8 @@ describe('the healthy-machine setup prompt', () => {
   it('names the thing they are most likely there for', () => {
     expect(text).toContain('create_voice')
     expect(text).toContain('write_voice_config')
+    // Switching to the other bundled timbre is the likeliest change of all.
+    expect(text).toMatch(/preset/)
   })
 })
 

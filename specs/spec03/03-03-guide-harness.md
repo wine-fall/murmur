@@ -212,14 +212,17 @@
   the signup page, then the API-keys page — and names what to click there,
   pacing itself by the user's replies. Two things it must also get, or the result does not work:
   - the **`model`**, which the hosted API requires on every call;
-  - a **`referenceId`** — the user picks a voice from the provider's library.
+  - a **`referenceId`** — a voice pinned in the listener's own account.
     fish.audio has no default voice identity and no `seed` in its request
     schema, so without one the timbre changes from line to line. murmur ships
-    **no default voice id**: the one in the maintainer's `.env.fishaudio` is a
-    *private* model that would 403 for anyone else, and the public library's
-    most popular voices are celebrity and character clones — not an identity
-    murmur should hand a new listener by default. Skipping the pick is allowed,
-    and the guide says plainly what it costs.
+    **no default voice id** — a hosted voice id is private to the account that
+    created it, so the maintainer's would 403 for anyone else, and the public
+    library's most popular voices are celebrity and character clones — but it
+    ships **two reference clips of its own** (male / female, `voices/` in the
+    repo, 2026-09-02) that `create_voice` clones INTO the listener's account on
+    request (`preset`, below). The guide offers those first, then a recording
+    of the listener's own, then a library pick. Skipping is allowed, and the
+    guide says plainly what it costs.
 - **Tool-captured secrets** (the rule, not just this case): a secret the user
   types **as a conversation message** becomes an SDK user message — it is sent
   to the API and kept in the local session transcript, where it outlives the
@@ -267,6 +270,23 @@
       Answers `201` with `_id` — that is the `referenceId`. The free tier
       allows it; a created model is deletable, which is how the probe left
       nothing behind.
+    - **`preset: male | female`** (2026-09-02) — the same upload, fed from one
+      of murmur's own clips instead of a listener path. The clips are **not in
+      the npm package**: a listener with a voice of their own, or one from the
+      library, would download bytes they never use. They live in the repo
+      (`voices/`, excluded from `files`) and the handler fetches the picked one
+      on demand from the raw GitHub URL into `$MURMUR_HOME/cache/voices/`,
+      **verifies it against a sha256 pinned beside the URL**
+      (`assets/voice-presets.json`, which also carries the clip's title and
+      transcript), and only then uploads. The pin is what makes a file fetched
+      from `main` trustworthy under the listener's key — so a clip is never
+      edited in place; a new timbre is a new filename and a new pin. A cached
+      clip that no longer matches is re-fetched, not uploaded. A failed or
+      mismatched download is an error that names the URL, so the guide can
+      hand the listener the file to fetch by hand and finish through
+      `audioPath`. No mirror, no retry queue: GitHub reachability is the one
+      known soft spot (listeners in mainland China), and the by-hand path is
+      the fallback until it is measured to matter.
   - **Both tools ride the TARGET, not the gap** — and an EXPLICIT entry with
     no gaps opens the conversation instead of closing it. The two follow from
     one observation: the listener who reopens setup is usually there to change
