@@ -47,17 +47,23 @@ export type DecodeOptions = {
   // Start decoding this many seconds in (the bed resume, spec 03-04). Seeking
   // past the end yields an empty stream, which callers treat as a track miss.
   startS?: number
+  // The sample rate the PCM must arrive at — the playing context's own.
+  rate?: number
 }
 
 // The decoder invocation, exposed for tests: `-ss` sits BEFORE `-i` (input-side
 // seek — near-instant on local files) so resume never stalls the audio path.
-export function decodeArgs(source: string, startS?: number): string[] {
+// `rate` is the context's REAL sample rate: the output device sets it (a
+// 44.1 kHz Bluetooth headset ignores the 48 kHz request) and the engine
+// schedules PCM frames on that clock unresampled, so decoding at any other
+// rate plays every song stretched.
+export function decodeArgs(source: string, startS?: number, rate: number = MIX_RATE): string[] {
   // prettier-ignore
   return [
     '-nostdin', '-hide_banner', '-loglevel', 'error',
     ...(startS ? ['-ss', String(startS)] : []),
     '-i', source,
-    '-f', 'f32le', '-ar', String(MIX_RATE), '-ac', String(MIX_CHANNELS),
+    '-f', 'f32le', '-ar', String(rate), '-ac', String(MIX_CHANNELS),
     'pipe:1',
   ]
 }
@@ -69,10 +75,10 @@ export function decodeArgs(source: string, startS?: number): string[] {
 // Ending the iteration early (break / return) kills the decoder; no orphans.
 export async function* ffmpegDecode(
   source: string,
-  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal, startS }: DecodeOptions = {},
+  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal, startS, rate }: DecodeOptions = {},
 ): AsyncGenerator<Float32Array> {
   if (signal?.aborted) return
-  const proc = spawn(ffmpegCmd, decodeArgs(source, startS), { stdio: ['ignore', 'pipe', 'pipe'] })
+  const proc = spawn(ffmpegCmd, decodeArgs(source, startS, rate), { stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''
   proc.stderr.on('data', (c: Buffer) => (stderr = (stderr + c.toString()).slice(-2000)))
   const onAbort = () => proc.kill('SIGKILL')
