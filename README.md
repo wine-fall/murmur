@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/murmur-logo.svg" alt="A minimal line drawing of a person whispering behind a raised hand" width="150">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/murmur-logo-dark.svg">
+    <img src="assets/murmur-logo.svg" alt="A minimal line drawing of a person whispering behind a raised hand" width="150">
+  </picture>
 </p>
 
 # murmur
