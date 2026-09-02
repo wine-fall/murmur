@@ -120,6 +120,15 @@ export class LineQueue {
     this.waiting = null
   }
 
+  // Whether a reader is parked on this queue right now. A pushed line resolves
+  // and clears the waiter, and a peek with lines already queued resolves
+  // outright without parking — so a reader is waiting only when the queue is
+  // empty, which makes this exactly "the next line typed will be taken (and
+  // echoed) immediately". Its one caller is the echo timing in IpcHost.
+  hasReader(): boolean {
+    return this.waiting !== null
+  }
+
   peek(): Promise<string> {
     if (this.lines.length > 0) return Promise.resolve(this.lines[0]!)
     if (this.waiting === null) {

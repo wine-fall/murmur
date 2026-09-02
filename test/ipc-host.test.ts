@@ -360,6 +360,104 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(host.takeLine()).toBeUndefined()
   })
 
+  it('echoes a line typed while the floor-holder is mid-turn, the moment it is typed', async () => {
+    // spec 10 §3.4 (user report, 2026-09-02): the echo lives in `lineReader`,
+    // which fires when a read TAKES the line. A guide turn is seconds long
+    // with no read open, so the listener's own words sat in the queue —
+    // submitted, gone from the field, and nowhere on screen — until the turn
+    // ended. Nobody waiting means nobody will echo it for a while, so the
+    // host echoes it itself.
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('guide')
+    await c.settle()
+    c.line('use my own recording')
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({ v: 1, type: 'userLine', text: 'use my own recording' })
+  })
+
+  it('echoes it exactly once — the reader that finally takes it stays quiet', async () => {
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('guide')
+    await c.settle()
+    c.line('use my own recording')
+    await c.settle()
+    // What `lineReader` does the moment the turn ends and its read opens.
+    expect(host.takeLine()).toBe('use my own recording')
+    host.onUserLine('use my own recording')
+    await c.settle()
+    expect(c.received.filter((m) => m.type === 'userLine')).toHaveLength(1)
+  })
+
+  it('stays silent while a read is already open — the secret paste (spec 03-03 §7.2)', async () => {
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('guide')
+    await c.settle()
+    // The credential prompt opens its read BEFORE the user types, and that
+    // read is the one that decides (`echo: false`). A host that echoed ahead
+    // of it would put the key on the wire and in the program log.
+    const read = host.peekLine()
+    c.line('sk-live-not-in-the-log')
+    expect(await read).toBe('sk-live-not-in-the-log')
+    await c.settle()
+    expect(c.received.some((m) => m.type === 'userLine')).toBe(false)
+  })
+
+  it('keeps the suppression on the line it belongs to when a silent read takes it (codex review)', async () => {
+    // A line typed while the guide is thinking, taken by the read that
+    // opens next — which turns out to be the secret read, and echoes nothing.
+    // The swallow owed for that line must die with it, or the NEXT reply,
+    // echoed by an ordinary read, would be the one swallowed.
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('guide')
+    await c.settle()
+    c.line('typed ahead')
+    await c.settle()
+    expect(host.takeLine()).toBe('typed ahead') // read({ echo: false }): no onUserLine
+    // The ordinary reply after it, with its read already waiting.
+    const read = host.peekLine()
+    c.line('now a real reply')
+    expect(await read).toBe('now a real reply')
+    expect(host.takeLine()).toBe('now a real reply')
+    host.onUserLine('now a real reply')
+    await c.settle()
+    const echoed = c.received.filter((m) => m.type === 'userLine').map((m) => m.text)
+    expect(echoed).toEqual(['typed ahead', 'now a real reply'])
+  })
+
+  it('does not echo ahead under the report floor — its lines go into the report, not the log', async () => {
+    // The report's own queue never echoes what it takes, and the host must
+    // not start to on its behalf: a line would show up only when the
+    // Director happened not to be peeking, which is no rule at all.
+    const c = await client()
+    c.attach()
+    await c.settle()
+    host.setMode('report')
+    await c.settle()
+    c.line('the bars froze after the second song')
+    await c.settle()
+    expect(c.received.some((m) => m.type === 'userLine')).toBe(false)
+  })
+
+  it('leaves the radio floor to the Director, which echoes its own turns', async () => {
+    // In radio mode a line can be consumed with no echo at all (a command is
+    // not a turn), so a host echoing ahead there would put `/settings` in the
+    // log AND swallow the echo of the next real line.
+    const c = await client()
+    c.attach()
+    await c.settle()
+    c.line('are you there')
+    await c.settle()
+    expect(c.received.some((m) => m.type === 'userLine')).toBe(false)
+  })
+
   it('ignores traffic from a client that has not attached', async () => {
     const c = await client()
     c.line('too early')
