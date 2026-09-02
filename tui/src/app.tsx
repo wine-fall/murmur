@@ -41,7 +41,7 @@ import {
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
 import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
-import { accentFor, CARD, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
+import { accentFor, CARD, CARD_INK, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
 import {
@@ -1178,13 +1178,6 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           const lines = cardLines(head.text)
           const facts = lines.some((l) => l.role === 'ready' || l.role === 'gap')
           const width = Math.min(Math.floor(cols * 0.55), cols - 4)
-          const ROLE_FG = {
-            main: INK.text,
-            note: INK.notice,
-            ready: INK.user,
-            gap: INK.notice,
-            option: INK.notice,
-          } as const
           // The divider stands between the facts and the choices: above the
           // first option row when the card carries its own, else above the
           // closing invite (legacy checklist shape).
@@ -1225,10 +1218,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                     // must read as an option, Enter never as a silent default.
                     <text>
                       <span fg={INK.text} bg={CHIP}>{` ${line.text.split(' - ')[0]} `}</span>
-                      <span fg={ROLE_FG.option}>{`  ${line.text.split(' - ').slice(1).join(' - ')}`}</span>
+                      <span fg={CARD_INK.option}>{`  ${line.text.split(' - ').slice(1).join(' - ')}`}</span>
                     </text>
                   ) : (
-                    <text style={{ fg: ROLE_FG[line.role] }}>
+                    <text style={{ fg: CARD_INK[line.role] }}>
                       {line.role === 'ready' ? 'ok  ' : line.role === 'gap' ? '--  ' : ''}
                       {line.text}
                     </text>

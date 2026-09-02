@@ -45,6 +45,18 @@ export const PERIWINKLE = '#a4aede'
 export const CARD = '#0c1526'
 export const CHIP = '#1a2540'
 
+// The spotlight card's role ink (§3.2-B as built): the card's ASCII role
+// markers each carry their own light. A gap is the one thing on the card that
+// isn't fine — it takes the ember, so it can never be mistaken for one more
+// quiet hint sitting beside the options.
+export const CARD_INK = {
+  main: INK.text,
+  note: INK.notice,
+  ready: INK.user,
+  gap: EMBER,
+  option: INK.notice,
+} as const
+
 // The spotlight dim (§3.2-B as built): while a question is on the card, the
 // whole room steps down one notch — same hue, less light. One function so the
 // palette stays the single point of color truth.
