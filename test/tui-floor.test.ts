@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { BUSY_FRAMES, busyLine, floorFace, SLATE } from '../tui/src/floor.ts'
+import { BUSY_FRAMES, busyLine, COMPOSER_MAX_ROWS, composerRows, floorFace, SLATE } from '../tui/src/floor.ts'
 import { INK, PERIWINKLE, WARM } from '../tui/src/palette.ts'
 
 function channels(hex: string): { r: number; g: number; b: number } {
@@ -109,5 +109,34 @@ describe('the busy sign', () => {
     // The client ticks a monotonic counter; the sign must not go undefined
     // when it wraps past the frame count for the hundredth time.
     expect(busyLine('guide', 9_999)).toBe(busyLine('guide', 9_999 % BUSY_FRAMES.length))
+  })
+})
+
+describe('the composer under a floor (spec 10 §3.4)', () => {
+  // A conversation with an agent is typed in paragraphs, not one-liners: the
+  // field grows with the draft. The radio keeps its single row — that row is
+  // what the band composition's raster anchors are measured from.
+  it('stands on one row while the draft fits in one', () => {
+    expect(composerRows(0, 40)).toBe(1)
+    expect(composerRows(1, 40)).toBe(1)
+  })
+
+  it('grows a row per wrapped line of the draft', () => {
+    expect(composerRows(2, 40)).toBe(2)
+    expect(composerRows(5, 40)).toBe(5)
+  })
+
+  it('stops at the cap, and the rest scrolls inside the field', () => {
+    expect(composerRows(COMPOSER_MAX_ROWS + 20, 60)).toBe(COMPOSER_MAX_ROWS)
+    expect(COMPOSER_MAX_ROWS).toBeGreaterThanOrEqual(4)
+  })
+
+  it('never eats the log alive on a short terminal', () => {
+    // A third of the frame at most: the walkthrough being replied to is the
+    // thing the reply is about, and it has to stay readable above the field.
+    expect(composerRows(COMPOSER_MAX_ROWS, 12)).toBeLessThanOrEqual(4)
+    expect(composerRows(COMPOSER_MAX_ROWS, 12)).toBeGreaterThanOrEqual(1)
+    // ...and a degenerate height still leaves the one row to type in.
+    expect(composerRows(3, 2)).toBe(1)
   })
 })
