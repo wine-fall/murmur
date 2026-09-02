@@ -17,13 +17,19 @@ export function sceneFor(now: Date): Scene {
   return 'late-night'
 }
 
-// The clock as the talk prompt renders it ("2:28 pm"). Hand-rolled rather than
-// toLocaleTimeString: ICU inserts a narrow no-break space before am/pm on some
-// builds, and prompt text must be byte-stable across machines.
+const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const
+
+// The clock as the talk prompt renders it ("Monday 2026-08-31, 2:28 pm"). The
+// weekday and date carry what the hour alone cannot — a Monday reads
+// differently from a Saturday — and the minute separates hours the six-hour
+// bucket lumps together. Hand-rolled rather than toLocaleString: ICU inserts a
+// narrow no-break space before am/pm on some builds, and prompt text must be
+// byte-stable across machines.
 export function formatClock(now: Date): string {
+  const two = (n: number) => String(n).padStart(2, '0')
+  const date = `${now.getFullYear()}-${two(now.getMonth() + 1)}-${two(now.getDate())}`
   const hour = now.getHours() % 12 || 12
-  const minute = String(now.getMinutes()).padStart(2, '0')
-  return `${hour}:${minute} ${now.getHours() < 12 ? 'am' : 'pm'}`
+  return `${WEEKDAYS[now.getDay()]} ${date}, ${hour}:${two(now.getMinutes())} ${now.getHours() < 12 ? 'am' : 'pm'}`
 }
 
 // A non-empty but invalid override warns and degrades to the clock — a typo

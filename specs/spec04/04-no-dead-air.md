@@ -292,6 +292,14 @@ this makes the host speak to the actual local time.
   English scaffolding as always — the persona still produces Chinese.
 - **Persona seed:** generalized from its hard "late-night" framing to be
   time-neutral, so the per-scene cue (not a night-locked seed) sets the mood.
+- **The clock beside the bucket (amended 2026-09-02):** the bucket is a mood,
+  not a schedule — late-night spans 23:00–04:59, and a model reading only the
+  cue cannot tell 01:00 from 04:00, nor a Monday from a Saturday. The Director
+  stamps the compose-time clock on the pack (`ctx.time`, rendered by
+  `format_clock` — pure and ICU-free, so prompt text is byte-stable across
+  machines) as the weekday, the zero-padded date, and the 12-hour local time to
+  the minute. It rides every prompt that speaks aloud; a forced `MURMUR_SCENE`
+  drops it rather than contradict the audition.
 - **Stochastic quality is eval-track:** *that the scene reaches the prompt* is a
   deterministic unit assertion; *whether the host's phrasing actually reads as
   morning vs. late-night* is a by-ear / eval concern (DESIGN §10.3), not a unit
