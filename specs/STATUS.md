@@ -43,6 +43,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 - **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
+- **#197** (by-ear) Memory v1.5 by feel: fading, fold cadence, forgetting, how a recalled memory sounds — spec 05-01 §6.
 
 ## Pinned — do not relitigate
 
