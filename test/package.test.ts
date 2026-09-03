@@ -4,6 +4,7 @@
 // compiled dist/ built by prepack — while dev keeps running src/ directly.
 // These pin the manifest invariants that `npm pack` itself does not check.
 
+import { spawnSync } from 'node:child_process'
 import { readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -51,5 +52,56 @@ describe('package manifest (the npm-install contract)', () => {
 
   it('declares the Node floor native type-stripping needs', () => {
     expect(pkg.engines?.node).toBe('>=24')
+  })
+})
+
+// spec 05-01 §3.4: node:sqlite is behind Node's experimental flag and warns on
+// load. The listener did not choose SQLite and cannot act on it, so that one
+// warning must not reach the terminal a real run prints to.
+describe('the engine starts without an experimental warning', () => {
+  // Two halves, and each pins a different one. This one pins that nothing in
+  // main.ts's import graph loads node:sqlite STATICALLY — a static import warns
+  // when the builtin links, which is before any filter a module could install.
+  it('never links node:sqlite just by starting up', () => {
+    const run = spawnSync(process.execPath, [join(root, 'src/main.ts'), '--version'], {
+      encoding: 'utf8',
+    })
+    expect(run.status).toBe(0)
+    expect(run.stderr).not.toContain('ExperimentalWarning')
+  })
+
+  // And this one pins that the filter actually silences the warning when the
+  // module IS loaded — which is what a run that reaches recall does.
+  it('silences the warning when recall loads node:sqlite', () => {
+    const script =
+      "import './src/warnings.ts'\nconst { RecallIndex } = await import('./src/recall.ts')\n" +
+      "new RecallIndex(':memory:').rebuild([{ ts: 1, role: 'user', text: 'a lantern' }])\n"
+    const run = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    expect(run.status).toBe(0)
+    expect(run.stderr).toBe('')
+
+    // Without the filter the same run is noisy — so the assertion above is not
+    // passing for some other reason.
+    const bare = spawnSync(
+      process.execPath,
+      ['--input-type=module', '--eval', script.split('\n').slice(1).join('\n')],
+      { cwd: root, encoding: 'utf8' },
+    )
+    expect(bare.stderr).toContain('ExperimentalWarning')
+  })
+
+  it('still lets every other warning through', () => {
+    const script =
+      "import './src/warnings.ts'\nprocess.emitWarning('a real warning')\n" +
+      "process.emitWarning('another experiment', 'ExperimentalWarning')\n"
+    const run = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
+      cwd: root,
+      encoding: 'utf8',
+    })
+    expect(run.stderr).toContain('a real warning')
+    expect(run.stderr).toContain('another experiment')
   })
 })

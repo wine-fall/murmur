@@ -1,8 +1,11 @@
 # spec/05-01 · recall & forgetting — memory v1.5
 
-> **Status**: **Draft, 2026-09-02** — designed from a survey of open-source
+> **Status**: **Built 2026-09-03** — designed from a survey of open-source
 > agent-memory systems (§7) and from the real memory dir of the author's
-> install (§1.1). Not built. Extends [`05-memory.md`](05-memory.md); nothing
+> install (§1.1). Every §5 criterion is pinned by a unit test except 12 and 13,
+> which are the manual `make pack` and real-run passes recorded in the PR. Six
+> contracts moved between draft and build; each is marked **[built]** in place
+> below. Extends [`05-memory.md`](05-memory.md); nothing
 > in spec 05 is contradicted, only its "deferred to v1.5" items are delivered
 > and its compaction input is re-scoped.
 > **Part**: The Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6), v1.5:
@@ -143,11 +146,25 @@ type SteerActions = {
 
 | Tool | Input | Returns to the model | When the prompt tells the model to call it |
 |---|---|---|---|
-| `recall_memory` | `query: string` — a few words in the listener's language | up to 5 hits as `YYYY-MM-DD HH:MM · listener/host/faded: text` | the listener refers to something not in the transcript or profile ("that project", "like last time", "do you remember"); at most **one** call per reply |
+| `recall_memory` | `query: string` — a few words in the listener's language | up to 5 hits as the `(From memory)` block of §3.6 **[built: one renderer, `memoryBlock`, not a second format]** | the listener refers to something not in the transcript or profile ("that project", "like last time", "do you remember"); at most **one** call per reply |
 | `forget_memory` | `what: string` — the topic/phrase to erase | `removed N lines` | the listener explicitly asks the host to forget/erase/not remember something. Never on a mood remark. |
 
 `maxTurns` for the steer task goes **3 → 4** (recall → act → reply → slack).
 `submit_reply` stays the terminal tool; fallbacks unchanged.
+
+**[built]** The Director reaches the same tier through a wider `MemoryOps`
+(`contracts.ts`), because it also fixes the recall limit and flags the steered
+turn; `SteerActions.memory` stays the narrow tool-facing surface above.
+`PersistentMemoryStore` satisfies `MemoryOps` structurally and is wired in
+`app.ts` exactly like the other persistent-only capabilities.
+
+```ts
+type MemoryOps = {
+  recall(query: string, limit: number): RecallHit[]
+  forget(what: string): { rows: number; lines: number }
+  markSteered(): void
+}
+```
 
 ### 2.3 Compaction surface (impl-level, spec 05 §2.1) — re-scoped
 
@@ -173,9 +190,14 @@ the slice change. The stub Brain's no-op stands.
 | `COMPACT_EVERY_USER_TURNS` | 8 | `memory.ts` | replaces `COMPACT_EVERY_TURNS` |
 | `FACT_FADE_DAYS` | 90 | `memory.ts` | a line unconfirmed this long fades |
 | `RECALL_LIMIT` | 5 | `director.ts` | hits handed to the model |
-| `RECALL_CANDIDATES` | 40 | `memory.ts` | bm25 top-k before rerank |
-| `RECALL_HALF_LIFE_DAYS` | 30 | `memory.ts` | recency decay |
-| `RECALL_USER_BOOST` | 3 | `memory.ts` | listener rows over host rows |
+| (exclusion) | `settings().recentWindow` | `director.ts` | trailing turns recall skips (§3.4) |
+| `RECALL_CANDIDATES` | 40 | `recall.ts` | bm25 top-k before rerank |
+| `RECALL_HALF_LIFE_DAYS` | 30 | `recall.ts` | recency decay |
+| `RECALL_USER_BOOST` | 3 | `recall.ts` | listener rows over host rows |
+| `FACT_FADE_DAYS` | 90 | `memory.ts` | (as above) |
+
+**[built]** The three `RECALL_*` weights live in `recall.ts`, beside the rerank
+that is their only reader.
 
 No new `Config` fields, no new settings-pane items (spec 12 untouched).
 
@@ -213,13 +235,26 @@ A listener row is **not admitted** to the fold when any of these hold:
 | Rule | Example (paraphrased) | Why |
 |---|---|---|
 | starts with `/` | `/done`, `/settings` | a command, not speech |
-| ≤ 2 characters after trim, or matches the ack list (`ok`, `yes`, `no`, `thanks`, `continue`, `hmm`, and their CJK equivalents — a small constant list) | "ok" | nothing to learn |
+| ≤ 2 characters after trim, or matches the ack list (`ok`, `yes`, `no`, `thanks`, `continue`, `hmm` — a small constant list, **[built: English only]**) | "ok" | nothing to learn |
 | the steer turn that consumed it called `switch_music`, `end_broadcast`, or `change_settings` **and** the line is under 12 characters | "next song" | acted-on request, not a preference. Longer lines pass: "skip this, I can't do saxophone tonight" carries a fact |
 
-The Director already knows which tool the steer turn called (spec 11 logs
-it); it records the row with a `steered: true` flag in `history.jsonl` (an
-additive optional field on the row schema — zod default `false`). The gate
-reads the flag; nothing else changes on disk.
+**[built: why English only]** DESIGN §0 bars CJK characters from every source
+file, and an ack list is a hardcoded string list. It costs nothing: an
+acknowledgement in Chinese, Japanese or Korean is one or two characters, which
+the length rule above already drops.
+
+The Director knows which tool the steer turn called (spec 11 logs it) and the
+row carries a `steered: true` flag in `history.jsonl` — an additive optional
+field on the row schema, zod default `false`. The gate reads the flag; nothing
+else changes on disk.
+
+**[built: when the flag is written]** The Director records the listener's turn
+*before* the reply turn runs, so the flag is only known ~one model call later.
+Rather than reorder the recording (which would lose the line if the compose
+degraded), the store exposes `markSteered()`: it flags the newest listener row
+in memory and rewrites `history.jsonl` atomically through the same path §3.5
+needs. A full rewrite per steered turn is bounded by a file spec 05 keeps
+trivially small, and it happens off the audio path.
 
 Not admitted ≠ not recorded: every row still lands in `history.jsonl` and in
 the recall index. The gate only decides what the profile learns from.
@@ -274,10 +309,18 @@ is checked, so old facts make room before the model is asked to squeeze.
 ### 3.4 Recall — a derived FTS5 index
 
 **Storage.** `<memory_dir>/index.db`, `node:sqlite`, one FTS5 table
-(`unicode61` tokenizer) with columns `(ts, role, body)` plus `rowid`. **Derived
-and disposable**: built from `history.jsonl` + `profile-faded.md` on boot when
-missing or when its row count disagrees with the source; deleting it costs a
-rebuild (< 100 ms at 10k rows). It therefore lives under `data/` beside its
+(`unicode61` tokenizer) with columns `(ts, role, body)` plus `rowid` (**[built]**
+plus an `UNINDEXED text` column holding the unshingled line, so a hit renders as
+the listener wrote it). **Derived and disposable**: built from `history.jsonl` +
+`profile-faded.md` when missing or when its row count disagrees with the source;
+deleting it costs a rebuild (< 100 ms at 10k rows).
+
+**[built: built on first use, not on boot.]** The draft put the build in
+`load()` and left a pitfall about it blocking air. Building it lazily — on the
+first `recall`/`forget` — removes the question: recall only ever happens on a
+reply turn that is already waiting on a model call, and a run that never
+recalls never pays for the index at all. `record()` inserts into an index
+already open, so a live session stays current without a rebuild. It therefore lives under `data/` beside its
 sources but is documented as rebuildable. The JSONL files stay the source of
 truth; nothing is written to the db that is not also in a JSONL/markdown file.
 
@@ -302,41 +345,74 @@ recency   = 0.5 ^ (ageDays / RECALL_HALF_LIFE_DAYS)  (floor 0.05, so an old
 ```
 
 Rows inside the current recent window (already in the transcript) are
-excluded. Return the top `limit`.
+excluded — by ts, never by text. **[built]** "The recent window" is the
+`recentWindow` turns the reply prompt actually renders (the Director passes the
+count), NOT the far wider window the store keeps in memory: the latter is 256
+turns or 48 hours, so excluding it would blind recall to two days of turns the
+model was never shown. The exclusion is a `ts <` predicate in the SQL, applied
+**before** the `RECALL_CANDIDATES` cut — after it, a listener who has just been
+discussing the topic fills the whole candidate budget with rows the model can
+already see, and the older memory never surfaces. Return the top `limit`.
 
 **Why rerank in TS**: one query, one sort, readable in a unit test; the SQL
 stays a plain FTS match.
 
-**Warning noise.** `node:sqlite` prints `ExperimentalWarning` to stderr on
-first use. The engine process installs a `process.on('warning')` filter for
-that one name (or runs with `--disable-warning=ExperimentalWarning` in the
-`bin` shim — implementer's pick, but `make pack` must show a clean stderr).
+**Warning noise.** `node:sqlite` prints `ExperimentalWarning` to stderr. **[built]**
+The warning fires when the builtin *links*, which for a static ESM import is
+before any module body runs — so a `process.on('warning')` filter installed by
+an imported module cannot catch it. Two pieces, both needed: `src/warnings.ts`
+(imported first in `main.ts`) removes Node's default warning listener and
+re-emits everything except that one message, and `recall.ts` reaches the module
+through `process.getBuiltinModule('node:sqlite')` at first use rather than
+importing it. `--disable-warning` in the `bin` shim was not taken: the shebang
+cannot carry a flag portably.
 
 ### 3.5 Forget on request
 
 `forget(what)`:
-1. `what` is shingled and matched against the index exactly like recall, but
-   every hit above a fixed relevance floor is taken, not the top-k.
+1. `what` is shingled into tokens and every row and line carrying them is
+   taken, not a top-k. **[built]** A plain scan over the same sources, not an
+   FTS query: forget wants *every* match, which is what the files already give
+   in one pass, and it keeps the floor below readable instead of a bm25
+   threshold.
 2. The matched history rows are removed: `history.jsonl` is rewritten
    atomically without them (the one sanctioned non-append write; spec 05 §3.1
    discipline: temp + rename).
-3. Profile and faded lines containing any token of `what` (post-shingle,
-   case-insensitive) are removed from both files, atomically.
-4. The index is rebuilt from the sources.
+3. Profile and faded lines are removed from both files, atomically, by the
+   **same** floor the rows use — **[built]**; "any token" would have made the
+   profile easier to over-forget than the history it summarises.
+4. The index is rebuilt from the sources — **[built]** or, when it was never
+   opened this session, its file is deleted. The index stores every row's text
+   verbatim, so a stale `index.db` is a copy of exactly what was asked to be
+   destroyed; and the row-count check that guards §3.4 would not catch it,
+   because recording as many new turns as were forgotten makes the counts agree.
 5. A ledger event `kind: 'forget'` with key = the ISO time (no text) is
    appended, so the host can acknowledge it did forget without keeping what.
 6. The in-memory recent window is filtered the same way, so the very next
    pack no longer carries it.
+7. **[built]** The listener's own request is removed but **not counted**. It was
+   recorded as a turn before the reply turn ran and always carries its own
+   words, so counting it would make the radio claim to have forgotten something
+   every single time it was asked — the "found nothing" reply would be
+   unreachable. The Director says how many trailing listener turns are the
+   asking (`askedIn`, 1). Removing it is deliberate: the asking can hold the
+   very detail being erased.
 
 **No backup, no undo.** A forgotten line that is kept "just in case" is not
 forgotten; the listener asked for the opposite. The tool's reply names the
 count; if it is 0 the model says it found nothing to forget.
 
-Pitfall: over-match. "forget about the coffee thing" shingled includes
-"about" / "thing"-like tokens in CJK too. Mitigation: the relevance floor is
-set so a row must match at least two tokens or one 3+-char token, and the
-tool result lists the removed lines' first 40 chars so the reply can tell the
-listener what went. If by-ear says it over-forgets, the floor is the knob.
+Pitfall: over-match. "forget about the coffee thing" shingles to tokens like
+"about" and "thing" that name nothing. **[built]** The floor: drop a small
+list of English stop words, then a line must carry **two** of the remaining
+tokens — unless only one survived, in which case that one IS the request (which
+is also what makes a two-character Chinese word forgettable: it shingles to a
+single bigram). Matching is on **whole tokens**, never substrings: forgetting is
+irreversible, and "the ex thing" reduces to the single token `ex`, which as a
+substring also names "next", "exhausted" and "exactly". The draft's "one
+3+-char token" clause was dropped: "thing" and "about" are both 3+ characters,
+so it would have re-opened the case it was meant to close. The tool result reports the count; if by-ear says it
+over-forgets, the stop-word list and the two-token bar are the knobs.
 
 ### 3.6 Prompts (all in `prompts.ts`)
 
@@ -466,10 +542,8 @@ Unit (fakes / `tmp` dir, injected clock, model-free) unless noted:
   existing `atomicWrite`; never truncate in place.
 - **Tests must inject the dir** (the `~/.murmur` test-isolation gap already
   bit this repo). Never construct a store without `dir` in a test.
-- **Index rebuild on boot must not block air**: it is < 100 ms at v1 sizes,
-  but do it in the constructor's `load()` synchronously and measure in the
-  PR — if it ever exceeds ~300 ms, move it behind the first segment like
-  compaction catch-up.
+- ~~**Index rebuild on boot must not block air**~~ — **[built]** moot: the
+  index is built at first recall, not at boot (§3.4).
 
 ### Open (build-time or by-ear; none blocking)
 

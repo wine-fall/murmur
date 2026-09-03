@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from 'node:url'
 
-import type { ContextPack, SeedAnswer, Turn } from './contracts.ts'
+import type { ContextPack, RecallHit, SeedAnswer, Turn } from './contracts.ts'
 
 // The bundled static persona seed (L0). Spec 06 will generate/evolve personas
 // at runtime; this is only the default.
@@ -595,9 +595,26 @@ OBSERVATIONAL, not directive: it records what has actually worked, and it never
 states who the host is — the persona owns that.`
 
 const COMPACTION_INSTRUCTION = `You maintain a long-term listener profile for a personal companion radio. Fold
-the durable facts from the recent transcript into the existing profile.
+the durable facts from the exchange below into the existing profile.
+
+The exchange is labelled: \`listener:\` is the person, \`host:\` is the radio. Derive
+facts ONLY from the listener's lines. A \`host:\` line is there for context — it is
+the radio talking to itself, and nothing in it is a fact about the listener.
 
 ${PROFILE_SHAPE}
+
+Every fact is one line, and ends with the date it was last confirmed:
+
+- Stopped drinking coffee; prefers tea [seen 2026-09-01]
+- Name they go by: Z; speaks Chinese [seen 2026-07-20] [stable]
+
+Rules for the lines:
+- A fact the listener confirms again gets today's date.
+- A newer statement that contradicts an older fact REPLACES it — keep the newer
+  line, drop the old one; never keep both.
+- A one-off request ("play something else") is not a preference unless it recurs.
+- Mark identity facts — name, language, where they live, what they do — [stable].
+- Keep the existing date on a fact this exchange did not touch.
 
 Drop: ephemera, one-off small talk, anything transient. Merge — do not simply
 append; rewrite the profile so it stays coherent and non-repetitive.
@@ -607,10 +624,14 @@ listener's own language, under ${PROFILE_CHAR_CAP} characters total. No preamble
 or commentary.
 `
 
-// The compaction turn: current profile + the recent transcript to fold.
+// The compaction turn: current profile + the listener-only slice to fold
+// (spec 05-01 §3.1). `host:`/`listener:` rather than the role names, so the
+// prompt's one-half rule and the line labels are the same word.
 export function buildCompactionPrompt(profile: string, transcript: readonly Turn[]): string {
   const current = profile.trim() || '(no profile yet)'
-  const lines = transcript.map((t) => `${t.role}: ${t.text}`).join('\n') || '(nothing)'
+  const lines =
+    transcript.map((t) => `${t.role === 'radio' ? 'host' : 'listener'}: ${t.text}`).join('\n') ||
+    '(nothing)'
   return (
     `${COMPACTION_INSTRUCTION}\n` +
     `(Current profile)\n${current}\n\n` +
@@ -770,17 +791,61 @@ export const STEER_ARMED_NOTE =
   'radio. If this turn confirms it, call end_broadcast again to close; if it ' +
   'does not, do NOT call end_broadcast and just carry on (it disarms on its own).'
 
+// The two memory tools, offered only when the store behind them is real
+// (spec 05-01 §3.6). Recall is capped at one call per reply: it rides the turn
+// the listener already paid for, and a second lookup is a conversation the
+// listener did not ask for.
+const STEER_MEMORY_RULE =
+  '- The listener refers to something that is NOT in the program above or in ' +
+  'what you know about them ("that project", "like last time", "do you ' +
+  'remember") -> call recall_memory ONCE with a few words in their language, ' +
+  'then answer from what comes back.\n' +
+  '- The listener explicitly asks you to forget or erase something -> call ' +
+  'forget_memory with the topic in their words, then confirm it is gone. ' +
+  'Never for a mood remark.\n'
+
+// The anti-fabrication line for the reply turn: memory is a thing you looked
+// up, not a thing you can invent (spec 05-01 §3.6).
+const MEMORY_GROUNDING =
+  '\n\nOnly mention a past moment that appears in the program above, in what ' +
+  'you know about the listener, or in a recall_memory result. Never invent a ' +
+  'date, a quote, or a memory.'
+
+// Recall hits, dated and attributed, as the reply turn reads them
+// (spec 05-01 §3.6). No hits renders nothing at all — an empty block would
+// invite the model to fill it in.
+export function memoryBlock(hits: readonly RecallHit[]): string {
+  if (hits.length === 0) return ''
+  const lines = hits.map((hit) => {
+    const day = new Date(hit.ts * 1000).toISOString().slice(0, 10)
+    const who =
+      hit.role === 'user'
+        ? 'the listener said'
+        : hit.role === 'radio'
+          ? 'you said'
+          : 'you knew, and had since let go'
+    return `- ${day}, ${who}: "${hit.text}"`
+  })
+  return `(From memory)\n${lines.join('\n')}`
+}
+
 export function buildSteerPrompt(
   userText: string,
   ctx: ContextPack,
-  opts: { musicWired: boolean; shutdownArmed: boolean; settingsWired: boolean },
+  opts: {
+    musicWired: boolean
+    shutdownArmed: boolean
+    settingsWired: boolean
+    memoryWired: boolean
+  },
 ): string {
   const transcript = renderTranscript(ctx, userText)
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
   const rules =
     `${opts.musicWired ? STEER_SWITCH_RULE : ''}` +
     `${opts.settingsWired ? STEER_SETTINGS_RULE : ''}` +
-    `${STEER_END_RULE}${STEER_REPLY_RULE}`
+    `${opts.memoryWired ? STEER_MEMORY_RULE : ''}` +
+    `${STEER_END_RULE}${STEER_REPLY_RULE}${opts.memoryWired ? MEMORY_GROUNDING : ''}`
   const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
   return (
     `${profileBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n\n` +

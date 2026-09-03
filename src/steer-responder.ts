@@ -10,8 +10,8 @@ import type { ContextPack, Harness, SteerActions, SteerBrain } from './contracts
 import { buildSteerPrompt } from './prompts.ts'
 import { steerTools } from './steer-tools.ts'
 
-// Enough turns for act -> reply, plus one slack turn.
-const DEFAULT_MAX_TURNS = 3
+// Enough turns for recall -> act -> reply, plus one slack turn (spec 05-01 §2.2).
+const DEFAULT_MAX_TURNS = 4
 
 export type SteerResponderDeps = {
   brain: Harness
@@ -32,6 +32,7 @@ export class SteerResponder implements SteerBrain {
       prompt: buildSteerPrompt(userText, ctx, {
         musicWired: actions.music !== undefined,
         settingsWired: actions.settings !== undefined,
+        memoryWired: actions.memory !== undefined,
         shutdownArmed: actions.shutdown.armed(),
       }),
       model: this.deps.model,

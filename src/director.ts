@@ -28,6 +28,7 @@ import type {
   MusicHandle,
   MusicState,
   Player,
+  MemoryOps,
   SteerActions,
   SteerSettingsActions,
   SteerBrain,
@@ -92,6 +93,11 @@ const ATTEMPTS = 2
 // dropped for a fresh one (spec 03-02 §3.5: confirm audio BEFORE the announce).
 const STREAM_START_TIMEOUT_S = 8
 const MUSIC_START_ATTEMPTS = 2
+
+// How many recalled lines the reply turn is handed (spec 05-01 §2.5). Five is
+// enough to answer "that project" and few enough to stay a memory rather than
+// a transcript dump.
+const RECALL_LIMIT = 5
 
 // Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
 // (spec 05 §3.5) — cross-session on the persistent store. Deep enough to cover
@@ -199,6 +205,10 @@ export type DirectorDeps = {
   // The agentic reply turn (spec 11): preferred over brain.respond when
   // present; absent on stub runs (the harness behind it is the real SDK).
   steer?: SteerBrain
+  // The persistent memory tier (spec 05-01 §2.2): what recall_memory and
+  // forget_memory act through, and where a steered turn is flagged. Absent =
+  // neither tool is offered — a stub run has nothing on record to search.
+  memoryOps?: MemoryOps
   // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
@@ -275,6 +285,10 @@ export class Director {
   // until the sign-off reply has aired.
   private shutdownArmed = false
   private steerEndCalled = false
+  // Whether the steer task that just ran acted on the program at all — the
+  // admission gate's input (spec 05-01 §3.2): a line the radio acted on is a
+  // command, not a durable preference.
+  private steerActed = false
   private quitAfterReply = false
   // A merged reply discards its in-flight steer task, but the task cannot be
   // cancelled — the epoch makes the orphan's late tool calls dead instead of
@@ -1247,6 +1261,7 @@ export class Director {
     if (steer === undefined) return this.deps.brain.respond(userText, this.context())
     const armedBefore = this.shutdownArmed
     this.steerEndCalled = false
+    this.steerActed = false
     let reply: string | null = null
     try {
       reply = await steer.respond(userText, this.context(), this.steerActions())
@@ -1254,6 +1269,7 @@ export class Director {
       this.deps.host.debug?.(`steer task failed (${String(err)}); falling back to respond`)
     }
     if (armedBefore && !this.steerEndCalled) this.shutdownArmed = false
+    if (this.steerActed) this.deps.memoryOps?.markSteered()
     if (reply !== null) return reply
     return this.deps.brain.respond(userText, this.context())
   }
@@ -1272,7 +1288,9 @@ export class Director {
         music: {
           playing: () => this.liveSong !== null,
           switchTrack: (hint?: string) => {
-            if (live()) this.switchMusic(hint)
+            if (!live()) return
+            this.steerActed = true
+            this.switchMusic(hint)
           },
         },
       }),
@@ -1283,18 +1301,58 @@ export class Director {
       ...(this.deps.settingsStore !== undefined && {
         settings: {
           current: () => this.deps.settingsStore!.current(),
-          set: (patch) => (live() ? this.deps.settingsStore!.set(patch) : false),
+          set: (patch) => {
+            if (!live()) return false
+            this.steerActed = true
+            return this.deps.settingsStore!.set(patch)
+          },
+        },
+      }),
+      // What the listener has said before, past the transcript (spec 05-01
+      // §2.2). The limit is the Director's call, not the model's; the epoch
+      // guard rides forget for the same reason it rides every other mutator —
+      // an orphaned attempt must never delete what a newer turn superseded.
+      ...(this.deps.memoryOps !== undefined && {
+        memory: {
+          recall: (query: string) => {
+            const hits = this.deps.memoryOps!.recall(
+              query,
+              RECALL_LIMIT,
+              this.deps.settings().recentWindow,
+            )
+            // The deterministic seam: a real run is read here, never from the
+            // model's account of what it remembered (spec 05-01 §5.13).
+            const found = hits.map((h) => h.text.slice(0, 40)).join(' | ')
+            this.deps.host.debug?.(`memory.recall "${query}" -> ${hits.length} [${found}]`)
+            return hits
+          },
+          forget: (what: string) => {
+            if (!live()) return { rows: 0, lines: 0 }
+            // Forgetting is an action on the program like any other: the turn
+            // that asked for it is a command, not a preference, and must never
+            // teach the profile the very thing it destroyed.
+            this.steerActed = true
+            // The listener's request is the newest listener turn, recorded
+            // before this task ran (spec 05-01 §3.5).
+            const gone = this.deps.memoryOps!.forget(what, 1)
+            this.deps.host.debug?.(
+              `memory.forget "${what}" -> ${gone.rows} rows, ${gone.lines} lines`,
+            )
+            return gone
+          },
         },
       }),
       shutdown: {
         armed: () => this.shutdownArmed,
         arm: () => {
           if (!live()) return
+          this.steerActed = true
           this.shutdownArmed = true
           this.steerEndCalled = true
         },
         confirm: () => {
           if (!live()) return
+          this.steerActed = true
           this.quitAfterReply = true
           this.steerEndCalled = true
         },

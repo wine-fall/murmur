@@ -13,6 +13,7 @@ import {
   buildSetupPrompt,
   VISIT_PERSONA,
   buildSteerPrompt,
+  memoryBlock,
   BOOTSTRAP_PROFILE_INSTRUCTION,
   CUE_GUIDANCE,
   buildFindMusicInstruction,
@@ -252,7 +253,12 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
     } as const
     const prompts = [
       buildRespondPrompt('hey', ctx),
-      buildSteerPrompt('hey', ctx, { musicWired: true, shutdownArmed: false, settingsWired: false }),
+      buildSteerPrompt('hey', ctx, {
+        musicWired: true,
+        shutdownArmed: false,
+        settingsWired: false,
+        memoryWired: false,
+      }),
     ]
     for (const p of prompts) {
       expect(p).toContain("It's Monday 2026-08-31, 2:28 pm")
@@ -326,9 +332,22 @@ describe('compaction prompt', () => {
       { role: 'user', text: 'long day' },
     ])
     expect(p).toContain('(Current profile)\nknows jazz')
-    expect(p).toContain('radio: evening')
-    expect(p).toContain('user: long day')
+    // host:/listener: labels, not role names — the fold reads a conversation,
+    // and only the listener's half may become a fact (spec 05-01 §3.1).
+    expect(p).toContain('host: evening')
+    expect(p).toContain('listener: long day')
+    expect(p).not.toContain('radio: evening')
     expect(p).toContain(String(PROFILE_CHAR_CAP))
+  })
+
+  // spec 05-01 §3.3: dates, decay and contradiction are carried by the line
+  // syntax, so the fold must state it — and derive facts from one half only.
+  it('states the dated-fact syntax and the listener-only rule', () => {
+    const p = buildCompactionPrompt('x', [])
+    expect(p).toMatch(/\[seen \d{4}-\d{2}-\d{2}\]/)
+    expect(p).toContain('[stable]')
+    expect(p).toMatch(/listener:/)
+    expect(p).toMatch(/contradict/i)
   })
 
   it('placeholders an empty profile and empty transcript', () => {
@@ -606,6 +625,53 @@ describe('the language override directive (spec 12 §3.9)', () => {
 // catch-all ("anything else is just conversation, no action tools") actively
 // told the model NOT to act on a settings request. Authorization is per
 // capability, exactly like switch_music.
+describe('the recall block and its grounding (spec 05-01 §3.6)', () => {
+  const ctx = { persona: 'p', recent: [] }
+  const hit = (role: 'user' | 'radio' | 'faded', text: string) => ({
+    ts: Date.parse('2026-08-15T21:04:00Z') / 1000,
+    role,
+    text,
+    score: 1,
+  })
+
+  it('renders each hit with its date and who said it', () => {
+    const block = memoryBlock([
+      hit('user', 'the lantern finally works'),
+      hit('radio', 'the sky went orange'),
+      hit('faded', '- Drinks coffee at night [seen 2026-01-01]'),
+    ])
+    expect(block).toContain('(From memory)')
+    expect(block).toContain('- 2026-08-15, the listener said: "the lantern finally works"')
+    expect(block).toContain('you said: "the sky went orange"')
+    expect(block).toContain('let go')
+  })
+
+  it('renders nothing at all with no hits', () => {
+    expect(memoryBlock([])).toBe('')
+  })
+
+  it('names the tools and forbids inventing a memory, only when memory is wired', () => {
+    const wired = buildSteerPrompt('do you remember?', ctx, {
+      musicWired: false,
+      shutdownArmed: false,
+      settingsWired: false,
+      memoryWired: true,
+    })
+    expect(wired).toMatch(/recall_memory/)
+    expect(wired).toMatch(/forget_memory/)
+    expect(wired).toMatch(/never invent a/i)
+
+    const bare = buildSteerPrompt('do you remember?', ctx, {
+      musicWired: false,
+      shutdownArmed: false,
+      settingsWired: false,
+      memoryWired: false,
+    })
+    expect(bare).not.toMatch(/recall_memory/)
+    expect(bare).not.toMatch(/never invent a/i)
+  })
+})
+
 describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
   const ctx = { persona: 'p', recent: [] }
 
@@ -614,6 +680,7 @@ describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
       musicWired: false,
       shutdownArmed: false,
       settingsWired: true,
+      memoryWired: false,
     })
     expect(p).toMatch(/change_settings/)
     // The same guard the pane's vocabulary implies: a mood remark is not a request.
@@ -625,6 +692,7 @@ describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
       musicWired: false,
       shutdownArmed: false,
       settingsWired: false,
+      memoryWired: false,
     })
     expect(p).not.toMatch(/change_settings/)
   })

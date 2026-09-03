@@ -10,15 +10,15 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-08-31 (direction split out into ROADMAP.md; the #145
-input-drop bug moved there as roadmap line 0 and its issue closed)_
+_Last updated: 2026-09-03 (memory v1.5 built — spec 05-01 recall & forgetting)_
 
 ## Where we are
 
 **L0 + L1 are code-complete in TypeScript, and every code spec on the roadmap is
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
-bed + spec 05 memory, with 04, 06, 07, 10, 11 and 12 built on top. Unit gate
+bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
+07, 10, 11 and 12 built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
 spec for what it does, its PR for how it got there. Everything left is under

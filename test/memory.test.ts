@@ -122,11 +122,11 @@ describe('PersistentMemoryStore', () => {
   it('treats an unreadable meta.json as never compacted', () => {
     const c = clock()
     const path = dir()
-    opened(path, c).record({ role: 'radio', text: 'a' })
+    opened(path, c).record({ role: 'user', text: 'a thing worth folding' })
     writeFileSync(join(path, 'meta.json'), 'not json')
     const warnings: string[] = []
     const b = opened(path, c, { log: (m: string) => warnings.push(m) })
-    expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['a'])
+    expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['a thing worth folding'])
     expect(warnings.length).toBe(1)
   })
 
@@ -136,10 +136,11 @@ describe('PersistentMemoryStore', () => {
     const a = opened(path, c, { compactEvery: 3 })
     expect(a.profile()).toBe('')
     expect(a.compactionDue()).toBe(false)
-    a.record({ role: 'radio', text: '1' })
-    a.record({ role: 'user', text: '2' })
+    a.record({ role: 'radio', text: 'a beat nobody answered' })
+    a.record({ role: 'user', text: 'the first thing I said' })
     expect(a.compactionDue()).toBe(false)
-    a.record({ role: 'radio', text: '3' })
+    a.record({ role: 'user', text: 'the second thing I said' })
+    a.record({ role: 'user', text: 'the third thing I said' })
     expect(a.compactionDue()).toBe(true)
   })
 
@@ -148,12 +149,12 @@ describe('PersistentMemoryStore', () => {
     const path = dir()
     const a = opened(path, c, { compactEvery: 2 })
     a.record({ role: 'radio', text: 'early-1' })
-    a.record({ role: 'user', text: 'early-2' })
+    a.record({ role: 'user', text: 'early-2, said by the listener' })
     const slice = a.compactionSlice()
-    expect(slice.turns.map((t) => t.text)).toEqual(['early-1', 'early-2'])
+    expect(slice.turns.map((t) => t.text)).toEqual(['early-1', 'early-2, said by the listener'])
 
     // The fold races record(): a turn lands while the Brain is folding.
-    a.record({ role: 'radio', text: 'during-fold' })
+    a.record({ role: 'user', text: 'during-fold' })
     a.applyCompaction('the profile', slice.throughTs)
 
     expect(a.profile()).toBe('the profile')

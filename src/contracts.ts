@@ -123,12 +123,27 @@ export type BedPosition = { track: string; offsetS: number }
 // window does not re-fire it. 'setup' keys the onboarding offer's standing
 // answer (spec 03-03 §7.1): a recorded decline is what turns later boots with
 // the same gaps quiet instead of re-opening the conversation.
-export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup'
+// 'forget' keys one honoured forget request (spec 05-01 §3.5) — the time only,
+// never the text: an event that kept what was forgotten would defeat the point.
+export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup' | 'forget'
+
+// Where a recalled line came from (spec 05-01 §2.1): a history row's speaker,
+// or 'faded' for a profile fact that has aged out of the prompts but is still
+// answerable when the listener asks about it.
+export type RecallRole = 'radio' | 'user' | 'faded'
+
+export type RecallHit = {
+  readonly ts: number // unix seconds of the source row
+  readonly role: RecallRole
+  readonly text: string
+  readonly score: number // final rerank score, higher = better
+}
 
 // The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
 // profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
 // recentSongs / recentAnchors span sessions and days on the persistent store
-// (issue #44; spec 07 §2.4).
+// (issue #44; spec 07 §2.4). spec 05-01 adds retrieval over the whole log and
+// removal on request.
 export interface MemoryStore {
   record(turn: Turn): void
   recent(n: number): Turn[]
@@ -137,6 +152,12 @@ export interface MemoryStore {
   recentTopics(n: number): string[]
   recentSongs(n: number): string[]
   recentAnchors(n: number): string[]
+  // Search everything on record, past the recent window (spec 05-01 §3.4).
+  recall(query: string, limit: number): RecallHit[]
+  // Remove every history row and profile line matching `what`, physically and
+  // without a backup (spec 05-01 §3.5) — a line kept "just in case" is not
+  // forgotten. Returns the counts so the reply can name them.
+  forget(what: string): { rows: number; lines: number }
 }
 
 // A search hit the brain judges (spec 03-01 §2.2): enough signal to reject junk
@@ -263,10 +284,33 @@ export type SteerSettingsActions = {
   set(patch: SettingsPatch): boolean
 }
 
+// The memory tier as the reply turn reaches it (spec 05-01 §2.2). Absent =
+// neither recall_memory nor forget_memory is offered: a stub run has nothing
+// worth searching, and offering a tool over canned chatter is a lie.
+export type SteerMemoryActions = {
+  recall(query: string): RecallHit[]
+  forget(what: string): { rows: number; lines: number }
+}
+
+// The persistent memory tier as the DIRECTOR reaches it (spec 05-01 §2.2) —
+// wider than the tools' surface: the Director also fixes the recall limit and
+// flags the turn a reply acted on. Absent on a stub run, which is what gates
+// the two memory tools out of the set.
+export type MemoryOps = {
+  // `excludeRecent` = how many trailing turns the reply prompt already renders;
+  // `askedIn` = how many trailing listener turns are the forget request itself.
+  recall(query: string, limit: number, excludeRecent: number): RecallHit[]
+  forget(what: string, askedIn: number): { rows: number; lines: number }
+  // Mark the newest listener turn as one the reply already acted on, so the
+  // fold never mistakes a command for a preference (spec 05-01 §3.2).
+  markSteered(): void
+}
+
 export type SteerActions = {
   readonly music?: SteerMusicActions
   readonly shutdown: SteerShutdownActions
   readonly settings?: SteerSettingsActions
+  readonly memory?: SteerMemoryActions
 }
 
 // The agentic reply capability (spec 11 §2.2): resolves to the reply text the

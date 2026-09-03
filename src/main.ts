@@ -2,6 +2,9 @@
 // Entry point: parse the CLI, run the app. Kept separate from app.ts so tests
 // can import the wiring without executing it.
 
+// First, and before anything that loads node:sqlite (spec 05-01 §3.4).
+import './warnings.ts'
+
 import { packageVersion, parseCli } from './config.ts'
 import { runApp, runBootstrapProfileCli, runSetupCli } from './app.ts'
 
