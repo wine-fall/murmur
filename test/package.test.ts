@@ -82,25 +82,22 @@ describe('the engine starts without an experimental warning', () => {
     })
     expect(run.status).toBe(0)
     expect(run.stderr).toBe('')
-
-    // Without the filter the same run is noisy — so the assertion above is not
-    // passing for some other reason.
-    const bare = spawnSync(
-      process.execPath,
-      ['--input-type=module', '--eval', script.split('\n').slice(1).join('\n')],
-      { cwd: root, encoding: 'utf8' },
-    )
-    expect(bare.stderr).toContain('ExperimentalWarning')
   })
 
-  it('still lets every other warning through', () => {
+  // The predicate itself, with no dependency on whether this Node build happens
+  // to consider SQLite experimental — a negative control there is vacuous on a
+  // runtime that never warns.
+  it('swallows that one warning and lets every other one through', () => {
     const script =
-      "import './src/warnings.ts'\nprocess.emitWarning('a real warning')\n" +
+      "import './src/warnings.ts'\n" +
+      "process.emitWarning('SQLite is an experimental feature', 'ExperimentalWarning')\n" +
+      "process.emitWarning('a real warning')\n" +
       "process.emitWarning('another experiment', 'ExperimentalWarning')\n"
     const run = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
       cwd: root,
       encoding: 'utf8',
     })
+    expect(run.stderr).not.toContain('SQLite')
     expect(run.stderr).toContain('a real warning')
     expect(run.stderr).toContain('another experiment')
   })
