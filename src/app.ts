@@ -24,7 +24,7 @@ import { ClaudeBrain, StubBrain } from './brain.ts'
 import { LiveCadence, PacingCadence } from './cadence.ts'
 import { Compactor } from './compaction.ts'
 import { packageVersion, type Config, ttsFromFile } from './config.ts'
-import type { Harness, MemoryStore, VoiceProvider } from './contracts.ts'
+import type { Brain, Harness, MemoryStore, VoiceProvider } from './contracts.ts'
 import {
   canOpenBrowser,
   copyToClipboard,
@@ -46,12 +46,13 @@ import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
+import { readRwtPolicy, RealWorldTopics, RwtPool, RwtRoll, seedRwtPolicy } from './rwt.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './report.ts'
 import { SteerResponder } from './steer-responder.ts'
 import { YtDlpMusicProvider } from './music.ts'
 import { detectLanguage } from './locale.ts'
-import { loadPersona, personaLine } from './persona.ts'
+import { loadPersona, personaLanguage, personaLine } from './persona.ts'
 import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
 import { buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
@@ -218,6 +219,7 @@ export function buildSettingsStore(
       recentWindow: resolved.recentWindow,
       muted: resolved.muted,
       tuiPet: resolved.tuiPet,
+      rwtEnabled: resolved.rwtEnabled,
     },
     touched: stored,
     log,
@@ -278,6 +280,54 @@ function buildMusic(
   // §2.5): an empty room gets music/bed, everything else is the user's policy.
   const cadence = config.gatingEnabled ? new PacingCadence(configured) : configured
   return { source, cadence, engine }
+}
+
+// The language the gists are written in (spec 13 §3.5), read where the host
+// reads its own: the listener's override, else what the persona says it
+// speaks, else the persona's own prose held up as the example — a generated
+// persona is written in the listener's language and never names it (spec 06
+// §2.2), and the machine locale is not a record of anything.
+const PERSONA_SAMPLE_CHARS = 120
+
+export function rwtLanguage(override: string | undefined, persona: string): string {
+  const named = override ?? personaLanguage(persona)
+  if (named !== undefined) return named
+  const prose = persona
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line !== '' && !line.startsWith('#'))
+  return `the language this is written in: "${(prose ?? persona).slice(0, PERSONA_SAMPLE_CHARS)}"`
+}
+
+// Real-world topics (spec 13): the pool under cache/, the roll from the env
+// knobs, the fetch on the cheap tier. `language` is read at fetch time from
+// where the host reads it, so an override lands on the next refresh; region
+// is the system timezone, in the prompt only, never stored.
+export function buildRwt(
+  config: Config,
+  brain: Pick<Brain, 'fetchTopics'>,
+  language: () => string,
+  host: Host,
+): RealWorldTopics {
+  if (seedRwtPolicy(config.rwtPolicyPath)) host.debug?.(`rwt.policy seeded ${config.rwtPolicyPath}`)
+  return new RealWorldTopics({
+    pool: new RwtPool({
+      path: config.rwtPoolPath,
+      ttlHours: config.rwtTtlHours,
+      staleHours: config.rwtStaleHours,
+      ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+    }),
+    roll: new RwtRoll({ p: config.rwtP, minGap: config.rwtMinGap, maxGap: config.rwtMaxGap }),
+    brain,
+    request: () => ({
+      language: language(),
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      // en-CA is the one locale whose short date is ISO YYYY-MM-DD, local.
+      today: new Date().toLocaleDateString('en-CA'),
+      policy: readRwtPolicy(config.rwtPolicyPath),
+    }),
+    ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+  })
 }
 
 // Presence wiring (spec 07). The sensor is what puts the activity cue in the
@@ -786,6 +836,18 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     })
   }
 
+  // Real-world material rides the real brain only (spec 13): the stub's
+  // fetch returns nothing, so wiring it there would only add log lines.
+  const rwt =
+    claude === null
+      ? undefined
+      : buildRwt(
+          config,
+          new ClaudeBrain(config.rwtModel),
+          () => rwtLanguage(settings.current().language, persona),
+          host,
+        )
+
   const director = new Director({
     persona,
     brain,
@@ -804,6 +866,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(music !== undefined && { music }),
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
+    ...(rwt !== undefined && { rwt }),
     ...(setupRecall !== undefined && { setupRecall }),
     // The one production wiring of the desktop opener: the Director has no
     // default, so this is the only place a real browser can be launched from.

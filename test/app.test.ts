@@ -18,6 +18,8 @@ import {
   buildMemory,
   ensureTuiDeps,
   buildPacing,
+  buildRwt,
+  rwtLanguage,
   buildSettingsStore,
   buildVoice,
   escalatingSigint,
@@ -37,8 +39,11 @@ import { HostedVoice } from '../src/hosted-voice.ts'
 import { IpcHost } from '../src/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { LedgerScheduler } from '../src/scheduler.ts'
+import { DEFAULT_RWT_POLICY } from '../src/prompts.ts'
 import { readSettingsFile } from '../src/settings.ts'
 import { StubVoice } from '../src/voice.ts'
+
+import { FakeBrain, FakeHost } from './fakes.ts'
 
 // A murmur home with nothing in it — so a stray real ~/.murmur/voice.json on
 // the developer's machine can never decide what these tests see. Every config
@@ -406,6 +411,45 @@ describe('memory wiring', () => {
 
 // spec 12 §2.4: one store per run, seeded from the merged config (flags/env
 // respected), persisting around the file's user-touched keys.
+// spec 13 §3.5: language from where the host reads it, region from the system
+// clock only, the policy file seeded so the listener can find it.
+describe('real-world topics wiring (spec 13)', () => {
+  it('seeds the policy file and resolves the request at fetch time', async () => {
+    const home = emptyHome()
+    const c = config([], { MURMUR_HOME: home })
+    const brain = new FakeBrain()
+    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost())
+    expect(existsSync(join(home, 'rwt-policy.md'))).toBe(true)
+    rwt.maybeRefresh()
+    await rwt.drain()
+    const req = brain.fetchRequests[0]!
+    expect(req.language).toBe('Japanese')
+    expect(req.timezone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
+    expect(req.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(req.policy).toBe(DEFAULT_RWT_POLICY)
+  })
+
+  it('the gist language is the override, else what the persona says it speaks, else the persona itself', () => {
+    expect(rwtLanguage('Japanese', 'Always speak in Chinese (Mandarin).')).toBe('Japanese')
+    expect(rwtLanguage(undefined, 'Always speak in Chinese (Mandarin).')).toBe('Chinese (Mandarin)')
+    // A generated persona is written in the listener's language and never
+    // names it in English (spec 06 §2.2): the text itself is the answer.
+    const french = '# Brume\n\nTu es la voix de la nuit, douce et lente. Tu parles sans te presser.'
+    expect(rwtLanguage(undefined, french)).toMatch(/the language this is written in: "Tu es la voix de la nuit/)
+  })
+
+  it('a listener policy replaces the default wholesale', async () => {
+    const home = emptyHome()
+    const c = config([], { MURMUR_HOME: home })
+    writeFileSync(join(home, 'rwt-policy.md'), '<!-- mine -->\nOnly cats.\n')
+    const brain = new FakeBrain()
+    const rwt = buildRwt(c, brain, () => 'English', new FakeHost())
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(brain.fetchRequests[0]!.policy).toBe('Only cats.')
+  })
+})
+
 describe('settings store wiring (spec 12)', () => {
   it('starts from the merged config and persists around the touched keys', () => {
     const home = emptyHome()
@@ -415,6 +459,13 @@ describe('settings store wiring (spec 12)', () => {
     store.set({ tuiPet: false })
     // ...but the file remembers the user's own 5 for the next flag-less boot.
     expect(readSettingsFile(join(home, 'settings.json'))).toEqual({ gapSeconds: 5, tuiPet: false })
+  })
+
+  it('seeds the real-world-topics knob from the flag, and the file wins a flag-less boot (spec 13 §2.6)', () => {
+    const home = emptyHome()
+    expect(buildSettingsStore(config(['--no-rwt'], { MURMUR_HOME: home })).current().rwtEnabled).toBe(false)
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ rwtEnabled: false }))
+    expect(buildSettingsStore(config([], { MURMUR_HOME: home })).current().rwtEnabled).toBe(false)
   })
 
   it('a persisted mute seeds the store without touching the voice provider', () => {

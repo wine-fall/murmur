@@ -14,7 +14,16 @@ import { parseArgs } from 'node:util'
 import { z } from 'zod'
 
 import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './dev-log.ts'
-import { dataRoot, homeRoot, musicPolicyPath, settingsPath, tuiSocketPath, voiceConfigPath } from './paths.ts'
+import {
+  dataRoot,
+  homeRoot,
+  musicPolicyPath,
+  rwtPolicyPath,
+  rwtPoolPath,
+  settingsPath,
+  tuiSocketPath,
+  voiceConfigPath,
+} from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts.ts'
 import { readSettingsFile } from './settings.ts'
 import { MAX_SPEED, MIN_SPEED, readVoiceConfig, type VoiceConfig } from './voice-config.ts'
@@ -99,6 +108,19 @@ export const ConfigSchema = z.object({
   // The always-on background bed (spec 03-04); --no-bed or an empty cache
   // degrades to talk-with-silence.
   bedEnabled: z.boolean().default(true),
+
+  // --- real-world topics (spec 13 §2.6) ----------------------------------- //
+  // On/off is a settings-layer knob (file < flag, anchorsEnabled's shape); the
+  // numbers are env-only by-ear knobs. The fetch rides the cheap tier.
+  rwtEnabled: z.boolean().default(true),
+  rwtPoolPath: z.string().default(() => rwtPoolPath()),
+  rwtPolicyPath: z.string().default(() => rwtPolicyPath()),
+  rwtModel: z.string().default('claude-haiku-4-5-20251001'),
+  rwtP: z.coerce.number().min(0).max(1).default(0.35),
+  rwtMinGap: z.coerce.number().int().nonnegative().default(1),
+  rwtMaxGap: z.coerce.number().int().nonnegative().default(4),
+  rwtStaleHours: z.coerce.number().positive().default(6),
+  rwtTtlHours: z.coerce.number().positive().default(48),
 
   // --- proactive & pacing (spec 07 §3.7) ---------------------------------- //
   // On/off as config; the behavioral shape (thresholds, windows) stays as
@@ -232,6 +254,23 @@ function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
   }
 }
 
+// The MURMUR_RWT_* numbers (spec 13 §2.6): the same warn-and-default posture,
+// omitted when unset so the schema default stands.
+function rwtFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
+  const p = envNumber(env, 'MURMUR_RWT_P', z.coerce.number().min(0).max(1))
+  const minGap = envNumber(env, 'MURMUR_RWT_MIN_GAP', z.coerce.number().int().nonnegative())
+  const maxGap = envNumber(env, 'MURMUR_RWT_MAX_GAP', z.coerce.number().int().nonnegative())
+  const staleHours = envNumber(env, 'MURMUR_RWT_STALE_HOURS', z.coerce.number().positive())
+  const ttlHours = envNumber(env, 'MURMUR_RWT_TTL_HOURS', z.coerce.number().positive())
+  return {
+    ...(p !== undefined && { rwtP: p }),
+    ...(minGap !== undefined && { rwtMinGap: minGap }),
+    ...(maxGap !== undefined && { rwtMaxGap: maxGap }),
+    ...(staleHours !== undefined && { rwtStaleHours: staleHours }),
+    ...(ttlHours !== undefined && { rwtTtlHours: ttlHours }),
+  }
+}
+
 // The guide-written endpoint (spec 03-03 §7.2). The lowest layer of the three:
 // a damaged or absent file is simply no endpoint, never a boot failure.
 //
@@ -275,6 +314,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
       'no-bed': { type: 'boolean' },
       'no-anchors': { type: 'boolean' },
       'no-gating': { type: 'boolean' },
+      'no-rwt': { type: 'boolean' },
       tui: { type: 'boolean' },
       plain: { type: 'boolean' },
       setup: { type: 'boolean' },
@@ -305,6 +345,9 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     home: homeRoot(env),
     memoryDir: join(dataRoot(env), 'memory'),
     musicPolicyPath: musicPolicyPath(env),
+    rwtPoolPath: rwtPoolPath(env),
+    rwtPolicyPath: rwtPolicyPath(env),
+    ...rwtFromEnv(env),
     listeningApiKey: env.MURMUR_LISTENING_API_KEY?.trim() ?? '',
     listeningUrl: env.MURMUR_LISTENING_URL?.trim() ?? '',
     tuiSocket: tuiSocketPath(env),
@@ -324,6 +367,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     ...(values['no-bed'] === true && { bedEnabled: false }),
     ...(values['no-anchors'] === true && { anchorsEnabled: false }),
     ...(values['no-gating'] === true && { gatingEnabled: false }),
+    ...(values['no-rwt'] === true && { rwtEnabled: false }),
     ...(values.tui === true && { frontEnd: 'tui' }),
     // Last, so an explicit opt-out always wins over a redundant opt-in.
     ...(values.plain === true && { frontEnd: 'plain' }),

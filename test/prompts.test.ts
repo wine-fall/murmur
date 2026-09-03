@@ -30,6 +30,10 @@ import {
   STATUS_MICROCOPY,
   statusMicrocopy,
   withLanguage,
+  buildFetchTopicsPrompt,
+  DEFAULT_RWT_POLICY,
+  RWT_FETCH_SYSTEM_PROMPT,
+  RWT_POLICY_HEADER,
 } from '../src/prompts.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
@@ -861,5 +865,88 @@ describe('the persona a setup conversation runs under', () => {
     for (const persona of [GUIDE_PERSONA, VISIT_PERSONA]) {
       expect(persona.toLowerCase()).toContain('api key')
     }
+  })
+})
+
+// --- real-world topics (spec 13) ------------------------------------------ //
+
+describe('rwt rendering (spec 13 §2.5)', () => {
+  const base = { persona: 'p', recent: [] }
+  const rwt = { title: 'Typhoon season opens early', gist: 'The first storm came in a month ahead of the usual.' }
+
+  it('renders the item as material with the usage lines, on both talk builders', () => {
+    for (const p of [buildNextTalkPrompt({ ...base, rwt }), buildNextTalksPrompt({ ...base, rwt }, 2)]) {
+      expect(p).toContain('Typhoon season opens early')
+      expect(p).toContain('a month ahead of the usual')
+      expect(p).toMatch(/material, not an assignment/i)
+      expect(p).toMatch(/never a bulletin/i)
+      expect(p).toMatch(/leave it/i)
+    }
+  })
+
+  it('renders nothing without an item', () => {
+    expect(buildNextTalkPrompt(base)).not.toMatch(/out in the world/i)
+  })
+
+  it('never rides an anchor or coda beat, even if the pack carries one', () => {
+    for (const cue of ['anchor:morning', CODA_CUE]) {
+      const p = buildNextTalkPrompt({ ...base, rwt, cue })
+      expect(p).not.toContain('Typhoon season opens early')
+    }
+  })
+
+  it('the reply path does not carry it — a reply answers the listener', () => {
+    expect(buildRespondPrompt('hey', { ...base, rwt })).not.toContain('Typhoon season opens early')
+  })
+})
+
+describe('the fetch prompt (spec 13 §3.3)', () => {
+  const base = { persona: 'p', recent: [] }
+  const req = {
+    language: 'Japanese',
+    timezone: 'Asia/Tokyo',
+    today: '2026-09-03',
+    avoid: ['Already held', 'Also held'],
+    policy: 'Only cats.',
+  }
+
+  it('is a neutral researcher framing, not the persona', () => {
+    expect(RWT_FETCH_SYSTEM_PROMPT).toMatch(/material for a radio host/i)
+    expect(RWT_FETCH_SYSTEM_PROMPT).not.toMatch(/you are the host/i)
+  })
+
+  it('states language, timezone, freshness, the held titles, privacy, and the terminal call', () => {
+    const p = buildFetchTopicsPrompt(req)
+    // the title reaches the host beside the gist, so it is in the language too
+    expect(p).toMatch(/every title and every gist in Japanese/)
+    expect(p).toContain('Asia/Tokyo')
+    expect(p).toContain('2026-09-03')
+    expect(p).toMatch(/today or yesterday/i)
+    expect(p).toContain('- Already held')
+    expect(p).toContain('- Also held')
+    expect(p).toMatch(/private/i)
+    expect(p).toContain('submit_topics')
+    expect(p).toContain(`${RWT_POLICY_HEADER}\nOnly cats.`)
+  })
+
+  it('an empty avoid list renders no list', () => {
+    expect(buildFetchTopicsPrompt({ ...req, avoid: [] })).not.toMatch(/already in the pool/i)
+  })
+
+  it('the default policy names the four categories and the local weighting', () => {
+    for (const word of ['news', 'tech', 'entertainment', 'sports']) {
+      expect(DEFAULT_RWT_POLICY.toLowerCase()).toContain(word)
+    }
+    expect(buildFetchTopicsPrompt({ ...req, policy: DEFAULT_RWT_POLICY })).toContain(DEFAULT_RWT_POLICY)
+  })
+
+  it('the steer settings rule names the knob so "stop with the news" is a settings ask', () => {
+    const p = buildSteerPrompt('hey', base, {
+      musicWired: false,
+      shutdownArmed: false,
+      settingsWired: true,
+      memoryWired: false,
+    })
+    expect(p).toMatch(/real-world|news/i)
   })
 })

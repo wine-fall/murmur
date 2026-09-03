@@ -86,3 +86,14 @@ export function settingsPath(env: NodeJS.ProcessEnv = process.env): string {
 export function musicPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(homeRoot(env), 'music-policy.md')
 }
+
+// The real-world topic pool (spec 13 §2.1): rebuildable, so it lives under
+// cache/ — deleting it costs one fetch.
+export function rwtPoolPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(cacheRoot(env), 'rwt.json')
+}
+
+// The listener's topic policy (spec 13 §2.5): the music-policy shape, beside it.
+export function rwtPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'rwt-policy.md')
+}

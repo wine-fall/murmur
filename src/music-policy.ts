@@ -53,7 +53,9 @@ export function parseMusicPolicy(text: string): string | undefined {
   return body === '' ? undefined : body
 }
 
-export function readMusicPolicy(path: string): string | undefined {
+// The policy-file discipline, shared with the real-world topic policy (spec
+// 13 §2.5): comments stripped, absent/empty/unreadable = no policy.
+export function readPolicyFile(path: string): string | undefined {
   try {
     return parseMusicPolicy(readFileSync(path, 'utf-8'))
   } catch {
@@ -64,12 +66,20 @@ export function readMusicPolicy(path: string): string | undefined {
 // Seeded once at boot, because a policy the listener never sees is one they
 // can never edit. `wx` makes "already there" a normal outcome, so their own
 // text is never overwritten. Returns whether this call wrote the file.
-export function seedMusicPolicy(path: string): boolean {
+export function seedPolicyFile(path: string, template: string): boolean {
   try {
     mkdirSync(dirname(path), { recursive: true })
-    writeFileSync(path, TEMPLATE, { encoding: 'utf-8', flag: 'wx' })
+    writeFileSync(path, template, { encoding: 'utf-8', flag: 'wx' })
     return true
   } catch {
     return false
   }
+}
+
+export function readMusicPolicy(path: string): string | undefined {
+  return readPolicyFile(path)
+}
+
+export function seedMusicPolicy(path: string): boolean {
+  return seedPolicyFile(path, TEMPLATE)
 }

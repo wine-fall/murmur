@@ -23,6 +23,17 @@ describe('StubBrain', () => {
     expect(reply).toContain('hi')
   })
 
+  it('fetchTopics returns nothing, so a stub run never offers a topic (spec 13)', async () => {
+    const topics = await new StubBrain().fetchTopics({
+      language: 'English',
+      timezone: 'UTC',
+      today: '2026-09-03',
+      avoid: [],
+      policy: '',
+    })
+    expect(topics).toEqual([])
+  })
+
   it('compactProfile is a no-op (offline chatter never rewrites the profile)', async () => {
     const brain = new StubBrain()
     const updated = await brain.compactProfile('who you are', [{ role: 'radio', text: 'x' }])
@@ -68,6 +79,15 @@ describe('agenticOptions', () => {
     expect(o.mcpServers).toHaveProperty('murmur')
     expect(o.maxTurns).toBe(2)
     expect(o.skills).toEqual([])
+  })
+
+  // spec 13 §2.2: a task may name built-ins; they are bounded (tools) AND
+  // pre-approved (allowedTools), and nothing else appears.
+  it('a task with builtins gets exactly those, bounded and pre-approved', () => {
+    const server = { type: 'sdk', name: 'murmur' } as never
+    const o = agenticOptions('sys', 'model-x', server, ['mcp__murmur__submit_topics'], 12, ['WebSearch'])
+    expect(o.tools).toEqual(['WebSearch'])
+    expect(o.allowedTools).toEqual(['mcp__murmur__submit_topics', 'WebSearch'])
   })
 })
 

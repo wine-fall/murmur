@@ -37,6 +37,7 @@ import type {
   TrackSource,
   Turn,
   VoiceProvider,
+  RwtTopic,
 } from './contracts.ts'
 import type { Host } from './host.ts'
 import { COMMANDS, type ProgramState } from './ipc.ts'
@@ -205,6 +206,9 @@ export type DirectorSettings = {
   recentWindow: number
   anchorsEnabled: boolean
   musicEnabled: boolean
+  // Whether an ordinary talk batch may be offered real-world material (spec
+  // 13 §2.6); read live at each batch, so "stop with the news" lands at once.
+  rwtEnabled: boolean
   // Absent = the persona decides (spec 12 §3.9). Read live like every other
   // knob here, so a change lands on the next beat with no restart.
   language?: string | undefined
@@ -234,6 +238,10 @@ export type DirectorDeps = {
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
   compactor?: { maybeSchedule(): boolean }
+  // Real-world material (spec 13 §2.4): one synchronous offer per ordinary
+  // talk batch, and a refresh poked at every boundary that runs off the loop
+  // like the compactor's fold. Absent = never offered (stub runs, tests).
+  rwt?: { offer(): RwtTopic | null; maybeRefresh(): boolean }
   // The mid-broadcast recall (spec 10 §3.4): a typed /setup parks the talk
   // loop inside this call — the engine keeps playing — and the loop resumes
   // when it returns. Absent (stub runs): /setup answers with the shell pointer.
@@ -439,6 +447,7 @@ export class Director {
   private beginBoundary(): void {
     this.now = new Date()
     this.readActivity()
+    this.deps.rwt?.maybeRefresh() // background, single-flight
   }
 
   // The sensor read, honoring MURMUR_ACTIVITY (by-ear). Also taken right after
@@ -656,7 +665,11 @@ export class Director {
   // them instead of regenerating the same beat — the buffered text lives here
   // in the Director, so the stateless Brain is told what is already scheduled,
   // not only what has aired and been recorded.
-  private context(queued: readonly string[] = [], cue?: string): ContextPack {
+  private context(
+    queued: readonly string[] = [],
+    cue?: string,
+    rwt?: ContextPack['rwt'],
+  ): ContextPack {
     const window = this.deps.settings().recentWindow
     const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
@@ -675,6 +688,7 @@ export class Director {
       coveredTopics: this.deps.memory.recentTopics(window),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
+      ...(rwt !== undefined && { rwt }),
     }
   }
 
@@ -1106,9 +1120,14 @@ export class Director {
     queued: readonly string[] = [],
     cue?: string,
   ): Promise<TalkBeat[]> {
+    // One roll per batch, before the retry loop: a retried batch is the same
+    // batch, not a second chance at a topic. Anchors and the coda have a job
+    // of their own and are never offered one (spec 13 §2.4).
+    const offered = cue === undefined && this.deps.settings().rwtEnabled ? this.deps.rwt?.offer() : undefined
+    const rwt = offered == null ? undefined : { title: offered.title, gist: offered.gist }
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        return await this.deps.brain.nextTalks(this.context(queued, cue), count)
+        return await this.deps.brain.nextTalks(this.context(queued, cue, rwt), count)
       } catch (err) {
         if (attempt < ATTEMPTS) {
           this.deps.host.debug?.(`talk.next_talks failed (attempt ${attempt}/${ATTEMPTS}); retrying`)

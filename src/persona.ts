@@ -44,3 +44,18 @@ export function loadPersona(path: string, language: string): string {
   if (!text) throw new Error(`persona seed file is empty: ${path}`)
   return renderPersona(text, language)
 }
+
+// The language the persona says it speaks (spec 13 §3.5). Once past the first
+// run the persona is the record — the machine locale that seeded it may have
+// changed since — and it states its language in a sentence, not a field:
+// "Always speak in Chinese (Mandarin)." / "Speak in Japanese, softly." The
+// first such clause, up to the sentence's end. A language is a proper noun,
+// so the capture must open with a capital: "speak in a warm tone" is manner,
+// not language. Undefined when the persona never says — a generated persona
+// is written in the listener's language and does not name it in English.
+const SPEAKS_IN = /\b[Ss]peak(?:s|ing)? in ([A-Z][^.,;\n*]*)/
+
+export function personaLanguage(persona: string): string | undefined {
+  const name = SPEAKS_IN.exec(persona)?.[1]?.trim()
+  return name ? name : undefined
+}

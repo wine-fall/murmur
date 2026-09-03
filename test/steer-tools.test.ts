@@ -23,6 +23,7 @@ const BASE: Settings = {
   recentWindow: 12,
   muted: false,
   tuiPet: true,
+  rwtEnabled: true,
 }
 
 function harness(initial: Partial<Settings> = {}, wired: { music?: boolean } = {}) {
@@ -68,6 +69,10 @@ describe('change_settings (spec 12 §2.6)', () => {
     expect((await call({ anchors: false, pet: false })).ok).toBe(true)
     expect(store.current().anchorsEnabled).toBe(false)
     expect(store.current().tuiPet).toBe(false)
+
+    // "stop with the news" (spec 13 §2.6)
+    expect((await call({ rwt: false })).ok).toBe(true)
+    expect(store.current().rwtEnabled).toBe(false)
   })
 
   it('translates the mix gear the way the pane does, never raw field names', async () => {

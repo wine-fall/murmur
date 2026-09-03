@@ -25,6 +25,8 @@ import { z } from 'zod'
 import type {
   Brain,
   ContextPack,
+  FetchedTopic,
+  FetchTopicsRequest,
   GuideCapable,
   GuideRequest,
   Harness,
@@ -44,6 +46,7 @@ import {
   SEED_PERSONA_SYSTEM_PROMPT,
 } from './prompts.ts'
 import { renderPersona } from './persona.ts'
+import { fetchTopicsTask } from './rwt.ts'
 import { emitTalkBeatsTool } from './talk-tools.ts'
 
 // Canned English fake output so the loop looks realistic with no network. The
@@ -86,6 +89,11 @@ export class StubBrain implements Brain {
     // filled, since what this returns is written to the listener's home.
     return renderPersona(readFileSync(DEFAULT_PERSONA_PATH, 'utf-8').trim(), language)
   }
+
+  async fetchTopics(_req: FetchTopicsRequest): Promise<FetchedTopic[]> {
+    // Offline: an empty pool never offers, so a stub run is its pre-spec-13 self.
+    return []
+  }
 }
 
 // Full isolation from the user's local Claude Code environment: no CLAUDE.md /
@@ -110,20 +118,24 @@ export function isolatedOptions(systemPrompt: string, model: string): Options {
 
 // Options for an agentic task over murmur's OWN in-process MCP tools (spec
 // 03-01 §2.1): same isolation, but the allowlist is exactly murmur's tools.
+// `builtins` (spec 13 §2.2) are the SDK's own tools a task may use beside
+// murmur's: on `tools` so they are the whole built-in surface, and on
+// `allowedTools` so the run never stops to ask. Default none.
 export function agenticOptions(
   systemPrompt: string,
   model: string,
   server: McpSdkServerConfigWithInstance,
   toolNames: string[],
   maxTurns: number,
+  builtins: readonly string[] = [],
 ): Options {
   return {
     systemPrompt,
     model,
     settingSources: [],
     strictMcpConfig: true,
-    tools: [],
-    allowedTools: toolNames,
+    tools: [...builtins],
+    allowedTools: [...toolNames, ...builtins],
     mcpServers: { murmur: server },
     skills: [],
     maxTurns,
@@ -360,7 +372,7 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     const allowed = tools.map((t) => `mcp__murmur__${t.name}`)
     const q = query({
       prompt: task.prompt,
-      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns),
+      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins),
     })
     for await (const _message of q) {
       if (captured !== null) break
@@ -404,6 +416,13 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   // 06 §3.3).
   async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
     return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language))
+  }
+
+  // The real-world fetch (spec 13 §2.2): the same bounded loop, with WebSearch
+  // let in and the cheap tier driving. null (budget out, no terminal call)
+  // reads as "nothing this round".
+  async fetchTopics(req: FetchTopicsRequest): Promise<FetchedTopic[]> {
+    return (await this.runTask(fetchTopicsTask(req, this.model))) ?? []
   }
 
   private async generate(persona: string, prompt: string): Promise<string> {
