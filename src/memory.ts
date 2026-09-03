@@ -153,9 +153,12 @@ export function admitsToFold(text: string, steered: boolean): boolean {
   return true
 }
 
-// A profile fact is a markdown bullet; section headers and blank lines are not
-// facts and are never dated or faded.
-const FACT_LINE = /^\s*[-*]\s+\S/
+// A fact is any line that is not a section header — a markdown bullet, or the
+// plain prose the spec-06 bootstrap and a hand edit both produce. Matching only
+// bullets left a bootstrapped profile permanently undated, which meant it never
+// aged out either. Headers are the parenthesized labels; blank lines are not
+// facts.
+const FACT_LINE = /^\s*[^\s(]/
 const SEEN_TAG = /\[seen (\d{4}-\d{2}-\d{2})\]/
 
 // UTC, deliberately: a `[seen]` tag is only ever compared against another
@@ -317,6 +320,12 @@ export class PersistentMemoryStore implements MemoryStore {
   // Built on first recall/forget, not at boot (spec 05-01 §3.4).
   private recallIndex: RecallIndex | null = null
   private watermark = 0
+  // Bumped by every forget. A fold reads its slice, then waits on a model call;
+  // if the listener erases something in that window the fold is holding
+  // pre-forget text, and applying it would write the erased fact straight back
+  // into profile.md (spec 05-01 §3.5).
+  private forgetEpoch = 0
+  private sliceEpoch = 0
   private lastTs = 0
   // The gap this session opened across, measured once at load and then frozen
   // (spec 10 §3.7.3). undefined = no history on disk to measure from.
@@ -367,7 +376,11 @@ export class PersistentMemoryStore implements MemoryStore {
     // the reply prompt's transcript window, not the (much wider) window the
     // store keeps in memory. Excluding the latter would hide up to two days of
     // turns the model was never shown.
-    const seen = excludeRecent > 0 ? this.turns.at(-excludeRecent)?.ts : undefined
+    // When fewer turns exist than the transcript renders, "the oldest of the
+    // last N" does not exist — fall back to the oldest turn there is, or the
+    // listener's own question comes back as a memory of itself.
+    const seen =
+      excludeRecent > 0 ? (this.turns.at(-excludeRecent)?.ts ?? this.turns[0]?.ts) : undefined
     return this.index().search(query, {
       now: this.now(),
       limit,
@@ -412,11 +425,13 @@ export class PersistentMemoryStore implements MemoryStore {
     this.turns = this.turns.filter((t) => !hit(t.turn.text))
     this.backlog = this.backlog.filter((b) => !hit(b.turn.text))
     // The index holds every row's text verbatim, so a stale index.db is a copy
-    // of exactly what was asked to be destroyed. Rebuild it when it is open;
-    // delete it when it is not — a row-count check would miss this, because
-    // recording as many new turns as were forgotten makes the counts agree.
-    if (this.recallIndex !== null) this.recallIndex.rebuild(this.indexRows())
-    else rmSync(join(this.dir, 'index.db'), { force: true })
+    // of exactly what was asked to be destroyed. A DELETE is not enough — the
+    // row's bytes stay on SQLite's freelist and the words are still in the
+    // file. Close it and unlink it; the next recall rebuilds from the cleaned
+    // sources. (A row-count check would not have caught this either: record as
+    // many new turns as were forgotten and the counts agree again.)
+    this.dropIndex()
+    this.forgetEpoch++
     if (rows === 0 && lines === 0) return { rows: 0, lines: 0 }
     // The time only: an event that kept what was forgotten would defeat the
     // point of asking.
@@ -534,6 +549,7 @@ export class PersistentMemoryStore implements MemoryStore {
       turns.push(entry.turn)
       emitted = i
     })
+    this.sliceEpoch = this.forgetEpoch
     return {
       profile: this.profileText,
       turns,
@@ -542,6 +558,12 @@ export class PersistentMemoryStore implements MemoryStore {
   }
 
   applyCompaction(newProfile: string, throughTs: number): void {
+    if (this.sliceEpoch !== this.forgetEpoch) {
+      // Dropping the fold costs nothing: the watermark did not move, so the
+      // turns are folded again next time — from sources the forget has cleaned.
+      this.log('memory: dropping a fold that predates a forget')
+      return
+    }
     this.refreshProfile(newProfile)
     atomicWrite(this.metaPath, JSON.stringify({ compacted_through: throughTs }))
     this.watermark = throughTs
@@ -552,6 +574,16 @@ export class PersistentMemoryStore implements MemoryStore {
 
   // The derived index, built on first use and rebuilt whenever its row count
   // disagrees with the files it is derived from (spec 05-01 §3.4).
+  // Close and unlink the derived index and anything SQLite left beside it.
+  private dropIndex(): void {
+    this.recallIndex?.close()
+    this.recallIndex = null
+    const db = join(this.dir, 'index.db')
+    for (const path of [db, `${db}-journal`, `${db}-wal`, `${db}-shm`]) {
+      rmSync(path, { force: true })
+    }
+  }
+
   private index(): RecallIndex {
     if (this.recallIndex === null) {
       this.recallIndex = new RecallIndex(join(this.dir, 'index.db'), this.log)

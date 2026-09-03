@@ -286,6 +286,13 @@ they live, what they do) `[stable]`.
 **Date post-pass** (deterministic, in `applyCompaction` and on load): any
 fact line without a `[seen ...]` tag gets today's date. This covers the
 spec-06 bootstrap output and hand edits without changing either writer.
+**[built]** A "fact line" is any non-blank line that is not a section header —
+not only a markdown bullet. Matching bullets alone left a bootstrapped profile
+written as prose permanently undated, and therefore permanently un-fadeable,
+which is exactly the compatibility this pass claims. **[built]** The fold is
+also told what today's date actually is: it runs under a neutral system prompt
+with no clock, and a model left to guess copies the year in the example — a
+syntactically valid tag that `stampDates` then preserves.
 
 **Fade pass** (deterministic, in `applyCompaction` and on load): a line whose
 date is older than `FACT_FADE_DAYS` and is not `[stable]` moves to
@@ -347,7 +354,10 @@ recency   = 0.5 ^ (ageDays / RECALL_HALF_LIFE_DAYS)  (floor 0.05, so an old
 Rows inside the current recent window (already in the transcript) are
 excluded — by ts, never by text. **[built]** "The recent window" is the
 `recentWindow` turns the reply prompt actually renders (the Director passes the
-count), NOT the far wider window the store keeps in memory: the latter is 256
+count), falling back to the oldest turn there is when fewer exist than that —
+otherwise a fresh install excludes nothing and hands the listener their own
+question back as a memory of itself. It is NOT the far wider window the store
+keeps in memory: the latter is 256
 turns or 48 hours, so excluding it would blind recall to two days of turns the
 model was never shown. The exclusion is a `ts <` predicate in the SQL, applied
 **before** the `RECALL_CANDIDATES` cut — after it, a listener who has just been
@@ -381,22 +391,37 @@ cannot carry a flag portably.
 3. Profile and faded lines are removed from both files, atomically, by the
    **same** floor the rows use — **[built]**; "any token" would have made the
    profile easier to over-forget than the history it summarises.
-4. The index is rebuilt from the sources — **[built]** or, when it was never
-   opened this session, its file is deleted. The index stores every row's text
-   verbatim, so a stale `index.db` is a copy of exactly what was asked to be
-   destroyed; and the row-count check that guards §3.4 would not catch it,
-   because recording as many new turns as were forgotten makes the counts agree.
+4. The index file is **closed and unlinked**, and the next recall rebuilds it
+   from the cleaned sources. **[built]** A rebuild-in-place is not enough: a
+   `DELETE` leaves the row's bytes on SQLite's freelist, so the words are still
+   in `index.db` afterwards — verified. Nor would the row-count check that
+   guards §3.4 have caught it, because recording as many new turns as were
+   forgotten makes the counts agree again.
 5. A ledger event `kind: 'forget'` with key = the ISO time (no text) is
    appended, so the host can acknowledge it did forget without keeping what.
 6. The in-memory recent window is filtered the same way, so the very next
    pack no longer carries it.
-7. **[built]** The listener's own request is removed but **not counted**. It was
+7. **[built]** Any fold already in flight is **dropped**. A compaction reads its
+   slice, then waits on a model call; a forget inside that window leaves the
+   fold holding pre-forget text, and applying it would write the erased fact
+   straight back into `profile.md` — reproduced. The store versions the slice
+   against a forget counter and refuses a stale apply; nothing is lost, because
+   the watermark did not move and the turns fold again next time.
+8. **[built]** The listener's own request is removed but **not counted**. It was
    recorded as a turn before the reply turn ran and always carries its own
    words, so counting it would make the radio claim to have forgotten something
    every single time it was asked — the "found nothing" reply would be
    unreachable. The Director says how many trailing listener turns are the
-   asking (`askedIn`, 1). Removing it is deliberate: the asking can hold the
-   very detail being erased.
+   asking (`askedIn` — every line the reply MERGED, not a constant 1). Removing
+   it is deliberate: the asking can hold the very detail being erased.
+
+**What forgetting cannot reach.** The diagnostics log (`~/.murmur/log/` on an
+installed run) already mirrors every listener line and every aired segment, and
+`forget` does not rewrite it. **[built]** The recall/forget dev-log lines
+therefore record shape only — counts, hit dates and roles — never the query, the
+phrase, or a hit's text; a log line naming what was just erased would be the one
+copy the erase provably created. The pre-existing mirror is a known residual
+gap, recorded here rather than papered over.
 
 **No backup, no undo.** A forgotten line that is kept "just in case" is not
 forgotten; the listener asked for the opposite. The tool's reply names the

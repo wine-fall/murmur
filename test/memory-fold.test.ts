@@ -407,3 +407,86 @@ describe('recall excludes what the model can already see (spec 05-01 §3.4)', ()
     expect(store.recall('roastery', 50, 0).length).toBe(30)
   })
 })
+
+// Findings from the codex peer review (PR #196), each pinned.
+describe('forget beats a fold that is already in flight (spec 05-01 §3.5)', () => {
+  it('refuses a compaction whose slice predates the forget', () => {
+    const c = clock(at('2026-09-01'))
+    const path = dir()
+    writeFileSync(join(path, 'profile.md'), '(About the listener)\n- Likes the quiet hour [seen 2026-08-30]')
+    const store = new PersistentMemoryStore({ dir: path, now: c.now })
+    store.record({ role: 'user', text: 'my friend Sarah moved to Lisbon last spring' })
+
+    // The fold reads its slice, then waits on the model...
+    const slice = store.compactionSlice()
+    // ...and the listener asks to forget while it waits.
+    expect(store.forget('Sarah').rows).toBe(1)
+    // The fold comes back holding a profile derived from what is now erased.
+    store.applyCompaction('(About the listener)\n- Friend Sarah, in Lisbon', slice.throughTs)
+
+    expect(store.profile()).not.toContain('Sarah')
+    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).not.toContain('Sarah')
+    // A fold started AFTER the forget still applies normally.
+    const fresh = store.compactionSlice()
+    store.applyCompaction('(About the listener)\n- Likes tea', fresh.throughTs)
+    expect(store.profile()).toContain('Likes tea')
+  })
+})
+
+describe('forget leaves nothing behind in the index (spec 05-01 §3.5)', () => {
+  it('erases the bytes, not just the rows, when the index is open', () => {
+    const c = clock(at('2026-09-01'))
+    const path = dir()
+    const store = new PersistentMemoryStore({ dir: path, now: c.now })
+    store.record({ role: 'user', text: 'my friend Sarah moved to Lisbon last spring' })
+    expect(store.recall('Sarah', 5).length).toBe(1)
+
+    expect(store.forget('Sarah').rows).toBe(1)
+    // A DELETE leaves the row's bytes on SQLite's freelist, so the text is
+    // still in the file — a physical-delete promise that only removes the
+    // index entry is not one.
+    const raw = existsSync(join(path, 'index.db'))
+      ? readFileSync(join(path, 'index.db')).toString('latin1')
+      : ''
+    expect(raw).not.toContain('Sarah')
+    expect(raw).not.toContain('Lisbon')
+    expect(store.recall('Sarah', 5)).toEqual([])
+    // And the index still works afterwards.
+    store.record({ role: 'user', text: 'the kettle is on' })
+    expect(store.recall('kettle', 5).length).toBe(1)
+  })
+})
+
+describe('recall on a short history (spec 05-01 §3.4)', () => {
+  it('excludes every visible turn when the window is not full yet', () => {
+    // A fresh install: fewer turns exist than the transcript renders, so
+    // "the oldest of the last 12" does not exist. Excluding nothing would hand
+    // the listener their own question back as a memory.
+    const c = clock(at('2026-09-01'))
+    const store = new PersistentMemoryStore({ dir: dir(), now: c.now })
+    store.record({ role: 'radio', text: 'a quiet hour' })
+    store.record({ role: 'user', text: 'do you remember the lantern?' })
+    expect(store.recall('lantern', 5, 12)).toEqual([])
+  })
+})
+
+describe('dating covers prose profiles, not only bullets (spec 05-01 §3.3)', () => {
+  const prose = ['(About the listener)', 'A night owl who codes late.', '', '(Relationship & style)', 'Short replies land best.'].join('\n')
+
+  it('stamps a bootstrapped profile written as plain prose', () => {
+    const stamped = stampDates(prose, '2026-09-01')
+    expect(stamped).toContain('A night owl who codes late. [seen 2026-09-01]')
+    expect(stamped).toContain('Short replies land best. [seen 2026-09-01]')
+    // Section headers are still not facts.
+    expect(stamped).toContain('(About the listener)\n')
+    expect(stamped).not.toContain('(About the listener) [seen')
+    expect(stamped).not.toContain('(Relationship & style) [seen')
+  })
+
+  it('fades a prose fact like any other', () => {
+    const old = '(About the listener)\nDrinks coffee at night [seen 2026-01-01]'
+    expect(fadeFacts(old, at('2026-09-01')).faded).toEqual([
+      'Drinks coffee at night [seen 2026-01-01]',
+    ])
+  })
+})

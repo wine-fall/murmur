@@ -285,10 +285,9 @@ export class Director {
   // until the sign-off reply has aired.
   private shutdownArmed = false
   private steerEndCalled = false
-  // Whether the steer task that just ran acted on the program at all — the
-  // admission gate's input (spec 05-01 §3.2): a line the radio acted on is a
-  // command, not a durable preference.
-  private steerActed = false
+  // How many listener lines the turn being composed merged (spec 05-01 §3.5):
+  // all of them are the asking when the reply forgets something.
+  private pendingUserLines = 1
   private quitAfterReply = false
   // A merged reply discards its in-flight steer task, but the task cannot be
   // cancelled — the epoch makes the orphan's late tool calls dead instead of
@@ -1241,6 +1240,7 @@ export class Director {
   // Total (never rejects): a failed compose degrades to null so the race in
   // compose() and the loop above never unwind the radio on a Brain error.
   private async prepareReply(texts: string[]): Promise<{ reply: string; clip: AudioClip } | null> {
+    this.pendingUserLines = texts.length
     let reply: string
     try {
       reply = await this.composeReply(texts.join('\n'))
@@ -1261,15 +1261,18 @@ export class Director {
     if (steer === undefined) return this.deps.brain.respond(userText, this.context())
     const armedBefore = this.shutdownArmed
     this.steerEndCalled = false
-    this.steerActed = false
+    // Attempt-local (spec 05-01 §3.2): reply attempts overlap when a line lands
+    // mid-compose, and a shared flag let the newer attempt reset what the older
+    // one had already acted on — the acted-on command then entered the fold.
+    const acted = { value: false }
     let reply: string | null = null
     try {
-      reply = await steer.respond(userText, this.context(), this.steerActions())
+      reply = await steer.respond(userText, this.context(), this.steerActions(acted))
     } catch (err) {
       this.deps.host.debug?.(`steer task failed (${String(err)}); falling back to respond`)
     }
     if (armedBefore && !this.steerEndCalled) this.shutdownArmed = false
-    if (this.steerActed) this.deps.memoryOps?.markSteered()
+    if (acted.value) this.deps.memoryOps?.markSteered()
     if (reply !== null) return reply
     return this.deps.brain.respond(userText, this.context())
   }
@@ -1278,7 +1281,7 @@ export class Director {
   // callbacks closed over live state; tools never import the Director. `music`
   // rides only when music is wired — that absence gates switch_music out of
   // the tool set.
-  private steerActions(): SteerActions {
+  private steerActions(acted: { value: boolean }): SteerActions {
     // Mutators are live only while this attempt is the latest — a merged reply
     // orphans its predecessor, whose late calls must land on a dead surface.
     const epoch = this.steerEpoch
@@ -1289,7 +1292,7 @@ export class Director {
           playing: () => this.liveSong !== null,
           switchTrack: (hint?: string) => {
             if (!live()) return
-            this.steerActed = true
+            acted.value = true
             this.switchMusic(hint)
           },
         },
@@ -1303,7 +1306,7 @@ export class Director {
           current: () => this.deps.settingsStore!.current(),
           set: (patch) => {
             if (!live()) return false
-            this.steerActed = true
+            acted.value = true
             return this.deps.settingsStore!.set(patch)
           },
         },
@@ -1320,10 +1323,13 @@ export class Director {
               RECALL_LIMIT,
               this.deps.settings().recentWindow,
             )
-            // The deterministic seam: a real run is read here, never from the
-            // model's account of what it remembered (spec 05-01 §5.13).
-            const found = hits.map((h) => h.text.slice(0, 40)).join(' | ')
-            this.deps.host.debug?.(`memory.recall "${query}" -> ${hits.length} [${found}]`)
+            // The deterministic seam a real run is read from, never the model's
+            // account of what it remembered (spec 05-01 §5.13) — but SHAPE
+            // only. Diagnostics persist under the murmur home and ride along on
+            // a /bug report, so the words themselves must not land here: a
+            // later forget cannot reach into this file.
+            const when = hits.map((h) => `${new Date(h.ts * 1000).toISOString().slice(0, 10)} ${h.role}`)
+            this.deps.host.debug?.(`memory.recall -> ${hits.length} [${when.join(' | ')}]`)
             return hits
           },
           forget: (what: string) => {
@@ -1331,13 +1337,12 @@ export class Director {
             // Forgetting is an action on the program like any other: the turn
             // that asked for it is a command, not a preference, and must never
             // teach the profile the very thing it destroyed.
-            this.steerActed = true
-            // The listener's request is the newest listener turn, recorded
-            // before this task ran (spec 05-01 §3.5).
-            const gone = this.deps.memoryOps!.forget(what, 1)
-            this.deps.host.debug?.(
-              `memory.forget "${what}" -> ${gone.rows} rows, ${gone.lines} lines`,
-            )
+            acted.value = true
+            // Every merged line of this turn is the asking (spec 05-01 §3.5):
+            // removed, but never counted as a memory that was there before.
+            const gone = this.deps.memoryOps!.forget(what, this.pendingUserLines)
+            // Counts only — never `what`, for the same reason as above.
+            this.deps.host.debug?.(`memory.forget -> ${gone.rows} rows, ${gone.lines} lines`)
             return gone
           },
         },
@@ -1346,13 +1351,13 @@ export class Director {
         armed: () => this.shutdownArmed,
         arm: () => {
           if (!live()) return
-          this.steerActed = true
+          acted.value = true
           this.shutdownArmed = true
           this.steerEndCalled = true
         },
         confirm: () => {
           if (!live()) return
-          this.steerActed = true
+          acted.value = true
           this.quitAfterReply = true
           this.steerEndCalled = true
         },

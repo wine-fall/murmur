@@ -340,6 +340,13 @@ describe('compaction prompt', () => {
     expect(p).toContain(String(PROFILE_CHAR_CAP))
   })
 
+  // The fold is asked to stamp facts with "today", and an isolated model has
+  // no clock: left to guess it copies the example year (spec 05-01 §3.3).
+  it('tells the fold what today actually is', () => {
+    const p = buildCompactionPrompt('x', [], '2026-09-03')
+    expect(p).toContain('2026-09-03')
+  })
+
   // spec 05-01 §3.3: dates, decay and contradiction are carried by the line
   // syntax, so the fold must state it — and derive facts from one half only.
   it('states the dated-fact syntax and the listener-only rule', () => {

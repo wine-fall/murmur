@@ -157,13 +157,15 @@ describe('PersistentMemoryStore', () => {
     a.record({ role: 'user', text: 'during-fold' })
     a.applyCompaction('the profile', slice.throughTs)
 
-    expect(a.profile()).toBe('the profile')
-    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).toBe('the profile')
+    // The fold's output is dated on the way in (spec 05-01 §3.3), so the text
+    // round-trips with its [seen] tag rather than verbatim.
+    expect(a.profile()).toMatch(/^the profile \[seen \d{4}-\d{2}-\d{2}\]$/)
+    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).toContain('the profile [seen ')
     // The mid-fold turn stays in the next backlog — on this instance and after
     // a reload (the watermark on disk is exactly throughTs).
     expect(a.compactionSlice().turns.map((t) => t.text)).toEqual(['during-fold'])
     const b = opened(path, c)
-    expect(b.profile()).toBe('the profile')
+    expect(b.profile()).toContain('the profile [seen ')
     expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['during-fold'])
   })
 })
@@ -190,7 +192,7 @@ describe('PersistentMemoryStore.writeProfile (spec 06 §2.4)', () => {
     store.writeProfile('bootstrapped')
     // The turn is still owed to compaction: a bootstrap is not a fold.
     expect(store.compactionSlice().turns.map((t) => t.text)).toEqual(['hello'])
-    expect(store.compactionSlice().profile).toBe('bootstrapped')
+    expect(store.compactionSlice().profile).toContain('bootstrapped [seen ')
   })
 })
 

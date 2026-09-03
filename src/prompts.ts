@@ -609,7 +609,7 @@ Every fact is one line, and ends with the date it was last confirmed:
 - Name they go by: Z; speaks Chinese [seen 2026-07-20] [stable]
 
 Rules for the lines:
-- A fact the listener confirms again gets today's date.
+- A fact the listener confirms again gets TODAY's date, stated below.
 - A newer statement that contradicts an older fact REPLACES it — keep the newer
   line, drop the old one; never keep both.
 - A one-off request ("play something else") is not a preference unless it recurs.
@@ -627,13 +627,21 @@ or commentary.
 // The compaction turn: current profile + the listener-only slice to fold
 // (spec 05-01 §3.1). `host:`/`listener:` rather than the role names, so the
 // prompt's one-half rule and the line labels are the same word.
-export function buildCompactionPrompt(profile: string, transcript: readonly Turn[]): string {
+// `today` is stated outright: the fold runs under a neutral system prompt with
+// no clock, and a model left to guess copies the year in the example — which
+// `stampDates` then preserves, because the tag is syntactically valid.
+export function buildCompactionPrompt(
+  profile: string,
+  transcript: readonly Turn[],
+  today: string = new Date().toISOString().slice(0, 10),
+): string {
   const current = profile.trim() || '(no profile yet)'
   const lines =
     transcript.map((t) => `${t.role === 'radio' ? 'host' : 'listener'}: ${t.text}`).join('\n') ||
     '(nothing)'
   return (
     `${COMPACTION_INSTRUCTION}\n` +
+    `(Today is ${today}.)\n\n` +
     `(Current profile)\n${current}\n\n` +
     `(Recent transcript to fold in)\n${lines}`
   )
