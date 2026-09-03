@@ -38,7 +38,31 @@ class FakeSteer implements SteerBrain {
   }
 }
 
-function build(steer: SteerBrain, opts: { music?: boolean } = {}) {
+// The persistent memory tier as the Director reaches it, scripted: what the
+// tools act through, plus the steered flag the admission gate reads.
+function fakeMemoryOps() {
+  return {
+    recalls: [] as { query: string; limit: number; excludeRecent: number }[],
+    forgets: [] as { what: string; askedIn: number }[],
+    steered: 0,
+    recall(query: string, limit: number, excludeRecent: number) {
+      this.recalls.push({ query, limit, excludeRecent })
+      return []
+    },
+    forget(what: string, askedIn: number) {
+      this.forgets.push({ what, askedIn })
+      return { rows: 1, lines: 0 }
+    },
+    markSteered() {
+      this.steered++
+    },
+  }
+}
+
+function build(
+  steer: SteerBrain,
+  opts: { music?: boolean; memoryOps?: ReturnType<typeof fakeMemoryOps> } = {},
+) {
   const brain = new FakeBrain()
   brain.batches = Array.from({ length: 12 }, (_, i) => [`talk ${2 * i + 1}`, `talk ${2 * i + 2}`])
   const voice = new FakeVoice()
@@ -60,6 +84,7 @@ function build(steer: SteerBrain, opts: { music?: boolean } = {}) {
     ...(opts.music !== false && {
       music: { source, cadence: new EveryNCadence(1), engine: player },
     }),
+    ...(opts.memoryOps !== undefined && { memoryOps: opts.memoryOps }),
     steer,
   }
   return { deps, brain, voice, player, host, source, memory, director: new Director(deps) }
@@ -166,6 +191,114 @@ describe('the agentic reply path', () => {
     await director.run(2)
     expect(brain.respondCalls).toEqual(['hey'])
     expect(host.radio).toContain('re:hey')
+  })
+})
+
+describe('the memory tier on the reply turn (spec 05-01 §2.2)', () => {
+  it('offers no memory actions when no persistent store is wired', async () => {
+    let seen: SteerActions | null = null
+    const steer = new FakeSteer((_text, actions) => {
+      seen = actions
+      return 'mm.'
+    })
+    const { director, host } = build(steer, { music: false })
+    host.type('do you remember?')
+    await director.run(2)
+    expect(seen!.memory).toBeUndefined()
+  })
+
+  it('hands recall and forget through, with the Director-fixed limit', async () => {
+    const memoryOps = fakeMemoryOps()
+    const steer = new FakeSteer((_text, actions) => {
+      actions.memory!.recall('that project')
+      actions.memory!.forget('the sister thing')
+      return 'it is gone.'
+    })
+    const { director, host } = build(steer, { music: false, memoryOps })
+    host.type('forget what I said about my sister')
+    await director.run(2)
+    // The transcript window the reply prompt renders is what recall must skip —
+    // not the far wider window the store keeps in memory.
+    expect(memoryOps.recalls).toEqual([{ query: 'that project', limit: 5, excludeRecent: 6 }])
+    // The listener's own request is one of those trailing turns: removed, but
+    // never counted as something forgotten.
+    expect(memoryOps.forgets).toEqual([{ what: 'the sister thing', askedIn: 1 }])
+    // The deterministic seam a real run is read from — shape only, never the
+    // words (spec 05-01 §5.13, and the diagnostics rule below).
+    expect(host.debugs.some((d) => d.includes('memory.recall -> 0'))).toBe(true)
+    expect(host.debugs.some((d) => d.includes('memory.forget -> 1 rows'))).toBe(true)
+  })
+
+  it('never writes the forgotten words, or a recalled line, into the diagnostics log', async () => {
+    // Diagnostics persist under ~/.murmur/log/ on an installed run and ride
+    // along on a /bug report. A forget that leaves its own phrase in another
+    // on-disk file has not forgotten it.
+    const ops = fakeMemoryOps()
+    const steer = new FakeSteer((_text, actions) => {
+      actions.memory!.recall('the sister thing')
+      actions.memory!.forget('the sister thing')
+      return 'it is gone.'
+    })
+    const { director, host } = build(steer, { music: false, memoryOps: ops })
+    host.type('forget what I told you about my sister')
+    await director.run(2)
+    const log = host.debugs.join('\n')
+    expect(log).toContain('memory.recall')
+    expect(log).toContain('memory.forget')
+    expect(log).not.toContain('sister')
+  })
+
+  it('counts every merged line of the request as the asking, not just the last', async () => {
+    // Two lines typed before the reply is ready are ONE turn. Declaring only
+    // one as the asking lets the other be reported as a prior memory removed.
+    const ops = fakeMemoryOps()
+    const steer = new FakeSteer(async (_text, actions) => {
+      await new Promise((r) => setTimeout(r, 30))
+      actions.memory!.forget('kayaking')
+      return 'gone.'
+    })
+    const { director, host } = build(steer, { music: false, memoryOps: ops })
+    const run = director.run(3)
+    host.type('please forget kayaking')
+    await new Promise((r) => setTimeout(r, 10))
+    host.type('I mean everything about kayaking')
+    await run
+    // The orphaned first attempt's tools land on a dead surface, so the only
+    // call that reaches the store is the merged one.
+    expect(ops.forgets).toEqual([{ what: 'kayaking', askedIn: 2 }])
+  })
+
+  it('marks the turn steered when the reply forgets something, like any other action', async () => {
+    // Otherwise the request line stays admitted, and the fold can learn a
+    // durable fact about exactly what was supposed to be destroyed.
+    const ops = fakeMemoryOps()
+    const steer = new FakeSteer((_text, actions) => {
+      actions.memory!.forget('the sister thing')
+      return 'it is gone.'
+    })
+    const { director, host } = build(steer, { music: false, memoryOps: ops })
+    host.type('forget what I told you about my sister')
+    await director.run(2)
+    expect(ops.steered).toBe(1)
+  })
+
+  it('marks the turn steered only when the reply actually acted on the program', async () => {
+    const acted = fakeMemoryOps()
+    const steerActing = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack('softer')
+      return 'on it.'
+    })
+    const a = build(steerActing, { memoryOps: acted })
+    a.host.type('next song')
+    await a.director.run(2)
+    expect(acted.steered).toBe(1)
+
+    const idle = fakeMemoryOps()
+    const steerTalking = new FakeSteer(() => 'just talking.')
+    const b = build(steerTalking, { memoryOps: idle })
+    b.host.type('the rain has not let up')
+    await b.director.run(2)
+    expect(idle.steered).toBe(0)
   })
 })
 

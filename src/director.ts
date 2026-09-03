@@ -28,6 +28,7 @@ import type {
   MusicHandle,
   MusicState,
   Player,
+  MemoryOps,
   SteerActions,
   SteerSettingsActions,
   SteerBrain,
@@ -92,6 +93,11 @@ const ATTEMPTS = 2
 // dropped for a fresh one (spec 03-02 §3.5: confirm audio BEFORE the announce).
 const STREAM_START_TIMEOUT_S = 8
 const MUSIC_START_ATTEMPTS = 2
+
+// How many recalled lines the reply turn is handed (spec 05-01 §2.5). Five is
+// enough to answer "that project" and few enough to stay a memory rather than
+// a transcript dump.
+const RECALL_LIMIT = 5
 
 // Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
 // (spec 05 §3.5) — cross-session on the persistent store. Deep enough to cover
@@ -220,6 +226,10 @@ export type DirectorDeps = {
   // The agentic reply turn (spec 11): preferred over brain.respond when
   // present; absent on stub runs (the harness behind it is the real SDK).
   steer?: SteerBrain
+  // The persistent memory tier (spec 05-01 §2.2): what recall_memory and
+  // forget_memory act through, and where a steered turn is flagged. Absent =
+  // neither tool is offered — a stub run has nothing on record to search.
+  memoryOps?: MemoryOps
   // Off-the-loop profile compaction (spec 05 §3.6), poked once per segment
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
@@ -307,6 +317,9 @@ export class Director {
   // until the sign-off reply has aired.
   private shutdownArmed = false
   private steerEndCalled = false
+  // How many listener lines the turn being composed merged (spec 05-01 §3.5):
+  // all of them are the asking when the reply forgets something.
+  private pendingUserLines = 1
   private quitAfterReply = false
   // A merged reply discards its in-flight steer task, but the task cannot be
   // cancelled — the epoch makes the orphan's late tool calls dead instead of
@@ -1379,6 +1392,7 @@ export class Director {
   // Total (never rejects): a failed compose degrades to null so the race in
   // compose() and the loop above never unwind the radio on a Brain error.
   private async prepareReply(texts: string[]): Promise<{ reply: string; clip: AudioClip } | null> {
+    this.pendingUserLines = texts.length
     let reply: string
     try {
       reply = await this.composeReply(texts.join('\n'))
@@ -1399,13 +1413,18 @@ export class Director {
     if (steer === undefined) return this.deps.brain.respond(userText, this.context())
     const armedBefore = this.shutdownArmed
     this.steerEndCalled = false
+    // Attempt-local (spec 05-01 §3.2): reply attempts overlap when a line lands
+    // mid-compose, and a shared flag let the newer attempt reset what the older
+    // one had already acted on — the acted-on command then entered the fold.
+    const acted = { value: false }
     let reply: string | null = null
     try {
-      reply = await steer.respond(userText, this.context(), this.steerActions())
+      reply = await steer.respond(userText, this.context(), this.steerActions(acted))
     } catch (err) {
       this.deps.host.debug?.(`steer task failed (${String(err)}); falling back to respond`)
     }
     if (armedBefore && !this.steerEndCalled) this.shutdownArmed = false
+    if (acted.value) this.deps.memoryOps?.markSteered()
     if (reply !== null) return reply
     return this.deps.brain.respond(userText, this.context())
   }
@@ -1414,7 +1433,7 @@ export class Director {
   // callbacks closed over live state; tools never import the Director. `music`
   // rides only when music is wired — that absence gates switch_music out of
   // the tool set.
-  private steerActions(): SteerActions {
+  private steerActions(acted: { value: boolean }): SteerActions {
     // Mutators are live only while this attempt is the latest — a merged reply
     // orphans its predecessor, whose late calls must land on a dead surface.
     const epoch = this.steerEpoch
@@ -1424,7 +1443,9 @@ export class Director {
         music: {
           playing: () => this.liveSong !== null,
           switchTrack: (hint?: string) => {
-            if (live()) this.switchMusic(hint)
+            if (!live()) return
+            acted.value = true
+            this.switchMusic(hint)
           },
         },
       }),
@@ -1435,18 +1456,60 @@ export class Director {
       ...(this.deps.settingsStore !== undefined && {
         settings: {
           current: () => this.deps.settingsStore!.current(),
-          set: (patch) => (live() ? this.deps.settingsStore!.set(patch) : false),
+          set: (patch) => {
+            if (!live()) return false
+            acted.value = true
+            return this.deps.settingsStore!.set(patch)
+          },
+        },
+      }),
+      // What the listener has said before, past the transcript (spec 05-01
+      // §2.2). The limit is the Director's call, not the model's; the epoch
+      // guard rides forget for the same reason it rides every other mutator —
+      // an orphaned attempt must never delete what a newer turn superseded.
+      ...(this.deps.memoryOps !== undefined && {
+        memory: {
+          recall: (query: string) => {
+            const hits = this.deps.memoryOps!.recall(
+              query,
+              RECALL_LIMIT,
+              this.deps.settings().recentWindow,
+            )
+            // The deterministic seam a real run is read from, never the model's
+            // account of what it remembered (spec 05-01 §5.13) — but SHAPE
+            // only. Diagnostics persist under the murmur home and ride along on
+            // a /bug report, so the words themselves must not land here: a
+            // later forget cannot reach into this file.
+            const when = hits.map((h) => `${new Date(h.ts * 1000).toISOString().slice(0, 10)} ${h.role}`)
+            this.deps.host.debug?.(`memory.recall -> ${hits.length} [${when.join(' | ')}]`)
+            return hits
+          },
+          forget: (what: string) => {
+            if (!live()) return { rows: 0, lines: 0 }
+            // Forgetting is an action on the program like any other: the turn
+            // that asked for it is a command, not a preference, and must never
+            // teach the profile the very thing it destroyed.
+            acted.value = true
+            // Every merged line of this turn is the asking (spec 05-01 §3.5):
+            // removed, but never counted as a memory that was there before.
+            const gone = this.deps.memoryOps!.forget(what, this.pendingUserLines)
+            // Counts only — never `what`, for the same reason as above.
+            this.deps.host.debug?.(`memory.forget -> ${gone.rows} rows, ${gone.lines} lines`)
+            return gone
+          },
         },
       }),
       shutdown: {
         armed: () => this.shutdownArmed,
         arm: () => {
           if (!live()) return
+          acted.value = true
           this.shutdownArmed = true
           this.steerEndCalled = true
         },
         confirm: () => {
           if (!live()) return
+          acted.value = true
           this.quitAfterReply = true
           this.steerEndCalled = true
         },

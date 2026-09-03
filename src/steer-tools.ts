@@ -12,6 +12,7 @@ import { z } from 'zod'
 
 import type { SteerActions, TaskTool } from './contracts.ts'
 import { LANGUAGE_MAX, MIX_EVERY_N, MIX_NAMES, type SettingsPatch } from './ipc.ts'
+import { memoryBlock } from './prompts.ts'
 
 function reply(payload: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] }
@@ -145,6 +146,48 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
           // What is true at RETURN time (spec 11 §3.2), so the reply composed
           // afterwards cannot narrate a change that did not land.
           return reply({ ok: true, applied: settings.current() })
+        },
+      ),
+    )
+  }
+
+  // The memory tier (spec 05-01 §2.2). Absent on a stub run, where there is
+  // nothing on record worth searching.
+  const memory = actions.memory
+  if (memory !== undefined) {
+    tools.push(
+      tool(
+        'recall_memory',
+        'Look something up in what the listener has said to you before, beyond ' +
+          'the program above. Use it when they refer to something you cannot ' +
+          'see ("that project", "like last time", "do you remember"). Call it ' +
+          'AT MOST ONCE per reply, with a few words in their own language.',
+        { query: z.string().describe("a few words to search for, in the listener's language") },
+        async (args) => {
+          const hits = memory.recall(args.query)
+          return reply({ ok: true, found: hits.length, memory: memoryBlock(hits) })
+        },
+      ),
+    )
+    tools.push(
+      tool(
+        'forget_memory',
+        'The listener EXPLICITLY asked you to forget or erase something. ' +
+          'Removes it permanently — there is no undo — so never call it for a ' +
+          'mood remark or a passing regret.',
+        { what: z.string().describe("the topic or phrase to erase, in the listener's words") },
+        async (args) => {
+          const { rows, lines } = memory.forget(args.what)
+          const removed = rows + lines
+          return reply({
+            ok: true,
+            removed,
+            status:
+              removed === 0
+                ? 'nothing on record matched — say so plainly rather than ' +
+                  'claiming to have forgotten something'
+                : 'gone for good; tell them it is forgotten',
+          })
         },
       ),
     )

@@ -717,7 +717,8 @@ describe('Director — memory wiring (spec 05)', () => {
     brain.batches = [['a']]
     await director.run(1)
     const ctx = brain.talkContexts.at(-1)!
-    expect(ctx.profile).toBe('knows jazz')
+    // Dated on load by the spec 05-01 §3.3 post-pass.
+    expect(ctx.profile).toContain('knows jazz')
     expect(ctx.coveredTopics).toEqual(['rain', 'coffee'])
     expect(SCENES).toContain(ctx.scene)
   })

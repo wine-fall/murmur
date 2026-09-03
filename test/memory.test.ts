@@ -122,11 +122,11 @@ describe('PersistentMemoryStore', () => {
   it('treats an unreadable meta.json as never compacted', () => {
     const c = clock()
     const path = dir()
-    opened(path, c).record({ role: 'radio', text: 'a' })
+    opened(path, c).record({ role: 'user', text: 'a thing worth folding' })
     writeFileSync(join(path, 'meta.json'), 'not json')
     const warnings: string[] = []
     const b = opened(path, c, { log: (m: string) => warnings.push(m) })
-    expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['a'])
+    expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['a thing worth folding'])
     expect(warnings.length).toBe(1)
   })
 
@@ -136,10 +136,11 @@ describe('PersistentMemoryStore', () => {
     const a = opened(path, c, { compactEvery: 3 })
     expect(a.profile()).toBe('')
     expect(a.compactionDue()).toBe(false)
-    a.record({ role: 'radio', text: '1' })
-    a.record({ role: 'user', text: '2' })
+    a.record({ role: 'radio', text: 'a beat nobody answered' })
+    a.record({ role: 'user', text: 'the first thing I said' })
     expect(a.compactionDue()).toBe(false)
-    a.record({ role: 'radio', text: '3' })
+    a.record({ role: 'user', text: 'the second thing I said' })
+    a.record({ role: 'user', text: 'the third thing I said' })
     expect(a.compactionDue()).toBe(true)
   })
 
@@ -148,21 +149,23 @@ describe('PersistentMemoryStore', () => {
     const path = dir()
     const a = opened(path, c, { compactEvery: 2 })
     a.record({ role: 'radio', text: 'early-1' })
-    a.record({ role: 'user', text: 'early-2' })
+    a.record({ role: 'user', text: 'early-2, said by the listener' })
     const slice = a.compactionSlice()
-    expect(slice.turns.map((t) => t.text)).toEqual(['early-1', 'early-2'])
+    expect(slice.turns.map((t) => t.text)).toEqual(['early-1', 'early-2, said by the listener'])
 
     // The fold races record(): a turn lands while the Brain is folding.
-    a.record({ role: 'radio', text: 'during-fold' })
+    a.record({ role: 'user', text: 'during-fold' })
     a.applyCompaction('the profile', slice.throughTs)
 
-    expect(a.profile()).toBe('the profile')
-    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).toBe('the profile')
+    // The fold's output is dated on the way in (spec 05-01 §3.3), so the text
+    // round-trips with its [seen] tag rather than verbatim.
+    expect(a.profile()).toMatch(/^the profile \[seen \d{4}-\d{2}-\d{2}\]$/)
+    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).toContain('the profile [seen ')
     // The mid-fold turn stays in the next backlog — on this instance and after
     // a reload (the watermark on disk is exactly throughTs).
     expect(a.compactionSlice().turns.map((t) => t.text)).toEqual(['during-fold'])
     const b = opened(path, c)
-    expect(b.profile()).toBe('the profile')
+    expect(b.profile()).toContain('the profile [seen ')
     expect(b.compactionSlice().turns.map((t) => t.text)).toEqual(['during-fold'])
   })
 })
@@ -189,7 +192,7 @@ describe('PersistentMemoryStore.writeProfile (spec 06 §2.4)', () => {
     store.writeProfile('bootstrapped')
     // The turn is still owed to compaction: a bootstrap is not a fold.
     expect(store.compactionSlice().turns.map((t) => t.text)).toEqual(['hello'])
-    expect(store.compactionSlice().profile).toBe('bootstrapped')
+    expect(store.compactionSlice().profile).toContain('bootstrapped [seen ')
   })
 })
 

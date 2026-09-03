@@ -225,7 +225,7 @@ A radio's iron law is **no dead air**. TTS generation takes seconds; "decide the
 | **② History (mid-term)** | conversation log (your input + what it broadcast), recent window | take the last N for continuity |
 | **③ Ledger (anti-repeat)** | topics covered, songs played, broadcast times | checked at segment selection for de-dup and callbacks |
 
-- **Semantic memory (vector recall) is deferred to v1.5**; the MVP gets ~80% of the "it gets me" feel from "profile + recent window + ledger," with structure reserved for it.
+- **Recall and forgetting are v1.5** ([`spec05/05-01-recall-and-forgetting.md`](spec05/05-01-recall-and-forgetting.md)): keyword recall over history (a derived FTS5 index, no embeddings), dated profile facts that fade, a listener-only compaction input, and forget-on-request. The MVP got ~80% of the "it gets me" feel from "profile + recent window + ledger"; v1.5 makes it hold up over weeks.
 - Writes: append history and record the ledger after each segment / each input; the profile is updated via **periodic compaction** so it doesn't grow unbounded.
 - Each Brain call gets a compact **context pack**: `persona + profile + recent window + recently covered topics + current time/activity`. (Anti-repeat spans sessions/days, not just "today" — a midnight reset would re-surface the same openers on a cold boot; see spec 05 §2.2 and issue #44.)
 

@@ -798,6 +798,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // key in /settings are one act (spec 12 §2.6).
     settingsStore: settings,
     ...(pacing !== undefined && { pacing }),
+    // Recall and forgetting ride the persistent store only (spec 05-01 §2.2):
+    // a stub run's canned chatter has nothing worth searching.
+    ...(memory instanceof PersistentMemoryStore && { memoryOps: memory }),
     ...(music !== undefined && { music }),
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),

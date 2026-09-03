@@ -138,3 +138,83 @@ describe('change_settings (spec 12 §2.6)', () => {
     expect(JSON.stringify(out.applied)).toMatch(/French/)
   })
 })
+
+// --- the memory tools (spec 05-01 §2.2) ------------------------------------ //
+
+describe('recall_memory / forget_memory', () => {
+  const hit = (text: string, role: 'user' | 'radio' | 'faded' = 'user') => ({
+    ts: Date.parse('2026-08-15T09:30:00Z') / 1000,
+    role,
+    text,
+    score: 1,
+  })
+
+  function memoryHarness(wired: boolean) {
+    const calls: { recall: string[]; forget: string[] } = { recall: [], forget: [] }
+    const actions: SteerActions = {
+      shutdown: { armed: () => false, arm: () => {}, confirm: () => {} },
+      ...(wired && {
+        memory: {
+          recall: (query: string) => {
+            calls.recall.push(query)
+            return query === 'lantern' ? [hit('the lantern on the balcony')] : []
+          },
+          forget: (what: string) => {
+            calls.forget.push(what)
+            return what === 'lantern' ? { rows: 2, lines: 1 } : { rows: 0, lines: 0 }
+          },
+        },
+      }),
+    }
+    return { calls, tools: steerTools(actions, () => {}) }
+  }
+
+  it('offers neither tool when memory is not wired', () => {
+    const names = memoryHarness(false).tools.map((t) => t.name)
+    expect(names).not.toContain('recall_memory')
+    expect(names).not.toContain('forget_memory')
+    expect(names).toContain('submit_reply')
+  })
+
+  it('offers both tools when memory is wired', () => {
+    const names = memoryHarness(true).tools.map((t) => t.name)
+    expect(names).toContain('recall_memory')
+    expect(names).toContain('forget_memory')
+  })
+
+  it('returns the hits as a dated, attributed block', async () => {
+    const { tools, calls } = memoryHarness(true)
+    const found = (await callTool(tools, 'recall_memory', { query: 'lantern' })) as {
+      found: number
+      memory: string
+    }
+    expect(calls.recall).toEqual(['lantern'])
+    expect(found.found).toBe(1)
+    expect(found.memory).toContain('(From memory)')
+    expect(found.memory).toContain('2026-08-15')
+    expect(found.memory).toContain('the lantern on the balcony')
+  })
+
+  it('says plainly when it recalls nothing, rather than returning an empty block', async () => {
+    const { tools } = memoryHarness(true)
+    const found = (await callTool(tools, 'recall_memory', { query: 'trombone' })) as {
+      found: number
+      memory: string
+    }
+    expect(found.found).toBe(0)
+    expect(found.memory).toBe('')
+  })
+
+  it('reports what forgetting removed, and reports nothing removed as zero', async () => {
+    const { tools, calls } = memoryHarness(true)
+    const gone = (await callTool(tools, 'forget_memory', { what: 'lantern' })) as {
+      removed: number
+    }
+    expect(calls.forget).toEqual(['lantern'])
+    expect(gone.removed).toBe(3)
+    const none = (await callTool(tools, 'forget_memory', { what: 'trombone' })) as {
+      removed: number
+    }
+    expect(none.removed).toBe(0)
+  })
+})

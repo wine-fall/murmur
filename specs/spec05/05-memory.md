@@ -18,6 +18,10 @@
 > The §5.10 two-run smoke ran through the real SDK: run 2 carried run 1's tail
 > and a forced compaction produced a plausible Chinese profile with topic tags
 > arriving on real beats.
+> **v1.5 (built 2026-09-03)**: the deferred items — recall over history, dated
+> facts that fade, forgetting — and a listener-only compaction input are
+> specified and built per [`05-01-recall-and-forgetting.md`](05-01-recall-and-forgetting.md).
+> Where the two differ (the compaction slice and cadence, §3.6), 05-01 wins.
 > **Part**: The persistent Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6):
 > three tiers — ① **Profile** (long-term: who you are, prefs, the persona living
 > asset) · ② **History** (conversation log, recent window) · ③ **Ledger**
