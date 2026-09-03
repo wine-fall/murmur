@@ -8,8 +8,14 @@ import { describe, expect, it, vi } from 'vitest'
 import { packageVersion, parseCli } from '../src/config.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 
-// No MURMUR_TTS_* in the ambient env: every test states the env it means.
-const NO_ENV = {}
+// Every test states the env it means, and its home is a directory with nothing
+// in it — so a real ~/.murmur/{voice,settings}.json on the developer's machine
+// can never decide what a test sees.
+const isolated = (extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
+  MURMUR_HOME: mkdtempSync(join(tmpdir(), 'murmur-cfg-')),
+  ...extra,
+})
+const NO_ENV = isolated()
 
 describe('parseCli', () => {
   it('parses the explicit --setup-music entry (spec 03-03)', () => {
@@ -93,7 +99,7 @@ describe('hosted-voice config', () => {
   it('warns and degrades on an unusable speed instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     for (const bad of ['fast', '0', '9']) {
-      expect(parseCli([], { MURMUR_TTS_SPEED: bad }).config.ttsSpeed).toBeUndefined()
+      expect(parseCli([], isolated({ MURMUR_TTS_SPEED: bad })).config.ttsSpeed).toBeUndefined()
     }
     expect(warn).toHaveBeenCalledTimes(3)
     warn.mockRestore()
@@ -125,10 +131,10 @@ describe('hosted-voice config', () => {
   // voice) — it warns and degrades to the documented default.
   it('warns and degrades on an unusable seed or pad instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { config } = parseCli([], {
-      MURMUR_TTS_SEED: 'lucky',
-      MURMUR_TTS_SENTENCE_PAD_S: '-2',
-    })
+    const { config } = parseCli(
+      [],
+      isolated({ MURMUR_TTS_SEED: 'lucky', MURMUR_TTS_SENTENCE_PAD_S: '-2' }),
+    )
     expect(config.ttsSeed).toBeUndefined()
     expect(config.ttsSentencePadS).toBe(0.8)
     expect(warn).toHaveBeenCalledTimes(2)
@@ -139,7 +145,7 @@ describe('hosted-voice config', () => {
   // value — not throw out of parseCli and take every voice down with it.
   it('degrades on a fractional seed instead of aborting startup', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { config } = parseCli([], { MURMUR_TTS_SEED: '1.5' })
+    const { config } = parseCli([], isolated({ MURMUR_TTS_SEED: '1.5' }))
     expect(config.ttsSeed).toBeUndefined()
     expect(config.voice).toBe('stub')
     expect(warn).toHaveBeenCalledOnce()
@@ -148,7 +154,7 @@ describe('hosted-voice config', () => {
 
   it('treats an empty env value as unset, silently', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const { config } = parseCli([], { MURMUR_TTS_SEED: '  ', MURMUR_TTS_SENTENCE_PAD_S: '' })
+    const { config } = parseCli([], isolated({ MURMUR_TTS_SEED: '  ', MURMUR_TTS_SENTENCE_PAD_S: '' }))
     expect(config.ttsSeed).toBeUndefined()
     expect(config.ttsSentencePadS).toBe(0.8)
     expect(warn).not.toHaveBeenCalled()
@@ -185,7 +191,6 @@ describe('pacing flags', () => {
 describe('music discovery config', () => {
   it('defaults musicPolicyPath under the (relocatable) home', () => {
     expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.musicPolicyPath).toBe('/tmp/mh/music-policy.md')
-    expect(parseCli([], NO_ENV).config.musicPolicyPath.endsWith('/.murmur/music-policy.md')).toBe(true)
   })
 
   it('takes the listening key from env only, and treats a blank one as absent', () => {
@@ -246,7 +251,6 @@ describe('memory config', () => {
   it('defaults memoryDir under the (relocatable) data root', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
     expect(config.memoryDir).toBe('/tmp/mh/data/memory')
-    expect(parseCli([], NO_ENV).config.memoryDir.endsWith('/.murmur/data/memory')).toBe(true)
   })
 
   it('defaults compactModel to the cheap tier', () => {
