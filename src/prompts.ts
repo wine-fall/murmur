@@ -43,8 +43,18 @@ const SCENE_GUIDANCE: Record<string, string> = {
   'late-night': "It's late at night — keep it hushed and intimate, the small-hours mood.",
 }
 
+// The clock is bearings, not a line (spec 04 bugfix): the host knows the hour
+// the way a person in the room does, and a person in the room does not read
+// the date out. Every path that shows the clock says so — with the one
+// exception a reply turn needs, a listener asking outright.
+const CLOCK_USAGE =
+  'That is your bearings, not a line to say: mention the hour or the day only ' +
+  'when it genuinely lands in what you are already talking about, or when the ' +
+  'listener asks you outright — never as an announcement, a time-check, or a ' +
+  'way to open.'
+
 function sceneLine(ctx: ContextPack): string {
-  const time = ctx.time === undefined ? '' : `\nIt's ${ctx.time}.`
+  const time = ctx.time === undefined ? '' : `\nThe clock reads ${ctx.time}. ${CLOCK_USAGE}`
   const cue = SCENE_GUIDANCE[ctx.scene ?? '']
   return `${time}${cue === undefined ? '' : `\n${cue}`}`
 }
@@ -146,8 +156,15 @@ function pacingLines(ctx: ContextPack): string {
 // The tier-① listener profile as a leading stable block (spec 05 §3.5): it
 // precedes the volatile transcript so persona + profile form the cache-friendly
 // stable prefix (master §7 pillar 4). Empty -> nothing (degrade silently).
+//
+// A fact line ends in the fading ledger's bookkeeping — `[seen YYYY-MM-DD]`,
+// `[stable]` (spec 05-01 §3.3, src/memory.ts). It is the file's business, not
+// the host's: the prompt carries the fact without its tags. Anchored to the
+// line end, so the same words inside a fact stay what the listener said.
+const PROFILE_TAGS = /(?:[ \t]*\[(?:seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
+
 function profileBlock(ctx: ContextPack): string {
-  const profile = ctx.profile?.trim()
+  const profile = ctx.profile?.replaceAll(PROFILE_TAGS, '').trim()
   return profile ? `(What you know about the listener)\n${profile}\n\n` : ''
 }
 
