@@ -137,11 +137,15 @@ export class FakeBrain implements Brain {
 export class FakeVoice {
   synthesized: string[] = []
   failTimes = 0
+  // Synthesis of this exact text always throws — the "one clip dies, the rest
+  // of the program is fine" case, which failTimes (positional) cannot express.
+  failFor: string | null = null
   failWith = 'synth down'
 
   async start(): Promise<void> {}
 
   async synthesize(text: string): Promise<AudioClip> {
+    if (this.failFor !== null && text === this.failFor) throw new Error(this.failWith)
     if (this.failTimes > 0) {
       this.failTimes--
       throw new Error(this.failWith)

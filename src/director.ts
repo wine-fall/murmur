@@ -115,6 +115,17 @@ const TALK_LOOKAHEAD = 2
 // place. How much longer the gap runs in an empty room.
 const AWAY_GAP_FACTOR = 3
 
+// The beat airing while the next pick is chosen, labeled for the pick task: the
+// announce is asked to pick up whatever thread this line leaves, so it has to
+// arrive as that line and not as one more transcript row (spec 03-02 §1 #6).
+// "as this song was chosen", not "just before it": a prefetched pick is fired
+// one talk beat (or more) ahead of the boundary that airs it (spec 04 §3.1),
+// and a label that overclaimed would have the announce hand over from a line
+// the listener heard two beats ago.
+function priorLine(text: string): string {
+  return `The line on air as this song was chosen: "${text}"`
+}
+
 export type Steer =
   | { intent: 'quit' }
   | { intent: 'settings' }
@@ -551,7 +562,7 @@ export class Director {
     // Same two primings the ordinary talk path does, so an anchor does not leave
     // the next boundary cold: the music pick resolves around this beat's mood,
     // and the look-ahead (untouched by the anchor) is topped back up.
-    this.prefetchMusic(`- radio: ${beat.text}`)
+    this.prefetchMusic(priorLine(beat.text))
     this.prefetchTalk()
     await this.runVoice(onAir(this.deps.player.play(clip)))
   }
@@ -671,7 +682,7 @@ export class Director {
       this.deps.host.debug?.(`talk.buffer warm depth=${this.talkAhead.length + 1}`)
       // Prime the next music pick around the airing text (mood) — it needs no
       // audio, so the find-and-pull overlaps this beat's airtime.
-      this.prefetchMusic(`- radio: ${primed.beat.text}`)
+      this.prefetchMusic(priorLine(primed.beat.text))
       const clip = await primed.clip
       return clip === null ? null : { beat: primed.beat, clip }
     }
@@ -679,7 +690,7 @@ export class Director {
     const beats = await this.generateTalks(TALK_LOOKAHEAD)
     const first = beats.shift()
     if (first === undefined) return null
-    this.prefetchMusic(`- radio: ${first.text}`)
+    this.prefetchMusic(priorLine(first.text))
     // Beat 1's synth first (it airs next), the look-ahead synths right behind
     // it — all in flight together on a concurrent backend.
     const firstClip = this.synthesizeOrSkip(first.text)
@@ -910,6 +921,11 @@ export class Director {
     const music = this.deps.music!
     const handle = await music.engine.playMusic(pick.clip)
     const announced = pick.announce === undefined ? null : this.synthesizeOrSkip(pick.announce)
+    // The head of the track is born ducked when something is about to be said
+    // over it (spec 03-02 §1 #6): a song that comes up at full volume and is
+    // shoved down 0.3s later is the edge the ear hears. play()'s own scheduled
+    // unduck lifts it slowly when the announce ends.
+    if (announced !== null) handle.duck()
     // A quit typed while the stream spun up: the start is void — no announce,
     // no "now playing", no ledger entry for a song nobody heard (codex review).
     if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S)) || this.quit) {
@@ -936,6 +952,11 @@ export class Director {
       this.deps.host.onRadioSegment(pick.announce)
       this.deps.memory.record({ role: 'radio', text: pick.announce })
       voice = onAir(this.deps.player.play(announceClip))
+    } else {
+      // Nothing will speak over this head, so nothing will schedule its lift:
+      // an unsynthesized announce (or a handle born ducked under a still-airing
+      // clip) would otherwise leave the whole song at the duck target.
+      handle.unduck()
     }
     return { handle, voice }
   }

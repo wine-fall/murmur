@@ -43,6 +43,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 - **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
+- **#198** (by-ear) The talk<->music transitions: announce hand-over and the slow lift — spec 03-02 §6.1.
 
 ## Pinned — do not relitigate
 
