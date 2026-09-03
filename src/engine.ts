@@ -24,6 +24,10 @@ import type { AudioClip, BedPosition, BedSource, MixingPlayer, MusicHandle } fro
 export const FULL_GAIN = 1.0
 export const DUCK_TARGET = 0.3
 export const RAMP_S = 0.3
+// The music comes back UP far more slowly than it went down (spec 03-02 §6.1).
+// A duck has to get out of the voice's way at once; the return is the shape the
+// ear reads as a radio settling back into the song rather than a switch flipping.
+export const UNDUCK_RAMP_S = 2.5
 export const BED_GAIN = 0.5
 export const BED_XFADE_S = 1.5
 
@@ -170,6 +174,10 @@ class MixedHandle implements MusicHandle {
   // False while born silent under a live bed — gain moves are recorded in
   // `ducked` and applied by the first-frame crossfade (spec 03-04 §3.1).
   audible = false
+  // False until the stream's first frame is scheduled. Nothing has been heard
+  // yet, so a gain move is a STEP rather than a ramp — which is what makes a
+  // track's head born ducked instead of ducked 0.3s in (spec 03-02 §1 #6).
+  started = false
 
   private ctx: BaseAudioContext
   readonly gain: GainNode
@@ -177,6 +185,7 @@ class MixedHandle implements MusicHandle {
   private abort: AbortController
   private duckTarget: number
   private rampS: number
+  private unduckRampS: number
 
   constructor(deps: {
     ctx: BaseAudioContext
@@ -185,6 +194,7 @@ class MixedHandle implements MusicHandle {
     abort: AbortController
     duckTarget: number
     rampS: number
+    unduckRampS: number
   }) {
     this.ctx = deps.ctx
     this.gain = deps.gain
@@ -192,6 +202,7 @@ class MixedHandle implements MusicHandle {
     this.abort = deps.abort
     this.duckTarget = deps.duckTarget
     this.rampS = deps.rampS
+    this.unduckRampS = deps.unduckRampS
   }
 
   target(): number {
@@ -200,15 +211,17 @@ class MixedHandle implements MusicHandle {
 
   duck(): void {
     this.ducked = true
-    if (this.audible) ramp(this.gain.gain, this.duckTarget, this.ctx.currentTime, this.rampS)
+    if (!this.audible) return
+    if (!this.started) this.gain.gain.value = this.duckTarget
+    else ramp(this.gain.gain, this.duckTarget, this.ctx.currentTime, this.rampS)
   }
 
   unduck(at?: number): void {
     this.ducked = false
-    if (this.audible) {
-      // A future unduck starts from the duck plateau it is returning from.
-      ramp(this.gain.gain, FULL_GAIN, this.ctx.currentTime, this.rampS, at, this.duckTarget)
-    }
+    if (!this.audible) return
+    if (!this.started && at === undefined) this.gain.gain.value = FULL_GAIN
+    // A future unduck starts from the duck plateau it is returning from.
+    else ramp(this.gain.gain, FULL_GAIN, this.ctx.currentTime, this.unduckRampS, at, this.duckTarget)
   }
 
   async stop(): Promise<void> {
@@ -232,6 +245,7 @@ export type AudioEngineDeps = {
   decode: Decode
   duckTarget?: number
   rampS?: number
+  unduckRampS?: number
   bedGain?: number
   bedXfadeS?: number
   leadS?: number
@@ -245,6 +259,7 @@ export class AudioEngine implements MixingPlayer {
   private decode: Decode
   private duckTarget: number
   private rampS: number
+  private unduckRampS: number
   private bedGain: number
   private bedXfadeS: number
   private leadS: number
@@ -276,6 +291,7 @@ export class AudioEngine implements MixingPlayer {
     this.decode = deps.decode
     this.duckTarget = deps.duckTarget ?? DUCK_TARGET
     this.rampS = deps.rampS ?? RAMP_S
+    this.unduckRampS = deps.unduckRampS ?? UNDUCK_RAMP_S
     this.bedGain = deps.bedGain ?? BED_GAIN
     this.bedXfadeS = deps.bedXfadeS ?? BED_XFADE_S
     this.leadS = deps.leadS ?? LEAD_S
@@ -332,8 +348,12 @@ export class AudioEngine implements MixingPlayer {
       )
     } catch (err) {
       // An unreadable clip degrades to a silent segment — a voice fault must
-      // never unwind the radio loop (spec-01 Player posture).
+      // never unwind the radio loop (spec-01 Player posture). The clip occupies
+      // no time, so any duck it was meant to ride is lifted now: a caller that
+      // ducked a track's head ahead of this call (spec 03-02 §1 #6) would
+      // otherwise leave the whole song at the duck target.
       this.log(`voice clip failed to load (${clip.source}): ${String(err)}`)
+      this.music?.unduck()
       return
     }
     // aclose() may have landed while the clip was loading: a closing engine
@@ -392,6 +412,7 @@ export class AudioEngine implements MixingPlayer {
       abort,
       duckTarget: this.duckTarget,
       rampS: this.rampS,
+      unduckRampS: this.unduckRampS,
     })
     handle.ducked = this.voice !== null // born ducked under a live voice
     const bedLive = this.bedMaster !== null
@@ -403,6 +424,7 @@ export class AudioEngine implements MixingPlayer {
 
     void stream.started.then((ok) => {
       if (!ok) return // failure is logged once, from the done path below
+      handle.started = true
       if (this.mixed !== handle) return
       if (this.bedMaster !== null) {
         const now = this.ctx.currentTime

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { decodeArgs, framedChunks, ffmpegDecode, probeDurationS, probeStream } from '../src/ffmpeg.ts'
+import { decodeArgs, framedChunks, ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from '../src/ffmpeg.ts'
 
 async function* bytes(...chunks: Buffer[]): AsyncGenerator<Buffer> {
   for (const c of chunks) yield c
@@ -52,6 +52,16 @@ describe('decodeArgs', () => {
   it('omits the seek when unset or zero', () => {
     expect(decodeArgs('song.m4a')).not.toContain('-ss')
     expect(decodeArgs('song.m4a', 0)).not.toContain('-ss')
+  })
+
+  // The output device sets the context's real rate (a 44.1 kHz Bluetooth
+  // headset ignores the 48 kHz request): PCM decoded at any other rate plays
+  // stretched — 48k frames on a 44.1k clock ran 8.8% slow and a semitone flat.
+  it('decodes at the rate the caller names, defaulting to the mix rate', () => {
+    const args = decodeArgs('song.m4a', undefined, 44_100)
+    expect(args[args.indexOf('-ar') + 1]).toBe('44100')
+    const dflt = decodeArgs('song.m4a')
+    expect(dflt[dflt.indexOf('-ar') + 1]).toBe(String(MIX_RATE))
   })
 })
 

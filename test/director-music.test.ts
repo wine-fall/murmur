@@ -1,10 +1,12 @@
 // The Director's music branch (spec 03-02 §3.5 + §1 #5/#6/#9) on fakes: cadence
 // consulted at boundaries, prefetch never blocks the air, real audio confirmed
 // before the announce commits, interjections duck (never stop) the song.
+import { setTimeout as sleep } from 'node:timers/promises'
+
 import { describe, expect, it } from 'vitest'
 
 import { EveryNCadence } from '../src/cadence.ts'
-import { Director, type DirectorDeps } from '../src/director.ts'
+import { CODA_LEAD_MIN_S, Director, type DirectorDeps } from '../src/director.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import { sceneFor } from '../src/scene.ts'
 import {
@@ -81,6 +83,48 @@ describe('music scheduling (cadence at the boundary)', () => {
     await run
   })
 
+  // spec 03-02 §1 #6: the head of the track is born ducked, so the announce
+  // never has to shove a song that already came up at full volume; play()'s
+  // scheduled unduck lifts it slowly once the intro is done.
+  it('ducks the head before the announce, and lets play() lift it', async () => {
+    const { director, player, source } = build()
+    source.picks = [pickOf('https://stream/song1', { announce: 'up next' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => player.played.length >= 2, 'announce aired')
+    const handle = player.handles[0]!
+    expect(handle.ducks).toBe(1) // the fake player never ducks; this is the Director's
+    expect(handle.unducks).toBe(0) // the engine's scheduled unduck does the lifting
+    handle.end()
+    await run
+  })
+
+  it('lifts the head itself when there is no announce to ride it', async () => {
+    const { director, player, source } = build()
+    source.picks = [pickOf('https://stream/plain')]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    const handle = player.handles[0]!
+    await until(() => handle.unducks === 1, 'head lifted')
+    handle.end()
+    await run
+  })
+
+  // Otherwise a dead announce synth leaves the song ducked for its whole length.
+  it('lifts the head when the announce fails to synthesize', async () => {
+    const { director, player, source, voice } = build()
+    voice.failFor = 'up next'
+    source.picks = [pickOf('https://stream/song1', { announce: 'up next' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    const handle = player.handles[0]!
+    await until(() => handle.unducks === 1, 'head lifted')
+    expect(handle.ducks).toBe(1)
+    expect(player.played.length).toBe(1) // the talk beat only; no announce aired
+    handle.end()
+    await run
+  })
+
   it('nothing suitable found degrades to talk', async () => {
     const { director, host, player } = build()
     // source.picks empty -> nextTrack returns null
@@ -146,6 +190,26 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     expect(source.calls).toBe(1) // single-slot: one prefetch, consumed at the boundary
   })
 
+  // spec 03-02 §1 #6: the announce is asked to pick up whatever thread the
+  // line before the song left, so that line has to arrive labeled as such.
+  it('labels the airing line in the situation of the pick that actually airs', async () => {
+    const { director, player, source } = build()
+    source.picks = [
+      pickOf('https://stream/song1', { announce: 'first' }),
+      pickOf('https://stream/song2', { announce: 'second' }),
+    ]
+    const run = director.run(4) // talk, music, talk, music
+    await until(() => player.handles.length === 1, 'first song on air')
+    player.handles[0]!.end()
+    await until(() => player.handles.length === 2, 'second song on air')
+    player.handles[1]!.end()
+    await run
+    // The startup-primed pick airs first and predates every beat, so it has no
+    // line to name; the pick the SECOND song airs on was primed by one.
+    expect(source.contexts[1]!.situation).toMatch(/The line on air as this song was chosen: "talk /)
+    expect(source.contexts.every((c) => !c.situation.includes('- radio: '))).toBe(true)
+  })
+
   it('a song ledgered in an earlier session reaches the first pick context', async () => {
     const memory = new InProcessMemoryStore()
     memory.recordEvent('song', 'Old Favorite — X')
@@ -192,24 +256,27 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
 
 describe('talk look-ahead survives music (spec 04 §3.3)', () => {
   it('a beat buffered before a song airs after it — no cold regen at the boundary', async () => {
-    const { director, voice, player, host, source } = build()
+    const { director, brain, voice, player, host, source } = build()
+    brain.cueBeats = { coda: ['the coda'] }
     source.picks = [pickOf('https://stream/r1')]
-    const run = director.run(3) // talk, music, talk
+    const run = director.run(4) // talk, music, talk, talk (no pick left for #4)
     await until(() => player.handles.length === 1, 'song on air')
     // The buffered beat's clip is ALREADY synthesized while the song plays —
     // the music->talk boundary has no synth wait, not just no Brain wait.
     expect(voice.synthesized).toContain('talk two')
     player.handles[0]!.end()
     await run
-    // talk two was buffered before the song and airs warm after it; a cold
-    // regeneration at the music->talk boundary would air a later-batch beat.
-    expect(host.radio).toEqual(['talk one', 'talk two'])
+    // The coda leads out of the song (spec 04 §3.3) and talk two, buffered
+    // before it, airs right behind — warm. A cold regeneration at the
+    // music->talk boundary would air a later-batch beat instead.
+    expect(host.radio).toEqual(['talk one', 'the coda', 'talk two'])
   })
 
-  it('depth 2: each post-song talk airs a warm buffered beat across two songs', async () => {
-    const { director, voice, player, host, source } = build()
+  it('depth 2: a beat buffered before TWO songs still airs warm behind their codas', async () => {
+    const { director, brain, voice, player, host, source } = build()
+    brain.cueBeats = { coda: ['coda one', 'coda two'] }
     source.picks = [pickOf('https://stream/r1'), pickOf('https://stream/r2')]
-    const run = director.run(5) // talk, music, talk, music, talk
+    const run = director.run(6) // talk, music, talk, music, talk, talk
     await until(() => player.handles.length === 1, 'first song')
     expect(voice.synthesized).toContain('talk two') // prebuilt before song 1
     player.handles[0]!.end()
@@ -217,12 +284,14 @@ describe('talk look-ahead survives music (spec 04 §3.3)', () => {
     expect(voice.synthesized).toContain('talk three') // topped up between songs
     player.handles[1]!.end()
     await run
-    // The gap-free numbering proves both post-song talks came from the buffer.
-    expect(host.radio).toEqual(['talk one', 'talk two', 'talk three'])
+    // Each song is followed by its OWN coda, and talk two — buffered before the
+    // first song — is still there behind both of them, never regenerated.
+    expect(host.radio).toEqual(['talk one', 'coda one', 'coda two', 'talk two'])
   })
 
   it('a talkback during a song refills the discarded buffer while the song plays', async () => {
-    const { director, voice, player, host, source } = build()
+    const { director, brain, voice, player, host, source } = build()
+    brain.cueBeats = { coda: ['the coda'] }
     source.picks = [pickOf('https://stream/r1')]
     const run = director.run(3) // talk, music (interjected), talk
     await until(() => player.handles.length === 1, 'song on air')
@@ -237,6 +306,7 @@ describe('talk look-ahead survives music (spec 04 §3.3)', () => {
     // pre-steer buffer, and not a cold boundary regeneration.
     expect(host.radio.at(-1)).toBe('talk five')
     expect(host.radio).not.toContain('talk two')
+    expect(host.radio).not.toContain('the coda') // discarded with the buffer
   })
 
   it('an empty buffer refills DURING the song and the boundary airs the prebuilt clip', async () => {
@@ -250,17 +320,142 @@ describe('talk look-ahead survives music (spec 04 §3.3)', () => {
       music: { ...deps.music!, cadence: { nextKind: async () => script.shift() ?? 'talk' } },
     })
     brain.batches = [['talk one', 'talk two']]
+    brain.cueBeats = { coda: ['the coda'] }
     source.picks = [pickOf('https://stream/r1')]
-    const run = director.run(2) // music, talk
+    const run = director.run(3) // music, talk, talk (no pick left for #3)
     await until(() => player.handles.length === 1, 'song on air (no talk aired yet)')
     // The refill completes while the song plays: both beats are synthesized
     // behind it, and no talk has aired.
     await until(() => voice.synthesized.includes('talk one'), 'beat prebuilt during the song')
     expect(host.radio).toEqual([])
-    expect(brain.nextTalksCalls).toBe(1) // the music-start refill only
+    // the music-start refill only — the coda is its own, spec'd extra call
+    expect(brain.talkContexts.filter((c) => c.cue === undefined).length).toBe(1)
     player.handles[0]!.end()
     await run
-    expect(host.radio).toEqual(['talk one']) // aired warm, no boundary Brain call
+    // both aired warm, no boundary Brain call: the coda first, then the refill
+    expect(host.radio).toEqual(['the coda', 'talk one'])
+  })
+})
+
+// spec 04 §3.3: one beat per song, generated at its start and cued 'coda', so
+// the way OUT of a song is written by something that knows the song happened.
+describe('the coda beat (spec 04 §3.3)', () => {
+  const codaBuild = (over: Partial<DirectorDeps> = {}) => {
+    const built = build(over)
+    built.brain.cueBeats = { coda: ['the coda'] }
+    return built
+  }
+
+  it('is generated when the song goes on air, cued as a coda', async () => {
+    const { director, player, brain, source } = codaBuild()
+    source.picks = [pickOf('https://stream/s1', { announce: 'here it is' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => brain.talkContexts.some((c) => c.cue === 'coda'), 'coda requested')
+    // written with the song and its intro already in context
+    const ctx = brain.talkContexts.find((c) => c.cue === 'coda')!
+    expect(ctx.recent.some((t) => t.text === 'here it is')).toBe(true)
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('airs at the head of the queue when the song ends', async () => {
+    const { director, player, host, source } = codaBuild()
+    source.picks = [pickOf('https://stream/s1')]
+    const run = director.run(3) // talk, music, talk
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'coda ready')
+    player.handles[0]!.end()
+    await run
+    // the beat after the song is the coda, not the beat buffered before it
+    expect(host.radio.at(-1)).toBe('the coda')
+  })
+
+  it('rides the outro when the length is known and the coin says so', async () => {
+    // random() = 0: the coin hits and the lead is its minimum, so a track just
+    // over CODA_LEAD_MIN_S long reaches the ride moment almost at once.
+    const { director, player, host, source } = codaBuild({ random: () => 0 })
+    source.picks = [pickOf('https://stream/s1', { durationS: CODA_LEAD_MIN_S + 0.1 })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => host.radio.includes('the coda'), 'coda rode the outro')
+    expect(player.handles[0]!.endedNaturally).toBe(false) // still playing under it
+    // a coda over the outro is not a talk segment: the front-end keeps the track
+    expect(host.states.at(-1)!.kind).toBe('music')
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('falls back to the post-song head when the track length is unknown', async () => {
+    const { director, player, host, source } = codaBuild({ random: () => 0 })
+    source.picks = [pickOf('https://stream/s1')] // a live stream: no durationS
+    const run = director.run(3)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'coda ready')
+    expect(host.radio).not.toContain('the coda') // nothing rode the outro
+    player.handles[0]!.end()
+    await run
+    expect(host.radio.at(-1)).toBe('the coda')
+  })
+
+  it('falls back to the post-song head when the coin misses', async () => {
+    const { director, player, host, source } = codaBuild({ random: () => 0.99 })
+    source.picks = [pickOf('https://stream/s1', { durationS: CODA_LEAD_MIN_S + 0.1 })]
+    const run = director.run(3)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'coda ready')
+    await sleep(60) // well past the ride moment the winning coin would have set
+    expect(host.radio).not.toContain('the coda')
+    player.handles[0]!.end()
+    await run
+    expect(host.radio.at(-1)).toBe('the coda')
+  })
+
+  it('a typed line discards the coda with the rest of the look-ahead', async () => {
+    const { director, player, host, source } = codaBuild()
+    source.picks = [pickOf('https://stream/s1')]
+    const run = director.run(3)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'coda ready')
+    host.type('are you there')
+    await until(() => host.radio.includes('re:are you there'), 'reply aired')
+    player.handles[0]!.end()
+    await run
+    // the coda predates the listener's turn: dropped, never aired
+    expect(host.radio).not.toContain('the coda')
+  })
+
+  // The look-ahead's whole promise is that a boundary never waits on synthesis.
+  // A coda handed to the queue as an in-flight (or failed) clip would have the
+  // post-song boundary await it, and air nothing if it came back empty.
+  it('never reaches the boundary unless it is ready to play', async () => {
+    const { director, player, host, voice, source } = codaBuild()
+    voice.failFor = 'the coda'
+    source.picks = [pickOf('https://stream/s1')]
+    const run = director.run(3) // talk, music, talk
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => voice.synthesized.includes('talk two'), 'the buffered beat is ready')
+    player.handles[0]!.end()
+    await run
+    // the ready buffered beat airs; the unusable coda is simply gone
+    expect(host.radio).toEqual(['talk one', 'talk two'])
+    expect(host.debugs).not.toContain('coda ready')
+  })
+
+  it('belongs to the song on air: a second track replaces the first coda', async () => {
+    const { director, player, host, brain, source } = codaBuild()
+    brain.cueBeats = { coda: ['first coda', 'second coda'] }
+    source.picks = [pickOf('https://stream/s1'), pickOf('https://stream/s2')]
+    const run = director.run(4) // talk, music, talk, music
+    await until(() => player.handles.length === 1, 'first song on air')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'first coda ready')
+    player.handles[0]!.end()
+    await until(() => player.handles.length === 2, 'second song on air')
+    await until(() => brain.talkContexts.filter((c) => c.cue === 'coda').length === 2, 'second coda')
+    player.handles[1]!.end()
+    await run
+    expect(host.radio).toContain('first coda')
+    expect(host.radio).not.toContain('second coda') // the run ends on the song
   })
 })
 
@@ -498,12 +693,17 @@ describe('the talk context carries the real music state (spec 04 bugfix)', () =>
   it('after the song ends the context names the last track, nothing playing', async () => {
     const { director, knobs, player, brain, source } = build()
     source.picks = [pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' })]
-    const run = director.run(3) // talk, music, talk
+    // Four segments, not three: the coda occupies the first post-song boundary
+    // and leaves the look-ahead full, so the refill that reads the post-song
+    // music state fires at the boundary after it.
+    const run = director.run(4) // talk, music, talk (coda), talk
     await until(() => player.handles.length === 1, 'song on air')
     knobs.musicEnabled = false // no fresh prefetch after the song ends
     player.handles[0]!.end()
     await run
-    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'quiet', lastTrack: 'Song — Artist' })
+    // the coda's own context is written mid-song; the post-song beat's is last
+    const beats = brain.talkContexts.filter((c) => c.cue === undefined)
+    expect(beats.at(-1)!.music).toEqual({ kind: 'quiet', lastTrack: 'Song — Artist' })
   })
 
   it('a pick ready but not yet aired still grounds the beat: quiet, nothing playing (codex review)', async () => {

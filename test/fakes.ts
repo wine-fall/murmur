@@ -91,6 +91,10 @@ export class FakeBrain implements Brain {
   // Each nextTalks call shifts one batch; empty list -> throws (failure mode).
   // A string entry is a bare beat; a TalkBeat entry can carry a topic tag.
   batches: (string | TalkBeat)[][] = []
+  // Beats keyed by ContextPack.cue, answered instead of a batch. A one-entry
+  // list sticks for every call with that cue; a longer one advances, so
+  // consecutive cued calls are distinguishable.
+  cueBeats: Record<string, string[]> = {}
   nextTalksCalls = 0
   talkContexts: ContextPack[] = []
   // Scripted transient failures / latency for the look-ahead retry + refill-
@@ -111,6 +115,10 @@ export class FakeBrain implements Brain {
       throw new Error('brain down')
     }
     if (this.nextTalksDelayMs > 0) await sleep(this.nextTalksDelayMs)
+    const cued = ctx.cue === undefined ? undefined : this.cueBeats[ctx.cue]
+    if (cued !== undefined && cued.length > 0) {
+      return [{ text: cued.length > 1 ? cued.shift()! : cued[0]! }]
+    }
     const batch = this.batches.shift()
     if (batch === undefined) throw new Error('no more batches')
     return batch.map((beat) => (typeof beat === 'string' ? { text: beat } : beat))
@@ -137,11 +145,15 @@ export class FakeBrain implements Brain {
 export class FakeVoice {
   synthesized: string[] = []
   failTimes = 0
+  // Synthesis of this exact text always throws — the "one clip dies, the rest
+  // of the program is fine" case, which failTimes (positional) cannot express.
+  failFor: string | null = null
   failWith = 'synth down'
 
   async start(): Promise<void> {}
 
   async synthesize(text: string): Promise<AudioClip> {
+    if (this.failFor !== null && text === this.failFor) throw new Error(this.failWith)
     if (this.failTimes > 0) {
       this.failTimes--
       throw new Error(this.failWith)

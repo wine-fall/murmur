@@ -12,6 +12,7 @@ import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
 import type { ListeningData, MusicProvider, TaskTool, TrackPick } from './contracts.ts'
+import { ANNOUNCE_FIELD_DESCRIPTION } from './prompts.ts'
 
 // Pull-time playability check: given a resolved stream source, does it actually
 // decode? Injected — the real one belongs to the audio engine (Phase 3), so this
@@ -57,13 +58,7 @@ export function musicTools(
       why: z.string().describe('one line: why this track'),
       title: z.string().optional().describe("the track's title"),
       artist: z.string().optional().describe("the track's artist/uploader"),
-      announce: z
-        .string()
-        .optional()
-        .describe(
-          'one short in-persona spoken line introducing the track (the DJ ' +
-            "'up next'), in the persona's language",
-        ),
+      announce: z.string().optional().describe(ANNOUNCE_FIELD_DESCRIPTION),
     },
     async (args) => {
       const ref = args.ref.trim()

@@ -518,13 +518,17 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       ? new Compactor(memory, new ClaudeBrain(config.compactModel), (m) => host.info(m))
       : undefined
 
+  // The device decides the real rate (a 44.1 kHz headset ignores the request);
+  // the decoder follows it, and the log names the clock the air runs on.
   const context = new AudioContext({ sampleRate: MIX_RATE, latencyHint: 'playback' })
+  if (context.sampleRate !== MIX_RATE) host.info(`audio: output runs at ${context.sampleRate} Hz`)
   const engine = new AudioEngine({
     context,
     decode: (source, signal, startS) =>
       ffmpegDecode(source, {
         ffmpegCmd: config.ffmpegCmd,
         signal,
+        rate: context.sampleRate,
         ...(startS !== undefined && { startS }),
       }),
     log: (m) => host.info(m),

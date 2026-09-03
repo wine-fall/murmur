@@ -9,7 +9,7 @@ import { OfflineAudioContext } from 'node-web-audio-api'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { AudioClip, MusicHandle } from '../src/contracts.ts'
-import { AudioEngine, type Decode } from '../src/engine.ts'
+import { AudioEngine, RAMP_S, UNDUCK_RAMP_S, type Decode } from '../src/engine.ts'
 import { logBins, VIZ_BINS } from '../src/viz.ts'
 import { encodeWav } from '../src/wav.ts'
 
@@ -77,8 +77,15 @@ function build(seconds: number, decode: Decode, overrides: EngineOverrides = {})
   return { context, engine }
 }
 
-// Let the eager scheduling of a synchronous fake stream settle before render.
-const settle = () => new Promise((r) => setTimeout(r, 25))
+// Let the graph finish building before startRendering. It is built by async
+// work a render cannot wait on from the inside — a voice clip's read + decode,
+// the fake stream's chunk scheduling — so ONE fixed sleep is a race the moment
+// the runner is loaded (a full-suite run starves the timer and the render then
+// sees an unducked graph). Yield many short turns instead of guessing one long
+// one: a starved loop gets that many chances to run the pending continuations.
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5))
+}
 
 const MUSIC = { source: 'fake://music', kind: 'music' } as const
 
@@ -111,7 +118,7 @@ describe('voice channel', () => {
 
 describe('ducking (acceptance #2/#3)', () => {
   it('play(voice) ducks live music and the unduck lands at the clip end', async () => {
-    const { context, engine } = build(3, dcChunks(0.5, 3))
+    const { context, engine } = build(3, dcChunks(0.5, 3), { unduckRampS: 0.2 })
     const handle = await engine.playMusic(MUSIC)
     expect(await handle.waitStarted(1)).toBe(true)
     const played = engine.play(silentClip) // voice occupies [0, 1]
@@ -124,8 +131,58 @@ describe('ducking (acceptance #2/#3)', () => {
     expect(level(rendered, 1.4, 2.9)).toBeCloseTo(0.5, 1)
   })
 
+  // spec 03-02 §1 #6: the song dips fast under a voice and comes back SLOWLY —
+  // a 0.3s snap back to full is the "hard" edge the by-ear pass flagged.
+  it('ducks fast and unducks on the slow ramp (the default UNDUCK_RAMP_S)', async () => {
+    const { context, engine } = build(5, dcChunks(0.5, 5)) // engine default unduck ramp
+    const handle = await engine.playMusic(MUSIC)
+    expect(await handle.waitStarted(1)).toBe(true)
+    const played = engine.play(silentClip) // voice occupies [0, 1]; unduck at 1.0
+    await settle()
+    const rendered = await context.startRendering()
+    await played
+    expect(UNDUCK_RAMP_S).toBeGreaterThan(RAMP_S)
+    // the duck itself is still the fast ramp: plateau well before the clip ends
+    expect(level(rendered, 0.4, 0.95)).toBeCloseTo(0.15, 1)
+    // 1.2s into a 2.5s climb: risen off the duck plateau, nowhere near full
+    const climbing = level(rendered, 2.1, 2.3)
+    expect(climbing).toBeGreaterThan(0.16)
+    expect(climbing).toBeLessThan(0.45)
+    // full only after the ramp completes at 1.0 + UNDUCK_RAMP_S
+    expect(level(rendered, 3.6, 4.9)).toBeCloseTo(0.5, 1)
+  })
+
+  // spec 03-02 §1 #6: ducked before the first frame is scheduled, the head is
+  // born at the duck target — a ramp here would let a fast source (a local file,
+  // a warm cache) come up at full volume and be shoved down 0.3s later.
+  it('a duck before the first frame steps, so the head is born ducked', async () => {
+    const { context, engine } = build(1, dcChunks(0.5, 1))
+    const handle = await engine.playMusic(MUSIC)
+    handle.duck() // the Director's head-duck, before any audio exists
+    expect(await handle.waitStarted(1)).toBe(true)
+    await settle()
+    const rendered = await context.startRendering()
+    expect(level(rendered, 0, 0.05)).toBeCloseTo(0.15, 2) // 0.5 * DUCK_TARGET
+    expect(level(rendered, 0.5, 0.95)).toBeCloseTo(0.15, 2)
+  })
+
+  // The Director ducks a track's head and relies on play() to lift it; a clip
+  // that never loads returns early, so the lift has to happen there too or the
+  // whole song stays at the duck target.
+  it('an unreadable clip lifts a ducked song instead of stranding it', async () => {
+    const { context, engine } = build(3, dcChunks(0.5, 3))
+    const handle = await engine.playMusic(MUSIC)
+    handle.duck()
+    expect(await handle.waitStarted(1)).toBe(true)
+    await engine.play({ source: '/nonexistent/announce.wav', kind: 'talk' })
+    await settle()
+    const rendered = await context.startRendering()
+    // lifted on the ordinary slow ramp, full once it completes
+    expect(level(rendered, 2.7, 2.95)).toBeCloseTo(0.5, 1)
+  })
+
   it('interjection semantics: stop() cuts voice, never the song', async () => {
-    const { context, engine } = build(2, dcChunks(0.5, 2))
+    const { context, engine } = build(2, dcChunks(0.5, 2), { unduckRampS: 0.2 })
     const handle = await engine.playMusic(MUSIC)
     await handle.waitStarted(1)
     const played = engine.play(voiceClip)

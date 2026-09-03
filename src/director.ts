@@ -42,7 +42,7 @@ import type { Host } from './host.ts'
 import { COMMANDS, type ProgramState } from './ipc.ts'
 import type { ReportSession } from './report.ts'
 import { INSTALL_COMMAND } from './update.ts'
-import { buildMusicSituation, withLanguage } from './prompts.ts'
+import { buildMusicSituation, CODA_CUE, withLanguage } from './prompts.ts'
 import { currentScene, formatClock, sceneFor } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
@@ -117,9 +117,30 @@ const MUSIC_RECENT_TURNS = 6
 // remaining gap (spec 04 §6).
 const TALK_LOOKAHEAD = 2
 
+// spec 04 §3.3, by-ear (spec 03-02 §6.1 lists them): how the coda leaves.
+// Half the time it rides the track's outro rather than waiting for silence —
+// always doing it would make every song end the same way, never doing it leaves
+// the music->talk seam a hard cut every time.
+export const CODA_RIDE_P = 0.5
+// How many seconds before the end the ride starts, uniform in this range: long
+// enough to be talking over the fade, short enough not to sit on the song.
+export const CODA_LEAD_MIN_S = 8
+export const CODA_LEAD_MAX_S = 12
+
 // spec 07 §3.7: behavioral shape as a module constant, tunable by ear in one
 // place. How much longer the gap runs in an empty room.
 const AWAY_GAP_FACTOR = 3
+
+// The beat airing while the next pick is chosen, labeled for the pick task: the
+// announce is asked to pick up whatever thread this line leaves, so it has to
+// arrive as that line and not as one more transcript row (spec 03-02 §1 #6).
+// "as this song was chosen", not "just before it": a prefetched pick is fired
+// one talk beat (or more) ahead of the boundary that airs it (spec 04 §3.1),
+// and a label that overclaimed would have the announce hand over from a line
+// the listener heard two beats ago.
+function priorLine(text: string): string {
+  return `The line on air as this song was chosen: "${text}"`
+}
 
 export type Steer =
   | { intent: 'quit' }
@@ -237,6 +258,10 @@ export type DirectorDeps = {
   // An auth-shaped voice failure, raised so the app can mark the endpoint as
   // failing — detectGaps then treats the configured endpoint as a gap (#97).
   onVoiceAuthFailure?: () => void
+  // The one place chance enters the loop: whether the coda rides a track's
+  // outro, and how far before the end (spec 04 §3.3). Injectable so a test can
+  // pin both; Math.random otherwise.
+  random?: () => number
 }
 
 // A look-ahead entry: the beat with its synthesis already running (spec 04
@@ -262,6 +287,13 @@ export class Director {
   // refill keeps running and the epoch guard drops its stale result.
   private talkFill: Pending<void> | null = null
   private talkEpoch = 0
+  // spec 04 §3.3: the beat that answers the song currently on air, generated at
+  // its start. Kept OUT of talkAhead so the look-ahead's depth invariant is
+  // untouched — it either rides the track's outro or goes to the head of the
+  // queue when the track ends, and is dropped by a steer like any other beat
+  // written before the listener spoke.
+  private coda: { beat: TalkBeat; clip: AudioClip } | null = null
+  private codaEpoch = 0
   private talksSinceMusic = 0
   // spec 07: the boundary's clock and presence reading, taken once per segment
   // (§3.2) and refreshed when a typed line proves the listener is back.
@@ -564,7 +596,7 @@ export class Director {
     // Same two primings the ordinary talk path does, so an anchor does not leave
     // the next boundary cold: the music pick resolves around this beat's mood,
     // and the look-ahead (untouched by the anchor) is topped back up.
-    this.prefetchMusic(`- radio: ${beat.text}`)
+    this.prefetchMusic(priorLine(beat.text))
     this.prefetchTalk()
     await this.runVoice(onAir(this.deps.player.play(clip)))
   }
@@ -573,10 +605,18 @@ export class Director {
   // segment in context. The topic tag (when the model provided one) feeds the
   // cross-day anti-repeat ledger (spec 05 §3.9).
   private airBeat(beat: TalkBeat): void {
+    this.recordBeat(beat)
+    this.emitState('talk')
+  }
+
+  // Everything airing a beat means EXCEPT claiming the segment: a coda riding a
+  // track's outro (spec 04 §3.3) is spoken over a song that is still playing,
+  // so the front-end must keep naming the track — same reason the reply path
+  // does not emitState('talk') either.
+  private recordBeat(beat: TalkBeat): void {
     this.deps.host.onRadioSegment(beat.text)
     this.deps.memory.record({ role: 'radio', text: beat.text })
     if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
-    this.emitState('talk')
   }
 
   // What the program is doing, for a front-end with a status region (spec 10
@@ -684,7 +724,7 @@ export class Director {
       this.deps.host.debug?.(`talk.buffer warm depth=${this.talkAhead.length + 1}`)
       // Prime the next music pick around the airing text (mood) — it needs no
       // audio, so the find-and-pull overlaps this beat's airtime.
-      this.prefetchMusic(`- radio: ${primed.beat.text}`)
+      this.prefetchMusic(priorLine(primed.beat.text))
       const clip = await primed.clip
       return clip === null ? null : { beat: primed.beat, clip }
     }
@@ -692,7 +732,7 @@ export class Director {
     const beats = await this.generateTalks(TALK_LOOKAHEAD)
     const first = beats.shift()
     if (first === undefined) return null
-    this.prefetchMusic(`- radio: ${first.text}`)
+    this.prefetchMusic(priorLine(first.text))
     // Beat 1's synth first (it airs next), the look-ahead synths right behind
     // it — all in flight together on a concurrent backend.
     const firstClip = this.synthesizeOrSkip(first.text)
@@ -745,8 +785,77 @@ export class Director {
   // cancelled — the epoch bump makes it discard its own result on arrival.
   private discardTalkAhead(): void {
     this.talkEpoch++
+    this.codaEpoch++
     this.talkAhead = []
     this.talkFill = null
+    this.coda = null
+  }
+
+  // -- the coda: the way out of a song (spec 04 §3.3) ----------------------- //
+
+  // One beat per track, fired once the song is confirmed on air and its intro
+  // is in context. Fire-and-forget and epoch-guarded at both ends: a steer
+  // drops it (it predates the listener's turn), and a newer track's coda always
+  // wins over an older one still in flight.
+  private prefetchCoda(): void {
+    if (this.gated()) return
+    const epoch = ++this.codaEpoch
+    // The slot belongs to the track on air: a previous track's coda must never
+    // be left in it to be spoken after a different song.
+    this.coda = null
+    void (async () => {
+      // No queued beats in the context: unlike a look-ahead refill, the coda
+      // airs BEFORE whatever is buffered, so handing it those beats as prior
+      // turns would have it continue speech the listener has not heard yet.
+      const [beat] = await this.generateTalks(1, [], CODA_CUE)
+      if (beat === undefined || epoch !== this.codaEpoch) return
+      const clip = await this.synthesizeOrSkip(beat.text)
+      if (clip === null || epoch !== this.codaEpoch) return
+      // Stored only once it is a beat that can go on air THIS instant: the slot
+      // never holds a promise, so neither exit can ever wait on synthesis.
+      this.coda = { beat, clip }
+      this.deps.host.debug?.('coda ready')
+    })()
+  }
+
+  // The song ended without the coda riding its outro: it goes to the HEAD of
+  // the look-ahead, so the next talk segment is the one that knows the song
+  // happened rather than a beat written before it existed. This can briefly
+  // hold TALK_LOOKAHEAD + 1 — prefetchTalk's `>=` simply does not refill until
+  // it drains.
+  private queueCoda(): void {
+    const coda = this.coda
+    if (coda === null) return
+    this.coda = null
+    this.talkAhead.unshift({ beat: coda.beat, clip: Promise.resolve(coda.clip) })
+    this.deps.host.debug?.(`coda queued depth=${this.talkAhead.length}`)
+  }
+
+  // Arm the outro ride for the track now on air: a timer that resolves at the
+  // moment the coda should start talking over the tail. Null = not riding this
+  // one (the length is unknown, the coin missed, or the track is already
+  // shorter than the lead) — the coda then leaves through queueCoda instead.
+  private armCodaRide(): Promise<'coda'> | null {
+    const { durationS, startedAt } = this.segment
+    if (durationS === undefined || startedAt === undefined) return null
+    const random = this.deps.random ?? Math.random
+    if (random() >= CODA_RIDE_P) return null
+    const lead = CODA_LEAD_MIN_S + random() * (CODA_LEAD_MAX_S - CODA_LEAD_MIN_S)
+    const at = durationS - lead - (Date.now() - startedAt) / 1000
+    if (at <= 0) return null
+    // Unref'd: a song that ends first leaves this timer unobserved, and it must
+    // not hold the process open on its own.
+    return sleep(at * 1000, 'coda' as const, { ref: false })
+  }
+
+  // The coda, if there is one to go out over the outro RIGHT NOW. Null = not
+  // generated (or not synthesized) yet — the ride is lost and the beat leaves
+  // through the post-song path, or not at all.
+  private takeCoda(): { beat: TalkBeat; clip: AudioClip } | null {
+    const coda = this.coda
+    if (coda === null) return null
+    this.coda = null
+    return coda
   }
 
   // -- the music branch (spec 03-02 §3.5) ----------------------------------- //
@@ -923,6 +1032,11 @@ export class Director {
     const music = this.deps.music!
     const handle = await music.engine.playMusic(pick.clip)
     const announced = pick.announce === undefined ? null : this.synthesizeOrSkip(pick.announce)
+    // The head of the track is born ducked when something is about to be said
+    // over it (spec 03-02 §1 #6): a song that comes up at full volume and is
+    // shoved down 0.3s later is the edge the ear hears. play()'s own scheduled
+    // unduck lifts it slowly when the announce ends.
+    if (announced !== null) handle.duck()
     // A quit typed while the stream spun up: the start is void — no announce,
     // no "now playing", no ledger entry for a song nobody heard (codex review).
     if (!(await handle.waitStarted(STREAM_START_TIMEOUT_S)) || this.quit) {
@@ -949,7 +1063,15 @@ export class Director {
       this.deps.host.onRadioSegment(pick.announce)
       this.deps.memory.record({ role: 'radio', text: pick.announce })
       voice = onAir(this.deps.player.play(announceClip))
+    } else {
+      // Nothing will speak over this head, so nothing will schedule its lift:
+      // an unsynthesized announce (or a handle born ducked under a still-airing
+      // clip) would otherwise leave the whole song at the duck target.
+      handle.unduck()
     }
+    // The way out of this song is written now, while it plays: the beat that
+    // airs after it (or over its outro) is the one that knows it happened.
+    this.prefetchCoda()
     return { handle, voice }
   }
 
@@ -1065,6 +1187,10 @@ export class Director {
     let track = song
     let steer: Steer | null = seed ?? null
     this.liveSong = track ?? null
+    // spec 04 §3.3: half the time the coda talks over the track's tail instead
+    // of waiting for silence. Armed once per track (re-armed on a handover, for
+    // the new one), and cleared once it has been raced.
+    let codaRide = track === undefined ? null : this.armCodaRide()
     try {
       while (!this.quit) {
         if (steer === null) {
@@ -1081,14 +1207,37 @@ export class Director {
             track !== undefined && this.switchDue && this.pendingPick !== null
               ? this.pendingPick.promise.then(() => 'pick' as const)
               : null
+          // Only while the voice channel is free: the ride is a beat, and one
+          // voice clip at a time still holds.
+          const riding = codaRide !== null && !voiceLive ? codaRide : null
           const winner = await Promise.race([
             audio,
             ...(pickReady !== null ? [pickReady] : []),
+            ...(riding !== null ? [riding] : []),
             this.deps.host.peekLine().then(() => 'line' as const),
             this.quitting,
           ])
           if (winner === 'quit') return // the finally below cuts voice and song
-          if (winner === 'song') return // the song ended -> segment over
+          if (winner === 'song') {
+            // The outro passed without the ride (or there was none): the coda
+            // goes to the head of the talk queue instead.
+            this.queueCoda()
+            return // the song ended -> segment over
+          }
+          if (winner === 'coda') {
+            codaRide = null // one ride per track, won or lost
+            const ride = this.takeCoda()
+            if (ride === null) {
+              this.deps.host.debug?.('coda not ready for the outro; it waits for the boundary')
+              continue
+            }
+            this.deps.host.debug?.('coda rides the outro')
+            // Recorded, not aired as a segment: the song is still on air under
+            // it, so the front-end keeps naming the track (see recordBeat).
+            this.recordBeat(ride.beat)
+            current = onAir(this.deps.player.play(ride.clip))
+            continue
+          }
           if (winner === 'pick') {
             // One voice clip at a time: let a still-airing reply finish, then
             // swap — the cut lands between clips, never over one.
@@ -1099,6 +1248,9 @@ export class Director {
               track = swapped.handle
               this.liveSong = track ?? null
               current = swapped.voice
+              // A new track brought its own coda (startTrack fired one); the
+              // ride belongs to ITS length, from ITS start.
+              codaRide = track === undefined ? null : this.armCodaRide()
             }
             continue
           }
