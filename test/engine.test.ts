@@ -77,8 +77,15 @@ function build(seconds: number, decode: Decode, overrides: EngineOverrides = {})
   return { context, engine }
 }
 
-// Let the eager scheduling of a synchronous fake stream settle before render.
-const settle = () => new Promise((r) => setTimeout(r, 25))
+// Let the graph finish building before startRendering. It is built by async
+// work a render cannot wait on from the inside — a voice clip's read + decode,
+// the fake stream's chunk scheduling — so ONE fixed sleep is a race the moment
+// the runner is loaded (a full-suite run starves the timer and the render then
+// sees an unducked graph). Yield many short turns instead of guessing one long
+// one: a starved loop gets that many chances to run the pending continuations.
+const settle = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((r) => setTimeout(r, 5))
+}
 
 const MUSIC = { source: 'fake://music', kind: 'music' } as const
 

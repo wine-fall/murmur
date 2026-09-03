@@ -220,6 +220,8 @@ an audition changes one number in one place.
 | `RAMP_S` | `src/engine.ts` | 0.3 s | How fast it gets out of the way. |
 | `UNDUCK_RAMP_S` | `src/engine.ts` | 2.5 s | How slowly it comes back after the voice ends. |
 | announce length | `FIND_MUSIC_CONTRACT`, `src/prompts.ts` | 2-4 sentences, ~10-20 s | How much room the way into a track has. |
+| `CODA_RIDE_P` | `src/director.ts` | 0.5 | How often the way OUT of a track rides its outro (spec 04 §3.3-C). |
+| `CODA_LEAD_MIN_S` / `CODA_LEAD_MAX_S` | `src/director.ts` | 8 s / 12 s | How long before the end that ride starts. |
 
 - **Format/buffers:** starting values 48 kHz / stereo / float32, block + ring depth tuned during implementation (latency vs underrun resilience).
 - **Envelope shape/timing:** starting values ~300 ms linear ramp, duck target 0.3 — final numbers tuned by ear at human acceptance.

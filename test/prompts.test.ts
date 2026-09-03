@@ -18,6 +18,8 @@ import {
   buildFindMusicInstruction,
   DEFAULT_MUSIC_POLICY,
   ANNOUNCE_FIELD_DESCRIPTION,
+  CODA_CUE,
+  MUSIC_OUTLASTS_RULE,
   FIND_MUSIC_CONTRACT,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
@@ -64,6 +66,38 @@ describe('prompt builders', () => {
   })
 })
 
+// spec 04 §3.3: the beat written to air as a song ends is the one beat that
+// must be allowed to speak about that song ending.
+describe('the coda cue (spec 04 §3.3)', () => {
+  const packWith = (over: Partial<ContextPack>): ContextPack => ({
+    persona: 'p',
+    recent: [],
+    music: { kind: 'playing', track: 'Song - Artist' },
+    ...over,
+  })
+
+  it('carries its own cue text', () => {
+    const p = buildNextTalksPrompt(packWith({ cue: CODA_CUE }), 1)
+    expect(p).toContain(CUE_GUIDANCE[CODA_CUE])
+    expect(CUE_GUIDANCE[CODA_CUE]).toBeDefined()
+  })
+
+  it('drops the red line that forbids speaking about the song ending', () => {
+    const coda = buildNextTalksPrompt(packWith({ cue: CODA_CUE }), 1)
+    const ordinary = buildNextTalksPrompt(packWith({}), 1)
+    expect(ordinary).toContain(MUSIC_OUTLASTS_RULE)
+    expect(coda).not.toContain(MUSIC_OUTLASTS_RULE)
+    // every other red line still stands
+    expect(coda).toContain('never announce, promise, or narrate')
+    expect(coda).toContain('never narrate time passing')
+  })
+
+  it('drops it on the single-beat fallback path too', () => {
+    expect(buildNextTalkPrompt(packWith({ cue: CODA_CUE }))).not.toContain(MUSIC_OUTLASTS_RULE)
+    expect(buildNextTalkPrompt(packWith({}))).toContain(MUSIC_OUTLASTS_RULE)
+  })
+})
+
 describe('music prompts', () => {
   it('instructs the pick task to judge candidates and write the announce', () => {
     expect(FIND_MUSIC_INSTRUCTION).toContain('search_music')
@@ -96,6 +130,12 @@ describe('music prompts', () => {
     expect(contract).toContain('the line that was on air as this song was chosen')
     expect(contract).toContain('never an "up next" formula')
     expect(contract).toContain('only where it comes naturally')
+  })
+
+  // Not "the same words" but literally the same string: the contract renders
+  // the shared description, so the two instructions cannot drift.
+  it('renders the shared announce description rather than restating it', () => {
+    expect(FIND_MUSIC_CONTRACT).toContain(ANNOUNCE_FIELD_DESCRIPTION)
   })
 
   // spec 03-01 §2.3: the listener owns the taste half, the code owns the
