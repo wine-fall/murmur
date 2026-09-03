@@ -87,8 +87,22 @@ const GROUNDING_RULES =
   'itself when one actually starts, so never announce, promise, or narrate ' +
   'finding, choosing, or starting a song yourself. Never claim to hear ' +
   "sounds from the listener's side. Your beat may go to air a few minutes " +
-  'after this moment: never narrate time passing, and say nothing that turns ' +
-  'false when the music above ends or changes.'
+  'after this moment: never narrate time passing.'
+
+// Split out of the rules above because ONE beat must not carry it: the coda is
+// written to air exactly as the song it can see is ending (spec 04 §3.3), so
+// forbidding anything that turns false when the music ends would forbid the
+// only thing that beat is for.
+export const MUSIC_OUTLASTS_RULE =
+  'Say nothing that turns false when the music above ends or changes.'
+
+// The cue naming that beat. Exported so the Director and the prompt agree on
+// one spelling.
+export const CODA_CUE = 'coda'
+
+function groundingRules(ctx: ContextPack): string {
+  return ctx.cue === CODA_CUE ? GROUNDING_RULES : `${GROUNDING_RULES} ${MUSIC_OUTLASTS_RULE}`
+}
 
 // Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
 // narrates the sensing — the listener is kept company, not observed. An absent
@@ -112,6 +126,15 @@ export const CUE_GUIDANCE: Record<string, string> = {
   'anchor:night':
     'This beat closes the day: a good-night that lets it settle, quiet and ' +
     'unhurried, asking nothing of them.',
+  // spec 04 §3.3: the way OUT of a song. Permission, not an assignment — a
+  // beat that must review every track would be the "up next" formula again,
+  // wearing the other end of the song.
+  [CODA_CUE]:
+    'This beat goes out as the song above is ending, or just after it has. You ' +
+    'may answer the song, say why it followed the stretch of talk before it, ' +
+    'or say nothing about it at all and simply carry on. Introducing or ' +
+    'reviewing the track is not the job: mention it only where it comes ' +
+    'naturally, and never in a formula.',
 }
 
 function pacingLines(ctx: ContextPack): string {
@@ -156,7 +179,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${GROUNDING_RULES}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -169,7 +192,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
     `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n` +
-    `${GROUNDING_RULES}\n` +
+    `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
@@ -187,6 +210,16 @@ export const MUSIC_CONTEXT_HEADER = 'Current context for choosing music:\n'
 // The CONTRACT half is code-owned: how the task ends, and what `submit_pick`
 // must carry. A listener policy that forgot to ask for an announce would
 // otherwise put a track on the air with no intro.
+// What the announce IS, in one sentence — the single source for both places the
+// model is told: the contract below, and the submit_pick schema's `announce`
+// parameter (src/music-tools.ts). A tool's parameter description is a runtime
+// instruction read at exactly the moment the field is filled, so it must not be
+// a second, drifting copy.
+export const ANNOUNCE_FIELD_DESCRIPTION =
+  'what you say on air as this track comes in: two to four sentences, around ' +
+  'ten to twenty seconds spoken, in the persona\'s voice and language, picking ' +
+  'up the line that was on air as this song was chosen where it leaves a thread'
+
 export const FIND_MUSIC_CONTRACT = `Choose ONE piece of music to play next on a personal radio.
 
 Use the search_music tool to find candidates, judge them against the persona,
@@ -195,24 +228,13 @@ track and a short reason.
 
 - If your pick fails to resolve, pick another candidate and submit again.
 - In submit_pick, also pass the track's title and artist (from the candidate),
-  and write \`announce\`: what you say on air as this track comes in — two to
-  four sentences, around ten to twenty seconds spoken, in the persona's voice
-  and language. It is read aloud over the song's opening, so write only the
-  words: no quotes around it, no markdown.
-- The context may end with the line that was on air as this song was chosen. If
-  that line leaves a thread, pick it up and let the song follow from it; if it
-  does not, simply bring the song in. Say something about the track itself only
-  where it comes naturally — a sentence or two — never a title/artist/year
-  rundown, and never an "up next" formula.`
+  and write \`announce\`: ${ANNOUNCE_FIELD_DESCRIPTION}.
+  It is read aloud over the song's opening, so write only the words: no quotes
+  around it, no markdown.
+- If that line leaves no thread to pick up, simply bring the song in. Say
+  something about the track itself only where it comes naturally — a sentence
+  or two — never a title/artist/year rundown, and never an "up next" formula.`
 
-// The same instruction where the model actually fills the field in: the
-// submit_pick schema (src/music-tools.ts). A tool's parameter description is a
-// runtime instruction competing with the contract above, so there is one text,
-// not two that can drift apart.
-export const ANNOUNCE_FIELD_DESCRIPTION =
-  'what you say on air as this track comes in: two to four sentences, around ' +
-  'ten to twenty seconds spoken, in the persona\'s voice and language, picking ' +
-  'up the line that was on air as this song was chosen where it leaves a thread'
 
 // The TASTE half — everything a listener may replace wholesale by writing
 // $MURMUR_HOME/music-policy.md (spec 03-01 §2.3). Written as a playbook rather

@@ -267,6 +267,68 @@ mechanical, driven by JS promise semantics and the TS codebase's seams:
   (~15 s to the first search), including one dead-probe pick-again in both
   runs (~10 s each).
 
+### 3.3-C The coda — the way out of a song (amended 2026-09-03)
+
+§3.3 removed the music→talk *dead air*: the post-song beat airs warm off the
+look-ahead. It did not make that beat **about** the song, and could not: the
+buffer is held at depth `N` and topped up after every consumed beat, so by the
+time a song starts the buffer is already full and the refill fired at the song's
+start is a no-op. Every post-song beat is therefore written **before the song
+existed**, and `GROUNDING_RULES` (correctly) forbade it to say anything that
+turns false when the music ends — so the only safe move was to ignore the song
+entirely. The song stopped, silence, and the talk came in cold.
+
+The **coda** is one beat per track that knows the track happened.
+
+- **Its own slot.** `Director.coda`, deliberately **not** in `talkAhead`: the
+  depth-`N` invariant and its refill arithmetic are untouched.
+- **Generated at the song's start**, once the stream is confirmed audible and
+  the announce is recorded — so the coda's context carries the song and its
+  intro. One extra `nextTalks(1)` per song; that is the whole added cost.
+- **Aired history only.** Unlike a look-ahead refill (§3.2, "coherence"), the
+  coda is **not** handed the queued-but-unaired beats: it airs *ahead* of them,
+  so presenting them as prior turns would have it continue speech the listener
+  has not heard. It sees what aired, plus the announce.
+- **The slot holds a beat that can go on air this instant** — never a promise.
+  It is filled only after its synthesis has come back with a real clip, so
+  neither exit can ever make a boundary wait on TTS, and a coda whose synthesis
+  failed simply does not exist (the ready buffered beat airs instead). It is
+  also cleared when a new track's coda is fired, so one track's coda can never
+  be spoken after a different song.
+- **Cued `coda`.** `CUE_GUIDANCE.coda` gives it permission, not an assignment:
+  it may answer the song, say why the song followed the stretch of talk before
+  it, or say nothing about it and carry on. Reviewing the track is explicitly
+  not the job. And the one red line it must not carry — "say nothing that turns
+  false when the music above ends" — is split out of `GROUNDING_RULES` as
+  `MUSIC_OUTLASTS_RULE` and omitted for this cue only. Every other red line
+  stands.
+- **Two ways out.**
+  1. **The outro ride.** When the track's length is known, with probability
+     `CODA_RIDE_P`, the coda goes out `CODA_LEAD_MIN_S`-`CODA_LEAD_MAX_S`
+     seconds before the end (uniform), racing the song's completion inside
+     `runVoice`. The engine ducks the tail under it exactly as it ducks the head
+     under an announce — so the radio talks over the fade instead of waiting for
+     silence. It is aired like a reply, not like a segment: recorded and printed,
+     but no `emitState('talk')`, because the track is still playing and the
+     front-end must keep naming it.
+  2. **The head of the queue.** Otherwise — length unknown, coin missed, track
+     shorter than the lead, or no coda ready — the song ends
+     and the coda is `unshift`ed to the FRONT of `talkAhead`. The next talk
+     segment pops it like any buffered beat. The buffer momentarily holds
+     `N + 1`; `prefetchTalk`'s `>=` tolerates that and simply does not refill
+     until it drains.
+- **Chance is injected.** `DirectorDeps.random` (default `Math.random`) is the
+  only entry point for the coin and the lead, so both are pinned in tests. Not
+  a config knob: the values are by-ear (spec 03-02 §6.1).
+- **Invalidation.** A talkback steer drops the coda with the rest of the
+  look-ahead (it predates the listener's turn) — `discardTalkAhead` clears the
+  slot and bumps `codaEpoch` so an in-flight generation discards its own result.
+  A mid-segment switch (spec 11 §2.3) starts a new track, whose `startTrack`
+  fires a new coda; the same epoch guard drops the old one if it lands late.
+- **No coda after a reply.** A reply already speaks to the song it is ducked
+  over, and re-firing one per interjection would pay a call per typed line.
+  Deliberate omission, not an oversight.
+
 ### 3.4 Time-of-day scene (context enrichment)
 Adjacent to the latency work above; it rides in this spec (see the header note).
 The radio was permanently "night" because the persona seed was night-flavored;
@@ -340,7 +402,8 @@ this makes the host speak to the actual local time.
 6. **slice 2 (survives music):** a talk beat buffered before a music segment airs
    **after** the song (not regenerated cold at the music→talk boundary) — the
    music→talk transition has no Brain/synth wait. Verified on fakes: with a song
-   between two talks, the pre-buffered beat is the one that airs post-song.
+   between two talks, the pre-buffered beat is the one that airs post-song,
+   behind that song's coda (§3.3-C).
 7. **slice 2 (depth 2):** the buffer is held at depth `N` (not drained-then-
    refilled) — a beat buffered before **two** consecutive music segments still airs
    after them, and each post-song talk airs a warm buffered beat.
@@ -360,7 +423,17 @@ this makes the host speak to the actual local time.
     self-initiated talk prompts; a `None` / unmapped scene appends nothing.
     Verified on the prompt strings (deterministic). The host's actual time-of-day
     voice is an eval / by-ear item, not a unit assertion.
-12. **§3.4 (scene override):** a valid `MURMUR_SCENE` wins over the clock; an
+12. **§3.3-C (the coda):** a beat is generated at each song's start with cue
+    `coda`, its context carrying that song and its intro; with the length known
+    and the coin won it airs over the outro while the track is still playing
+    (and without claiming the segment — the front-end keeps naming the track);
+    with the length unknown or the coin lost it airs first at the post-song
+    boundary; a talkback steer discards it; each song gets its own. Verified on
+    fakes with an injected `random`. The coda prompt carries its cue text and
+    **not** `MUSIC_OUTLASTS_RULE`, while every other prompt still carries it —
+    verified on the prompt strings. Whether the coda's tone actually lands is
+    by-ear (issue #198), not a unit assertion.
+13. **§3.4 (scene override):** a valid `MURMUR_SCENE` wins over the clock; an
     empty/unset value derives from the clock; a non-empty invalid value degrades
     to the clock (never raises). Verified with a fixed clock whose derived bucket
     differs from the override, so the env is proven to win.
@@ -368,6 +441,15 @@ this makes the host speak to the actual local time.
 ---
 
 ## 6. Open questions
+
+### 6.1 By-ear constants (§3.3-C)
+Listed beside the ducking knobs in spec 03-02 §6.1; the homes are here.
+
+| Constant | Home | Value | What it sets |
+|---|---|---|---|
+| `CODA_RIDE_P` | `src/director.ts` | 0.5 | How often the coda rides the outro instead of waiting for silence. |
+| `CODA_LEAD_MIN_S` / `CODA_LEAD_MAX_S` | `src/director.ts` | 8 s / 12 s | How long before the end the ride starts (uniform in range). |
+
 - **Buffer depth:** single-slot (one pick / one segment ahead) vs N-deep. Slice 1
   starts single-slot; deepen only if measurement shows a remaining gap.
 - **Continuous vs cold-start-only prefetch:** slice 1 prefetches continuously
