@@ -81,6 +81,48 @@ describe('music scheduling (cadence at the boundary)', () => {
     await run
   })
 
+  // spec 03-02 §1 #6: the head of the track is born ducked, so the announce
+  // never has to shove a song that already came up at full volume; play()'s
+  // scheduled unduck lifts it slowly once the intro is done.
+  it('ducks the head before the announce, and lets play() lift it', async () => {
+    const { director, player, source } = build()
+    source.picks = [pickOf('https://stream/song1', { announce: 'up next' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => player.played.length >= 2, 'announce aired')
+    const handle = player.handles[0]!
+    expect(handle.ducks).toBe(1) // the fake player never ducks; this is the Director's
+    expect(handle.unducks).toBe(0) // the engine's scheduled unduck does the lifting
+    handle.end()
+    await run
+  })
+
+  it('lifts the head itself when there is no announce to ride it', async () => {
+    const { director, player, source } = build()
+    source.picks = [pickOf('https://stream/plain')]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    const handle = player.handles[0]!
+    await until(() => handle.unducks === 1, 'head lifted')
+    handle.end()
+    await run
+  })
+
+  // Otherwise a dead announce synth leaves the song ducked for its whole length.
+  it('lifts the head when the announce fails to synthesize', async () => {
+    const { director, player, source, voice } = build()
+    voice.failFor = 'up next'
+    source.picks = [pickOf('https://stream/song1', { announce: 'up next' })]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    const handle = player.handles[0]!
+    await until(() => handle.unducks === 1, 'head lifted')
+    expect(handle.ducks).toBe(1)
+    expect(player.played.length).toBe(1) // the talk beat only; no announce aired
+    handle.end()
+    await run
+  })
+
   it('nothing suitable found degrades to talk', async () => {
     const { director, host, player } = build()
     // source.picks empty -> nextTrack returns null
@@ -144,6 +186,26 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     player.handles[0]!.end()
     await run
     expect(source.calls).toBe(1) // single-slot: one prefetch, consumed at the boundary
+  })
+
+  // spec 03-02 §1 #6: the announce is asked to pick up whatever thread the
+  // line before the song left, so that line has to arrive labeled as such.
+  it('labels the airing line in the situation of the pick that actually airs', async () => {
+    const { director, player, source } = build()
+    source.picks = [
+      pickOf('https://stream/song1', { announce: 'first' }),
+      pickOf('https://stream/song2', { announce: 'second' }),
+    ]
+    const run = director.run(4) // talk, music, talk, music
+    await until(() => player.handles.length === 1, 'first song on air')
+    player.handles[0]!.end()
+    await until(() => player.handles.length === 2, 'second song on air')
+    player.handles[1]!.end()
+    await run
+    // The startup-primed pick airs first and predates every beat, so it has no
+    // line to name; the pick the SECOND song airs on was primed by one.
+    expect(source.contexts[1]!.situation).toMatch(/The line on air as this song was chosen: "talk /)
+    expect(source.contexts.every((c) => !c.situation.includes('- radio: '))).toBe(true)
   })
 
   it('a song ledgered in an earlier session reaches the first pick context', async () => {

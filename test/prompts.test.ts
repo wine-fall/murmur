@@ -17,6 +17,8 @@ import {
   CUE_GUIDANCE,
   buildFindMusicInstruction,
   DEFAULT_MUSIC_POLICY,
+  ANNOUNCE_FIELD_DESCRIPTION,
+  FIND_MUSIC_CONTRACT,
   FIND_MUSIC_INSTRUCTION,
   GUIDE_PERSONA,
   PERSONA_CHAR_CAP,
@@ -68,6 +70,32 @@ describe('music prompts', () => {
     expect(FIND_MUSIC_INSTRUCTION).toContain('submit_pick')
     expect(FIND_MUSIC_INSTRUCTION).toContain('announce')
     expect(FIND_MUSIC_INSTRUCTION).toContain('Someone has to be singing')
+  })
+
+  // The contract is hard-wrapped source; assert on its words, not its line ends.
+  const contract = FIND_MUSIC_CONTRACT.replace(/\s+/g, ' ')
+
+  // spec 03-02 §1 #6: the intro is a stretch of radio, not a one-line label —
+  // it has room to land, and it hands over from the line the song follows.
+  it('asks for an announce long enough to be a real intro', () => {
+    expect(contract).toContain('two to four sentences')
+    expect(contract).toContain('ten to twenty seconds')
+    expect(contract).not.toContain('ONE short spoken line')
+  })
+
+  // The submit_pick schema is a runtime instruction of its own: two texts asking
+  // for different announces would let the tool's win.
+  it('describes the announce field once, for both the contract and the tool', () => {
+    const field = ANNOUNCE_FIELD_DESCRIPTION.replace(/\s+/g, ' ')
+    expect(field).toContain('two to four sentences')
+    expect(field).toContain('ten to twenty seconds')
+    expect(field).not.toContain('up next')
+  })
+
+  it('tells the announce to pick up the line the song follows, without a formula', () => {
+    expect(contract).toContain('the line that was on air as this song was chosen')
+    expect(contract).toContain('never an "up next" formula')
+    expect(contract).toContain('only where it comes naturally')
   })
 
   // spec 03-01 §2.3: the listener owns the taste half, the code owns the

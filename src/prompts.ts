@@ -195,9 +195,24 @@ track and a short reason.
 
 - If your pick fails to resolve, pick another candidate and submit again.
 - In submit_pick, also pass the track's title and artist (from the candidate),
-  and write \`announce\`: ONE short spoken line introducing the track, in the
-  persona's voice and language — like a radio DJ's "up next". No quotes around
-  it, no markdown; it will be read aloud over the song's opening.`
+  and write \`announce\`: what you say on air as this track comes in — two to
+  four sentences, around ten to twenty seconds spoken, in the persona's voice
+  and language. It is read aloud over the song's opening, so write only the
+  words: no quotes around it, no markdown.
+- The context may end with the line that was on air as this song was chosen. If
+  that line leaves a thread, pick it up and let the song follow from it; if it
+  does not, simply bring the song in. Say something about the track itself only
+  where it comes naturally — a sentence or two — never a title/artist/year
+  rundown, and never an "up next" formula.`
+
+// The same instruction where the model actually fills the field in: the
+// submit_pick schema (src/music-tools.ts). A tool's parameter description is a
+// runtime instruction competing with the contract above, so there is one text,
+// not two that can drift apart.
+export const ANNOUNCE_FIELD_DESCRIPTION =
+  'what you say on air as this track comes in: two to four sentences, around ' +
+  'ten to twenty seconds spoken, in the persona\'s voice and language, picking ' +
+  'up the line that was on air as this song was chosen where it leaves a thread'
 
 // The TASTE half — everything a listener may replace wholesale by writing
 // $MURMUR_HOME/music-policy.md (spec 03-01 §2.3). Written as a playbook rather
