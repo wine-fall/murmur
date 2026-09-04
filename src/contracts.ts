@@ -98,7 +98,6 @@ export type FetchTopicsRequest = {
   readonly timezone: string
   readonly today: string
   readonly avoid: readonly string[]
-  readonly policy: string
 }
 
 export interface VoiceProvider {

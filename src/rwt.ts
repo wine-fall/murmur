@@ -15,8 +15,7 @@ import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
 import type { Brain, FetchedTopic, FetchTopicsRequest, RwtTopic, Task } from './contracts.ts'
-import { readPolicyFile, seedPolicyFile } from './music-policy.ts'
-import { buildFetchTopicsPrompt, DEFAULT_RWT_POLICY, RWT_FETCH_SYSTEM_PROMPT } from './prompts.ts'
+import { buildFetchTopicsPrompt, RWT_FETCH_SYSTEM_PROMPT } from './prompts.ts'
 
 // --- the pool (§2.1) ------------------------------------------------------ //
 
@@ -310,34 +309,4 @@ export function fetchTopicsTask(req: FetchTopicsRequest, model: string): Task<Fe
       ),
     ],
   }
-}
-
-// --- the taste file (§2.5) ------------------------------------------------ //
-
-const POLICY_TEMPLATE = `<!--
-murmur real-world topics policy.
-
-This is the half of the topic search that is yours: what kinds of thing the
-host should have on hand to mention, and how to weight them. murmur re-reads
-it every time it refreshes its pool (a few times a day), so an edit lands on
-the next refresh -- no restart. Delete the file to go back to the default
-below. Anything inside an HTML comment (like this) is stripped before the
-text reaches the brain.
-
-What you cannot change from here is the mechanism: the gists are always
-written in the language the host speaks, weighted to where your clock says
-you are, only from today or yesterday, and never about private people. And
-whether the host brings any of it up at all is a settings knob, not this
-file -- tell it "stop with the news", or run with --no-rwt.
--->
-
-${DEFAULT_RWT_POLICY}
-`
-
-export function readRwtPolicy(path: string): string {
-  return readPolicyFile(path) ?? DEFAULT_RWT_POLICY
-}
-
-export function seedRwtPolicy(path: string): boolean {
-  return seedPolicyFile(path, POLICY_TEMPLATE)
 }

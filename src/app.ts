@@ -46,7 +46,7 @@ import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
-import { readRwtPolicy, RealWorldTopics, RwtPool, RwtRoll, seedRwtPolicy } from './rwt.ts'
+import { RealWorldTopics, RwtPool, RwtRoll } from './rwt.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './report.ts'
 import { SteerResponder } from './steer-responder.ts'
@@ -309,7 +309,6 @@ export function buildRwt(
   language: () => string,
   host: Host,
 ): RealWorldTopics {
-  if (seedRwtPolicy(config.rwtPolicyPath)) host.debug?.(`rwt.policy seeded ${config.rwtPolicyPath}`)
   return new RealWorldTopics({
     pool: new RwtPool({
       path: config.rwtPoolPath,
@@ -324,7 +323,6 @@ export function buildRwt(
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       // en-CA is the one locale whose short date is ISO YYYY-MM-DD, local.
       today: new Date().toLocaleDateString('en-CA'),
-      policy: readRwtPolicy(config.rwtPolicyPath),
     }),
     ...(host.debug !== undefined && { log: host.debug.bind(host) }),
   })

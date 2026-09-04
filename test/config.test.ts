@@ -194,10 +194,10 @@ describe('real-world topics config', () => {
     expect(parseCli(['--no-rwt'], NO_ENV).config.rwtEnabled).toBe(false)
   })
 
-  it('places the pool under cache/ and the policy at the home root', () => {
+  it('places the pool under cache/ and seeds no policy file', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
     expect(config.rwtPoolPath).toBe('/tmp/mh/cache/rwt.json')
-    expect(config.rwtPolicyPath).toBe('/tmp/mh/rwt-policy.md')
+    expect(config).not.toHaveProperty('rwtPolicyPath')
   })
 
   it('reads the roll and freshness numbers from env, and ignores a bad one with a warning', () => {

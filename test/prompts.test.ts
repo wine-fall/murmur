@@ -912,7 +912,6 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
     timezone: 'Asia/Tokyo',
     today: '2026-09-03',
     avoid: ['Already held', 'Also held'],
-    policy: 'Only cats.',
   }
 
   it('is a neutral researcher framing, not the persona', () => {
@@ -931,7 +930,7 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
     expect(p).toContain('- Also held')
     expect(p).toMatch(/private/i)
     expect(p).toContain('submit_topics')
-    expect(p).toContain(`${RWT_POLICY_HEADER}\nOnly cats.`)
+    expect(p).toContain(`${RWT_POLICY_HEADER}\n${DEFAULT_RWT_POLICY}`)
   })
 
   it('an empty avoid list renders no list', () => {
@@ -943,7 +942,6 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
       expect(DEFAULT_RWT_POLICY.toLowerCase()).toContain(word)
     }
     expect(DEFAULT_RWT_POLICY).toMatch(/hard nouns/i)
-    expect(buildFetchTopicsPrompt({ ...req, policy: DEFAULT_RWT_POLICY })).toContain(DEFAULT_RWT_POLICY)
   })
 
   it('the steer settings rule names the knob so "stop with the news" is a settings ask', () => {

@@ -92,8 +92,3 @@ export function musicPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
 export function rwtPoolPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(cacheRoot(env), 'rwt.json')
 }
-
-// The listener's topic policy (spec 13 §2.5): the music-policy shape, beside it.
-export function rwtPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
-  return join(homeRoot(env), 'rwt-policy.md')
-}

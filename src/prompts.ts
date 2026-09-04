@@ -354,7 +354,8 @@ export const RWT_FETCH_SYSTEM_PROMPT =
 
 export const RWT_POLICY_HEADER = 'What to look for:'
 
-// The TASTE half — replaceable wholesale by $MURMUR_HOME/rwt-policy.md.
+// The TASTE half — what to look for and how to weight it. Built in: the
+// per-listener half of the taste is the profile, not a file (spec 13 §3.4).
 export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertainment, sports. Mix them; do not
    let one kind take the whole batch.
 
@@ -377,7 +378,7 @@ export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertain
    with them scrubbed out is mood, not material.`
 
 // The CONTRACT half — code-owned: language, region, freshness, dedupe,
-// privacy, and how the task ends. A listener policy cannot loosen these.
+// privacy, and how the task ends. Nothing the listener says can loosen these.
 export function buildFetchTopicsPrompt(req: FetchTopicsRequest): string {
   const avoid =
     req.avoid.length === 0
@@ -395,7 +396,7 @@ export function buildFetchTopicsPrompt(req: FetchTopicsRequest): string {
     'to eight items. Each item: a one-line title, a gist of two to three spoken ' +
     'sentences a friend could say from memory (no URLs, no outlet names, no ' +
     'quotes), and its kind. Calling submit_topics ends the task.\n\n' +
-    `${RWT_POLICY_HEADER}\n${req.policy.trim()}`
+    `${RWT_POLICY_HEADER}\n${DEFAULT_RWT_POLICY}`
   )
 }
 

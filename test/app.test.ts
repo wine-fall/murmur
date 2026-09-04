@@ -39,7 +39,6 @@ import { HostedVoice } from '../src/hosted-voice.ts'
 import { IpcHost } from '../src/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
 import { LedgerScheduler } from '../src/scheduler.ts'
-import { DEFAULT_RWT_POLICY } from '../src/prompts.ts'
 import { readSettingsFile } from '../src/settings.ts'
 import { StubVoice } from '../src/voice.ts'
 
@@ -412,21 +411,22 @@ describe('memory wiring', () => {
 // spec 12 §2.4: one store per run, seeded from the merged config (flags/env
 // respected), persisting around the file's user-touched keys.
 // spec 13 §3.5: language from where the host reads it, region from the system
-// clock only, the policy file seeded so the listener can find it.
+// clock only; nothing is seeded into the home (the taste comes from the
+// profile, §3.4).
 describe('real-world topics wiring (spec 13)', () => {
-  it('seeds the policy file and resolves the request at fetch time', async () => {
+  it('resolves the request at fetch time and seeds no file', async () => {
     const home = emptyHome()
     const c = config([], { MURMUR_HOME: home })
     const brain = new FakeBrain()
     const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost())
-    expect(existsSync(join(home, 'rwt-policy.md'))).toBe(true)
+    expect(existsSync(join(home, 'rwt-policy.md'))).toBe(false)
     rwt.maybeRefresh()
     await rwt.drain()
     const req = brain.fetchRequests[0]!
     expect(req.language).toBe('Japanese')
     expect(req.timezone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
     expect(req.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
-    expect(req.policy).toBe(DEFAULT_RWT_POLICY)
+    expect(req).not.toHaveProperty('policy')
   })
 
   it('the gist language is the override, else what the persona says it speaks, else the persona itself', () => {
@@ -436,17 +436,6 @@ describe('real-world topics wiring (spec 13)', () => {
     // names it in English (spec 06 §2.2): the text itself is the answer.
     const french = '# Brume\n\nTu es la voix de la nuit, douce et lente. Tu parles sans te presser.'
     expect(rwtLanguage(undefined, french)).toMatch(/the language this is written in: "Tu es la voix de la nuit/)
-  })
-
-  it('a listener policy replaces the default wholesale', async () => {
-    const home = emptyHome()
-    const c = config([], { MURMUR_HOME: home })
-    writeFileSync(join(home, 'rwt-policy.md'), '<!-- mine -->\nOnly cats.\n')
-    const brain = new FakeBrain()
-    const rwt = buildRwt(c, brain, () => 'English', new FakeHost())
-    rwt.maybeRefresh()
-    await rwt.drain()
-    expect(brain.fetchRequests[0]!.policy).toBe('Only cats.')
   })
 })
 
