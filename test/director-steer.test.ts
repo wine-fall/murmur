@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import { EveryNCadence } from '../src/cadence.ts'
 import type { ContextPack, SteerActions, SteerBrain } from '../src/contracts.ts'
 import { Director, type DirectorDeps, steerFromLine } from '../src/director.ts'
+import { escPulse, lineReader, quitLatch } from '../src/guide.ts'
 import { COMMANDS } from '../src/ipc.ts'
 import { InProcessMemoryStore } from '../src/memory.ts'
 import {
@@ -473,5 +474,35 @@ describe('end_broadcast: two-phase shutdown (spec 11 §2.1)', () => {
     await until(() => steer.calls.length === 3, 're-arm turn handled')
     expect(steer.calls.map((c) => c.armed)).toEqual([false, true, false])
     await run
+  })
+})
+
+describe('the boot stretch hands the keyboard over (issue #145)', () => {
+  it('a line typed after a pre-broadcast reader settled reaches the steer path', async () => {
+    // A boot-stretch reader — the crash-report offer, the setup conversation —
+    // parks on the SAME LineQueue the Director races. Once its read has
+    // settled, its stale wake-up must not take the next line: that line is the
+    // Director's. guide.test.ts pins the reader's own guard on the quit and eof
+    // arms; this pins the hand-over across the seam, on a real LineQueue.
+    //
+    // What this does NOT prove: issue #145's dropped first line. That loss
+    // happened with the `settled` guard already present and its cause was never
+    // found (spec 01 §3.3), so this test is green on the base revision too —
+    // it is a characterization pin, not a red-to-green regression. Its power is
+    // over the guard: delete `settled` and the steer brain stops seeing the
+    // line, which is what the report described.
+    const steer = new FakeSteer(() => 'off it goes.')
+    const { director, host } = build(steer, { music: false })
+    const esc = escPulse()
+    const pending = lineReader(host, quitLatch(), esc)()
+    await new Promise((r) => setImmediate(r)) // the read registers on a microtask
+    esc.fire()
+    expect(await pending).toBe('')
+
+    host.type('turn the music off') // the listener's first line, now on air
+    await director.run(2)
+
+    expect(steer.calls.map((c) => c.userText)).toEqual(['turn the music off'])
+    expect(host.radio).toContain('off it goes.')
   })
 })
