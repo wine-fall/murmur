@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-03 (real-world topics built — spec 13)_
+_Last updated: 2026-09-04 (real-world topics ride memory: profile taste + ledger — spec 13 §3.4/§3.7)_
 
 ## Where we are
 
