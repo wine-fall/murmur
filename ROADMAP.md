@@ -1,27 +1,32 @@
 # murmur — roadmap
 
-_Where the radio goes next, in order. Five lines; a line is deleted when it is
-done, not archived. This is the **direction** layer: the current build focus
-lives in [`specs/STATUS.md`](specs/STATUS.md). Where a line names issues, the
-evidence and close condition live there; line 0 carries its own, having been
-folded in from a closed issue._
+_Where the radio goes next. Six lines; a line is deleted when it is done, not
+archived. Order is the **P** column, not the row number — the numbers are
+names, so a line keeps its own while the order moves. This is the **direction**
+layer: the current build focus lives in [`specs/STATUS.md`](specs/STATUS.md).
+Where a line names issues, the evidence and close condition live there; line 0
+carries its own, having been folded in from a closed issue._
 
-_Last updated: 2026-08-31._
+_P0_ blocks every judgement above it · _P1_ changes what murmur **is** ·
+_P2_ is reliability and quality · _P3_ is distribution and not rotting.
+
+_Last updated: 2026-09-04._
 
 **This round has two goals at once, and they do not conflict:** murmur should
 be good enough that its own author leaves it on, *and* runnable by someone who
 is not its author. Local TTS is **explicitly out of scope** this round — the
 hosted voice stays.
 
-| # | Line | What it is | This round delivers | Tracked as |
-|---|---|---|---|---|
-| 0 | Foundations | Land the work already written, and stop losing the listener's first line | A clean `main` and an input path that never drops a typed line | PRs in flight; §0 below |
-| 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can speak over a ducked song | [#163](https://github.com/wine-fall/murmur/issues/163) + new |
-| 2 | Say real things | The host gets real material — news, new releases, what is happening near the listener | An off-loop topic pool, weighted by the listener's language and timezone | new (absorbs [#44](https://github.com/wine-fall/murmur/issues/44)) |
-| 3 | Pick well, play reliably | Candidates come from sources worth trusting, not from keyword soup | Dead stream probes down; picks back under the spec-04 budget | [#164](https://github.com/wine-fall/murmur/issues/164), [#149](https://github.com/wine-fall/murmur/issues/149) + new |
-| 4 | Others can run it, and it does not rot | A second brain backend, and an eval track under the stochastic behavior | murmur runs without a Claude Code login; prompt regressions get caught by a test | [#89](https://github.com/wine-fall/murmur/issues/89), [#98](https://github.com/wine-fall/murmur/issues/98), [#80](https://github.com/wine-fall/murmur/issues/80), [#153](https://github.com/wine-fall/murmur/issues/153), [#102](https://github.com/wine-fall/murmur/issues/102) |
+| # | Line | What it is | This round delivers | P | Tracked as |
+|---|---|---|---|---|---|
+| 0 | Foundations | Land the work already written, and stop losing the listener's first line | A clean `main` and an input path that never drops a typed line | **P0** | §0 below (the reconciliation landed; the dropped line has not) |
+| 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can speak over a ducked song | **P1** | the lead-in half landed (#199, #200); the speak-over half is [#163](https://github.com/wine-fall/murmur/issues/163) |
+| 2 | Say real things | The host gets real material — news, new releases, what is happening near the listener | An off-loop topic pool, weighted by the listener's language and timezone | **P1** | built, green and unmerged: [#203](https://github.com/wine-fall/murmur/pull/203) + [#201](https://github.com/wine-fall/murmur/pull/201) (absorbs [#44](https://github.com/wine-fall/murmur/issues/44)) |
+| 5 | Log in to the catalogue you already have | The catalogues murmur cannot reach are the ones behind a login | An opt-in, guided login for one auth-gated source — NetEase first | **P1** | new; §5 below |
+| 3 | Pick well, play reliably | Candidates come from sources worth trusting, not from keyword soup | Dead stream probes down; picks back under the spec-04 budget | **P2** | [#164](https://github.com/wine-fall/murmur/issues/164), [#149](https://github.com/wine-fall/murmur/issues/149) + new |
+| 4 | Others can run it, and it does not rot | A second brain backend, and an eval track under the stochastic behavior | murmur runs without a Claude Code login; prompt regressions get caught by a test | **P3** (its eval half, [#98](https://github.com/wine-fall/murmur/issues/98), is P2 once lines 1/2 land) | [#89](https://github.com/wine-fall/murmur/issues/89), [#98](https://github.com/wine-fall/murmur/issues/98), [#80](https://github.com/wine-fall/murmur/issues/80), [#153](https://github.com/wine-fall/murmur/issues/153), [#102](https://github.com/wine-fall/murmur/issues/102) |
 
-Lines 1 and 2 are the ones that change what murmur *is*. Line 0 comes first
+Lines 1, 2 and 5 are the ones that change what murmur *is*. Line 0 comes first
 because every by-ear judgement above it is worthless while the first thing the
 listener says disappears.
 
@@ -76,6 +81,19 @@ something — never dropped.
 Done when a regression test pins it (a line pushed while a pre-broadcast reader
 is pending still reaches the Director's steer path, fakes only), and a real
 plain-mode run shows the **first** typed line echoing and taking effect.
+
+**Checked 2026-09-04 — still neither fixed nor cleared.** No fix has landed:
+the `settled` guard predates the repro (it came in on 2026-08-18/19, a week
+before), and `LineQueue` has not changed since. A stub plain-mode run with a
+pre-seeded persona echoed and acted on the **first** typed line — but that path
+runs with no harness, so neither the crash-report offer nor the setup
+conversation opens a pre-broadcast reader, and it therefore neither reproduces
+the bug nor clears it. The suspected seam also reads clean today: every `read()`
+in the first run, the crash offer and the setup flow is awaited, and `settled`
+is set in the race's own `finally`, so a resolved read's stale callback returns
+`''` rather than taking. So treat the suspected cause as **unconfirmed** and
+start from the repro conditions — real brain, a crash sentinel present — not
+from that seam.
 
 ## 1. Sound like a DJ
 
@@ -170,6 +188,53 @@ The distribution half and the durability half of the same goal.
 - **#80**, **#153**, **#102** — the first-run path a new listener actually
   walks: onboarding in a real terminal, quitting mid-onboarding, and the setup
   guide's consent rounds.
+
+## 5. Log in to the catalogue you already have
+
+**Recorded at the start, deferred on purpose.** `specs/DESIGN.md` §5 excludes
+both sources by name, and says why: NetEase Cloud Music has the best Chinese
+catalogue but only unofficial APIs, **needs a login cookie**, and gates its
+good tracks behind VIP; Spotify has no clean no-app-no-membership path — the
+desktop app (ads, on-demand limits) or headless librespot, which **needs
+Premium**. Spec 03-01 keeps the deferral as a single work item and names
+[`cliamp`](https://github.com/bjarneo/cliamp) as the credential reference: how
+it obtains, stores and refreshes per-service cookies — **the auth flow only**,
+never its user-picks interaction model, since murmur's listener is a listener
+and not a selector.
+
+**What has changed since that call**: nothing about Spotify — but yt-dlp,
+already murmur's only provider, ships `netease:song / playlist / singer /
+djradio` extractors and takes `--cookies FILE` / `--cookies-from-browser`
+(checked against yt-dlp 2026.08.19). So the NetEase half is **not a second
+provider**; it is a credential reaching the provider murmur already runs, plus
+URL-shaped candidate sources beside the open-ended search — which is line 3's
+"somewhere specific" by another road.
+
+What it touches:
+
+- `MusicProvider` (`src/contracts.ts:175`) is `search` + `resolve` and nothing
+  else: no session, no credential, no notion of a source that can fail on
+  *auth*. `src/app.ts:248` constructs `YtDlpMusicProvider` directly, so there
+  is no provider choice to configure either. Both need the smallest widening
+  that carries a cookie down to yt-dlp and reports an expired one **as expired**
+  — today it would surface as one more dead stream probe, the exact confusion
+  line 3 is trying to remove.
+- **The login is a conversation, not a config field.** The setup guide (spec
+  03-03) already walks a listener through a credential murmur cannot mint for
+  them — the voice key — and stores it in `~/.murmur/`. A NetEase cookie is the
+  same shape of question, with a lazier answer available first:
+  `--cookies-from-browser` may mean the listener is already logged in.
+- **Opt-in, never a shipped default** (DESIGN §3.7's personal-experiment tier).
+  The default install stays login-free yt-dlp; the fragility and the ToS risk
+  belong to the listener who mounts the source, which is why they mount it.
+- **Spotify gets the seam and an honest refusal.** Without Premium there is no
+  stream to duck, so what ships here is murmur saying so instead of offering a
+  source it cannot play. The external-player duck path (spec 03-02 §"out of
+  scope") stays unimplemented.
+
+Done when a listener with a NetEase account hears a track from it that **the
+brain picked**, an expired cookie says it is expired, and a listener with no
+account sees no change at all.
 
 ---
 
