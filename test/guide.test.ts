@@ -7,8 +7,8 @@ import {
   formatToolResult,
   lineReader,
   quitLatch,
-} from '../src/guide.ts'
-import type { AskKind, Host } from '../src/host.ts'
+} from '../src/setup/guide.ts'
+import type { AskKind, Host } from '../src/host/host.ts'
 
 // A host with scripted keyboard lines (the same stdin the Director uses).
 // atEof simulates a closed stdin (non-interactive run): no lines, ever.

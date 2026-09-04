@@ -18,7 +18,7 @@
 import { createCliRenderer } from '@opentui/core'
 import { createRoot } from '@opentui/react'
 
-import type { EngineMessage } from '../../src/ipc.ts'
+import type { EngineMessage } from '../../src/host/ipc.ts'
 import { App, type Subscribe } from './app.tsx'
 import { connectEngine } from './wire.ts'
 

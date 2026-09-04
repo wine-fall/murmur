@@ -25,9 +25,9 @@
 >   Upgrade path: pin explicit CC-BY URLs once verified.
 > **TS port (issue #54 Phase 3, 2026-07-27)**: ported with the TS engine — the
 > bed is a per-track gain chain under a bed master gain in the Web Audio graph
-> (`src/engine.ts`), with the track-loop crossfade scheduled declaratively at
+> (`src/audio/engine.ts`), with the track-loop crossfade scheduled declaratively at
 > each track's known end and the bed↔song crossfade still deferred to the
-> song's first scheduled frame. Acquisition/cache (`src/bed.ts`) keeps the
+> song's first scheduled frame. Acquisition/cache (`src/audio/bed.ts`) keeps the
 > Python cache layout and sha256[:16] key, so an existing warm cache is reused
 > as-is. Gains remain module constants (`BED_GAIN` 0.5 / `BED_XFADE_S` 1.5 s,
 > the Python as-built values); config/CLI carry only `--no-bed`.

@@ -11,7 +11,7 @@ import {
   isNewer,
   runUpdate,
   type UpdateDeps,
-} from '../src/update.ts'
+} from '../src/support/update.ts'
 
 function build(over: Partial<UpdateDeps> = {}) {
   const infos: string[] = []

@@ -9,7 +9,7 @@ import { basename, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
 
-import { IdleSensor, osIdleProbe } from './activity.ts'
+import { IdleSensor, osIdleProbe } from './director/activity.ts'
 import {
   CachedBedSource,
   DEFAULT_MANIFEST,
@@ -19,10 +19,10 @@ import {
   readBedPosition,
   writeBedPosition,
   ytdlpDownload,
-} from './bed.ts'
-import { ClaudeBrain, StubBrain } from './brain.ts'
-import { LiveCadence, PacingCadence } from './cadence.ts'
-import { Compactor } from './compaction.ts'
+} from './audio/bed.ts'
+import { ClaudeBrain, StubBrain } from './brain/brain.ts'
+import { LiveCadence, PacingCadence } from './director/cadence.ts'
+import { Compactor } from './memory/compaction.ts'
 import { packageVersion, type Config, ttsFromFile } from './config.ts'
 import type { Brain, Harness, MemoryStore, VoiceProvider } from './contracts.ts'
 import {
@@ -32,31 +32,32 @@ import {
   ghReady,
   runGh,
   spawnClipboard,
-} from './deliver.ts'
-import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director.ts'
-import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './update.ts'
-import { AudioEngine } from './engine.ts'
-import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './ffmpeg.ts'
-import { isFirstRun, runFirstRun, runProfileBootstrap } from './first-run.ts'
-import { prepareDevLog } from './dev-log.ts'
-import { CliHost, type Host } from './host.ts'
-import { HostedVoice } from './hosted-voice.ts'
-import { IpcHost, spawnTuiClient } from './ipc-host.ts'
-import { HostedListening } from './listening-data.ts'
-import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
+} from './support/deliver.ts'
+import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director/director.ts'
+import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './support/update.ts'
+import { AudioEngine } from './audio/engine.ts'
+import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './audio/ffmpeg.ts'
+import { isFirstRun, runFirstRun, runProfileBootstrap } from './setup/first-run.ts'
+import { prepareDevLog } from './support/dev-log.ts'
+import { CliHost, type Host } from './host/host.ts'
+import { HostedVoice } from './voice/hosted-voice.ts'
+import { IpcHost, spawnTuiClient } from './host/ipc-host.ts'
+import { HostedListening } from './music/listening-data.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from './memory/memory.ts'
 import { sentinelRoot } from './paths.ts'
-import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
-import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './rwt.ts'
-import { MusicProgrammer } from './music-programmer.ts'
-import { startReport, type ReportDeps, type ReportSession } from './report.ts'
-import { SteerResponder } from './steer-responder.ts'
-import { YtDlpMusicProvider } from './music.ts'
+import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
+import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './brain/rwt.ts'
+import { MusicProgrammer } from './music/music-programmer.ts'
+import { startReport, type ReportDeps, type ReportSession } from './support/report.ts'
+import { SteerResponder } from './brain/steer-responder.ts'
+import { YtDlpMusicProvider } from './music/music.ts'
 import { detectLanguage } from './locale.ts'
-import { loadPersona, personaLanguage, personaLine } from './persona.ts'
-import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
-import { aboutSection, buildFindMusicInstruction } from './prompts.ts'
-import { LedgerScheduler } from './scheduler.ts'
-import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
+import { loadPersona, personaLanguage, personaLine } from './brain/persona.ts'
+import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './setup/guide.ts'
+import { buildFindMusicInstruction } from './prompts/music.ts'
+import { aboutSection } from './prompts/talk.ts'
+import { LedgerScheduler } from './director/scheduler.ts'
+import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './host/settings.ts'
 import {
   armSentinel,
   collectCrashed,
@@ -64,11 +65,11 @@ import {
   offerCrashReport,
   readCrashWindow,
   uncleanExitNotice,
-} from './sentinel.ts'
-import { preflightBun, preflightFfmpeg, preflightYtdlp } from './startup.ts'
-import { VizFeed } from './viz.ts'
-import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice-config.ts'
-import { StubVoice } from './voice.ts'
+} from './support/sentinel.ts'
+import { preflightBun, preflightFfmpeg, preflightYtdlp } from './setup/startup.ts'
+import { VizFeed } from './audio/viz.ts'
+import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice/voice-config.ts'
+import { StubVoice } from './voice/voice.ts'
 
 // The memory store for a run (spec 05 §3.7): a real (claude) run persists to
 // memoryDir; a stub run stays in-process so canned chatter never touches the
@@ -107,7 +108,7 @@ export function ensureTuiDeps(bunCmd: string, tuiDir: string): boolean {
   return false
 }
 
-// The dev log's one assembly point: config decided the path (src/dev-log.ts),
+// The dev log's one assembly point: config decided the path (src/support/dev-log.ts),
 // here the directory is made and the aged-out days swept, and a host is only
 // ever handed the path. Idempotent, so every entry point can open it.
 function openDevLog(config: Config): string {
@@ -164,7 +165,7 @@ export async function buildHost(config: Config): Promise<HostBundle> {
 // The visualizer feed (spec 10 §3.6): frames flow only while a front-end is
 // attached AND subscribed, and the analyser tap is opened by that first
 // subscription rather than here — a plain or unwatched run pays nothing
-// (§5.5/§5.9). A vanished front-end unsubscribes itself (src/ipc-host.ts).
+// (§5.5/§5.9). A vanished front-end unsubscribes itself (src/host/ipc-host.ts).
 function attachVizFeed(host: IpcHost, engine: AudioEngine): VizFeed {
   const feed = new VizFeed({ tap: () => engine.spectrum(), send: (bins) => host.sendViz(bins) })
   host.setVizSubscriber((on, fps) => feed.set(on, fps))

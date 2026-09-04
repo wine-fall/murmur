@@ -1,5 +1,5 @@
 // The client end of the wire (spec 10 §2.3). The schemas are NOT redefined
-// here: they are imported from the engine's src/ipc.ts, which is the single
+// here: they are imported from the engine's src/host/ipc.ts, which is the single
 // source of truth for the protocol. This file is only the socket plumbing.
 
 import { connect, type Socket } from 'node:net'
@@ -11,7 +11,7 @@ import {
   PROTOCOL,
   type EngineMessage,
   type TuiMessage,
-} from '../../src/ipc.ts'
+} from '../../src/host/ipc.ts'
 
 export type Wire = {
   send: (message: TuiMessage) => void

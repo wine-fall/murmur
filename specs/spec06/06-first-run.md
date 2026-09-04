@@ -6,7 +6,7 @@
 > model's report). Where the code refined this design: `FirstRunDeps` also
 > carries `model` (the good tier, §3.3) and an optional `ccRoot` (injectable
 > data root, defaulting to `paths.claudeCodeRoot()`); `ProfileWritable` lives in
-> `src/first-run.ts` beside its consumer, the way `CompactionStore` lives in
+> `src/setup/first-run.ts` beside its consumer, the way `CompactionStore` lives in
 > `compaction.ts`; slice B is offered only when onboarding actually produced a
 > persona, so a run that skipped every question is not asked a fourth question.
 > The by-feel constants (`PERSONA_CHAR_CAP`, `MAX_SESSIONS`, `MAX_READ_CHARS`,
@@ -36,7 +36,7 @@
 > beat. This spec opens **no third hop** (§3.5 states exactly what text crosses
 > it, and slice B is refused unless the user explicitly consents).
 > **Conventions**: English; written for a coding agent. Design-level — mechanism
-> and contracts, not final code. Prompt text centralized in `src/prompts.ts`; no
+> and contracts, not final code. Prompt text centralized in `src/prompts/`; no
 > CJK in source (master §0).
 
 ---
@@ -101,7 +101,7 @@ loads from there afterwards. This spec keeps the *homing* rule and replaces the
 | absent, persistent run, onboarding skipped / declined / failed / non-interactive (EOF) | **copy the bundled seed** (today's behavior) → load it |
 | stub run (`--brain stub`) | load the bundled seed directly; nothing is written (spec 05 §3.7 stub isolation) |
 
-The seam is one function in a new `src/first-run.ts`:
+The seam is one function in a new `src/setup/first-run.ts`:
 
 ```ts
 export type FirstRunDeps = {
@@ -143,7 +143,7 @@ export type SeedAnswer = { readonly question: string; readonly answer: string }
 
 - `StubBrain` returns the bundled seed text unchanged (offline no-op), so a stub
   run's onboarding is inert and testable.
-- The prompt lives in `src/prompts.ts` (`buildSeedPersonaPrompt`,
+- The prompt lives in `src/prompts/` (`buildSeedPersonaPrompt`,
   `SEED_PERSONA_SYSTEM_PROMPT`), English scaffolding, with a hard character cap
   (§3.3).
 - *Rejected alternative*: running the seed generation as a harness task
@@ -170,7 +170,7 @@ Tools handed to the task (all murmur-owned, in-process, zod-validated args):
 | `list_sessions()` | metadata only for the CC data root: project name, session id, last-modified, byte size | at most `MAX_SESSIONS` newest entries; **stat-only** — no session file is opened (a turn count would mean reading every history in full, synchronously, in the live radio's process) |
 | `read_session(id, maxChars?)` | the transcript text of one session id from `list_sessions` — the **speaking turns only**, extracted from the JSONL; a file that yields none is refused rather than sent raw (its tool payloads and pasted buffers are exactly what the extraction drops) | `maxChars` capped at `MAX_READ_CHARS`; ids not produced by `list_sessions` are refused |
 | `read_instructions()` | the user's `~/.claude/CLAUDE.md`, if present | one file, capped |
-| `submit_profile(profile)` | **terminal** — finishes the task with the initial profile text | `PROFILE_CHAR_CAP` (spec 05, `src/prompts.ts`) |
+| `submit_profile(profile)` | **terminal** — finishes the task with the initial profile text | `PROFILE_CHAR_CAP` (spec 05, `src/prompts/`) |
 
 **Trust boundary (this is a read of the user's private data — do not simplify it
 away):** the reader tools resolve every path with `realpath` and refuse anything
@@ -202,7 +202,7 @@ bootstrap then logs and drops its result rather than clobbering it.
 
 ### 2.5 Slice C — the compaction contract, extended
 
-No new call, no new field. `COMPACTION_INSTRUCTION` (`src/prompts.ts`, spec 05
+No new call, no new field. `COMPACTION_INSTRUCTION` (`src/prompts/`, spec 05
 §3.6) is extended so the returned profile carries **two labelled sections**:
 
 ```
@@ -243,7 +243,7 @@ No new call, no new field. `COMPACTION_INSTRUCTION` (`src/prompts.ts`, spec 05
 ### 3.2 The seed questions (design-level content)
 
 Exactly three, short, answerable in one line, in this order. Wording lives in
-`src/prompts.ts`; what they must elicit is fixed here:
+`src/prompts/`; what they must elicit is fixed here:
 
 1. **Who is listening** — what to call you, and what your days usually look like
    (work, study, hours). *Feeds*: name/address form, the host's assumptions
@@ -276,7 +276,7 @@ launches in.
 
 The bundled seed (`src/prompts/persona-seed.md`) therefore names no language of
 its own: it carries a `{{language}}` slot, filled by `renderPersona()`
-(`src/persona.ts`) wherever the seed is read or lands at the listener's home. A
+(`src/brain/persona.ts`) wherever the seed is read or lands at the listener's home. A
 persona that states its own language has no slot, so filling one is a no-op.
 
 The generated persona must be a **complete standalone System Prompt** — the

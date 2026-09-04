@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { HostedListening } from '../src/listening-data.ts'
+import { HostedListening } from '../src/music/listening-data.ts'
 
 function fake(payload: unknown, status = 200): { calls: string[]; fetch: typeof fetch } {
   const calls: string[] = []

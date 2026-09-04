@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { COMMANDS } from '../src/ipc.ts'
+import { COMMANDS } from '../src/host/ipc.ts'
 import {
   cardLines,
   cardRows,

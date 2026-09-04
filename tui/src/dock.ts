@@ -3,7 +3,7 @@
 // queue head in a centered card above the input. This module shapes the card's
 // text; app.tsx renders it (wrapping is <text>'s own — no hand-rolled folding).
 
-import { COMMANDS, type EngineMessage } from '../../src/ipc.ts'
+import { COMMANDS, type EngineMessage } from '../../src/host/ipc.ts'
 
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']

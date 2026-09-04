@@ -9,9 +9,9 @@ import { OfflineAudioContext } from 'node-web-audio-api'
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 
 import type { AudioClip, MusicHandle } from '../src/contracts.ts'
-import { AudioEngine, RAMP_S, UNDUCK_RAMP_S, type Decode } from '../src/engine.ts'
-import { logBins, VIZ_BINS } from '../src/viz.ts'
-import { encodeWav } from '../src/wav.ts'
+import { AudioEngine, RAMP_S, UNDUCK_RAMP_S, type Decode } from '../src/audio/engine.ts'
+import { logBins, VIZ_BINS } from '../src/audio/viz.ts'
+import { encodeWav } from '../src/audio/wav.ts'
 
 const RATE = 48_000
 

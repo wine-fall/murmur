@@ -9,9 +9,9 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { SteerActions } from '../src/contracts.ts'
-import type { Settings } from '../src/ipc.ts'
-import { SettingsStore } from '../src/settings.ts'
-import { steerTools } from '../src/steer-tools.ts'
+import type { Settings } from '../src/host/ipc.ts'
+import { SettingsStore } from '../src/host/settings.ts'
+import { steerTools } from '../src/brain/steer-tools.ts'
 import { callTool } from './fakes.ts'
 
 const BASE: Settings = {

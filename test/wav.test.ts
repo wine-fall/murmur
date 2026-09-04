@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { concatWithSilence, encodeWav, readWav, silentWav, wavSeconds } from '../src/wav.ts'
+import { concatWithSilence, encodeWav, readWav, silentWav, wavSeconds } from '../src/audio/wav.ts'
 
 const FMT = { channels: 1, sampleRate: 16_000, bitsPerSample: 16 } as const
 

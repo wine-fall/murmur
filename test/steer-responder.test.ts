@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ContextPack, SteerActions } from '../src/contracts.ts'
-import { SteerResponder } from '../src/steer-responder.ts'
+import { SteerResponder } from '../src/brain/steer-responder.ts'
 import { FakeHarness, callTool } from './fakes.ts'
 
 const ctx: ContextPack = {

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
 
 describe('InProcessMemoryStore', () => {
   it('returns the last n turns oldest-first', () => {

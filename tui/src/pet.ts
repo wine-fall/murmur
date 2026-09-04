@@ -12,7 +12,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type { ProgramState } from '../../src/ipc.ts'
+import type { ProgramState } from '../../src/host/ipc.ts'
 
 // A frame is its pixel rows, top first. All rows the same width.
 export type Sprite = string[]

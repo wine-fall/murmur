@@ -14,7 +14,7 @@ import {
   admitsToFold,
   fadeFacts,
   stampDates,
-} from '../src/memory.ts'
+} from '../src/memory/memory.ts'
 
 const dir = () => mkdtempSync(join(tmpdir(), 'murmur-fold-'))
 

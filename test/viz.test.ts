@@ -4,7 +4,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { logBins, VizFeed, VIZ_BINS, VIZ_FPS } from '../src/viz.ts'
+import { logBins, VizFeed, VIZ_BINS, VIZ_FPS } from '../src/audio/viz.ts'
 
 // One FFT frame: silent everywhere except the named bins, which are loud.
 function frame(size: number, loud: Record<number, number>): Float32Array {

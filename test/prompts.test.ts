@@ -1,41 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ContextPack } from '../src/contracts.ts'
-import {
-  ACTIVITY_GUIDANCE,
-  buildCompactionPrompt,
-  buildFixMusicPrompt,
-  buildMusicSituation,
-  buildNextTalkPrompt,
-  buildNextTalksPrompt,
-  buildRespondPrompt,
-  buildSeedPersonaPrompt,
-  buildSetupPrompt,
-  VISIT_PERSONA,
-  buildSteerPrompt,
-  memoryBlock,
-  BOOTSTRAP_PROFILE_INSTRUCTION,
-  CUE_GUIDANCE,
-  buildFindMusicInstruction,
-  DEFAULT_MUSIC_POLICY,
-  ANNOUNCE_FIELD_DESCRIPTION,
-  CODA_CUE,
-  MUSIC_OUTLASTS_RULE,
-  FIND_MUSIC_CONTRACT,
-  FIND_MUSIC_INSTRUCTION,
-  GUIDE_PERSONA,
-  PERSONA_CHAR_CAP,
-  PROFILE_CHAR_CAP,
-  SEED_QUESTIONS,
-  STATUS_MICROCOPY,
-  statusMicrocopy,
-  withLanguage,
-  aboutSection,
-  buildFetchTopicsPrompt,
-  DEFAULT_RWT_POLICY,
-  RWT_FETCH_SYSTEM_PROMPT,
-  RWT_POLICY_HEADER,
-} from '../src/prompts.ts'
+import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION } from '../src/prompts/music.ts'
+import { buildSeedPersonaPrompt, PERSONA_CHAR_CAP, SEED_QUESTIONS, withLanguage } from '../src/prompts/persona.ts'
+import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP } from '../src/prompts/profile.ts'
+import { buildRespondPrompt, buildSteerPrompt, memoryBlock } from '../src/prompts/reply.ts'
+import { buildFetchTopicsPrompt, DEFAULT_RWT_POLICY, RWT_FETCH_SYSTEM_PROMPT, RWT_POLICY_HEADER } from '../src/prompts/rwt.ts'
+import { buildFixMusicPrompt, buildSetupPrompt, VISIT_PERSONA, GUIDE_PERSONA } from '../src/prompts/setup.ts'
+import { STATUS_MICROCOPY, statusMicrocopy } from '../src/prompts/status.ts'
+import { ACTIVITY_GUIDANCE, buildNextTalkPrompt, buildNextTalksPrompt, CUE_GUIDANCE, CODA_CUE, MUSIC_OUTLASTS_RULE, aboutSection } from '../src/prompts/talk.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
 

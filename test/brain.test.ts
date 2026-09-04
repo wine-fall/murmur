@@ -5,11 +5,11 @@ import { fileURLToPath } from 'node:url'
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain.ts'
+import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain/brain.ts'
 import type { ContextPack, GuideRequest, GuideSession } from '../src/contracts.ts'
-import { renderPersona } from '../src/persona.ts'
-import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
-import { cleanBeats, emitTalkBeatsTool } from '../src/talk-tools.ts'
+import { renderPersona } from '../src/brain/persona.ts'
+import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
+import { cleanBeats, emitTalkBeatsTool } from '../src/brain/talk-tools.ts'
 
 const ctx: ContextPack = { persona: 'p', recent: [] }
 

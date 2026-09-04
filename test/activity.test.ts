@@ -6,7 +6,7 @@ import {
   IdleSensor,
   PRESENT_MS,
   type IdleProbe,
-} from '../src/activity.ts'
+} from '../src/director/activity.ts'
 
 const T0 = new Date('2026-07-03T12:00:00')
 const at = (ms: number) => new Date(T0.getTime() + ms)

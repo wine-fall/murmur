@@ -23,7 +23,7 @@
    change events; every consumer goes through the same engine-side setter.
 3. **Two additive wire messages** (`settings` / `settingsSet`) so the TUI
    reads and writes settings without touching disk or importing anything
-   beyond `src/ipc.ts`.
+   beyond `src/host/ipc.ts`.
 4. **A `/settings` pane in the TUI** — exactly **eight writable items** plus
    two read-only lines. Eight is the ceiling, not a tranche (spec 10 §1 rules
    out the sixteen-knob theming engine).
@@ -82,7 +82,7 @@ and the raw knob identifiers appear nowhere in the UI.
 - **Path**: `$MURMUR_HOME/settings.json`, resolved by `paths.ts`
   (`settingsPath()`), sitting at the home root beside `voice.json` — it is
   re-obtainable configuration, not irreplaceable state (master §6.1).
-- **Schema** (zod, `src/settings.ts`): all keys optional; absence = "the user
+- **Schema** (zod, `src/host/settings.ts`): all keys optional; absence = "the user
   never touched this knob", which falls through to the layer below.
 
   ```ts
@@ -134,7 +134,7 @@ flag wins again, which is what flags mean.
 ### 2.4 The engine-side store (the single authority)
 
 ```ts
-// src/settings.ts
+// src/host/settings.ts
 // The 9 keys of §3.1, resolved. All required EXCEPT `language`, whose absence
 // is meaningful at runtime too: it means the persona decides (§3.9).
 export type Settings = { /* ... */ }
@@ -379,7 +379,7 @@ onboarding and never rewritten by murmur. This knob does not touch that:
   onboarding, and defaulting here would silently override a persona the
   listener hand-wrote.
 - **Set means an override**, applied by composing the system prompt as
-  `persona` + one directive line (`languageDirective()`, `src/prompts.ts`).
+  `persona` + one directive line (`languageDirective()`, `src/prompts/`).
   `persona.md` is never edited — so clearing the knob restores whatever the
   persona says, and a hand-edited persona is never clobbered by a stale knob.
 - **Free text, not an enum.** The value is a language *name* as a person would

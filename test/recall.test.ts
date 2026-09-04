@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { RecallIndex, shingle } from '../src/recall.ts'
+import { RecallIndex, shingle } from '../src/memory/recall.ts'
 
 // CJK fixtures are written as escapes, not characters: DESIGN §0 bars CJK from
 // every source file, and a tokenizer test needs the codepoints themselves.

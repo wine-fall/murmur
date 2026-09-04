@@ -10,7 +10,7 @@ import {
   type CadencePolicy,
   type CadenceState,
   type SegmentKind,
-} from '../src/cadence.ts'
+} from '../src/director/cadence.ts'
 
 import { callTool, FakeHarness } from './fakes.ts'
 
