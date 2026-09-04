@@ -2,7 +2,7 @@
   "name": "murmur-radio",
   "version": "0.2.1",
   "description": "A companion radio, always on the air — Claude for a brain, a fish-speech voice, keyboard-driven replies.",
-  "license": "SEE LICENSE IN README.md",
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/wine-fall/murmur.git"
