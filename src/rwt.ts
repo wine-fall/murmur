@@ -186,8 +186,18 @@ export type RealWorldTopicsDeps = {
   brain: Pick<Brain, 'fetchTopics'>
   // Resolved at fetch time, so a language change lands on the next refresh.
   request: () => Omit<FetchTopicsRequest, 'avoid'>
+  // Titles already told on air, from the ledger (spec 13 §3.7): the pool's
+  // own memory is 48 h, a story can run for weeks.
+  covered?: () => readonly string[]
   log?: (message: string) => void
 }
+
+// How many ledgered titles the fetch is told to avoid. The music avoid list
+// settled at 32 after 8 brought a favourite back every other session; a
+// topic is offered far less often than a song plays, so 32 here spans weeks
+// of sessions — enough to outlast a running story — at one prompt line each,
+// on a background task.
+export const RWT_AVOID_DEPTH = 32
 
 type Refresh = { promise: Promise<void>; done: () => boolean }
 
@@ -232,15 +242,18 @@ export class RealWorldTopics {
   private async run(): Promise<void> {
     const started = Date.now()
     try {
+      const covered = new Set(this.deps.covered?.() ?? [])
       const topics = await this.deps.brain.fetchTopics({
         ...this.deps.request(),
-        avoid: this.deps.pool.titles(),
+        avoid: [...new Set([...this.deps.pool.titles(), ...covered])],
       })
       if (topics.length === 0) {
         this.log('rwt.refresh failed (no topics returned)')
         return
       }
-      const n = this.deps.pool.merge(topics)
+      // A title the fetch was told to avoid and returned anyway is dropped
+      // here: the prompt is a request, the ledger is the record.
+      const n = this.deps.pool.merge(topics.filter((t) => !covered.has(t.title)))
       this.log(`rwt.refresh n=${n} ms=${Date.now() - started}`)
       this.logPool()
     } catch (err) {

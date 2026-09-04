@@ -158,7 +158,7 @@ export type BedPosition = { track: string; offsetS: number }
 // the same gaps quiet instead of re-opening the conversation.
 // 'forget' keys one honoured forget request (spec 05-01 §3.5) — the time only,
 // never the text: an event that kept what was forgotten would defeat the point.
-export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup' | 'forget'
+export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup' | 'forget' | 'rwt'
 
 // Where a recalled line came from (spec 05-01 §2.1): a history row's speaker,
 // or 'faded' for a profile fact that has aged out of the prompts but is still
@@ -185,6 +185,9 @@ export interface MemoryStore {
   recentTopics(n: number): string[]
   recentSongs(n: number): string[]
   recentAnchors(n: number): string[]
+  // Real-world items told on air (spec 13 §3.7): the fetch's avoid list
+  // past the pool's own 48 h memory.
+  recentRwt(n: number): string[]
   // Search everything on record, past the recent window (spec 05-01 §3.4).
   recall(query: string, limit: number): RecallHit[]
   // Remove every history row and profile line matching `what`, physically and

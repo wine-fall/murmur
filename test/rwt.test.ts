@@ -131,6 +131,7 @@ function feed(over: {
   fetch?: (req: FetchTopicsRequest) => Promise<FetchedTopic[]>
   roll?: RwtRoll
   clock?: { now: number }
+  covered?: () => readonly string[]
 } = {}) {
   const clock = over.clock ?? { now: 1000 }
   const { pool } = poolAt(clock)
@@ -146,6 +147,7 @@ function feed(over: {
       },
     },
     request: () => ({ language: 'Japanese', timezone: 'Asia/Tokyo', today: '2026-09-03', follows: '' }),
+    ...(over.covered !== undefined && { covered: over.covered }),
     log: (m) => lines.push(m),
   })
   return { pool, rwt, requests, lines, clock }
@@ -195,6 +197,23 @@ describe('RealWorldTopics (spec 13 §2.4 / §3.1)', () => {
     rwt.maybeRefresh()
     await until(() => requests.length === 2)
     expect(requests[1]?.avoid).toEqual(['A', 'B'])
+  })
+
+  // spec 13 §3.7: the pool forgets in 48 h; what was told on air is in the
+  // ledger, so the fetch is told both — once each, in that order.
+  it('the fetch is told what was told on air too, and a returned one is not merged', async () => {
+    const { pool, rwt, requests, clock } = feed({
+      covered: () => ['B', 'Old story'],
+      fetch: async () => [topic('A'), topic('B'), topic('Old story'), topic('C')],
+    })
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(requests[0]?.avoid).toEqual(['B', 'Old story'])
+    expect(pool.titles()).toEqual(['A', 'C'])
+    clock.now += 7 * HOUR
+    rwt.maybeRefresh()
+    await until(() => requests.length === 2)
+    expect(requests[1]?.avoid).toEqual(['A', 'C', 'B', 'Old story'])
   })
 })
 

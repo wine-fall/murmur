@@ -1124,6 +1124,9 @@ export class Director {
     // batch, not a second chance at a topic. Anchors and the coda have a job
     // of their own and are never offered one (spec 13 §2.4).
     const offered = cue === undefined && this.deps.settings().rwtEnabled ? this.deps.rwt?.offer() : undefined
+    // Ledgered with the take, not the air (spec 13 §3.7): the pool has already
+    // spent it, and the ledger is what outlives the pool's 48 h.
+    if (offered != null) this.deps.memory.recordEvent('rwt', offered.title)
     const rwt = offered == null ? undefined : { title: offered.title, gist: offered.gist }
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {

@@ -433,12 +433,24 @@ describe('real-world topics wiring (spec 13)', () => {
     const c = config([], { MURMUR_HOME: emptyHome() })
     const brain = new FakeBrain()
     let profile = ''
-    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost(), { profile: () => profile })
+    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost(), { profile: () => profile, recentRwt: () => [] })
     // Written after wiring, before the refresh: the fetch reads the live file.
     profile = '(About the listener)\nFollows sumo. [stable]\n\n(Relationship & style)\nDry.'
     rwt.maybeRefresh()
     await rwt.drain()
     expect(brain.fetchRequests[0]!.follows).toBe('Follows sumo.')
+  })
+
+  it('tells the fetch what the ledger already heard, newest last', async () => {
+    const c = config([], { MURMUR_HOME: emptyHome() })
+    const brain = new FakeBrain()
+    const memory = new InProcessMemoryStore()
+    memory.recordEvent('rwt', 'Typhoon season opens early')
+    memory.recordEvent('rwt', 'A late equaliser')
+    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost(), memory)
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(brain.fetchRequests[0]!.avoid).toEqual(['Typhoon season opens early', 'A late equaliser'])
   })
 
   it('the gist language is the override, else what the persona says it speaks, else the persona itself', () => {

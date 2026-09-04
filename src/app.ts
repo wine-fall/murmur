@@ -46,7 +46,7 @@ import { HostedListening } from './listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory.ts'
 import { sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music-policy.ts'
-import { RealWorldTopics, RwtPool, RwtRoll } from './rwt.ts'
+import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './rwt.ts'
 import { MusicProgrammer } from './music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './report.ts'
 import { SteerResponder } from './steer-responder.ts'
@@ -309,7 +309,7 @@ export function buildRwt(
   brain: Pick<Brain, 'fetchTopics'>,
   language: () => string,
   host: Host,
-  memory: Pick<MemoryStore, 'profile'>,
+  memory: Pick<MemoryStore, 'profile' | 'recentRwt'>,
 ): RealWorldTopics {
   return new RealWorldTopics({
     pool: new RwtPool({
@@ -327,6 +327,7 @@ export function buildRwt(
       today: new Date().toLocaleDateString('en-CA'),
       follows: aboutSection(memory.profile()),
     }),
+    covered: () => memory.recentRwt(RWT_AVOID_DEPTH),
     ...(host.debug !== undefined && { log: host.debug.bind(host) }),
   })
 }

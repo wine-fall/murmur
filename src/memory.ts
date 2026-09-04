@@ -20,6 +20,7 @@ export class InProcessMemoryStore implements MemoryStore {
   private anchors: string[] = []
   private setup: string[] = []
   private forgets: string[] = []
+  private rwt: string[] = []
 
   private maxlen: number
 
@@ -80,6 +81,10 @@ export class InProcessMemoryStore implements MemoryStore {
     return n > 0 ? this.anchors.slice(-n) : []
   }
 
+  recentRwt(n: number): string[] {
+    return n > 0 ? this.rwt.slice(-n) : []
+  }
+
   recentEvents(kind: LedgerKind, n: number): string[] {
     return n > 0 ? this.ledger(kind).slice(-n) : []
   }
@@ -96,6 +101,8 @@ export class InProcessMemoryStore implements MemoryStore {
         return this.setup
       case 'forget':
         return this.forgets
+      case 'rwt':
+        return this.rwt
     }
   }
 }
@@ -316,6 +323,7 @@ export class PersistentMemoryStore implements MemoryStore {
   private anchors: string[] = []
   private setup: string[] = []
   private forgets: string[] = []
+  private rwt: string[] = []
   private profileText = ''
   // Built on first recall/forget, not at boot (spec 05-01 §3.4).
   private recallIndex: RecallIndex | null = null
@@ -456,6 +464,10 @@ export class PersistentMemoryStore implements MemoryStore {
     return n > 0 ? this.anchors.slice(-n) : []
   }
 
+  recentRwt(n: number): string[] {
+    return n > 0 ? this.rwt.slice(-n) : []
+  }
+
   // Any ledger kind, by name. Impl-level and deliberately NOT on the MemoryStore
   // contract: the setup offer reads its own standing answer (spec 03-03 §7.1),
   // and the Director has no business in that tier.
@@ -472,6 +484,8 @@ export class PersistentMemoryStore implements MemoryStore {
         return this.setup.slice(-n)
       case 'forget':
         return this.forgets.slice(-n)
+      case 'rwt':
+        return this.rwt.slice(-n)
     }
   }
 
@@ -712,7 +726,9 @@ export class PersistentMemoryStore implements MemoryStore {
               ? this.setup
               : kind === 'forget'
                 ? this.forgets
-                : null
+                : kind === 'rwt'
+                  ? this.rwt
+                  : null
     if (target === null) return
     target.push(key)
     if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)
