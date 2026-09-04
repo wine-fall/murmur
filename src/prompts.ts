@@ -176,21 +176,24 @@ function coveredLine(ctx: ContextPack): string {
   return `\n(Recently covered — don't repeat these: ${ctx.coveredTopics.join(', ')})`
 }
 
-// One real-world item, rendered as material rather than a task (spec 13 §2.5):
-// a friend mentions something they read; a host does not read a bulletin. The
-// anchor beats and the coda have a job of their own and never carry it, even
-// if a pack arrives with one. Absent -> nothing.
+// One real-world item on the desk for this stretch (spec 13 §2.5). A host
+// names the thing — the title, who, where, when — says what happened and what
+// they make of it, and carries on; what a host does NOT do is switch into a
+// newsreader's rundown. The line draws on register, never on content: an item
+// with its names scrubbed out is the cozy-imagery attractor (#44) wearing a
+// fig leaf. The anchor beats and the coda have a job of their own and never
+// carry one, even if a pack arrives with it. Absent -> nothing.
 function rwtLine(ctx: ContextPack): string {
   const rwt = ctx.rwt
   if (rwt === undefined) return ''
   const cue = ctx.cue ?? ''
   if (cue === CODA_CUE || cue.startsWith('anchor:')) return ''
   return (
-    `\n(Something from out in the world, if you want it: ${rwt.title} — ${rwt.gist})\n` +
-    'Material, not an assignment: use it only if it fits this stretch of the ' +
-    'program, one thread of it, in your own words, the way a friend mentions ' +
-    'something they read; never a bulletin, never a headline read out, never ' +
-    "a list. If it doesn't fit, leave it."
+    `\n(On the desk for this stretch, from today: ${rwt.title} — ${rwt.gist})\n` +
+    'Bring it in the way a host does: name the thing — the title, who, where, ' +
+    'when — say what happened in a sentence or two and what you make of it, ' +
+    'then carry on. One item, in your own voice. Not a newsreader\'s rundown, ' +
+    'not a "here is the news" frame, not a list.'
   )
 }
 
@@ -365,9 +368,13 @@ export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertain
 4. Nothing that needs a screen to make sense of — no charts, no tables, no
    "as shown below". Nothing that is only a figure.
 
-5. Something a friend would actually bring up over a cup of something: a
-   release, a match, a small strange thing that happened, a thing people
-   are arguing about. Skip what is merely important.`
+5. Something a host would actually bring up on air: a release, a match, a
+   small strange thing that happened, a thing people are arguing about. Skip
+   what is merely important.
+
+6. Keep the hard nouns. A title, a name, a place, a date, a number that
+   matters — those are what make a thing real when it is said aloud. A gist
+   with them scrubbed out is mood, not material.`
 
 // The CONTRACT half — code-owned: language, region, freshness, dedupe,
 // privacy, and how the task ends. A listener policy cannot loosen these.

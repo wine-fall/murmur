@@ -874,18 +874,23 @@ describe('rwt rendering (spec 13 §2.5)', () => {
   const base = { persona: 'p', recent: [] }
   const rwt = { title: 'Typhoon season opens early', gist: 'The first storm came in a month ahead of the usual.' }
 
-  it('renders the item as material with the usage lines, on both talk builders', () => {
+  // The line is drawn on register, never on content: a host names the thing
+  // and carries on; a newsreader reads a rundown. Scrubbing the names out is
+  // the #44 attractor again, so the prompt must ask for them, not forbid them.
+  it('renders the item on the desk with the host-not-newsreader usage, on both talk builders', () => {
     for (const p of [buildNextTalkPrompt({ ...base, rwt }), buildNextTalksPrompt({ ...base, rwt }, 2)]) {
       expect(p).toContain('Typhoon season opens early')
       expect(p).toContain('a month ahead of the usual')
-      expect(p).toMatch(/material, not an assignment/i)
-      expect(p).toMatch(/never a bulletin/i)
-      expect(p).toMatch(/leave it/i)
+      expect(p).toMatch(/name the thing — the title, who, where, when/)
+      expect(p).toMatch(/not a newsreader's rundown/i)
+      expect(p).toMatch(/not a list/i)
+      expect(p).not.toMatch(/never a headline/i)
+      expect(p).not.toMatch(/leave it/i)
     }
   })
 
   it('renders nothing without an item', () => {
-    expect(buildNextTalkPrompt(base)).not.toMatch(/out in the world/i)
+    expect(buildNextTalkPrompt(base)).not.toMatch(/on the desk for this stretch/i)
   })
 
   it('never rides an anchor or coda beat, even if the pack carries one', () => {
@@ -937,6 +942,7 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
     for (const word of ['news', 'tech', 'entertainment', 'sports']) {
       expect(DEFAULT_RWT_POLICY.toLowerCase()).toContain(word)
     }
+    expect(DEFAULT_RWT_POLICY).toMatch(/hard nouns/i)
     expect(buildFetchTopicsPrompt({ ...req, policy: DEFAULT_RWT_POLICY })).toContain(DEFAULT_RWT_POLICY)
   })
 

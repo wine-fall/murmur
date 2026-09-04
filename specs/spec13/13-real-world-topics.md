@@ -42,8 +42,9 @@
 3. **A probability roll** (`RwtRoll`): whether a given talk batch is offered a
    topic at all. Not every batch: an item on every batch is a news ticker, and
    the listener said so.
-4. **The prompt seam**: `ContextPack.rwt` and `rwtLine()` — rendered as
-   *material, not an assignment*. The anchor beats and the coda never carry it.
+4. **The prompt seam**: `ContextPack.rwt` and `rwtLine()` — one item on the
+   desk, brought in *as a host does*: named, said in a sentence or two, then
+   carried past. The anchor beats and the coda never carry it.
 5. **The knob**: `rwtEnabled` in settings (default on), `--no-rwt`, and a
    `rwt` field on `change_settings` so "stop with the news" typed to the radio
    turns it off.
@@ -168,10 +169,15 @@ rwt?: {
 ### 2.5 The prompt seam
 
 - `ContextPack.rwt?: { readonly title: string; readonly gist: string }`.
-- `rwtLine(ctx)` renders **material, not an assignment**: the item, then the
-  usage — one thread of it, in the host's own words, the way a friend mentions
-  something they read; never a bulletin, never a headline read out, never a
-  list; leave it if it does not fit. Absent → renders nothing.
+- `rwtLine(ctx)` renders the item **on the desk for this stretch**, then the
+  usage: name the thing — the title, who, where, when — say what happened in
+  a sentence or two and what you make of it, then carry on; one item, in the
+  host's own voice; not a newsreader's rundown, not a "here is the news"
+  frame, not a list. The line is drawn on **register, never on content**: an
+  earlier draft forbade "a headline read out" and let the host "leave it",
+  and the measured result was the item scrubbed to mood (a Netflix release
+  became "a friend wanted to watch a show") — the #44 attractor with a fig
+  leaf. Absent → renders nothing.
 - `DEFAULT_RWT_POLICY` / `RWT_POLICY_HEADER` / `buildFetchTopicsPrompt(req)`
   live in `src/prompts.ts`. The listener's `rwt-policy.md` replaces the policy
   wholesale (HTML comments stripped, the music-policy discipline).
@@ -237,7 +243,8 @@ policy.
 and the weighting: mostly what is happening where the listener is, some of
 what the whole world is talking about, nothing that needs a screen to make
 sense of, nothing that is only a number, prefer the human-scale angle of a
-big story over the headline. Seeded to `rwt-policy.md` on first use so it is
+big story over the headline, and **keep the hard nouns** — a title, a name,
+a place, a date — because they are what make the thing real said aloud. Seeded to `rwt-policy.md` on first use so it is
 discoverable; read fresh on every fetch.
 
 ### 3.5 Language and region without a store
@@ -300,8 +307,8 @@ French gists about what matters in Japan, which is the intended reading of
 
 ### By-ear (open — one issue)
 
-9. A mentioned topic sounds like a friend bringing up something they read,
-   not a bulletin.
+9. A mentioned topic is named — the title, who, where — and said the way a
+   host says it, not a newsreader: one item, no rundown, no list.
 10. The proportion feels right — present but not every stretch.
 11. The gist language matches the persona's spoken language.
 12. Turning it off by typing works and the host does not keep mentioning news.
