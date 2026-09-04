@@ -243,17 +243,20 @@ export class RealWorldTopics {
     const started = Date.now()
     try {
       const covered = new Set(this.deps.covered?.() ?? [])
-      const topics = await this.deps.brain.fetchTopics({
+      const fetched = await this.deps.brain.fetchTopics({
         ...this.deps.request(),
         avoid: [...new Set([...this.deps.pool.titles(), ...covered])],
       })
+      // A title the fetch was told to avoid and returned anyway is dropped
+      // here: the prompt is a request, the ledger is the record. Dropped
+      // BEFORE the emptiness check — merging nothing would stamp the pool
+      // fresh and leave it empty for a whole stale interval.
+      const topics = fetched.filter((t) => !covered.has(t.title))
       if (topics.length === 0) {
-        this.log('rwt.refresh failed (no topics returned)')
+        this.log(`rwt.refresh failed (${fetched.length === 0 ? 'no topics returned' : 'nothing new returned'})`)
         return
       }
-      // A title the fetch was told to avoid and returned anyway is dropped
-      // here: the prompt is a request, the ledger is the record.
-      const n = this.deps.pool.merge(topics.filter((t) => !covered.has(t.title)))
+      const n = this.deps.pool.merge(topics)
       this.log(`rwt.refresh n=${n} ms=${Date.now() - started}`)
       this.logPool()
     } catch (err) {

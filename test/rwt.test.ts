@@ -215,6 +215,21 @@ describe('RealWorldTopics (spec 13 §2.4 / §3.1)', () => {
     await until(() => requests.length === 2)
     expect(requests[1]?.avoid).toEqual(['A', 'C', 'B', 'Old story'])
   })
+
+  // codex review: a fetch that returns only ledgered titles must count as a
+  // failed refresh — merging nothing would stamp the pool fresh and leave it
+  // empty and silent for a whole stale interval.
+  it('a fetch that returns only covered titles is a failed refresh, retried', async () => {
+    const { pool, rwt, lines } = feed({
+      covered: () => ['Old story'],
+      fetch: async () => [topic('Old story')],
+    })
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(pool.counts()).toEqual({ fresh: 0, used: 0 })
+    expect(lines).toContain('rwt.refresh failed (nothing new returned)')
+    expect(rwt.maybeRefresh()).toBe(true) // still due
+  })
 })
 
 // The fetch task itself (spec 13 §2.2): WebSearch bounded in, one terminal
