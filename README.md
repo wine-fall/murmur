@@ -9,6 +9,12 @@
 
 **A companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/a725fddd-f00e-4bb1-b6ca-032d50093f17" controls width="100%"></video>
+</p>
+
+<p align="center"><em><strong>Turn the sound on</strong> — the voice is the point. Two and a half minutes of the radio actually running.</em></p>
+
 murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It *broadcasts, never solicits* — it keeps going whether or not you say anything, and when you type back it chats for a bit, then eases back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **proactive + emotional companionship + voice radio** combination. That gap is murmur.
