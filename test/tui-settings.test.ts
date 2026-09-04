@@ -17,6 +17,7 @@ const VALUES: Settings = {
   recentWindow: 12,
   muted: false,
   tuiPet: true,
+  rwtEnabled: true,
 }
 
 const snap = (

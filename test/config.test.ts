@@ -186,6 +186,35 @@ describe('pacing flags', () => {
   })
 })
 
+// spec 13 §2.6: the knob is anchorsEnabled's shape (file < flag); the numbers
+// are env-only, with the MURMUR_TTS_* warn-and-default posture.
+describe('real-world topics config', () => {
+  it('defaults on; --no-rwt turns it off', () => {
+    expect(parseCli([], NO_ENV).config.rwtEnabled).toBe(true)
+    expect(parseCli(['--no-rwt'], NO_ENV).config.rwtEnabled).toBe(false)
+  })
+
+  it('places the pool under cache/ and the policy at the home root', () => {
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
+    expect(config.rwtPoolPath).toBe('/tmp/mh/cache/rwt.json')
+    expect(config.rwtPolicyPath).toBe('/tmp/mh/rwt-policy.md')
+  })
+
+  it('reads the roll and freshness numbers from env, and ignores a bad one with a warning', () => {
+    const { config } = parseCli(
+      [],
+      isolated({ MURMUR_RWT_P: '0.5', MURMUR_RWT_MIN_GAP: '2', MURMUR_RWT_MAX_GAP: '6', MURMUR_RWT_STALE_HOURS: '3', MURMUR_RWT_TTL_HOURS: '24' }),
+    )
+    expect([config.rwtP, config.rwtMinGap, config.rwtMaxGap, config.rwtStaleHours, config.rwtTtlHours]).toEqual([
+      0.5, 2, 6, 3, 24,
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseCli([], isolated({ MURMUR_RWT_P: 'often' })).config.rwtP).toBe(0.35)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('MURMUR_RWT_P'))
+    warn.mockRestore()
+  })
+})
+
 // spec 03-01 §2.3: the pick policy is a file the listener owns, at the home
 // root; the listening-data key is a secret, so it only ever comes from env.
 describe('music discovery config', () => {

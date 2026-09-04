@@ -638,6 +638,7 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       recentWindow: 12,
       muted: false,
       tuiPet: true,
+      rwtEnabled: true,
     }
 
     function wire(applyOk = true): SettingsPatch[] {

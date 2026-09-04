@@ -7,6 +7,8 @@ import type {
   AudioClip,
   Brain,
   ContextPack,
+  FetchedTopic,
+  FetchTopicsRequest,
   Harness,
   MixingPlayer,
   MusicContext,
@@ -30,7 +32,7 @@ import { LineQueue } from '../src/host.ts'
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
 // returned object to exercise hot application.
 export function directorSettings(over: Partial<DirectorSettings> = {}): DirectorSettings {
-  return { gapSeconds: 0, recentWindow: 12, anchorsEnabled: true, musicEnabled: true, ...over }
+  return { gapSeconds: 0, recentWindow: 12, anchorsEnabled: true, musicEnabled: true, rwtEnabled: true, ...over }
 }
 
 // Stands in for the model driving an agentic task: `play` is handed the task's
@@ -106,6 +108,15 @@ export class FakeBrain implements Brain {
   respondDelayMs = 0
   failRespond = false
   seedAnswers: (readonly SeedAnswer[])[] = []
+
+  // Scripted real-world items (spec 13); empty by default, like the stub.
+  topics: FetchedTopic[] = []
+  fetchRequests: FetchTopicsRequest[] = []
+
+  async fetchTopics(req: FetchTopicsRequest): Promise<FetchedTopic[]> {
+    this.fetchRequests.push(req)
+    return this.topics
+  }
 
   async nextTalks(ctx: ContextPack, _count: number): Promise<TalkBeat[]> {
     this.nextTalksCalls++

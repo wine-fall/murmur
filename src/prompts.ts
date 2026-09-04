@@ -8,7 +8,7 @@
 
 import { fileURLToPath } from 'node:url'
 
-import type { ContextPack, RecallHit, SeedAnswer, Turn } from './contracts.ts'
+import type { ContextPack, FetchTopicsRequest, RecallHit, SeedAnswer, Turn } from './contracts.ts'
 
 // The bundled static persona seed (L0). Spec 06 will generate/evolve personas
 // at runtime; this is only the default.
@@ -176,6 +176,27 @@ function coveredLine(ctx: ContextPack): string {
   return `\n(Recently covered — don't repeat these: ${ctx.coveredTopics.join(', ')})`
 }
 
+// One real-world item on the desk for this stretch (spec 13 §2.5). A host
+// names the thing — the title, who, where, when — says what happened and what
+// they make of it, and carries on; what a host does NOT do is switch into a
+// newsreader's rundown. The line draws on register, never on content: an item
+// with its names scrubbed out is the cozy-imagery attractor (#44) wearing a
+// fig leaf. The anchor beats and the coda have a job of their own and never
+// carry one, even if a pack arrives with it. Absent -> nothing.
+function rwtLine(ctx: ContextPack): string {
+  const rwt = ctx.rwt
+  if (rwt === undefined) return ''
+  const cue = ctx.cue ?? ''
+  if (cue === CODA_CUE || cue.startsWith('anchor:')) return ''
+  return (
+    `\n(On the desk for this stretch, from today: ${rwt.title} — ${rwt.gist})\n` +
+    'Bring it in the way a host does: name the thing — the title, who, where, ' +
+    'when — say what happened in a sentence or two and what you make of it, ' +
+    'then carry on. One item, in your own voice. Not a newsreader\'s rundown, ' +
+    'not a "here is the news" frame, not a list.'
+  )
+}
+
 // Render recent turns as a transcript. The host's own prior lines are "You";
 // the listener's lines are "Listener".
 function renderTranscript(ctx: ContextPack, dropTrailingUser?: string): string {
@@ -196,7 +217,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -208,7 +229,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n` +
+    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
     `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
@@ -319,6 +340,62 @@ export function buildMusicSituation(recent: readonly Turn[], avoid: readonly str
     `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}` +
     'Intent: a music break in the program. Pick something that fits the mood and\n' +
     "subjects of the conversation above (or the persona's taste if it is quiet)."
+  )
+}
+
+// --- real-world topics (spec 13 §3.3/§3.4) -------------------------------- //
+
+// A researcher, never the persona: the gists are handed to the host later as
+// material, so nothing here may speak in the host's voice.
+export const RWT_FETCH_SYSTEM_PROMPT =
+  'You gather real-world material for a radio host: a few things that ' +
+  'actually happened, each told briefly enough that a friend could mention ' +
+  'it in passing without reading from a screen.'
+
+export const RWT_POLICY_HEADER = 'What to look for:'
+
+// The TASTE half — replaceable wholesale by $MURMUR_HOME/rwt-policy.md.
+export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertainment, sports. Mix them; do not
+   let one kind take the whole batch.
+
+2. Mostly what is happening where the listener is, some of what the whole
+   world is talking about. Local first, international as the fallback, never
+   the other way round.
+
+3. Prefer the human-scale angle of a big story over the headline: what it is
+   like for the people in it, not the number in the title.
+
+4. Nothing that needs a screen to make sense of — no charts, no tables, no
+   "as shown below". Nothing that is only a figure.
+
+5. Something a host would actually bring up on air: a release, a match, a
+   small strange thing that happened, a thing people are arguing about. Skip
+   what is merely important.
+
+6. Keep the hard nouns. A title, a name, a place, a date, a number that
+   matters — those are what make a thing real when it is said aloud. A gist
+   with them scrubbed out is mood, not material.`
+
+// The CONTRACT half — code-owned: language, region, freshness, dedupe,
+// privacy, and how the task ends. A listener policy cannot loosen these.
+export function buildFetchTopicsPrompt(req: FetchTopicsRequest): string {
+  const avoid =
+    req.avoid.length === 0
+      ? ''
+      : `\nAlready in the pool — find something else:\n${req.avoid.map((t) => `- ${t}`).join('\n')}\n`
+  return (
+    `Write every title and every gist in ${req.language}. The listener is in the ${req.timezone} ` +
+    'timezone; weight what matters there, international as the fallback.\n' +
+    `Today is ${req.today}. Only things from today or yesterday — nothing older, ` +
+    'nothing undated.\n' +
+    'Nothing about private individuals, and nothing that identifies a person ' +
+    'who is not a public figure.\n' +
+    `${avoid}\n` +
+    'Use WebSearch to find candidates, then call submit_topics ONCE with three ' +
+    'to eight items. Each item: a one-line title, a gist of two to three spoken ' +
+    'sentences a friend could say from memory (no URLs, no outlet names, no ' +
+    'quotes), and its kind. Calling submit_topics ends the task.\n\n' +
+    `${RWT_POLICY_HEADER}\n${req.policy.trim()}`
   )
 }
 
@@ -835,7 +912,8 @@ const STEER_END_RULE =
 const STEER_SETTINGS_RULE =
   '- An explicit ask to change how the radio behaves — music on/off, more ' +
   'music or more talk, breathing room, sound/mute, the morning and night ' +
-  'moments, the pixel pet, memory span, or the language it speaks -> call ' +
+  'moments, the pixel pet, memory span, the language it speaks, or whether it ' +
+  'brings up real-world news and happenings at all -> call ' +
   'change_settings with only the fields they asked about, then say what ' +
   'changed. A mood remark is not a request ("this song is too loud" is not ' +
   '"mute"). For the language, pass the language name; pass an empty string to ' +

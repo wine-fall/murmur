@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { loadPersona, personaLine, renderPersona } from '../src/persona.ts'
+import { loadPersona, personaLanguage, personaLine, renderPersona } from '../src/persona.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
 
 describe('loadPersona', () => {
@@ -74,5 +74,22 @@ describe('personaLine', () => {
   it('never renders nothing', () => {
     expect(personaLine('   ')).toBe('(empty)')
     expect(personaLine('#')).toBe('(empty)')
+  })
+})
+
+// spec 13 §3.5: the spoken language lives in the persona's own words once the
+// install is past its first run — the machine locale may have changed since.
+describe('personaLanguage', () => {
+  it('reads the language the persona says it speaks', () => {
+    expect(personaLanguage('# x\n- **Always speak in Chinese (Mandarin).** Natural and spoken.')).toBe(
+      'Chinese (Mandarin)',
+    )
+    expect(personaLanguage('You are Ame. Speak in Japanese, softly.')).toBe('Japanese')
+  })
+
+  it('is undefined when the persona never names one, and a manner is not a language', () => {
+    expect(personaLanguage('You are the host. Keep it warm.')).toBeUndefined()
+    expect(personaLanguage('Speak in a warm tone, never rushed.')).toBeUndefined()
+    expect(personaLanguage(renderPersona('speak in {{language}}', 'English'))).toBe('English')
   })
 })

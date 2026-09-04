@@ -19,6 +19,7 @@ const BASE: Settings = {
   recentWindow: 12,
   muted: false,
   tuiPet: true,
+  rwtEnabled: true,
 }
 
 const home = () => mkdtempSync(join(tmpdir(), 'murmur-settings-'))

@@ -83,6 +83,8 @@ export const SettingsValuesSchema = z.object({
   // swap (`--voice stub` remains the dev-surface knob for not synthesizing).
   muted: z.boolean(),
   tuiPet: z.boolean(),
+  // Whether the host is offered real-world material at all (spec 13 §2.6).
+  rwtEnabled: z.boolean(),
   // The one OPTIONAL knob (spec 12 §3.9). Absent means the listener never said,
   // and the persona decides; set is an override applied as a directive on top
   // of the persona, never an edit to persona.md. Free text — a language name as
@@ -102,6 +104,7 @@ export const SettingsPatchSchema = z.object({
   recentWindow: z.number().int().positive().optional(),
   muted: z.boolean().optional(),
   tuiPet: z.boolean().optional(),
+  rwtEnabled: z.boolean().optional(),
   // Empty string is legal HERE and only here: it is how the listener clears the
   // override and hands the language back to the persona (spec 12 §3.9).
   language: z.union([LanguageSchema, z.literal('')]).optional(),

@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-03 (memory v1.5 built — spec 05-01 recall & forgetting)_
+_Last updated: 2026-09-03 (real-world topics built — spec 13)_
 
 ## Where we are
 
@@ -18,7 +18,7 @@ _Last updated: 2026-09-03 (memory v1.5 built — spec 05-01 recall & forgetting)
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
 bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
-07, 10, 11 and 12 built on top. Unit gate
+07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
 spec for what it does, its PR for how it got there. Everything left is under
@@ -32,7 +32,7 @@ it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
-- **#44** (eng) Cold-start talk repeats the same cozy imagery — a model-attractor problem, not hardcoded text.
+- **#44** (eng) Cold-start talk repeats the same cozy imagery — absorbed by spec 13; closes on #202's first box.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
 - **#80** (by-ear) First-run onboarding in a real terminal — spec 06 criterion 12.
 - **#81** (by-ear) A real day of pacing — spec 07 §5.16.
@@ -45,6 +45,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
 - **#197** (by-ear) Memory v1.5 by feel: fading, fold cadence, forgetting, how a recalled memory sounds — spec 05-01 §6.
 - **#198** (by-ear) The talk<->music transitions: announce hand-over and the slow lift — spec 03-02 §6.1.
+- **#202** (by-ear) Real-world topics as a friend would mention them, and the clock as bearings — spec 13 §5, spec 04 §3.4.
 
 ## Pinned — do not relitigate
 

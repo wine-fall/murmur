@@ -30,6 +30,7 @@ type SettingsIntent = {
   pet?: boolean | undefined
   memorySpan?: number | undefined
   language?: string | undefined
+  rwt?: boolean | undefined
 }
 
 function settingsPatch(intent: SettingsIntent): SettingsPatch | null {
@@ -45,6 +46,7 @@ function settingsPatch(intent: SettingsIntent): SettingsPatch | null {
     ...(intent.pet !== undefined && { tuiPet: intent.pet }),
     ...(intent.memorySpan !== undefined && { recentWindow: intent.memorySpan }),
     ...(intent.language !== undefined && { language: intent.language }),
+    ...(intent.rwt !== undefined && { rwtEnabled: intent.rwt }),
   }
   return Object.keys(patch).length === 0 ? null : patch
 }
@@ -120,6 +122,10 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
               'the language to speak, as a name ("Japanese", "Traditional ' +
                 'Chinese"). Empty string returns it to its own default.',
             ),
+          rwt: z
+            .boolean()
+            .optional()
+            .describe('whether the host brings up real-world news and happenings at all'),
         },
         async (args) => {
           // The pane greys the music items when this run has no pipeline; the

@@ -67,6 +67,38 @@ export type ContextPack = {
   readonly coveredTopics?: readonly string[]
   readonly activity?: Activity
   readonly cue?: string
+  // One real-world item offered to this batch (spec 13 §2.5): material, not
+  // an assignment. Absent on most batches — the roll decides — and always
+  // absent on an anchor or coda beat.
+  readonly rwt?: { readonly title: string; readonly gist: string }
+}
+
+// --- real-world topics (spec 13) ------------------------------------------ //
+
+// What the fetch task hands back: the item itself. The pool adds identity,
+// age and the used mark.
+export type FetchedTopic = {
+  readonly title: string
+  readonly gist: string
+  readonly category: string
+}
+
+export type RwtTopic = FetchedTopic & {
+  readonly id: string
+  readonly fetchedAt: number // epoch seconds
+  readonly used: boolean
+}
+
+// Everything the fetch is told about the listener (spec 13 §2.2): a language
+// name for the gists, the timezone as the only region signal, today's date,
+// the titles already held, and the listener's taste half. Nothing else leaves
+// the machine.
+export type FetchTopicsRequest = {
+  readonly language: string
+  readonly timezone: string
+  readonly today: string
+  readonly avoid: readonly string[]
+  readonly policy: string
 }
 
 export interface VoiceProvider {
@@ -244,6 +276,10 @@ export type Task<T> = {
   readonly model: string // tier per task (music search -> Haiku)
   readonly maxTurns: number // hard bound on the tool-use loop
   readonly tools: (finish: (value: T) => void) => TaskTool[]
+  // Built-in SDK tools the task may use beside murmur's own (spec 13 §2.2).
+  // Bounded AND pre-approved by the harness. Default none: the pick and the
+  // steer task stay tool-less underneath.
+  readonly builtins?: readonly string[]
 }
 
 // The agentic capability, separate from the tool-less Brain so talk-only brains
@@ -391,4 +427,8 @@ export interface Brain {
   // the answers do not settle the question. Tool-less text generation, same
   // posture as compactProfile.
   seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string>
+  // One bounded WebSearch run for real-world material (spec 13 §2.2), under a
+  // neutral framing — a researcher, never the persona. [] on the stub, on an
+  // exhausted turn budget, or when the model never made the terminal call.
+  fetchTopics(req: FetchTopicsRequest): Promise<FetchedTopic[]>
 }
