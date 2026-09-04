@@ -307,9 +307,9 @@ describe('PersistentMemoryStore.forget (spec 05-01 §3.5)', () => {
     expect(store.recent(10).map((t) => t.text)).toEqual([
       'the desk under the window sounds good',
     ])
-    // A survivor is still there after a reload — on the same clock, or the
-    // 48 h recent window ages the row out once the wall clock is two days
-    // past the fixture's date.
+    // A survivor is still there after a reload. The reopen reads the same clock
+    // the rows were written on: on the real one, the 48h recent window drops
+    // them for age, and the test goes red on a calendar day, not a regression.
     const reopened = new PersistentMemoryStore({ dir: path, now: c.now })
     expect(reopened.recent(10).length).toBe(1)
   })
