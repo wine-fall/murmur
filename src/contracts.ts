@@ -98,6 +98,8 @@ export type FetchTopicsRequest = {
   readonly timezone: string
   readonly today: string
   readonly avoid: readonly string[]
+  // The profile's (About the listener) section, tags stripped; '' = none.
+  readonly follows: string
 }
 
 export interface VoiceProvider {

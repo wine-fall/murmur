@@ -418,7 +418,7 @@ describe('real-world topics wiring (spec 13)', () => {
     const home = emptyHome()
     const c = config([], { MURMUR_HOME: home })
     const brain = new FakeBrain()
-    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost())
+    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost(), new InProcessMemoryStore())
     expect(existsSync(join(home, 'rwt-policy.md'))).toBe(false)
     rwt.maybeRefresh()
     await rwt.drain()
@@ -427,6 +427,18 @@ describe('real-world topics wiring (spec 13)', () => {
     expect(req.timezone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone)
     expect(req.today).toMatch(/^\d{4}-\d{2}-\d{2}$/)
     expect(req).not.toHaveProperty('policy')
+  })
+
+  it('hands the fetch what the listener follows, from the profile, read at fetch time', async () => {
+    const c = config([], { MURMUR_HOME: emptyHome() })
+    const brain = new FakeBrain()
+    let profile = ''
+    const rwt = buildRwt(c, brain, () => 'Japanese', new FakeHost(), { profile: () => profile })
+    // Written after wiring, before the refresh: the fetch reads the live file.
+    profile = '(About the listener)\nFollows sumo. [stable]\n\n(Relationship & style)\nDry.'
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(brain.fetchRequests[0]!.follows).toBe('Follows sumo.')
   })
 
   it('the gist language is the override, else what the persona says it speaks, else the persona itself', () => {

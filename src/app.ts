@@ -54,7 +54,7 @@ import { YtDlpMusicProvider } from './music.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLanguage, personaLine } from './persona.ts'
 import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './guide.ts'
-import { buildFindMusicInstruction } from './prompts.ts'
+import { aboutSection, buildFindMusicInstruction } from './prompts.ts'
 import { LedgerScheduler } from './scheduler.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from './settings.ts'
 import {
@@ -300,14 +300,16 @@ export function rwtLanguage(override: string | undefined, persona: string): stri
 }
 
 // Real-world topics (spec 13): the pool under cache/, the roll from the env
-// knobs, the fetch on the cheap tier. `language` is read at fetch time from
-// where the host reads it, so an override lands on the next refresh; region
-// is the system timezone, in the prompt only, never stored.
+// knobs, the fetch on the cheap tier. `language` and the profile's About
+// section are read at fetch time, so an override or a compaction lands on
+// the next refresh; region is the system timezone, in the prompt only, never
+// stored.
 export function buildRwt(
   config: Config,
   brain: Pick<Brain, 'fetchTopics'>,
   language: () => string,
   host: Host,
+  memory: Pick<MemoryStore, 'profile'>,
 ): RealWorldTopics {
   return new RealWorldTopics({
     pool: new RwtPool({
@@ -323,6 +325,7 @@ export function buildRwt(
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
       // en-CA is the one locale whose short date is ISO YYYY-MM-DD, local.
       today: new Date().toLocaleDateString('en-CA'),
+      follows: aboutSection(memory.profile()),
     }),
     ...(host.debug !== undefined && { log: host.debug.bind(host) }),
   })
@@ -844,6 +847,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
           new ClaudeBrain(config.rwtModel),
           () => rwtLanguage(settings.current().language, persona),
           host,
+          memory,
         )
 
   const director = new Director({

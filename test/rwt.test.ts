@@ -145,7 +145,7 @@ function feed(over: {
         return over.fetch === undefined ? [topic('A'), topic('B')] : over.fetch(req)
       },
     },
-    request: () => ({ language: 'Japanese', timezone: 'Asia/Tokyo', today: '2026-09-03' }),
+    request: () => ({ language: 'Japanese', timezone: 'Asia/Tokyo', today: '2026-09-03', follows: '' }),
     log: (m) => lines.push(m),
   })
   return { pool, rwt, requests, lines, clock }
@@ -207,6 +207,7 @@ describe('fetchTopicsTask (spec 13 §2.2)', () => {
     timezone: 'Asia/Tokyo',
     today: '2026-09-03',
     avoid: [],
+    follows: '',
   }
 
   it('names WebSearch as its one built-in, bounds the turns, and frames neutrally', async () => {

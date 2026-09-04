@@ -30,6 +30,7 @@ import {
   STATUS_MICROCOPY,
   statusMicrocopy,
   withLanguage,
+  aboutSection,
   buildFetchTopicsPrompt,
   DEFAULT_RWT_POLICY,
   RWT_FETCH_SYSTEM_PROMPT,
@@ -912,6 +913,7 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
     timezone: 'Asia/Tokyo',
     today: '2026-09-03',
     avoid: ['Already held', 'Also held'],
+    follows: '',
   }
 
   it('is a neutral researcher framing, not the persona', () => {
@@ -937,6 +939,21 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
     expect(buildFetchTopicsPrompt({ ...req, avoid: [] })).not.toMatch(/already in the pool/i)
   })
 
+  // spec 13 §3.4: the listener's half of the taste is the profile's (About the
+  // listener) section — what they follow, never how they like to be spoken to.
+  it('renders what the listener follows before the policy, with the privacy line', () => {
+    const p = buildFetchTopicsPrompt({ ...req, follows: 'Follows the Premier League.\nReads about Rust.' })
+    expect(p).toContain('(What the listener follows)\nFollows the Premier League.\nReads about Rust.')
+    expect(p).toMatch(/never for them/i)
+    expect(p.indexOf('(What the listener follows)')).toBeLessThan(p.indexOf(RWT_POLICY_HEADER))
+  })
+
+  it('an empty follows renders no block at all', () => {
+    const p = buildFetchTopicsPrompt({ ...req, follows: '' })
+    expect(p).not.toContain('What the listener follows')
+    expect(p).not.toMatch(/never for them/i)
+  })
+
   it('the default policy names the four categories and the local weighting', () => {
     for (const word of ['news', 'tech', 'entertainment', 'sports']) {
       expect(DEFAULT_RWT_POLICY.toLowerCase()).toContain(word)
@@ -952,5 +969,30 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
       memoryWired: false,
     })
     expect(p).toMatch(/real-world|news/i)
+  })
+})
+
+// spec 13 §3.4: only the (About the listener) section leaves for the fetch —
+// (Relationship & style) is tone, and tone is not a search term.
+describe('aboutSection (spec 13 §3.4)', () => {
+  const profile = `(About the listener)
+Follows the Premier League. [seen 2026-09-01]
+Learning Rust. [stable]
+
+(Relationship & style)
+Likes a slow evening voice; running joke about the kettle.`
+
+  it('cuts the About section out, tags stripped, and leaves the style section behind', () => {
+    expect(aboutSection(profile)).toBe('Follows the Premier League.\nLearning Rust.')
+  })
+
+  it('a profile without the labelled section yields nothing', () => {
+    expect(aboutSection('')).toBe('')
+    expect(aboutSection('Just some notes\nwith no sections.')).toBe('')
+    expect(aboutSection('(Relationship & style)\nGentle.')).toBe('')
+  })
+
+  it('the About section may be the whole profile', () => {
+    expect(aboutSection('(About the listener)\nRuns at night.\n')).toBe('Runs at night.')
   })
 })
