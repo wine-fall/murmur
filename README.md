@@ -10,7 +10,7 @@
 **A companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/a725fddd-f00e-4bb1-b6ca-032d50093f17" controls width="100%"></video>
+  <video src="https://github.com/user-attachments/assets/2d26bfab-b72d-425b-b21a-548326ff19eb" controls width="100%"></video>
 </p>
 
 <p align="center"><em><strong>Turn the sound on</strong> — the voice is the point. Two and a half minutes of the radio actually running.</em></p>
