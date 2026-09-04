@@ -263,6 +263,32 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
     const p = buildRespondPrompt('hey', { persona: 'p', recent: [], profile: 'night owl' })
     expect(p).toContain('(What you know about the listener)\nnight owl')
   })
+
+  // The fading ledger's tags (spec 05-01 §3.3) are the file's bookkeeping,
+  // not something the host knows about the listener: the file keeps them, the
+  // prompt does not.
+  it('strips the trailing [seen …] / [stable] bookkeeping from the profile block (spec 04 bugfix)', () => {
+    const profile =
+      '(About them)\n- Drinks coffee at night [seen 2026-08-31]\n- Called Zach [stable]\n- Likes jazz [seen 2026-08-30] [stable]'
+    for (const p of [
+      buildNextTalkPrompt({ persona: 'p', recent: [], profile }),
+      buildNextTalksPrompt({ persona: 'p', recent: [], profile }, 2),
+      buildRespondPrompt('hey', { persona: 'p', recent: [], profile }),
+    ]) {
+      expect(p).toContain('- Drinks coffee at night\n- Called Zach\n- Likes jazz\n')
+      expect(p).not.toMatch(/\[seen /)
+      expect(p).not.toContain('[stable]')
+    }
+  })
+
+  // Only the line-end sequence is bookkeeping; the same words inside a fact
+  // are the listener's (codex review).
+  it('leaves tag-shaped text inside a fact alone', () => {
+    const profile = '- Writes "[stable]" on every release branch [seen 2026-08-31]'
+    const p = buildNextTalkPrompt({ persona: 'p', recent: [], profile })
+    expect(p).toContain('- Writes "[stable]" on every release branch\n')
+    expect(p).not.toMatch(/\[seen /)
+  })
 })
 
 describe('music state + clock grounding (spec 04 bugfix)', () => {
@@ -305,8 +331,25 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
 
   it('renders the real clock alongside the scene cue', () => {
     const p = buildNextTalkPrompt({ ...base, time: 'Monday 2026-08-31, 2:28 pm', scene: 'afternoon' })
-    expect(p).toContain("It's Monday 2026-08-31, 2:28 pm")
+    expect(p).toContain('Monday 2026-08-31, 2:28 pm')
     expect(p).toContain('afternoon')
+  })
+
+  // The clock is bearings, not a line: every builder that shows it also says
+  // what it is for — and the reply path keeps the door open for a listener
+  // asking outright (codex review).
+  it('the clock comes with its usage, on every path that shows it (spec 04 bugfix)', () => {
+    const ctx = { ...base, time: 'Monday 2026-08-31, 2:28 pm' }
+    for (const p of [
+      buildNextTalkPrompt(ctx),
+      buildNextTalksPrompt(ctx, 2),
+      buildRespondPrompt('hey', ctx),
+    ]) {
+      expect(p).toContain('Monday 2026-08-31, 2:28 pm')
+      expect(p).toMatch(/bearings/)
+      expect(p).toMatch(/not (a line|something) to (say|read out)/i)
+      expect(p).toMatch(/asks you outright/)
+    }
   })
 
   it('an absent time renders no clock line', () => {
@@ -329,7 +372,7 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
       }),
     ]
     for (const p of prompts) {
-      expect(p).toContain("It's Monday 2026-08-31, 2:28 pm")
+      expect(p).toContain('Monday 2026-08-31, 2:28 pm')
       expect(p).toContain('"Song — Artist" is playing right now')
     }
   })
