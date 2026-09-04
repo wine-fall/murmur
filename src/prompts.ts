@@ -168,6 +168,21 @@ function profileBlock(ctx: ContextPack): string {
   return profile ? `(What you know about the listener)\n${profile}\n\n` : ''
 }
 
+// The profile's first section alone, tags stripped (spec 13 §3.4): what the
+// listener follows is a search term, how they like to be spoken to is not.
+// A profile without the labelled section (PROFILE_SHAPE) yields nothing —
+// the conservative reading, since the text leaves for a search task.
+const ABOUT_HEADER = '(About the listener)'
+const STYLE_HEADER = '(Relationship & style)'
+
+export function aboutSection(profile: string): string {
+  const start = profile.indexOf(ABOUT_HEADER)
+  if (start === -1) return ''
+  const body = profile.slice(start + ABOUT_HEADER.length)
+  const end = body.indexOf(STYLE_HEADER)
+  return (end === -1 ? body : body.slice(0, end)).replaceAll(PROFILE_TAGS, '').trim()
+}
+
 // A single volatile "recently covered — don't repeat" cue from the tier-③
 // ledger (spec 05 §3.5). Ledger-backed and cross-day, so it holds even when the
 // transcript is empty (the issue-#44 cold-open case). Empty -> nothing.
@@ -354,7 +369,8 @@ export const RWT_FETCH_SYSTEM_PROMPT =
 
 export const RWT_POLICY_HEADER = 'What to look for:'
 
-// The TASTE half — replaceable wholesale by $MURMUR_HOME/rwt-policy.md.
+// The TASTE half — what to look for and how to weight it. Built in: the
+// per-listener half of the taste is the profile, not a file (spec 13 §3.4).
 export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertainment, sports. Mix them; do not
    let one kind take the whole batch.
 
@@ -377,8 +393,15 @@ export const DEFAULT_RWT_POLICY = `1. Four kinds of thing: news, tech, entertain
    with them scrubbed out is mood, not material.`
 
 // The CONTRACT half — code-owned: language, region, freshness, dedupe,
-// privacy, and how the task ends. A listener policy cannot loosen these.
+// privacy, and how the task ends. Nothing the listener says can loosen these.
 export function buildFetchTopicsPrompt(req: FetchTopicsRequest): string {
+  // The listener's half of the taste, with the line the code owns: their
+  // interests steer the search; they themselves are never its subject.
+  const follows = req.follows.trim()
+    ? `(What the listener follows)\n${req.follows.trim()}\n` +
+      'Lean the search toward these. Search for what they follow, never for ' +
+      'them, and never for anything that identifies them.\n\n'
+    : ''
   const avoid =
     req.avoid.length === 0
       ? ''
@@ -395,7 +418,7 @@ export function buildFetchTopicsPrompt(req: FetchTopicsRequest): string {
     'to eight items. Each item: a one-line title, a gist of two to three spoken ' +
     'sentences a friend could say from memory (no URLs, no outlet names, no ' +
     'quotes), and its kind. Calling submit_topics ends the task.\n\n' +
-    `${RWT_POLICY_HEADER}\n${req.policy.trim()}`
+    `${follows}${RWT_POLICY_HEADER}\n${DEFAULT_RWT_POLICY}`
   )
 }
 

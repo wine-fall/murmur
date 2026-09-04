@@ -131,6 +131,7 @@ function feed(over: {
   fetch?: (req: FetchTopicsRequest) => Promise<FetchedTopic[]>
   roll?: RwtRoll
   clock?: { now: number }
+  covered?: () => readonly string[]
 } = {}) {
   const clock = over.clock ?? { now: 1000 }
   const { pool } = poolAt(clock)
@@ -145,7 +146,8 @@ function feed(over: {
         return over.fetch === undefined ? [topic('A'), topic('B')] : over.fetch(req)
       },
     },
-    request: () => ({ language: 'Japanese', timezone: 'Asia/Tokyo', today: '2026-09-03', policy: 'news' }),
+    request: () => ({ language: 'Japanese', timezone: 'Asia/Tokyo', today: '2026-09-03', follows: '' }),
+    ...(over.covered !== undefined && { covered: over.covered }),
     log: (m) => lines.push(m),
   })
   return { pool, rwt, requests, lines, clock }
@@ -196,6 +198,38 @@ describe('RealWorldTopics (spec 13 §2.4 / §3.1)', () => {
     await until(() => requests.length === 2)
     expect(requests[1]?.avoid).toEqual(['A', 'B'])
   })
+
+  // spec 13 §3.7: the pool forgets in 48 h; what was told on air is in the
+  // ledger, so the fetch is told both — once each, in that order.
+  it('the fetch is told what was told on air too, and a returned one is not merged', async () => {
+    const { pool, rwt, requests, clock } = feed({
+      covered: () => ['B', 'Old story'],
+      fetch: async () => [topic('A'), topic('B'), topic('Old story'), topic('C')],
+    })
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(requests[0]?.avoid).toEqual(['B', 'Old story'])
+    expect(pool.titles()).toEqual(['A', 'C'])
+    clock.now += 7 * HOUR
+    rwt.maybeRefresh()
+    await until(() => requests.length === 2)
+    expect(requests[1]?.avoid).toEqual(['A', 'C', 'B', 'Old story'])
+  })
+
+  // codex review: a fetch that returns only ledgered titles must count as a
+  // failed refresh — merging nothing would stamp the pool fresh and leave it
+  // empty and silent for a whole stale interval.
+  it('a fetch that returns only covered titles is a failed refresh, retried', async () => {
+    const { pool, rwt, lines } = feed({
+      covered: () => ['Old story'],
+      fetch: async () => [topic('Old story')],
+    })
+    rwt.maybeRefresh()
+    await rwt.drain()
+    expect(pool.counts()).toEqual({ fresh: 0, used: 0 })
+    expect(lines).toContain('rwt.refresh failed (nothing new returned)')
+    expect(rwt.maybeRefresh()).toBe(true) // still due
+  })
 })
 
 // The fetch task itself (spec 13 §2.2): WebSearch bounded in, one terminal
@@ -207,7 +241,7 @@ describe('fetchTopicsTask (spec 13 §2.2)', () => {
     timezone: 'Asia/Tokyo',
     today: '2026-09-03',
     avoid: [],
-    policy: 'news',
+    follows: '',
   }
 
   it('names WebSearch as its one built-in, bounds the turns, and frames neutrally', async () => {

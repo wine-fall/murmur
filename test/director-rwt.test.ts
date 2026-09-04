@@ -69,19 +69,20 @@ function build(over: Partial<DirectorDeps> & { rwtEnabled?: boolean; player?: Fa
   const host = new FakeHost()
   const rwt = new FakeRwt()
   const knobs = directorSettings({ gapSeconds: 0, rwtEnabled })
+  const memory = new InProcessMemoryStore()
   const deps: DirectorDeps = {
     persona: 'p',
     brain,
     voice: new FakeVoice(),
     player,
-    memory: new InProcessMemoryStore(),
+    memory,
     host,
     settings: () => knobs,
     openUrl: () => {},
     rwt,
     ...rest,
   }
-  return { brain, host, player, rwt, knobs, director: new Director(deps) }
+  return { brain, host, player, rwt, knobs, memory, director: new Director(deps) }
 }
 
 describe('real-world topics on the talk path (spec 13 §2.4)', () => {
@@ -99,6 +100,25 @@ describe('real-world topics on the talk path (spec 13 §2.4)', () => {
         gist: 'The first storm came in a month ahead of the usual.',
       })
     }
+  })
+
+  // spec 13 §3.7: the ledger row lands with the take — the pool's own `used`
+  // mark and the ledger agree on when a topic is spent.
+  it('an offered item is ledgered as rwt, by title, once per offer', async () => {
+    const { brain, rwt, memory, director } = build()
+    brain.batches = [['a', 'b'], ['c', 'd'], ['e', 'f'], ['g', 'h']]
+    await director.run(3)
+    await until(() => brain.nextTalksCalls >= 2, 'refill fired')
+    expect(memory.recentRwt(10)).toHaveLength(rwt.offers)
+    expect(new Set(memory.recentRwt(10))).toEqual(new Set(['Typhoon season opens early']))
+  })
+
+  it('a null offer leaves no ledger row', async () => {
+    const { brain, rwt, memory, director } = build()
+    rwt.topic = null
+    brain.batches = [['a', 'b'], ['c', 'd']]
+    await director.run(1)
+    expect(memory.recentRwt(10)).toEqual([])
   })
 
   it('a null offer leaves the pack without the field', async () => {

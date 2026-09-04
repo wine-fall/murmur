@@ -29,7 +29,7 @@ describe('StubBrain', () => {
       timezone: 'UTC',
       today: '2026-09-03',
       avoid: [],
-      policy: '',
+      follows: '',
     })
     expect(topics).toEqual([])
   })

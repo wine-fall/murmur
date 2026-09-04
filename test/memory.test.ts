@@ -47,6 +47,19 @@ describe('InProcessMemoryStore', () => {
     expect(store.recentSongs(9)).toEqual(['A — B'])
     expect(store.recentTopics(0)).toEqual([])
   })
+
+  // spec 13 §3.7: a real-world item told on air is a ledger footprint of its
+  // own kind — the pool forgets in 48 h, the ledger does not.
+  it('keeps real-world topics as their own kind', () => {
+    const store = new InProcessMemoryStore()
+    store.recordEvent('rwt', 'Typhoon season opens early')
+    store.recordEvent('topic', 'rain')
+    store.recordEvent('rwt', 'A late equaliser at Anfield')
+    expect(store.recentRwt(1)).toEqual(['A late equaliser at Anfield'])
+    expect(store.recentRwt(9)).toEqual(['Typhoon season opens early', 'A late equaliser at Anfield'])
+    expect(store.recentTopics(9)).toEqual(['rain'])
+    expect(store.recentRwt(0)).toEqual([])
+  })
 })
 
 const dir = () => mkdtempSync(join(tmpdir(), 'murmur-mem-'))
@@ -100,6 +113,17 @@ describe('PersistentMemoryStore', () => {
     expect(b.recentTopics(10)).toEqual(['rain', 'coffee'])
     expect(b.recentTopics(1)).toEqual(['coffee'])
     expect(b.recentSongs(10)).toEqual(['X — Y'])
+  })
+
+  it('persists real-world topics across instances and sessions (spec 13 §3.7)', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.recordEvent('rwt', 'Typhoon season opens early')
+    a.recordEvent('topic', 'rain')
+    const b = opened(path, c)
+    expect(b.recentRwt(10)).toEqual(['Typhoon season opens early'])
+    expect(b.recentTopics(10)).toEqual(['rain'])
   })
 
   it('skips corrupt jsonl lines and malformed rows, warns, and keeps booting', () => {
