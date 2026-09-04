@@ -5,8 +5,10 @@
 > green; a real `fetchTopics` was smoked through the SDK and a real `rwt.offer`
 > was read out of `.dev/dev.log` against the beat it produced. **§5's by-ear
 > criteria are open** — user-run, tracked as one issue.
-> **Part**: The "say real things" line of [`../../ROADMAP.md`](../../ROADMAP.md)
-> §2. Gives the self-initiated talk task material from outside its own head:
+> **Part**: Delivers the "say real things" line of
+> [`../../ROADMAP.md`](../../ROADMAP.md), which deletes a line once it lands —
+> so this spec, not that file, is the record. Gives the self-initiated talk
+> task material from outside its own head:
 > news, releases, what is happening where the listener is. Absorbs
 > [#44](https://github.com/wine-fall/murmur/issues/44) (the cozy-imagery
 > attractor) as the durable fix — a cold boot stops being identical when the
@@ -59,7 +61,7 @@
   look-ahead. Talk reads the pool and nothing else.
 - **Storing region.** Region is read from the system timezone at fetch time
   and written into the fetch prompt; it is never persisted and never asked
-  for. Language is not region (ROADMAP §2).
+  for. Language is not region (§3.5).
 - **A new onboarding question, a pane row, or a TUI surface.** The knob is
   reachable by flag, file, and the conversation. The pane stays at spec 12's
   eight items.

@@ -1,6 +1,6 @@
 # murmur — roadmap
 
-_Where the radio goes next. Six lines; a line is deleted when it is done, not
+_Where the radio goes next. Five lines; a line is deleted when it is done, not
 archived. Order is the **P** column, not the row number — the numbers are
 names, so a line keeps its own while the order moves. This is the **direction**
 layer: the current build focus lives in [`specs/STATUS.md`](specs/STATUS.md).
@@ -10,7 +10,7 @@ carries its own, having been folded in from a closed issue._
 _P0_ blocks every judgement above it · _P1_ changes what murmur **is** ·
 _P2_ is reliability and quality · _P3_ is distribution and not rotting.
 
-_Last updated: 2026-09-04._
+_Last updated: 2026-09-04 (line 2 delivered and deleted)._
 
 **This round has two goals at once, and they do not conflict:** murmur should
 be good enough that its own author leaves it on, *and* runnable by someone who
@@ -19,14 +19,13 @@ hosted voice stays.
 
 | # | Line | What it is | This round delivers | P | Tracked as |
 |---|---|---|---|---|---|
-| 0 | Foundations | Land the work already written, and stop losing the listener's first line | A clean `main` and an input path that never drops a typed line | **P0** | §0 below (the reconciliation landed; the dropped line has not) |
+| 0 | Foundations | Stop losing the listener's first line | An input path that never drops a typed line | **P0** | §0 below (the reconciliation landed; the dropped line has not) |
 | 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can interject mid-track, not only at its edges | **P1** | the lead-in and the coda landed (#199, #200) and both already speak over the ducked track; what is missing is the autonomous mid-track beat, [#163](https://github.com/wine-fall/murmur/issues/163) |
-| 2 | Say real things | The host gets real material — news, new releases, what is happening near the listener | An off-loop topic pool, weighted by the listener's language and timezone | **P1** | [spec 13](specs/spec13/13-real-world-topics.md), landed via [#201](https://github.com/wine-fall/murmur/pull/201) + [#203](https://github.com/wine-fall/murmur/pull/203); by-ear [#202](https://github.com/wine-fall/murmur/issues/202), absorbs [#44](https://github.com/wine-fall/murmur/issues/44) |
 | 5 | Log in to the catalogue you already have | The catalogues murmur cannot reach are the ones behind a login | An opt-in, guided login for one auth-gated source — NetEase first | **P1** | new; §5 below |
 | 3 | Pick well, play reliably | Candidates come from sources worth trusting, not from keyword soup | Dead stream probes down; picks back under the spec-04 budget | **P2** | [#164](https://github.com/wine-fall/murmur/issues/164), [#149](https://github.com/wine-fall/murmur/issues/149) + new |
-| 4 | Others can run it, and it does not rot | A second brain backend, and an eval track under the stochastic behavior | murmur runs without a Claude Code login; prompt regressions get caught by a test | **P3** (its eval half, [#98](https://github.com/wine-fall/murmur/issues/98), is P2 once lines 1/2 land) | [#89](https://github.com/wine-fall/murmur/issues/89), [#98](https://github.com/wine-fall/murmur/issues/98), [#80](https://github.com/wine-fall/murmur/issues/80), [#153](https://github.com/wine-fall/murmur/issues/153), [#102](https://github.com/wine-fall/murmur/issues/102) |
+| 4 | Others can run it, and it does not rot | A second brain backend, and an eval track under the stochastic behavior | murmur runs without a Claude Code login; prompt regressions get caught by a test | **P3** (its eval half, [#98](https://github.com/wine-fall/murmur/issues/98), is P2 now that line 2 has landed unguarded) | [#89](https://github.com/wine-fall/murmur/issues/89), [#98](https://github.com/wine-fall/murmur/issues/98), [#80](https://github.com/wine-fall/murmur/issues/80), [#153](https://github.com/wine-fall/murmur/issues/153), [#102](https://github.com/wine-fall/murmur/issues/102) |
 
-Lines 1, 2 and 5 are the ones that change what murmur *is*. Line 0 comes first
+Lines 1 and 5 are the ones that change what murmur *is*. Line 0 comes first
 because every by-ear judgement above it is worthless while the first thing the
 listener says disappears.
 
@@ -34,14 +33,17 @@ listener says disappears.
 
 ## 0. Foundations
 
-**Land what is already written.** Several PRs sit green and unmerged. Two of
-them — the clock-and-progress enrichment and the beat-grounding fix — were
-built by separate sessions against the same seam: both add a time field and a
-music-state field to `ContextPack` and both touch `src/contracts.ts`,
-`src/director.ts`, `src/prompts.ts` and the same three test files. They must be
-**reconciled into one change before either merges**. The suggested base is the
-one with the four-state music union and the anti-fabrication rules, taking the
-play-progress arithmetic and the spec amendments from the other.
+**The backlog of parallel work is resolved — and not by merging all of it.**
+The beat-grounding fix landed first (#165: the four-state music union and the
+anti-fabrication rules). The clock enrichment followed in #191, which took the
+weekday-and-date half of #162 and **deliberately left out** the on-air track's
+played/remaining seconds: a beat is composed two deep ahead of air (spec 04
+§3.3), so a countdown stamped at compose time is already false when it is
+spoken, and it works against the grounding rules #165 had just added.
+`MusicState` carries no progress fields for that reason. Nothing is queued
+behind those two. One PR is still open,
+[#168](https://github.com/wine-fall/murmur/pull/168), a conflicting
+STATUS.md-only chore that blocks nothing.
 
 **The first line a listener types in a session is silently dropped.** Carried
 here from issue #145, which is closed in favour of this line.
@@ -121,46 +123,6 @@ due switch. Adding that race arm is the feature — with the staleness rule
 issue #163 records, since a buffered beat can be minutes old by the time it
 airs.
 
-## 2. Say real things
-
-The self-initiated talk task has **no way to learn anything**. It runs through
-`runTask` (`src/brain.ts:356-366`), whose allowlist is built from exactly the
-tools the caller hands it — and `nextTalks` hands it one, the terminal
-`emit_talk_beats` (`src/brain.ts:377`). `agenticOptions` sets `tools: []` and
-allows only murmur's own MCP names, so there are no built-in tools underneath
-either. The model holds a persona and a transcript and nothing else, so it
-invents its topics, and on a cold start it lands on the same few cozy images
-every time (the standing complaint in #44). A topic capability therefore has to
-arrive as a murmur tool on that task, or already folded into its prompt —
-loosening `isolatedOptions` (`src/brain.ts:97`) changes nothing here; that is
-the tool-less plain-text path.
-
-The line: give the host **real material** — news, new releases, what is
-happening where the listener is — weighted toward their locale, with
-international as the fallback rather than the default.
-
-Two constraints that shape the design rather than being discovered late:
-
-- **Off the live loop.** Picks already run 80–190 s in a bad session (line 3);
-  hanging a search off the talk path would be fatal to the look-ahead. Fetch
-  into a **topic pool** in `MURMUR_HOME` on a schedule and have talk read from
-  the pool. This also keeps the spec-07 token economy honest.
-- **Region is not stored, and language is not region.** The spoken language is
-  settled at first run and then owned by the persona, with `settings.language`
-  able to override it afterwards (`src/app.ts:200-203`, spec 12 §3.9);
-  `detectLanguage` reads only `LC_ALL` / `LC_MESSAGES` / `LANG`
-  (`src/locale.ts:44`) and is the boot default, not a live signal. So the pool
-  has to weight on the **effective** spoken language, read where the host reads
-  it — and get *where the listener is* from a separate signal. The system
-  timezone is the cheap one; it should not need a new onboarding question.
-
-This is also the durable fix for #44: a cold boot stops being identical when
-the host actually has something in front of it.
-
-Cost to accept: this is a **fourth network call**, and the "three network
-calls" wording in `specs/DESIGN.md` (already stale, per #104) has to move
-again.
-
 ## 3. Pick well, play reliably
 
 `search_music` is a single keyword query against the provider
@@ -186,9 +148,12 @@ The distribution half and the durability half of the same goal.
   still run the radio. The largest single item on this roadmap: a full second
   implementation of the `Brain` / `Harness` / `GuideCapable` seam, including
   permission routing and streaming input.
-- **#98** — the first eval track. Lines 1 and 2 are entirely stochastic
-  behaviour; without an LLM-in-the-loop test, every prompt edit after them is
-  unguarded.
+- **#98** — the first eval track, and it is overdue rather than upcoming: line
+  2 shipped a prompt whose whole job is stochastic (does the host bring a real
+  item in a host's register, or scrub it back to mood?), and the only thing
+  that caught the first draft getting that wrong was a person reading
+  `.dev/dev.log`. Every prompt edit on that surface is unguarded until this
+  lands.
 - **#80**, **#153**, **#102** — the first-run path a new listener actually
   walks: onboarding in a real terminal, quitting mid-onboarding, and the setup
   guide's consent rounds.
@@ -258,9 +223,16 @@ account sees no change at all.
 - **The by-ear acceptance passes** ([#79](https://github.com/wine-fall/murmur/issues/79),
   [#81](https://github.com/wine-fall/murmur/issues/81),
   [#99](https://github.com/wine-fall/murmur/issues/99),
-  [#138](https://github.com/wine-fall/murmur/issues/138)) — these are a gate,
+  [#138](https://github.com/wine-fall/murmur/issues/138),
+  [#197](https://github.com/wine-fall/murmur/issues/197),
+  [#198](https://github.com/wine-fall/murmur/issues/198),
+  [#202](https://github.com/wine-fall/murmur/issues/202)) — these are a gate,
   not a direction. They are meant to be walked in one long real session, not
-  scheduled as separate work items.
+  scheduled as separate work items. [#44](https://github.com/wine-fall/murmur/issues/44)
+  now closes on #202's first box: spec 13 is its durable fix, and only an ear
+  can say whether it worked.
 - **Doc debt** ([#104](https://github.com/wine-fall/murmur/issues/104)) and
   **watch items** ([#83](https://github.com/wine-fall/murmur/issues/83)) — one
-  edit each, taken when they are in the way.
+  edit each, taken when they are in the way. #104 grew a third claim to fix:
+  spec 13's topic fetch makes the network calls four, not the "three" DESIGN
+  still names.
