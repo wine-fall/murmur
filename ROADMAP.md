@@ -1,16 +1,15 @@
 # murmur — roadmap
 
-_Where the radio goes next. Five lines; a line is deleted when it is done, not
+_Where the radio goes next. Four lines; a line is deleted when it is done, not
 archived. Order is the **P** column, not the row number — the numbers are
 names, so a line keeps its own while the order moves. This is the **direction**
 layer: the current build focus lives in [`specs/STATUS.md`](specs/STATUS.md).
-Where a line names issues, the evidence and close condition live there; line 0
-carries its own, having been folded in from a closed issue._
+Where a line names issues, the evidence and close condition live there._
 
-_P0_ blocks every judgement above it · _P1_ changes what murmur **is** ·
-_P2_ is reliability and quality · _P3_ is distribution and not rotting.
+_P1_ changes what murmur **is** · _P2_ is reliability and quality ·
+_P3_ is distribution and not rotting.
 
-_Last updated: 2026-09-04 (line 2 delivered and deleted)._
+_Last updated: 2026-09-04 (lines 2 and 0 delivered and deleted)._
 
 **This round has two goals at once, and they do not conflict:** murmur should
 be good enough that its own author leaves it on, *and* runnable by someone who
@@ -19,88 +18,17 @@ hosted voice stays.
 
 | # | Line | What it is | This round delivers | P | Tracked as |
 |---|---|---|---|---|---|
-| 0 | Foundations | Stop losing the listener's first line | An input path that never drops a typed line | **P0** | §0 below (the reconciliation landed; the dropped line has not) |
 | 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can interject mid-track, not only at its edges | **P1** | the lead-in and the coda landed (#199, #200) and both already speak over the ducked track; what is missing is the autonomous mid-track beat, [#163](https://github.com/wine-fall/murmur/issues/163) |
 | 5 | Log in to the catalogue you already have | The catalogues murmur cannot reach are the ones behind a login | An opt-in, guided login for one auth-gated source — NetEase first | **P1** | new; §5 below |
 | 3 | Pick well, play reliably | Candidates come from sources worth trusting, not from keyword soup | Dead stream probes down; picks back under the spec-04 budget | **P2** | [#164](https://github.com/wine-fall/murmur/issues/164), [#149](https://github.com/wine-fall/murmur/issues/149) + new |
 | 4 | Others can run it, and it does not rot | A second brain backend, and an eval track under the stochastic behavior | murmur runs without a Claude Code login; prompt regressions get caught by a test | **P3** (its eval half, [#98](https://github.com/wine-fall/murmur/issues/98), is P2 now that line 2 has landed unguarded) | [#89](https://github.com/wine-fall/murmur/issues/89), [#98](https://github.com/wine-fall/murmur/issues/98), [#80](https://github.com/wine-fall/murmur/issues/80), [#153](https://github.com/wine-fall/murmur/issues/153), [#102](https://github.com/wine-fall/murmur/issues/102) |
 
-Lines 1 and 5 are the ones that change what murmur *is*. Line 0 comes first
-because every by-ear judgement above it is worthless while the first thing the
-listener says disappears.
+Lines 1 and 5 are the ones that change what murmur *is*. Line 4's eval half
+([#98](https://github.com/wine-fall/murmur/issues/98)) is read first among the
+P2s: it is the only line already overdue rather than upcoming, and every prompt
+edit on the stochastic surface is unguarded until it lands.
 
 ---
-
-## 0. Foundations
-
-**The backlog of parallel work is resolved — and not by merging all of it.**
-The beat-grounding fix landed first (#165: the four-state music union and the
-anti-fabrication rules). The clock enrichment followed in #191, which took the
-weekday-and-date half of #162 and **deliberately left out** the on-air track's
-played/remaining seconds: a beat is composed two deep ahead of air (spec 04
-§3.3), so a countdown stamped at compose time is already false when it is
-spoken, and it works against the grounding rules #165 had just added.
-`MusicState` carries no progress fields for that reason. Nothing is queued
-behind those two. One PR is still open,
-[#168](https://github.com/wine-fall/murmur/pull/168), a conflicting
-STATUS.md-only chore that blocks nothing.
-
-**The first line a listener types in a session is silently dropped.** Carried
-here from issue #145, which is closed in favour of this line.
-
-It never echoes, never reaches the steer turn, and leaves no dev-log trace. The
-second line behaves normally. Reproduced 3/3 on 2026-08-25 against the real
-brain, with a pre-seeded `persona.md` so first-run onboarding is skipped, lines
-written to stdin after the second beat aired plus a 3 s settle:
-
-| run | line 1 | line 2 | result |
-|---|---|---|---|
-| A | "turn the music off please" | "actually, speak Japanese from now on" | only line 2 echoed and acted |
-| B | "hey, can you turn the music off? just talk tonight" | — | nothing echoed; no effect |
-| C | "turn the music off" | "turn the music off" | only line 2 echoed; `settings.json` got `musicEnabled: false` |
-
-Run C is the clean isolation — identical text, only the second one lands — so
-the defect is **positional**, not content- or intent-dependent.
-
-Suspected, **not verified**: a pre-broadcast `lineReader` (`src/guide.ts:143`)
-left legitimately pending from the boot stretch consumes the first queued line
-and discards it. `LineQueue.peek()` (`src/host.ts:108`) memoizes one shared
-waiting promise, so a stale reader's callback can win the race and `takeLine()`
-before the Director's own boundary race sees it. The `settled` guard
-(`src/guide.ts:149-156`) exists for this class of loss, but covers only a read
-already resolved through EOF or the quit latch — not a reader still pending
-when an unrelated line arrives.
-
-Not yet investigated: whether the TUI front-end is affected too (all three runs
-were `--plain`), and whether a real TTY behaves differently from the piped
-stdin used in the repro.
-
-Spec: `specs/spec01/01-core-loop.md` §3.3 and
-`specs/spec03/03-03-guide-harness.md` §3. The contract violated: a typed line
-either reaches the Director or is consumed by a reader that is actually asking
-something — never dropped.
-
-Done when a regression test pins it (a line pushed while a pre-broadcast reader
-is pending still reaches the Director's steer path, fakes only), and a real
-plain-mode run shows the **first** typed line echoing and taking effect.
-
-**Checked 2026-09-04 — still neither fixed nor cleared.** No fix has landed:
-the `settled` guard predates the repro (it came in on 2026-08-18/19, a week
-before), and `LineQueue`'s take/peek semantics have not changed since (#187
-added `hasReader()` and reworked the `IpcHost` echo flow around it on 09-02,
-which the plain-mode consumption path does not go through). A stub plain-mode run with a
-pre-seeded persona echoed and acted on the **first** typed line — but that path
-runs with no harness, so neither the crash-report offer nor the setup
-conversation opens a pre-broadcast reader, and it therefore neither reproduces
-the bug nor clears it. The suspected seam also reads clean today: every `read()`
-in the first run, the crash offer and the setup flow is awaited, and `settled`
-is set in the race's own `finally`, so a resolved read's stale callback returns
-`''` rather than taking. So treat the suspected cause as **unconfirmed** and
-start from the **August 25 boot state** — a real brain, a seeded persona, piped
-stdin — not from that seam. Note that the crash-report offer did not exist
-then (the sentinel landed 08-31, #169/#175), so it cannot have been the reader
-that ate that line; it is a *new* pre-broadcast reader worth checking on its
-own, not a way back to the original.
 
 ## 1. Sound like a DJ
 
@@ -231,6 +159,16 @@ account sees no change at all.
   scheduled as separate work items. [#44](https://github.com/wine-fall/murmur/issues/44)
   now closes on #202's first box: spec 13 is its durable fix, and only an ear
   can say whether it worked.
+- **The listener's dropped first line** (issue #145, formerly line 0) — retired
+  on 2026-09-04 as **cannot-reproduce, not fixed**: three real `--plain` runs
+  (real brain, seeded persona, piped stdin, one line after the second beat)
+  all landed the first line, verified at the `settings.json` seam. It is off
+  the roadmap because there is nothing to schedule — no repro means no red
+  test to write and no cause to fix — not because it was solved. The contract
+  and this history live in `specs/spec01/01-core-loop.md` §3.3, and the
+  hand-over it turns on is pinned in `test/director-steer.test.ts`. A listener
+  losing a first line again reopens this as a line, with the new repro.
+
 - **Doc debt** ([#104](https://github.com/wine-fall/murmur/issues/104)) and
   **watch items** ([#83](https://github.com/wine-fall/murmur/issues/83)) — one
   edit each, taken when they are in the way. #104 grew a third claim to fix:

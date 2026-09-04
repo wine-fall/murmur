@@ -142,6 +142,19 @@ Two concurrent tasks over a shared state, single event loop:
   returns `Steer | None`, and the interrupt handling is consolidated in one
   Director method rather than duplicated per segment kind.
 
+  **The contract on that line**: a typed line either reaches the Director or is
+  consumed by a reader that is actually asking something — never dropped. A
+  session in August 2026 lost its FIRST line three times running (issue #145),
+  positionally: identical text, only the second one landed. It has not
+  reproduced since — three real `--plain` runs on 2026-09-04 with the real
+  brain, a seeded persona and piped stdin all echoed and acted on the first
+  line, read at the seam (`settings.json` gained `musicEnabled: false`, which
+  only `src/steer-tools.ts` writes). No fix was ever identified, so the cause
+  is unknown rather than closed: `lineReader`'s `settled` guard was already
+  present when the loss happened, and it is pinned by test, not credited with
+  the cure. A first line that goes missing again is that defect returning, not
+  a new one.
+
   On a `talkback` steer, the interjection is **prepare-then-barge-in**, not
   cancel-then-compose:
   1. **The current segment keeps playing** — no immediate `stop()`. Cutting to
