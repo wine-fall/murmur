@@ -1,7 +1,7 @@
 # spec/13 · real-world-topics — an off-loop pool of things that actually happened
 
 > **Status**: **Built 2026-09-03** (PR #203); **redesigned 2026-09-04**
-> (PR #208): the taste file is gone, the profile's *About the listener*
+> (PR #209): the taste file is gone, the profile's *About the listener*
 > section steers the fetch, and a told topic is a ledger row the fetch
 > avoids. Pool, roll, fetch task, prompt rendering, the settings knob and the
 > steer field stand as built; the unit suite is green; a real `fetchTopics`
