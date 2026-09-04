@@ -25,7 +25,15 @@ describe('package manifest (the npm-install contract)', () => {
     // Bare "murmur" is taken on the registry (a murmur3 hashing lib).
     expect(pkg.name).toBe('murmur-radio')
     expect(pkg.private).toBeUndefined()
-    expect(pkg.license).toBeDefined()
+  })
+
+  it('carries a license npm and GitHub both recognise', () => {
+    // A bare SPDX id (not "SEE LICENSE IN ...") is what keeps npm from warning
+    // and what GitHub reads to show the license badge; the file at the root is
+    // what GitHub detects. npm packs LICENSE regardless of the files array.
+    expect(pkg.license).toBe('MIT')
+    expect(existsSync(join(root, 'LICENSE'))).toBe(true)
+    expect(readFileSync(join(root, 'LICENSE'), 'utf8')).toContain('MIT License')
   })
 
   it('exposes the murmur command as a built entry prepack produces', () => {

@@ -39,9 +39,9 @@ murmur's design is captured as **one master spec + several sub-specs**.
 
 ## 1. What this is (Vision)
 
-A **fully-local companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
+A **local-first companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
 
-> **Product framing**: murmur is an **open-source, non-commercial product** distributed to users. "Audience of one" is the *experience* — each user runs their own private, fully-local radio — **not** a personal one-off; the earlier "personal use" framing is retired. Model choices follow a **two-phase strategy** (§3.7): experiment with good local/open models now, adopt paid/licensed models at distribution.
+> **Product framing**: murmur is an **open-source (MIT) product** distributed to users. "Audience of one" is the *experience* — each user runs their own private radio — **not** a personal one-off; the earlier "personal use" framing is retired. murmur **ships no model** (§3.7): the listener brings their own brain session and voice endpoint, so each model's license is theirs, not something murmur redistributes.
 
 It is **always on the air**: it finds a topic and chats with me on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It is **broadcasting, never soliciting** — it keeps going whether or not I say anything, and when I type, we chat for a bit before it eases back into the program. (Amended 2026-08-07, §2.2: the earlier "occasionally turns to me and asks" degree is retired — a radio does not solicit interaction.) It has a **persona seeded by a few questions up front** and it **keeps learning me** as it keeps me company, so it fits me better over time. (Amended 2026-07-29, §2.3: the *host's character* stays stable — what grows is what it knows about me and how we get on.) I talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
@@ -95,9 +95,9 @@ The persona is **not a hard-coded constant — it is an evolving, living asset**
 Each item records the **why**, to avoid re-litigating later.
 
 ### 3.1 Positioning & privacy boundary
-- **Fully local, open-source, non-commercial** — distributed to users; every instance runs entirely on the user's own machine (not a hosted service, not a personal one-off).
-- **The only two network hops**: ① Claude brain inference; ② the music stream. All other logic, I/O, and memory stay on-device — a core product value, not merely a personal constraint.
-- *Rationale*: local-first + open-source is the product's identity. Model **licensing** is handled by the two-phase strategy (§3.7): during local experimentation any good open model is fair game; the distributable stack uses paid/properly-licensed models chosen at distribution time. (This retires the old "personal use unlocks non-commercial models" shortcut.)
+- **Local-first, open-source (MIT)** — distributed to users; every instance runs on the user's own machine (not a hosted service, not a personal one-off).
+- **The network hops, and only these**: ① Claude brain inference; ② the voice endpoint; ③ the music stream — plus, only where a feature asks for it, a listening catalogue, a package registry on a packaged first boot, a voice preset's clip, and the `/update` version check (README's *Third-party services* is the full list). All other logic, I/O, and memory stay on-device — a core product value, not merely a personal constraint.
+- *Rationale*: local-first + open-source is the product's identity. Model **licensing** is not murmur's to carry (§3.7): murmur redistributes no model, so a model's terms bind the listener who reaches it, not murmur's source. (This retires both the old "personal use unlocks non-commercial models" shortcut and the two-phase deferral that replaced it.)
 
 ### 3.2 Brain & authentication
 - Brain = **Claude Opus**, via `claude-agent-sdk`, **reusing the local Claude Code subscription OAuth credentials** — **no API key needed**.
@@ -137,7 +137,7 @@ Each item records the **why**, to avoid re-litigating later.
 - **Candidate pool** (decide the primary after a blind A/B): Qwen3-TTS, CosyVoice2, Chatterbox Multilingual V3, OpenAudio S1-mini. *(spec 02 wires the MLX-runnable experiment shortlist — **Spark** [primary], Qwen3-TTS, Chatterbox, Dia, and VoxCPM2 — as local experiment-phase voices per §3.7.)*
 - **TTS runs as an always-on warm sidecar process.** *Rationale*: models load slowly (seconds, several GB), so keep them warm rather than loading on every utterance; crash isolation — a TTS crash must not take down the radio brain; cross-process is also the cleanest seam for hot-swapping.
 - *Selection notes (from mid-2026 research)*:
-  - **Licensing is deferred to the two-phase strategy (§3.7)**: during local experimentation, non-commercially-licensed models (Spark/CosyVoice2/Fish/IndexTTS2, etc.) are fine to try; the *distributable* voice is a paid/licensed choice made at distribution time. So the experiment pool is unconstrained by license — an experiment pick is not a commitment to ship it.
+  - **Licensing does not filter the pool (§3.7)**: murmur ships no weights, so a non-commercially-licensed model (Spark/CosyVoice2/Fish/IndexTTS2, etc.) is a legitimate default as well as an experiment — what it obliges is disclosure, so the listener knows whose terms they are under (README's *Third-party services*).
   - On Mac the real trade-off is just "can it run in real time": MLX/Metal-accelerated models (e.g. Qwen3-TTS) can; CosyVoice2/GPT-SoVITS et al. are mostly CPU-bound and slow on Mac → better for **pre-generation** than millisecond-latency.
   - Since v1 input is keyboard and proactive broadcasts can be pre-generated in the background, "slow on Mac" matters little for broadcast → the most emotionally rich models remain usable.
   - **The human-ness / warmth of the voice is the soul of this product.** The primary model is ultimately decided by ear, via blind listening.
@@ -151,10 +151,10 @@ Each item records the **why**, to avoid re-litigating later.
   - **Consequence to reconcile**: a separate always-on engine + an attach/detach TUI **subsumes much of the deferred daemon/detach model** (§10.1, "the radio keeps broadcasting after the terminal closes; a client re-attaches"). spec 10 must reconcile the two rather than treat them as independent.
   - See the TUI sub-spec (§10, `specs/spec10/10-tui.md`).
 
-### 3.7 Model strategy: local substitutes now, paid/licensed at distribution
-- **Two phases.** *Now (local experimentation)*: use the best **local, open** models available to prototype quality — the Claude Code subscription for the brain (§3.2), local open TTS (§3.5) — **regardless of their distribution license**. *At distribution*: re-evaluate and adopt **paid / properly-licensed** models (a paid brain API; a licensed or paid TTS) so the shipped open-source product is legally clean.
-- *Why*: it decouples "find what sounds/works good" (cheap, fast, local, license-agnostic for private experimentation) from "what we're allowed to ship" (resolved once, at distribution, by paying for or licensing the chosen models). An experiment-phase pick like a CC-BY-NC TTS (e.g. Spark) is fine to run locally and is **not** a commitment to ship it.
-- *Consequence*: model **licensing is not a selection filter during experimentation**; it becomes one only when choosing the distributable stack. Every model sits behind a seam (`Brain`, `VoiceProvider`) so each swap is an adapter/config change, not a rewrite.
+### 3.7 Model strategy: murmur ships no model
+- **The listener brings the models.** The brain is the listener's own Claude session (§3.2); the voice is an endpoint they point murmur at (§3.5); music is fetched by `yt-dlp` on their machine (§3.6). murmur's tarball carries no weights and no model code — only the client that speaks to them.
+- *Consequence for murmur's own license*: the code is **MIT**. What murmur distributes embodies no model materials, so no model's license reaches murmur's source. What that does **not** settle is what binds a listener at the far end of an endpoint — the model's own license, the operator's service terms, or both — and murmur is not the party to that agreement or the one to characterise it. Conflating the two questions is what produced the earlier "non-commercial" framing, and it bought no protection while costing the distribution surface an OSI license buys.
+- *Consequence for model selection*: licensing is not a selection filter for murmur. The duty it does create is **disclosure** — every hop the default stack makes is named in README's *Third-party services*, pointing at the terms rather than summarising them, so the listener can read what applies to them. Every model sits behind a seam (`Brain`, `VoiceProvider`) so each swap is an adapter/config change, not a rewrite.
 
 ---
 
@@ -179,7 +179,7 @@ Each item records the **why**, to avoid re-litigating later.
 │                              Memory (who you are · what we've discussed · no repeats /     │
 │                                      the persona living asset)                            │
 └──────────────────────────────────────────────────────────────────────────────────────┘
-       Only network hops: Claude inference (one)  +  music stream (one)
+       Network hops: Claude inference + voice endpoint + music stream (see §3.1)
 ```
 
 | Component | Responsibility | Notes |
@@ -388,7 +388,7 @@ When a test or eval needs an **actual LLM** (not a canned fake) — exercising p
 ## Appendix: key-decision quick reference (to avoid re-litigating)
 - **Why TypeScript**: the brain harness is the product's heart and the TS Agent SDK is its first-class surface; deferring local TTS (the one hard Python constraint) freed the choice (issue #54).
 - **Why a local TTS would be a sidecar**: slow load, keep it warm, crash isolation, clean hot-swap (deferred with local TTS).
-- **Why personal use matters**: it unlocks the most emotional, non-commercially-licensed TTS.
+- **Why murmur ships no model**: it keeps murmur's own code MIT while leaving the most emotional TTS — non-commercially licensed — a legitimate default, since its terms bind the listener who reaches the endpoint, not murmur's source (§3.7).
 - **Why yt-dlp for v1 music**: the only "no login, no membership, no app" start that also covers Chinese (Bilibili); Spotify is gated by Premium, NetEase by unofficial-API + login.
 - **Why single loop + look-ahead**: a radio can't have dead air; this is the minimum-cost prevention.
 - **Why persona lives in Memory**: it needs a **writable, user-owned home** next to the profile (seeded on first run, then edited by the user) — not because murmur rewrites it. Auto-evolution was considered and rejected (§2.3, amended 2026-07-29): rewrite loops mean-revert, so the *profile* grows and the character stays.
