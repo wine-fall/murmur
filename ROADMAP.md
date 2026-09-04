@@ -20,7 +20,7 @@ hosted voice stays.
 | # | Line | What it is | This round delivers | P | Tracked as |
 |---|---|---|---|---|---|
 | 0 | Foundations | Land the work already written, and stop losing the listener's first line | A clean `main` and an input path that never drops a typed line | **P0** | §0 below (the reconciliation landed; the dropped line has not) |
-| 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can speak over a ducked song | **P1** | the lead-in half landed (#199, #200); the speak-over half is [#163](https://github.com/wine-fall/murmur/issues/163) |
+| 1 | Sound like a DJ | Talk and music actually interleave, instead of alternating at boundaries | A track gets a lead-in, not a label; the host can interject mid-track, not only at its edges | **P1** | the lead-in and the coda landed (#199, #200) and both already speak over the ducked track; what is missing is the autonomous mid-track beat, [#163](https://github.com/wine-fall/murmur/issues/163) |
 | 2 | Say real things | The host gets real material — news, new releases, what is happening near the listener | An off-loop topic pool, weighted by the listener's language and timezone | **P1** | built, green and unmerged: [#203](https://github.com/wine-fall/murmur/pull/203) + [#201](https://github.com/wine-fall/murmur/pull/201) (absorbs [#44](https://github.com/wine-fall/murmur/issues/44)) |
 | 5 | Log in to the catalogue you already have | The catalogues murmur cannot reach are the ones behind a login | An opt-in, guided login for one auth-gated source — NetEase first | **P1** | new; §5 below |
 | 3 | Pick well, play reliably | Candidates come from sources worth trusting, not from keyword soup | Dead stream probes down; picks back under the spec-04 budget | **P2** | [#164](https://github.com/wine-fall/murmur/issues/164), [#149](https://github.com/wine-fall/murmur/issues/149) + new |
@@ -84,7 +84,9 @@ plain-mode run shows the **first** typed line echoing and taking effect.
 
 **Checked 2026-09-04 — still neither fixed nor cleared.** No fix has landed:
 the `settled` guard predates the repro (it came in on 2026-08-18/19, a week
-before), and `LineQueue` has not changed since. A stub plain-mode run with a
+before), and `LineQueue`'s take/peek semantics have not changed since (#187
+added `hasReader()` and reworked the `IpcHost` echo flow around it on 09-02,
+which the plain-mode consumption path does not go through). A stub plain-mode run with a
 pre-seeded persona echoed and acted on the **first** typed line — but that path
 runs with no harness, so neither the crash-report offer nor the setup
 conversation opens a pre-broadcast reader, and it therefore neither reproduces
@@ -92,26 +94,28 @@ the bug nor clears it. The suspected seam also reads clean today: every `read()`
 in the first run, the crash offer and the setup flow is awaited, and `settled`
 is set in the race's own `finally`, so a resolved read's stale callback returns
 `''` rather than taking. So treat the suspected cause as **unconfirmed** and
-start from the repro conditions — real brain, a crash sentinel present — not
-from that seam.
+start from the **August 25 boot state** — a real brain, a seeded persona, piped
+stdin — not from that seam. Note that the crash-report offer did not exist
+then (the sentinel landed 08-31, #169/#175), so it cannot have been the reader
+that ate that line; it is a *new* pre-broadcast reader worth checking on its
+own, not a way back to the original.
 
 ## 1. Sound like a DJ
 
-Two halves of one behaviour.
+Two halves of one behaviour; the first has landed.
 
-**The intro is a label, not a lead-in.** Today the whole introduction is one
-optional line on `submit_pick` (`src/music-tools.ts`), and it is spoken *after*
-the engine has confirmed the stream is playing (`src/director.ts:826-851`), so
-the listener hears a title and the song is already under it. What is wanted is
-a beat that arrives at the track — why this one, what it follows — and then the
-music. Possibly a back-announce when it ends. This likely means promoting the
-announce from a field on the pick to a real talk beat, which touches spec 04
-and spec 03-02 §3.5.
+**The intro is no longer a label — landed (#199, #200).** The announce is a
+lead-in spoken over the ducked head of the track instead of a title read after
+the stream is already under the listener, and the coda is the back-announce at
+its tail.
 
-**Nothing is ever said over a song.** Inside a music segment the host is silent
-from the announce to the fade unless the listener speaks first. The engine half
-already exists and is in daily use — `Engine.play(voice)` ducks live music for
-the clip and pre-schedules the unduck. What is missing is the director asking:
+**Nothing is said over a song unprompted.** Speaking over a ducked track is
+not the missing piece — the lead-in and the coda both do it today
+(`src/director.ts`: the handle is ducked, the clip airs, the unduck lifts
+behind it), and `Engine.play(voice)` has ducked live music for a clip since
+long before that. What is missing is a beat the host starts on its own
+*between* those two edges: inside a music segment it is silent from the
+announce to the fade unless the listener speaks first, because
 `Director.runVoice` races only the song's end, the listener's next line, and a
 due switch. Adding that race arm is the feature — with the staleness rule
 issue #163 records, since a buffered beat can be minutes old by the time it
@@ -216,9 +220,12 @@ What it touches:
   else: no session, no credential, no notion of a source that can fail on
   *auth*. `src/app.ts:248` constructs `YtDlpMusicProvider` directly, so there
   is no provider choice to configure either. Both need the smallest widening
-  that carries a cookie down to yt-dlp and reports an expired one **as expired**
-  — today it would surface as one more dead stream probe, the exact confusion
-  line 3 is trying to remove.
+  that carries a cookie down to yt-dlp and reports an expired one **as expired**.
+  Today a yt-dlp auth failure comes back through `provider.resolve`, which
+  `submit_pick` catches and hands the model as "pick another"
+  (`src/music-tools.ts`) — never reaching the stream probe. So a listener whose
+  cookie went stale would watch murmur quietly reject candidate after candidate
+  with nothing on screen naming a login.
 - **The login is a conversation, not a config field.** The setup guide (spec
   03-03) already walks a listener through a credential murmur cannot mint for
   them — the voice key — and stores it in `~/.murmur/`. A NetEase cookie is the
@@ -227,10 +234,16 @@ What it touches:
 - **Opt-in, never a shipped default** (DESIGN §3.7's personal-experiment tier).
   The default install stays login-free yt-dlp; the fragility and the ToS risk
   belong to the listener who mounts the source, which is why they mount it.
-- **Spotify gets the seam and an honest refusal.** Without Premium there is no
-  stream to duck, so what ships here is murmur saying so instead of offering a
-  source it cannot play. The external-player duck path (spec 03-02 §"out of
-  scope") stays unimplemented.
+  This does not reopen DESIGN §8's v1 exclusion: NetEase stays out of the
+  shippable stack, and what this line adds is the mounting path for a listener
+  who chooses it on their own machine.
+- **Spotify gets the seam and an honest refusal.** Not because a free account
+  has no stream — DESIGN §5 records that the desktop app plays one, with ads
+  and on-demand limits; it is headless librespot that needs Premium. The
+  refusal is that murmur cannot *conduct* that stream: the external-player
+  control and duck path is explicitly out of scope in spec 03-02, and an app
+  bound over AppleScript cannot honour "play exactly this track", which is the
+  whole premise of a brain-picked program.
 
 Done when a listener with a NetEase account hears a track from it that **the
 brain picked**, an expired cookie says it is expired, and a listener with no
