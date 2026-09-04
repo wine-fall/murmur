@@ -294,7 +294,7 @@ describe('PersistentMemoryStore.forget (spec 05-01 §3.5)', () => {
   }
 
   it('removes the rows and the lines, physically, and stops recalling them', () => {
-    const { store, path } = build()
+    const { store, path, c } = build()
     const removed = store.forget('coffee')
     expect(removed.rows).toBe(1)
     expect(removed.lines).toBe(1)
@@ -307,8 +307,10 @@ describe('PersistentMemoryStore.forget (spec 05-01 §3.5)', () => {
     expect(store.recent(10).map((t) => t.text)).toEqual([
       'the desk under the window sounds good',
     ])
-    // A survivor is still there after a reload.
-    const reopened = new PersistentMemoryStore({ dir: path })
+    // A survivor is still there after a reload. The reopen reads the same clock
+    // the rows were written on: on the real one, the 48h recent window drops
+    // them for age, and the test goes red on a calendar day, not a regression.
+    const reopened = new PersistentMemoryStore({ dir: path, now: c.now })
     expect(reopened.recent(10).length).toBe(1)
   })
 
