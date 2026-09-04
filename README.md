@@ -13,7 +13,7 @@ murmur is always on the air. It finds a topic and chats with you on its own, pla
 
 Existing tools are either "voice-control Claude to write code" or message-driven assistants. Nobody occupies the **proactive + emotional companionship + voice radio** combination. That gap is murmur.
 
-> Open-source (MIT) — but **not self-contained**. Three things come off the network — the brain is a Claude session, the music streams in, and the voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio), reached over a hosted endpoint — and a fourth if you hand it a listening catalogue to find songs in. What runs on your machine is everything murmur itself owns — program logic, keyboard I/O, memory, persona, and audio mixing. A local TTS is a noted want, not current code.
+> Open-source (MIT) — but **not self-contained**. The main three come off the network — the brain is a Claude session, the music streams in, and the voice is [fish-speech](https://github.com/fishaudio/fish-speech) by [@fishaudio](https://github.com/fishaudio), reached over a hosted endpoint — and a fourth if you hand it a listening catalogue to find songs in. What runs on your machine is everything murmur itself owns — program logic, keyboard I/O, memory, persona, and audio mixing. A local TTS is a noted want, not current code.
 
 ## Core experience
 
@@ -140,5 +140,12 @@ murmur's own code is **MIT** — see [`LICENSE`](LICENSE).
 **Third-party services.** murmur ships no model weights; it calls services that carry their own terms, and complying with them is yours:
 
 - **Brain** — your own Claude session, under your own Anthropic subscription.
-- **Voice** — the default endpoint serves [fish-speech](https://github.com/fishaudio/fish-speech), whose model is under the Fish Audio Research License: free for research and non-commercial use, commercial use needs a separate license from Fish Audio.
+- **Voice** — the default endpoint serves [fish-speech](https://github.com/fishaudio/fish-speech), whose model carries the [Fish Audio Research License](https://github.com/fishaudio/fish-speech/blob/main/LICENSE) (research and non-commercial use free; commercial use by separate license). Whoever operates the endpoint you point at may add service terms of their own — read both; murmur is not a party to either.
 - **Music** — retrieval runs through `yt-dlp` on your machine, against whatever source you point it at.
+
+And these, only on the paths that need them:
+
+- **A package registry** — a packaged first boot runs `bun install` for the TUI; without it murmur falls back to the plain front-end.
+- **`raw.githubusercontent.com`** — downloading a built-in voice preset's reference clip (cached and hash-pinned after the first fetch).
+- **[Last.fm](https://www.last.fm/api), or the catalogue you point `MURMUR_LISTENING_URL` at** — only with a listening key set.
+- **`registry.npmjs.org`** — the version check behind `/update`.

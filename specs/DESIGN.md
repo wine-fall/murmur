@@ -39,7 +39,7 @@ murmur's design is captured as **one master spec + several sub-specs**.
 
 ## 1. What this is (Vision)
 
-A **fully-local companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
+A **local-first companion radio** — "a radio that broadcasts for an audience of one," with Claude as its brain.
 
 > **Product framing**: murmur is an **open-source (MIT) product** distributed to users. "Audience of one" is the *experience* — each user runs their own private radio — **not** a personal one-off; the earlier "personal use" framing is retired. murmur **ships no model** (§3.7): the listener brings their own brain session and voice endpoint, so each model's license is theirs, not something murmur redistributes.
 
@@ -96,7 +96,7 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.1 Positioning & privacy boundary
 - **Local-first, open-source (MIT)** — distributed to users; every instance runs on the user's own machine (not a hosted service, not a personal one-off).
-- **The only two network hops**: ① Claude brain inference; ② the music stream. All other logic, I/O, and memory stay on-device — a core product value, not merely a personal constraint.
+- **The network hops, and only these**: ① Claude brain inference; ② the voice endpoint; ③ the music stream — plus, only where a feature asks for it, a listening catalogue, a package registry on a packaged first boot, a voice preset's clip, and the `/update` version check (README's *Third-party services* is the full list). All other logic, I/O, and memory stay on-device — a core product value, not merely a personal constraint.
 - *Rationale*: local-first + open-source is the product's identity. Model **licensing** is not murmur's to carry (§3.7): murmur redistributes no model, so a model's terms bind the listener who reaches it, not murmur's source. (This retires both the old "personal use unlocks non-commercial models" shortcut and the two-phase deferral that replaced it.)
 
 ### 3.2 Brain & authentication
@@ -153,8 +153,8 @@ Each item records the **why**, to avoid re-litigating later.
 
 ### 3.7 Model strategy: murmur ships no model
 - **The listener brings the models.** The brain is the listener's own Claude session (§3.2); the voice is an endpoint they point murmur at (§3.5); music is fetched by `yt-dlp` on their machine (§3.6). murmur's tarball carries no weights and no model code — only the client that speaks to them.
-- *Consequence for murmur's own license*: the code is **MIT**. A model reached over an endpoint under a research/non-commercial license (fish-speech's Fish Audio Research License, say) binds whoever uses that model; it does not reach murmur's source, which embodies none of those materials. Conflating the two is what produced the earlier "non-commercial" framing, and it bought no protection — every commercially interesting piece is already gated by its own author's terms — while costing the distribution surface an OSI license buys.
-- *Consequence for model selection*: licensing is a **disclosure** obligation, not a selection filter. Whatever the default stack reaches is named in README's *Third-party services* with its terms, so the listener knows what they are agreeing to. Every model sits behind a seam (`Brain`, `VoiceProvider`) so each swap is an adapter/config change, not a rewrite.
+- *Consequence for murmur's own license*: the code is **MIT**. What murmur distributes embodies no model materials, so no model's license reaches murmur's source. What that does **not** settle is what binds a listener at the far end of an endpoint — the model's own license, the operator's service terms, or both — and murmur is not the party to that agreement or the one to characterise it. Conflating the two questions is what produced the earlier "non-commercial" framing, and it bought no protection while costing the distribution surface an OSI license buys.
+- *Consequence for model selection*: licensing is not a selection filter for murmur. The duty it does create is **disclosure** — every hop the default stack makes is named in README's *Third-party services*, pointing at the terms rather than summarising them, so the listener can read what applies to them. Every model sits behind a seam (`Brain`, `VoiceProvider`) so each swap is an adapter/config change, not a rewrite.
 
 ---
 
@@ -179,7 +179,7 @@ Each item records the **why**, to avoid re-litigating later.
 │                              Memory (who you are · what we've discussed · no repeats /     │
 │                                      the persona living asset)                            │
 └──────────────────────────────────────────────────────────────────────────────────────┘
-       Only network hops: Claude inference (one)  +  music stream (one)
+       Network hops: Claude inference + voice endpoint + music stream (see §3.1)
 ```
 
 | Component | Responsibility | Notes |
