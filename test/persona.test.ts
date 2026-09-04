@@ -4,8 +4,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { loadPersona, personaLanguage, personaLine, renderPersona } from '../src/persona.ts'
-import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
+import { loadPersona, personaLanguage, personaLine, renderPersona } from '../src/brain/persona.ts'
+import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
 
 describe('loadPersona', () => {
   it('loads and trims the bundled seed', () => {

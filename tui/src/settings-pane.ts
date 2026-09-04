@@ -11,7 +11,7 @@ import {
   type Settings,
   type SettingsPatch,
   type SettingsSnapshot,
-} from '../../src/ipc.ts'
+} from '../../src/host/ipc.ts'
 
 // The mix gear presets are shared with the reply turn's change_settings tool
 // (spec 12 §2.6); 'custom' is the pane's honest read-only position for a value

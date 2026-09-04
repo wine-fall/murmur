@@ -15,12 +15,12 @@ import {
   type SetupLedger,
   type SetupTargets,
   validateEndpoint,
-} from '../src/guide.ts'
-import type { AskKind, Host } from '../src/host.ts'
-import { InProcessMemoryStore } from '../src/memory.ts'
-import type { PreflightResult } from '../src/startup.ts'
-import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice-config.ts'
-import { encodeWav } from '../src/wav.ts'
+} from '../src/setup/guide.ts'
+import type { AskKind, Host } from '../src/host/host.ts'
+import { InProcessMemoryStore } from '../src/memory/memory.ts'
+import type { PreflightResult } from '../src/setup/startup.ts'
+import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice/voice-config.ts'
+import { encodeWav } from '../src/audio/wav.ts'
 
 const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }

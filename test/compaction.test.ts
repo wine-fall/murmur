@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { Compactor, type CompactionStore } from '../src/compaction.ts'
+import { Compactor, type CompactionStore } from '../src/memory/compaction.ts'
 import type { Turn } from '../src/contracts.ts'
 import { until } from './fakes.ts'
 

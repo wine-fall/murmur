@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseResolveOutput, parseSearchOutput, YtDlpMusicProvider } from '../src/music.ts'
+import { parseResolveOutput, parseSearchOutput, YtDlpMusicProvider } from '../src/music/music.ts'
 
 // One line of real-shaped `yt-dlp --dump-json` output.
 function hit(overrides: Record<string, unknown> = {}): string {

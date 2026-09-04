@@ -4,7 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
 import {
   BUG_FORM_URL,
   Director,
@@ -12,9 +12,9 @@ import {
   openerFor,
   steerFromLine,
   type DirectorDeps,
-} from '../src/director.ts'
-import { SCENES } from '../src/scene.ts'
-import { INSTALL_COMMAND } from '../src/update.ts'
+} from '../src/director/director.ts'
+import { SCENES } from '../src/director/scene.ts'
+import { INSTALL_COMMAND } from '../src/support/update.ts'
 import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
 function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
@@ -296,7 +296,7 @@ describe('Director — /bug and /feature-request', () => {
 
 // spec 10 §3.2-C: /update is a command like the rest — it checks npm for a
 // newer murmur beside the program, and never becomes a turn. The check itself
-// is `src/update.ts`; what is pinned here is that the Director routes to it.
+// is `src/support/update.ts`; what is pinned here is that the Director routes to it.
 describe('Director — /update', () => {
   function withUpdate(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
     const calls: number[] = []

@@ -1,7 +1,7 @@
 # spec/11 · agentic-steer — the reply turn becomes an agent
 
-> **Status**: **Implemented** (2026-08-01). Built: `src/steer-tools.ts` (the
-> three tools), `src/steer-responder.ts` (the task builder), the Director's
+> **Status**: **Implemented** (2026-08-01). Built: `src/brain/steer-tools.ts` (the
+> three tools), `src/brain/steer-responder.ts` (the task builder), the Director's
 > switch/handover/two-phase-shutdown wiring, and the app wiring (real brain
 > only — a stub run keeps the tool-less path by construction). Unit-verified in
 > `test/steer-tools.test.ts` / `test/steer-responder.test.ts` /
@@ -19,7 +19,7 @@
 > **Milestone**: companion feel — the listener's words can *do* things, not just
 > be replied to.
 > **Conventions**: English; written for a coding agent. Prompt text centralized
-> in `src/prompts.ts`; no CJK in source (master §0).
+> in `src/prompts/`; no CJK in source (master §0).
 
 ---
 
@@ -76,7 +76,7 @@ that call has no hands. Consequences observed:
 
 ## 2. Contracts / seams
 
-### 2.1 The steer tools (`src/steer-tools.ts`)
+### 2.1 The steer tools (`src/brain/steer-tools.ts`)
 
 Handed to `runTask` by the steer task builder. All are murmur-owned,
 in-process, and validated by zod schemas (03-01 isolation invariants apply
@@ -139,7 +139,7 @@ call what the program cannot do.
   spoken reply: clean spoken text, no markup/labels (same hygiene contract as
   `emit_talk_beats`). Calling this ends the task.
 
-### 2.2 The steer task (`src/steer-responder.ts` or folded into the Director)
+### 2.2 The steer task (`src/brain/steer-responder.ts` or folded into the Director)
 
 Mirrors `MusicProgrammer`: a small builder that renders context and runs the
 harnessed task. Shape (TS, illustrative):

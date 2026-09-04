@@ -13,7 +13,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
-import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './dev-log.ts'
+import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './support/dev-log.ts'
 import {
   dataRoot,
   homeRoot,
@@ -23,9 +23,9 @@ import {
   tuiSocketPath,
   voiceConfigPath,
 } from './paths.ts'
-import { DEFAULT_PERSONA_PATH } from './prompts.ts'
-import { readSettingsFile } from './settings.ts'
-import { MAX_SPEED, MIN_SPEED, readVoiceConfig, type VoiceConfig } from './voice-config.ts'
+import { DEFAULT_PERSONA_PATH } from './prompts/persona.ts'
+import { readSettingsFile } from './host/settings.ts'
+import { MAX_SPEED, MIN_SPEED, readVoiceConfig, type VoiceConfig } from './voice/voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
 // by-ear knob: fish TTS runs sentences together and its own pause hints are
@@ -155,7 +155,7 @@ export const ConfigSchema = z.object({
   // (spec 03-03 §7.2), so it must be the SAME home the rest of the run uses.
   home: z.string().default(() => homeRoot()),
 
-  // Where diagnostics are mirrored (src/dev-log.ts). Resolved once here, at the
+  // Where diagnostics are mirrored (src/support/dev-log.ts). Resolved once here, at the
   // boundary, so the hosts take a decided path instead of re-reading the env;
   // empty = no dev log at all. The default is a dated file under the home, so a
   // plain `npm i -g` install has something to attach to a bug report.

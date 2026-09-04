@@ -48,13 +48,13 @@ export function runRoot(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 // The same directory, resolved from the home a RUN already decided (config.home)
-// rather than the ambient env — the crash sentinels (src/sentinel.ts) have to
+// rather than the ambient env — the crash sentinels (src/support/sentinel.ts) have to
 // land in the home this instance is actually using.
 export function sentinelRoot(home: string): string {
   return join(home, RUN_DIR)
 }
 
-// The diagnostics the dev log holds (src/dev-log.ts). Rebuildable in spirit —
+// The diagnostics the dev log holds (src/support/dev-log.ts). Rebuildable in spirit —
 // a sweep drops what has aged out — but kept beside the home rather than under
 // cache/ so a listener reporting a bug can find it without knowing the layout.
 export function logRoot(env: NodeJS.ProcessEnv = process.env): string {

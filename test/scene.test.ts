@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { currentScene, formatClock, sceneFor } from '../src/scene.ts'
+import { currentScene, formatClock, sceneFor } from '../src/director/scene.ts'
 
 const at = (hour: number) => new Date(2026, 6, 28, hour, 30)
 

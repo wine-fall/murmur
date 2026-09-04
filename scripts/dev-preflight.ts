@@ -21,8 +21,8 @@ import {
   preflightFfmpeg,
   preflightYtdlp,
   preflightYtdlpFreshness,
-} from '../src/startup.ts'
-import { readVoiceConfig } from '../src/voice-config.ts'
+} from '../src/setup/startup.ts'
+import { readVoiceConfig } from '../src/voice/voice-config.ts'
 
 const OK = '\x1b[32m✓\x1b[0m'
 const NO = '\x1b[33m·\x1b[0m'

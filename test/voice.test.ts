@@ -3,7 +3,7 @@ import { dirname } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { StubVoice } from '../src/voice.ts'
+import { StubVoice } from '../src/voice/voice.ts'
 
 describe('StubVoice', () => {
   it('produces a playable talk clip and cleans its dir on close', async () => {

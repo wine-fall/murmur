@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ListeningData, MusicContext, TaskTool } from '../src/contracts.ts'
-import { MusicProgrammer, type MusicProgrammerDeps, renderMusicContext } from '../src/music-programmer.ts'
-import { MUSIC_CONTEXT_HEADER } from '../src/prompts.ts'
+import { MusicProgrammer, type MusicProgrammerDeps, renderMusicContext } from '../src/music/music-programmer.ts'
+import { MUSIC_CONTEXT_HEADER } from '../src/prompts/music.ts'
 
 import { callTool, FakeHarness, FakeMusicProvider } from './fakes.ts'
 

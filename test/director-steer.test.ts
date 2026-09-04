@@ -4,12 +4,12 @@
 // re-primes a stale pick, and end_broadcast is two-phase with auto-disarm.
 import { describe, expect, it } from 'vitest'
 
-import { EveryNCadence } from '../src/cadence.ts'
+import { EveryNCadence } from '../src/director/cadence.ts'
 import type { ContextPack, SteerActions, SteerBrain } from '../src/contracts.ts'
-import { Director, type DirectorDeps, steerFromLine } from '../src/director.ts'
-import { escPulse, lineReader, quitLatch } from '../src/guide.ts'
-import { COMMANDS } from '../src/ipc.ts'
-import { InProcessMemoryStore } from '../src/memory.ts'
+import { Director, type DirectorDeps, steerFromLine } from '../src/director/director.ts'
+import { escPulse, lineReader, quitLatch } from '../src/setup/guide.ts'
+import { COMMANDS } from '../src/host/ipc.ts'
+import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import {
   directorSettings,
   FakeBrain,

@@ -7,8 +7,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { Settings } from '../src/ipc.ts'
-import { readSettingsFile, SettingsStore, writeSettingsFile } from '../src/settings.ts'
+import type { Settings } from '../src/host/ipc.ts'
+import { readSettingsFile, SettingsStore, writeSettingsFile } from '../src/host/settings.ts'
 
 const BASE: Settings = {
   anchorsEnabled: true,

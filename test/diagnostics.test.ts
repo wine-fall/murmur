@@ -11,7 +11,7 @@ import {
   readLogTail,
   render,
   type DiagnosticsInput,
-} from '../src/diagnostics.ts'
+} from '../src/support/diagnostics.ts'
 
 const GENERATED_AT = new Date('2026-08-31T12:00:00Z')
 
