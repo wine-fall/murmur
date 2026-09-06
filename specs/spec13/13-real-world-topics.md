@@ -33,7 +33,7 @@
 > leaves for the talk brain on every batch; this is the same text on a
 > second, bounded task.
 > **Conventions**: English; written for a coding agent. Mechanism and
-> contracts, not final code. Prompt text centralized in `src/prompts.ts`; no
+> contracts, not final code. Prompt text centralized in `src/prompts/`; no
 > CJK in source (master §0).
 
 ---
@@ -108,7 +108,7 @@
 ### 2.1 The pool entry and the file
 
 ```ts
-// src/rwt.ts
+// src/brain/rwt.ts
 export type RwtTopic = {
   readonly id: string        // opaque, unique within the file
   readonly title: string     // one line, the thing itself
@@ -210,7 +210,7 @@ rwt?: {
   became "a friend wanted to watch a show") — the #44 attractor with a fig
   leaf. Absent → renders nothing.
 - `DEFAULT_RWT_POLICY` / `RWT_POLICY_HEADER` / `buildFetchTopicsPrompt(req)`
-  / `aboutSection(profile)` live in `src/prompts.ts`. The policy is built in;
+  / `aboutSection(profile)` live in `src/prompts/`. The policy is built in;
   the per-listener half of the taste is `req.follows` (§3.4).
 - `STEER_SETTINGS_RULE` names the new knob so the reply turn knows "stop with
   the news" is a settings ask.

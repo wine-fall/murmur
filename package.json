@@ -17,8 +17,8 @@
   },
   "files": [
     "dist",
-    "src/ipc.ts",
-    "src/activity.ts",
+    "src/host/ipc.ts",
+    "src/director/activity.ts",
     "assets",
     "tui/src",
     "tui/assets",

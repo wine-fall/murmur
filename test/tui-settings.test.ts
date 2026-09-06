@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { LANGUAGE_MAX, type Settings, type SettingsSnapshot } from '../src/ipc.ts'
+import { LANGUAGE_MAX, type Settings, type SettingsSnapshot } from '../src/host/ipc.ts'
 import { adjust, gearOf, languagePatch, paneFacts, paneItems } from '../tui/src/settings-pane.ts'
 
 const VALUES: Settings = {

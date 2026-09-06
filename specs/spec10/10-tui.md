@@ -81,7 +81,7 @@ headless murmur engine over IPC:
 
 ### 2.1 The Host seam (engine side — existing shape, one addition)
 
-The engine-side seam is the existing `Host` interface (`src/host.ts`, spec 01
+The engine-side seam is the existing `Host` interface (`src/host/host.ts`, spec 01
 §3.1 as ported):
 
 ```ts
@@ -205,7 +205,7 @@ export interface Host {
 **Transport**: unix domain socket at `$MURMUR_HOME/run/tui.sock` (resolved by
 `paths.ts`, the single path authority — spec 05 §2.3). **Format**: ndjson —
 one JSON object per line, `{ v: 1, type, ...payload }`. **Schemas**: zod,
-defined once in `src/ipc.ts` and imported by both processes — the wire
+defined once in `src/host/ipc.ts` and imported by both processes — the wire
 contract has exactly one source of truth, and both ends validate at the trust
 boundary (zod parse on every inbound message; malformed input is dropped with
 a dev-log line, never a crash).
@@ -323,7 +323,7 @@ ActivitySensor; typing flips `away` back to `engaged` and un-gates
 generation) — free with the same `line` message, since the stamp lives in the
 engine-side host bridge.
 
-**B. Serialized Q&A mode** (consuming reads — `lineReader`, `src/guide.ts`):
+**B. Serialized Q&A mode** (consuming reads — `lineReader`, `src/setup/guide.ts`):
 two shipped flows temporarily repurpose the input line as an answer field:
 
 - **First-run onboarding** (spec 06 slice A): three seed questions, empty
@@ -344,12 +344,12 @@ which is exactly what the plain host relies on today.~~
 Recency-adjacency proved too weak once the log breathes (§6.1 spacing) — a
 question is indistinguishable from a notice. The seam grew one optional
 method, `Host.ask(text, kind)` with `kind: 'question' | 'consent'`, routed
-through the `ask()` helper in `src/host.ts` so a bare host falls back to
+through the `ask()` helper in `src/host/host.ts` so a bare host falls back to
 `info` (the plain front-end's behavior is unchanged). Every consuming-read
 call site sends its question through it: the three first-run seeds and the
-CC-bootstrap y/N (`src/first-run.ts`), the setup entry consent, the per-tool
+CC-bootstrap y/N (`src/setup/first-run.ts`), the setup entry consent, the per-tool
 permission prompts (one self-contained ask carrying the command AND the y/N),
-the secret paste prompt, and the free-reply prompt (`src/guide.ts`). Context
+the secret paste prompt, and the free-reply prompt (`src/setup/guide.ts`). Context
 lines (gap lists, offer framing) stay `info`. On the wire this is the
 additive `ask` message (§2.3). Pending asks are their own engine-side queue,
 NOT the general replay backlog: an attach is handed only the questions still
@@ -402,7 +402,7 @@ its hierarchy in-band (`cardLines()`): first line bright, later lines
 quieter, and ASCII role markers — `ok ` (sage) / `-- ` (ember, so a gap never
 reads as one more quiet hint beside the options) — mark the
 pre-broadcast checklist that the setup offer now ships as ONE ask
-(`setupOfferText()` in `src/guide.ts`: summary, ready rows, gap rows, then
+(`setupOfferText()` in `src/setup/guide.ts`: summary, ready rows, gap rows, then
 the y/N; probe detail demoted to the dev log), with a divider drawn between
 the facts and the closing invite. Card copy is ASCII + CJK + box lines ONLY:
 East-Asian-Ambiguous glyphs (`✦ ◉ ✓ ○ …`) shift box borders on terminals
@@ -419,7 +419,7 @@ all of them from the same line stream; the TUI never grows its own command
 grammar. Future commands automatically work in both front-ends.
 
 As built: the radio commands live in one exported list (`COMMANDS` in
-`src/ipc.ts`, each entry a name + one-line blurb) that the Director's parser
+`src/host/ipc.ts`, each entry a name + one-line blurb) that the Director's parser
 and the TUI both read. The TUI's affordance is presentation only: a typed
 line opening with `/` opens a small command menu floating above the input
 (name + blurb per row; arrows choose, Enter runs the highlighted command, Tab
@@ -433,7 +433,7 @@ the guide-mode grammar (`/done`) stays the guide's own.
 
 **The feedback channel (as built)**: `/bug` and `/feature-request` open the
 **report floor** — a third value of the floor mode beside `radio` and `guide`
-(`FloorMode` in `src/host.ts`, the `mode`/`hello` messages in `src/ipc.ts`, the
+(`FloorMode` in `src/host/host.ts`, the `mode`/`hello` messages in `src/host/ipc.ts`, the
 client's own copy in `tui/src/app.tsx`). Both commands share it: what they mean
 is "the listener is writing something to send", and only the draft's title
 differs.
@@ -450,10 +450,10 @@ open session instead of reading it as a steer (`takeSteer` returns `consumed`).
 `/quit` is the one line the floor does not eat — a listener must always be able
 to leave.
 
-The flow (`src/report.ts`): one opening question, asked through the existing
+The flow (`src/support/report.ts`): one opening question, asked through the existing
 `GuideCapable` capability so the answer comes back written up for a maintainer
 — skipped whole on a run with no brain, which goes straight to the machine's
-half; then the draft, rendered by `src/diagnostics.ts` and written to
+half; then the draft, rendered by `src/support/diagnostics.ts` and written to
 `$MURMUR_HOME/reports/<kind>-<timestamp>.md`; then four ways out — **send**
 (the three roads below), **view**
 (`$EDITOR`),
@@ -508,9 +508,9 @@ prefix rule (this code under the global root of the node running it), not a
 `node_modules/murmur-radio/` match, because a checkout, an `npx` cache and a
 project-local dependency would all fail that weaker test the same way: an
 `npm i -g` from any of them installs a murmur that process is not running.
-The logic and its boundaries live in `src/update.ts`; the Director only routes.
+The logic and its boundaries live in `src/support/update.ts`; the Director only routes.
 
-**The attachable report (as built, renderer only)**: `src/diagnostics.ts`
+**The attachable report (as built, renderer only)**: `src/support/diagnostics.ts`
 builds the text a listener pastes into that form — a header (version,
 platform, the brain/voice/front-end a run actually wired up beside what it was
 asked for, the startup probes, and a small data-driven table of known failure
@@ -542,7 +542,7 @@ shared flag**: two radios can be on the air at once, and a single flag has
 them lying to each other — one instance's clean exit erasing the other's
 crash, or a second boot reading the first's live flag as a crash. So a boot
 sweeps `run/` and counts only the sentinels whose **pid the OS no longer
-knows** (`src/sentinel.ts`, probing with signal 0; EPERM means another user's
+knows** (`src/support/sentinel.ts`, probing with signal 0; EPERM means another user's
 live process, never a crash); a live pid is a neighbour and is left alone.
 Reporting and clearing are one act, so a crash is mentioned exactly once.
 Only a real broadcast arms one — `--setup`, `--setup-music` and
@@ -591,7 +591,7 @@ on the machine — a browser, an editor, a subprocess, someone's clipboard — i
 required, and the type collects the call sites. A test cannot file an issue or
 write a clipboard by forgetting an injection.
 
-**The delivery primitives (as built, parts only)**: `src/deliver.ts`.
+**The delivery primitives (as built, parts only)**: `src/support/deliver.ts`.
 `copyToClipboard` puts the draft where a listener can paste it — `pbcopy` on
 darwin, `clip` on win32, and on linux `wl-copy` then `xclip -selection
 clipboard`, since either stack may be absent and neither is a dependency we
@@ -846,7 +846,7 @@ contract (no framework until a second agent exists):
   `Host.setMode` seam from the accepted `y` to the conversation's end.
 - **Esc interrupts, never dismisses.** Esc (with no menu/pane open) goes
   over the wire as `interrupt`; the engine's Esc router (`runSetup` in
-  `src/guide.ts`, registered on `Host.onInterrupt` for the flow's whole
+  `src/setup/guide.ts`, registered on `Host.onInterrupt` for the flow's whole
   duration, opening probes included) reads it by where the flow stands:
   before the accepted `y` it is "not now" (the offer declines for this boot,
   never a standing decline); while the guide **works** it cuts the TURN —
@@ -861,7 +861,7 @@ contract (no framework until a second agent exists):
   from what the ENGINE reports (§3.3: segments + user lines + info) — and
   `onUserLine` was wired on the Director's path alone, so every line typed to
   the guide, to the first-run seeds, or to the crash-report offer vanished at
-  the moment it was submitted. The echo belongs in `lineReader` (`src/guide.ts`),
+  the moment it was submitted. The echo belongs in `lineReader` (`src/setup/guide.ts`),
   the one keyboard path all three share, not at each caller: a line that was
   actually taken from the queue is echoed, and a read that resolved through
   some other arm of its race (EOF, Esc, the quit fast-forward) echoes nothing,

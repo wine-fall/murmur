@@ -13,7 +13,7 @@ import {
   type ClipboardSpawn,
   type GhResult,
   type GhRunner,
-} from '../src/deliver.ts'
+} from '../src/support/deliver.ts'
 
 // A clipboard tool that behaves as told: 'ok' takes the text, 'missing' is not
 // installed (spawn emits ENOENT), 'fail' runs and exits non-zero.

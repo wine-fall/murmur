@@ -4,9 +4,9 @@ import { dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { readLogTail } from '../src/diagnostics.ts'
-import { prepareDevLog, resolveDevLog, resolveLogSource } from '../src/dev-log.ts'
-import { readCrashWindow } from '../src/sentinel.ts'
+import { readLogTail } from '../src/support/diagnostics.ts'
+import { prepareDevLog, resolveDevLog, resolveLogSource } from '../src/support/dev-log.ts'
+import { readCrashWindow } from '../src/support/sentinel.ts'
 
 // Local midnight-relative, like the sentinel's own tests: the log's stamps are
 // clock-only, so a UTC-built date would window the wrong hours.

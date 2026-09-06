@@ -72,7 +72,7 @@ jobs:
         working-directory: tui
 
       # BOTH trees, because the client's typecheck crosses the shared-schema
-      # boundary: tui/src imports src/ipc.ts (§2.3's one source of truth for the
+      # boundary: tui/src imports src/host/ipc.ts (§2.3's one source of truth for the
       # wire), and tsc resolves THAT file's own `zod` import by walking up from
       # src/ — which reaches the root node_modules, never tui's. Without this the
       # job passes only on a machine that happens to have installed the root.

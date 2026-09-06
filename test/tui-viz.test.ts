@@ -4,7 +4,7 @@
 // These modules are deliberately free of OpenTUI and React so the fast layer can
 // hold them: the rendering that CANNOT be unit-asserted is the frame OpenTUI
 // paints (§3.9), not the arithmetic that decides what goes in it. The client
-// still reaches into the engine for nothing but src/ipc.ts — a test importing a
+// still reaches into the engine for nothing but src/host/ipc.ts — a test importing a
 // pure client module adds no dependency to either side.
 
 import { describe, expect, it } from 'vitest'

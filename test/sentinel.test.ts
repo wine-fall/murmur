@@ -6,10 +6,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { parseCli } from '../src/config.ts'
 import { escalatingSigint, runSetupCli } from '../src/app.ts'
-import { quitLatch } from '../src/guide.ts'
-import { LineQueue, type Host } from '../src/host.ts'
+import { quitLatch } from '../src/setup/guide.ts'
+import { LineQueue, type Host } from '../src/host/host.ts'
 import { sentinelRoot } from '../src/paths.ts'
-import type { ReportSession } from '../src/report.ts'
+import type { ReportSession } from '../src/support/report.ts'
 import {
   armSentinel,
   collectCrashed,
@@ -19,7 +19,7 @@ import {
   readCrashWindow,
   uncleanExitNotice,
   type CrashedSession,
-} from '../src/sentinel.ts'
+} from '../src/support/sentinel.ts'
 
 const NOW = new Date('2026-08-31T10:00:00Z')
 

@@ -10,7 +10,7 @@ import {
   preflightMusic,
   preflightYtdlp,
   preflightYtdlpFreshness,
-} from '../src/startup.ts'
+} from '../src/setup/startup.ts'
 
 // Stand-in binaries (spec 03-03 §5 testing): tiny executable scripts standing
 // in for yt-dlp/ffmpeg, so the probes are exercised for real — spawn, exit

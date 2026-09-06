@@ -6,7 +6,7 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion } from '../src/config.ts'
-import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host.ts'
+import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host/host.ts'
 
 describe('LineQueue', () => {
   it('peek does not consume; take does', async () => {

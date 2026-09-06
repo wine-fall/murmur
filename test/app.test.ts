@@ -12,7 +12,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it, vi } from 'vitest'
 
-import { IdleSensor } from '../src/activity.ts'
+import { IdleSensor } from '../src/director/activity.ts'
 import {
   buildHost,
   buildMemory,
@@ -32,15 +32,15 @@ import {
   voiceChanged,
 } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
-import { isFirstRun } from '../src/first-run.ts'
-import { quitLatch } from '../src/guide.ts'
-import { CliHost, type Host } from '../src/host.ts'
-import { HostedVoice } from '../src/hosted-voice.ts'
-import { IpcHost } from '../src/ipc-host.ts'
-import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
-import { LedgerScheduler } from '../src/scheduler.ts'
-import { readSettingsFile } from '../src/settings.ts'
-import { StubVoice } from '../src/voice.ts'
+import { isFirstRun } from '../src/setup/first-run.ts'
+import { quitLatch } from '../src/setup/guide.ts'
+import { CliHost, type Host } from '../src/host/host.ts'
+import { HostedVoice } from '../src/voice/hosted-voice.ts'
+import { IpcHost } from '../src/host/ipc-host.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
+import { LedgerScheduler } from '../src/director/scheduler.ts'
+import { readSettingsFile } from '../src/host/settings.ts'
+import { StubVoice } from '../src/voice/voice.ts'
 
 import { FakeBrain, FakeHost } from './fakes.ts'
 
@@ -606,7 +606,7 @@ describe('front-end wiring (spec 10)', () => {
   })
 
   it('opens the configured dev log for the host it hands back', async () => {
-    // The npm-installed default (src/dev-log.ts): nobody set MURMUR_DEV_LOG, so
+    // The npm-installed default (src/support/dev-log.ts): nobody set MURMUR_DEV_LOG, so
     // the run still leaves a log behind — directory made here, not in the host.
     const home = mkdtempSync(join(tmpdir(), 'murmur-home-'))
     const bundle = await buildHost(config(['--plain'], { MURMUR_HOME: home }))

@@ -1,7 +1,7 @@
 # spec/07 · proactive-and-pacing — time anchors, activity pacing
 
 > **Status**: **Built (mechanism-level) 2026-07-29.** All four deliverables land
-> (`src/activity.ts`, `src/scheduler.ts`, `PacingCadence`, and the Director's
+> (`src/director/activity.ts`, `src/director/scheduler.ts`, `PacingCadence`, and the Director's
 > boundary / anchor / invite handling); the unit suite is green. The real
 > `ioreg` probe and the real Claude brain were smoke-tested through the SDK: the
 > model marks exactly one beat `invite: true`, and the slide-back neither
@@ -32,7 +32,7 @@
 > prompt. No third hop; nothing new is written to disk except one anchor event
 > per anchor in the spec-05 ledger.
 > **Conventions**: English; written for a coding agent. Design-level — mechanism
-> and contracts, not final code. Prompt text centralized in `src/prompts.ts`; no
+> and contracts, not final code. Prompt text centralized in `src/prompts/`; no
 > CJK in source (master §0).
 
 ---
@@ -125,7 +125,7 @@ readonly activity?: Activity   // absent = render nothing (degrade silently)
 ```
 
 The Director fills it in `context()` from the sensor, next to `currentScene()`.
-Prompt rendering appends a short cue (`src/prompts.ts`), and the cue is written
+Prompt rendering appends a short cue (`src/prompts/`), and the cue is written
 so the host **adjusts its manner, never narrates the surveillance** — no "you
 seem to be away"; more like "the room is quiet, keep it low and unhurried". A
 `null`/unmapped value appends nothing.
@@ -219,7 +219,7 @@ memory:
 
 ### 2.5 Cadence + pacing integration (no new scheduling machinery)
 
-`CadenceState` (`src/cadence.ts`) already documents "later specs extend it
+`CadenceState` (`src/director/cadence.ts`) already documents "later specs extend it
 (pacing in 07)". This spec adds the field and one decorator:
 
 ```ts
@@ -319,7 +319,7 @@ Gating is one rule applied at the two places talk work is started:
 
 1. At each boundary, before cadence: `scheduler.due(now)`.
 2. If an anchor is due, the segment is an **anchor talk segment**: one
-   `nextTalks(ctx, 1)` whose prompt carries an anchor cue (`src/prompts.ts`,
+   `nextTalks(ctx, 1)` whose prompt carries an anchor cue (`src/prompts/`,
    per-anchor wording), aired like any talk beat.
 3. Record it in history as usual, `recordEvent('anchor', "<id>@<date>")` at air
    time (aired, not merely intended — the same rule the music ledger follows).
@@ -384,7 +384,7 @@ Config (new):
   anchorsEnabled: boolean   default true    (--no-anchors)
   gatingEnabled:  boolean   default true    (--no-gating)
 
-Module constants (src/activity.ts, src/scheduler.ts, src/director.ts):
+Module constants (src/director/activity.ts, src/director/scheduler.ts, src/director/director.ts):
   ENGAGED_MS, PRESENT_MS, AWAY_GAP_FACTOR, anchor windows
 ```
 

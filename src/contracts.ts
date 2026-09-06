@@ -10,8 +10,8 @@
 
 import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropic-ai/claude-agent-sdk'
 
-import type { Activity } from './activity.ts'
-import type { Settings, SettingsPatch } from './ipc.ts'
+import type { Activity } from './director/activity.ts'
+import type { Settings, SettingsPatch } from './host/ipc.ts'
 
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).

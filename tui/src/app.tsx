@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
 import type { InputRenderable, ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
 
-import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/ipc.ts'
+import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/host/ipc.ts'
 import { Bars, render } from './bars.ts'
 import {
   cardLines,

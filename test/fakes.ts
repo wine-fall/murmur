@@ -24,10 +24,10 @@ import type {
   TrackSource,
   Turn,
 } from '../src/contracts.ts'
-import type { DirectorSettings } from '../src/director.ts'
-import type { AskKind, FloorMode, Host } from '../src/host.ts'
-import type { ProgramState } from '../src/ipc.ts'
-import { LineQueue } from '../src/host.ts'
+import type { DirectorSettings } from '../src/director/director.ts'
+import type { AskKind, FloorMode, Host } from '../src/host/host.ts'
+import type { ProgramState } from '../src/host/ipc.ts'
+import { LineQueue } from '../src/host/host.ts'
 
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
 // returned object to exercise hot application.

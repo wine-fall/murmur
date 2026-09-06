@@ -8,7 +8,7 @@ import {
   ndjson,
   type EngineMessage,
   type TuiMessage,
-} from '../src/ipc.ts'
+} from '../src/host/ipc.ts'
 
 // Every message in the spec-10 §2.3 table, once each: the wire contract is
 // pinned by round-tripping the whole set, not a sample.

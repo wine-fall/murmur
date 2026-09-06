@@ -26,7 +26,7 @@ import {
   VOICE_PROBE_LINE,
   writeVoiceConfig,
   writeVoiceConfigTool,
-} from '../src/voice-config.ts'
+} from '../src/voice/voice-config.ts'
 
 const home = (): string => mkdtempSync(join(tmpdir(), 'murmur-voice-'))
 

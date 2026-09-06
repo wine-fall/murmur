@@ -12,8 +12,8 @@ import {
   type DeliverTools,
   type ReportDeps,
   type ReportKind,
-} from '../src/report.ts'
-import type { GhDraft, GhStatus } from '../src/deliver.ts'
+} from '../src/support/report.ts'
+import type { GhDraft, GhStatus } from '../src/support/deliver.ts'
 import { FakeHost, until } from './fakes.ts'
 
 function home(): string {

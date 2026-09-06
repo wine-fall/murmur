@@ -16,7 +16,7 @@ import {
   readManifest,
   resumeFrom,
   writeBedPosition,
-} from '../src/bed.ts'
+} from '../src/audio/bed.ts'
 
 // The manifest constant is anchored relative to the module file; a tree move
 // that breaks the anchor must fail here, not at the first real run.

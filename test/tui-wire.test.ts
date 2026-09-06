@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { decodeTuiMessage, ndjson, PROTOCOL, type TuiMessage } from '../src/ipc.ts'
+import { decodeTuiMessage, ndjson, PROTOCOL, type TuiMessage } from '../src/host/ipc.ts'
 import { connectEngine } from '../tui/src/wire.ts'
 
 describe('connectEngine', () => {

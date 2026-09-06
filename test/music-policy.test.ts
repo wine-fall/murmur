@@ -8,8 +8,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { parseMusicPolicy, readMusicPolicy, seedMusicPolicy } from '../src/music-policy.ts'
-import { DEFAULT_MUSIC_POLICY } from '../src/prompts.ts'
+import { parseMusicPolicy, readMusicPolicy, seedMusicPolicy } from '../src/music/music-policy.ts'
+import { DEFAULT_MUSIC_POLICY } from '../src/prompts/music.ts'
 
 const home = () => mkdtempSync(join(tmpdir(), 'murmur-policy-'))
 const fileIn = (dir: string) => join(dir, 'music-policy.md')

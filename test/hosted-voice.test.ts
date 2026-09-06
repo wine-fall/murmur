@@ -4,8 +4,8 @@ import { dirname } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { buildTtsPayload, HostedVoice, splitSentences } from '../src/hosted-voice.ts'
-import { readWav, silentWav, wavSeconds } from '../src/wav.ts'
+import { buildTtsPayload, HostedVoice, splitSentences } from '../src/voice/hosted-voice.ts'
+import { readWav, silentWav, wavSeconds } from '../src/audio/wav.ts'
 
 // Sentence enders written as escapes so the source stays ASCII (DESIGN §0): the
 // persona speaks Chinese, where the fullwidth marks are the real enders.

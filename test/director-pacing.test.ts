@@ -3,11 +3,11 @@
 // time anchors beat the buffer.
 import { describe, expect, it } from 'vitest'
 
-import { IdleSensor, type Activity, type ActivitySensor } from '../src/activity.ts'
-import { EveryNCadence, PacingCadence } from '../src/cadence.ts'
-import { Director, type DirectorDeps, type PacingWiring } from '../src/director.ts'
-import { InProcessMemoryStore } from '../src/memory.ts'
-import type { AnchorId, Scheduler } from '../src/scheduler.ts'
+import { IdleSensor, type Activity, type ActivitySensor } from '../src/director/activity.ts'
+import { EveryNCadence, PacingCadence } from '../src/director/cadence.ts'
+import { Director, type DirectorDeps, type PacingWiring } from '../src/director/director.ts'
+import { InProcessMemoryStore } from '../src/memory/memory.ts'
+import type { AnchorId, Scheduler } from '../src/director/scheduler.ts'
 import {
   directorSettings,
   FakeBrain,

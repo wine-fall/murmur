@@ -113,7 +113,7 @@ dev: install
 	@# torn down when the app exits. Its crash can never take murmur down;
 	@# stderr lands in mem.log so a fatal crash is recorded, not swallowed.
 	@# The dev log is APPENDED, never truncated: a crash report is read back by
-	@# the NEXT boot (src/sentinel.ts), and emptying the file at launch would
+	@# the NEXT boot (src/support/sentinel.ts), and emptying the file at launch would
 	@# leave that boot reading its own lines as the dead run's. `make logs`
 	@# tails, so history above costs nothing; delete .dev/dev.log to reclaim it.
 	@if [ -f .env ]; then set -a; . ./.env; set +a; fi; \

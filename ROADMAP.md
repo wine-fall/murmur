@@ -41,7 +41,7 @@ its tail.
 
 **Nothing is said over a song unprompted.** Speaking over a ducked track is
 not the missing piece — the lead-in and the coda both do it today
-(`src/director.ts`: the handle is ducked, the clip airs, the unduck lifts
+(`src/director/director.ts`: the handle is ducked, the clip airs, the unduck lifts
 behind it), and `Engine.play(voice)` has ducked live music for a clip since
 long before that. What is missing is a beat the host starts on its own
 *between* those two edges: inside a music segment it is silent from the
@@ -54,7 +54,7 @@ airs.
 ## 3. Pick well, play reliably
 
 `search_music` is a single keyword query against the provider
-(`src/music-tools.ts:41`). There is no notion of a source, so whatever ranks
+(`src/music/music-tools.ts:41`). There is no notion of a source, so whatever ranks
 first is what gets judged, and nothing vouches for it. The observed cost is in
 #164: three dead stream probes in half an hour, one pick abandoned to talk, and
 every pick in that session running 1.5–3.5× the recorded spec-04 baseline —
@@ -116,7 +116,7 @@ What it touches:
   that carries a cookie down to yt-dlp and reports an expired one **as expired**.
   Today a yt-dlp auth failure comes back through `provider.resolve`, which
   `submit_pick` catches and hands the model as "pick another"
-  (`src/music-tools.ts`) — never reaching the stream probe. So a listener whose
+  (`src/music/music-tools.ts`) — never reaching the stream probe. So a listener whose
   cookie went stale would watch murmur quietly reject candidate after candidate
   with nothing on screen naming a login.
 - **The login is a conversation, not a config field.** The setup guide (spec

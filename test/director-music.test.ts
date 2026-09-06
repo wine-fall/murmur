@@ -5,10 +5,10 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 import { describe, expect, it } from 'vitest'
 
-import { EveryNCadence } from '../src/cadence.ts'
-import { CODA_LEAD_MIN_S, Director, type DirectorDeps } from '../src/director.ts'
-import { InProcessMemoryStore } from '../src/memory.ts'
-import { sceneFor } from '../src/scene.ts'
+import { EveryNCadence } from '../src/director/cadence.ts'
+import { CODA_LEAD_MIN_S, Director, type DirectorDeps } from '../src/director/director.ts'
+import { InProcessMemoryStore } from '../src/memory/memory.ts'
+import { sceneFor } from '../src/director/scene.ts'
 import {
   directorSettings,
   FakeBrain,

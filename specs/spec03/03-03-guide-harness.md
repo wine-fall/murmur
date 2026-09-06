@@ -24,7 +24,7 @@
 > per-action-consent language in the banners above is history, not contract.
 > **Part**: The third part of spec 03 (the music family), riding the brain-harness from [`03-01-brain-harness.md`](03-01-brain-harness.md): shape the **native Claude Code agent** to diagnose and — with the user's consent — fix why the music dependencies (**yt-dlp + ffmpeg** — both unbound external binaries per master §10.1) aren't working in *their* environment (missing entirely, or broken — e.g. a corporate proxy whose CA yt-dlp doesn't trust). This is what makes 03's music **actually usable** on constrained machines. See master [`../DESIGN.md`](../DESIGN.md) §3.2 (the brain is a harnessed agent), §10.1 (guided provisioning), §7 pillar 1 (deterministic checks are local, 0 tokens).
 > **Milestone**: L1 — part of delivering working music (03). Depends on 03-01 (the harness) + 01 (CLI Host); independent of 03-02 (ducking).
-> **Conventions**: English; written for a coding agent. We do **not** build an agent — Claude Code is the agent; we shape it. Prompts centralized in `src/prompts.ts`; no CJK in source (master §0).
+> **Conventions**: English; written for a coding agent. We do **not** build an agent — Claude Code is the agent; we shape it. Prompts centralized in `src/prompts/`; no CJK in source (master §0).
 
 ---
 
@@ -53,7 +53,7 @@
 - **`SetupGuide`** (guide.py): `fix_music(*, ytdlp="yt-dlp", ffmpeg="ffmpeg", reason="", venv_python=None, permission_mode="default") -> str` — `reason` carries the preflight findings into the task prompt.
 - **Prompts** (prompts/guide.py, done): `GUIDE_PERSONA` (behavior) + `build_fix_music_prompt` (high-level task, no prescribed remedy).
 - **Preflight** (music/preflight.py): deterministic probes — `preflight_ytdlp(binary)` (trivial query), `preflight_ffmpeg(binary)` (`-version` probe), and `preflight_music(ytdlp=..., ffmpeg=...)` aggregating both into one `PreflightResult(ok, reason)` (ok iff both; reason prefixes each broken binary's name). No LLM.
-- **Permission enforcement, two layers** (smoke-measured seam fact: the SDK consults `canUseTool` only when its own policy would ask — a `Read` or a classifier-safe Bash command never reaches it): the **secret-input guard lives in a `PreToolUse` hook** (`guideOptions`, `src/brain.ts`), which fires for every tool use and denies secret-bearing input with an explanation (murmur-owned tools exempt — their handlers own the secret channel); `cliPermission` (`src/guide.ts`) allows whatever does arrive under the entry authorization, repeats the secret test as the belt, and never puts a question to the user. Visibility comes from the tool-activity stream (`onToolUse`/`onToolResult`), which narrates every tool use into the host and dev log.
+- **Permission enforcement, two layers** (smoke-measured seam fact: the SDK consults `canUseTool` only when its own policy would ask — a `Read` or a classifier-safe Bash command never reaches it): the **secret-input guard lives in a `PreToolUse` hook** (`guideOptions`, `src/brain/brain.ts`), which fires for every tool use and denies secret-bearing input with an explanation (murmur-owned tools exempt — their handlers own the secret channel); `cliPermission` (`src/setup/guide.ts`) allows whatever does arrive under the entry authorization, repeats the secret test as the belt, and never puts a question to the user. Visibility comes from the tool-activity stream (`onToolUse`/`onToolResult`), which narrates every tool use into the host and dev log.
 
 ---
 
@@ -119,7 +119,7 @@
    standalone no-launch reporter.
    **Leaving mid-onboarding works (2026-08-11)**: a typed `/quit` — which is
    what Ctrl-C in the TUI sends — fires a quit latch inside the consuming
-   reader (`quitLatch`/`lineReader`, `src/guide.ts`) instead of being
+   reader (`quitLatch`/`lineReader`, `src/setup/guide.ts`) instead of being
    swallowed as an answer: every later read declines instantly and the app
    shuts down before the broadcast starts (spec 01 §3.6 extended to the Q&A
    flows).
@@ -135,7 +135,7 @@
    - **yt-dlp freshness (added 2026-08-12)**: releases are dated
      (`YYYY.MM.DD`) and extractors rot as sites move their APIs and anti-bot
      checks — Bilibili breaks first (its search/page endpoints 412 stale
-     clients). `preflightYtdlpFreshness` (`src/startup.ts`) reads `--version`
+     clients). `preflightYtdlpFreshness` (`src/setup/startup.ts`) reads `--version`
      locally and flags a release older than 60 days as a `ytdlp` gap. The
      probe is deliberately **not** a live Bilibili fetch: those endpoints
      answer probabilistically (smoke-measured 412 flicker on identical

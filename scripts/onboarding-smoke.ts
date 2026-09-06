@@ -23,11 +23,11 @@ import { promisify } from 'node:util'
 import { buildVoice, voiceAfterSetup } from '../src/app.ts'
 import { parseCli } from '../src/config.ts'
 import type { GuideCapable } from '../src/contracts.ts'
-import { runSetup, SETUP_DECLINED, type SetupTargets } from '../src/guide.ts'
-import type { Host } from '../src/host.ts'
-import { HostedVoice } from '../src/hosted-voice.ts'
-import { PersistentMemoryStore } from '../src/memory.ts'
-import { readVoiceConfig, type VoiceConfig, writeVoiceConfigTool } from '../src/voice-config.ts'
+import { runSetup, SETUP_DECLINED, type SetupTargets } from '../src/setup/guide.ts'
+import type { Host } from '../src/host/host.ts'
+import { HostedVoice } from '../src/voice/hosted-voice.ts'
+import { PersistentMemoryStore } from '../src/memory/memory.ts'
+import { readVoiceConfig, type VoiceConfig, writeVoiceConfigTool } from '../src/voice/voice-config.ts'
 
 const run = promisify(execFile)
 const REPO = join(import.meta.dirname, '..')

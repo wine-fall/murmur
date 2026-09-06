@@ -9,8 +9,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { FetchedTopic, FetchTopicsRequest } from '../src/contracts.ts'
-import { RWT_FETCH_SYSTEM_PROMPT } from '../src/prompts.ts'
-import { fetchTopicsTask, RealWorldTopics, RwtPool, RwtRoll } from '../src/rwt.ts'
+import { RWT_FETCH_SYSTEM_PROMPT } from '../src/prompts/rwt.ts'
+import { fetchTopicsTask, RealWorldTopics, RwtPool, RwtRoll } from '../src/brain/rwt.ts'
 import { callTool, FakeHarness, until } from './fakes.ts'
 
 const HOUR = 3600

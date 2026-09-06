@@ -4,8 +4,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory.ts'
-import { anchorDay, LedgerScheduler } from '../src/scheduler.ts'
+import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
+import { anchorDay, LedgerScheduler } from '../src/director/scheduler.ts'
 
 // Local wall-clock literals (no Z): the windows are local-hour buckets.
 const at = (iso: string) => new Date(iso)

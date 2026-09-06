@@ -447,8 +447,8 @@ Listed beside the ducking knobs in spec 03-02 §6.1; the homes are here.
 
 | Constant | Home | Value | What it sets |
 |---|---|---|---|
-| `CODA_RIDE_P` | `src/director.ts` | 0.5 | How often the coda rides the outro instead of waiting for silence. |
-| `CODA_LEAD_MIN_S` / `CODA_LEAD_MAX_S` | `src/director.ts` | 8 s / 12 s | How long before the end the ride starts (uniform in range). |
+| `CODA_RIDE_P` | `src/director/director.ts` | 0.5 | How often the coda rides the outro instead of waiting for silence. |
+| `CODA_LEAD_MIN_S` / `CODA_LEAD_MAX_S` | `src/director/director.ts` | 8 s / 12 s | How long before the end the ride starts (uniform in range). |
 
 - **Buffer depth:** single-slot (one pick / one segment ahead) vs N-deep. Slice 1
   starts single-slot; deepen only if measurement shows a remaining gap.

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'node:url'
 import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion, parseCli } from '../src/config.ts'
-import { DEFAULT_PERSONA_PATH } from '../src/prompts.ts'
+import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
 
 // Every test states the env it means, and its home is a directory with nothing
 // in it — so a real ~/.murmur/{voice,settings}.json on the developer's machine

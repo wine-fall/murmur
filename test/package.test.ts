@@ -82,7 +82,7 @@ describe('the engine starts without an experimental warning', () => {
   // module IS loaded — which is what a run that reaches recall does.
   it('silences the warning when recall loads node:sqlite', () => {
     const script =
-      "import './src/warnings.ts'\nconst { RecallIndex } = await import('./src/recall.ts')\n" +
+      "import './src/warnings.ts'\nconst { RecallIndex } = await import('./src/memory/recall.ts')\n" +
       "new RecallIndex(':memory:').rebuild([{ ts: 1, role: 'user', text: 'a lantern' }])\n"
     const run = spawnSync(process.execPath, ['--input-type=module', '--eval', script], {
       cwd: root,

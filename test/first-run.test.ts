@@ -4,11 +4,11 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { ProfileBootstrap } from '../src/cc-tools.ts'
+import type { ProfileBootstrap } from '../src/setup/cc-tools.ts'
 import type { Brain, SeedAnswer, Task } from '../src/contracts.ts'
-import { quitLatch } from '../src/guide.ts'
-import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/first-run.ts'
-import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts.ts'
+import { quitLatch } from '../src/setup/guide.ts'
+import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/setup/first-run.ts'
+import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts/persona.ts'
 import { callTool, FakeHarness, FakeHost } from './fakes.ts'
 
 const SEED_TEXT = 'bundled seed persona'

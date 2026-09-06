@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { decodeArgs, framedChunks, ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from '../src/ffmpeg.ts'
+import { decodeArgs, framedChunks, ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from '../src/audio/ffmpeg.ts'
 
 async function* bytes(...chunks: Buffer[]): AsyncGenerator<Buffer> {
   for (const c of chunks) yield c

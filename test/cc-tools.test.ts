@@ -4,9 +4,9 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { ccTools, MAX_READ_CHARS, MAX_SESSIONS } from '../src/cc-tools.ts'
-import type { ProfileBootstrap } from '../src/cc-tools.ts'
-import { PROFILE_CHAR_CAP } from '../src/prompts.ts'
+import { ccTools, MAX_READ_CHARS, MAX_SESSIONS } from '../src/setup/cc-tools.ts'
+import type { ProfileBootstrap } from '../src/setup/cc-tools.ts'
+import { PROFILE_CHAR_CAP } from '../src/prompts/profile.ts'
 import { callTool } from './fakes.ts'
 
 // A throwaway Claude-Code data root: <root>/projects/<project>/<session>.jsonl

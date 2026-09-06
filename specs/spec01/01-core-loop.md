@@ -122,7 +122,7 @@ class Brain:
 - Persona is injected as the **System Prompt**; `ctx.recent` is sent as prior turns. The API is stateless — the core resends the compact context each call (master §6).
 - Model `claude-opus-4-8` for L0. Tiered models (cheap filler on `claude-haiku-4-5`) are deferred. *(Amended 2026-07-29: spec 08 is dissolved — tiering is a config knob, master §7 status column; `musicModel`/`compactModel` already use the cheap tier.)*
 - **Resolved (step 2)**: uses the SDK's one-shot `query(prompt=..., options=ClaudeAgentOptions(...))` — explicitly *stateless* per the SDK, so it matches "resend the compact context each call." Per call: `system_prompt = ctx.persona` (a custom string, which replaces the `claude_code` preset); `model = claude-opus-4-8`; `max_turns=1`. **Full isolation from the user's local Claude Code environment** (the radio must not be influenced by their `CLAUDE.md`, plugins/skills, MCP servers, hooks, or subagents): `setting_sources=[]` (no user/project/local settings — verified to strip the user's plugins, MCP, and hooks), `allowed_tools=[]` + `tools=[]` (no tools loaded or invokable), `skills=[]` + `extra_args={"disable-slash-commands": None}` (no skills/commands), `mcp_servers={}`. Subscription OAuth is preserved (`apiKeySource = none`). Verified against the SDK init payload. (Residual: built-in agent *type* definitions still appear in metadata but are inert — with no tools there is no Task tool to launch them.) Reply text is collected from `AssistantMessage` `TextBlock`s. Subscription-OAuth is inherited automatically from the local Claude Code login (no API key) by the SDK shelling out to the `claude` CLI. (The spec fixes only the two-method contract + the auth/model facts from master §3.2; the above is the resolved mechanism, kept here to keep spec and code aligned.)
-- **Prompt text is centralized** in `src/prompts.ts` (English; DESIGN §0): the `nextTalks` / `respond` instruction templates + transcript rendering, with the static persona seed as `src/prompts/persona-seed.md`. `brain.ts` holds only Brain mechanics and imports the builders. `Config.personaPath` defaults to the bundled seed.
+- **Prompt text is centralized** in `src/prompts/` (English; DESIGN §0): the `nextTalks` / `respond` instruction templates + transcript rendering, with the static persona seed as `src/prompts/persona-seed.md`. `brain.ts` holds only Brain mechanics and imports the builders. `Config.personaPath` defaults to the bundled seed.
 
 ### 3.3 Control flow (the loop + interruption)
 Two concurrent tasks over a shared state, single event loop:
@@ -149,7 +149,7 @@ Two concurrent tasks over a shared state, single event loop:
   reproduced since — three real `--plain` runs on 2026-09-04 with the real
   brain, a seeded persona and piped stdin all echoed and acted on the first
   line, read at the seam (`settings.json` gained `musicEnabled: false`, which
-  only `src/steer-tools.ts` writes). No fix was ever identified, so the cause
+  only `src/brain/steer-tools.ts` writes). No fix was ever identified, so the cause
   is unknown rather than closed: `lineReader`'s `settled` guard was already
   present when the loss happened, and it is pinned by test, not credited with
   the cure. A first line that goes missing again is that defect returning, not

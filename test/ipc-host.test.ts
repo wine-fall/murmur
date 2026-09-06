@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { IpcHost, spawnTuiClient, TERMINAL_RESTORE } from '../src/ipc-host.ts'
+import { IpcHost, spawnTuiClient, TERMINAL_RESTORE } from '../src/host/ipc-host.ts'
 import {
   PROTOCOL,
   decodeEngineMessage,
@@ -15,8 +15,8 @@ import {
   type EngineMessage,
   type Settings,
   type SettingsPatch,
-} from '../src/ipc.ts'
-import { STATUS_MICROCOPY } from '../src/prompts.ts'
+} from '../src/host/ipc.ts'
+import { STATUS_MICROCOPY } from '../src/prompts/status.ts'
 
 // A stand-in TUI: the fast layer proves the bridge, never a rendered frame.
 class FakeClient {
@@ -514,7 +514,7 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
   })
 
   // spec 10 §3.6: the visualizer subscription. The bridge only routes it — the
-  // FFT and the pacing are the engine's (src/viz.ts).
+  // FFT and the pacing are the engine's (src/audio/viz.ts).
   describe('the visualizer subscription', () => {
     function subscriptions(): (readonly [boolean, number | undefined])[] {
       const seen: (readonly [boolean, number | undefined])[] = []

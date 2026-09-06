@@ -3,12 +3,12 @@
 // every boundary and never awaited.
 import { describe, expect, it } from 'vitest'
 
-import type { ActivitySensor } from '../src/activity.ts'
-import { EveryNCadence } from '../src/cadence.ts'
+import type { ActivitySensor } from '../src/director/activity.ts'
+import { EveryNCadence } from '../src/director/cadence.ts'
 import type { RwtTopic } from '../src/contracts.ts'
-import { Director, type DirectorDeps } from '../src/director.ts'
-import { InProcessMemoryStore } from '../src/memory.ts'
-import type { AnchorId, Scheduler } from '../src/scheduler.ts'
+import { Director, type DirectorDeps } from '../src/director/director.ts'
+import { InProcessMemoryStore } from '../src/memory/memory.ts'
+import type { AnchorId, Scheduler } from '../src/director/scheduler.ts'
 import {
   directorSettings,
   FakeBrain,
