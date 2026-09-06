@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-04 (real-world topics ride memory: profile taste + ledger — spec 13 §3.4/§3.7)_
+_Last updated: 2026-09-06 (spec 14 listening-taste drafted; roadmap line 5 retitled — build dispatched)_
 
 ## Where we are
 
@@ -21,7 +21,9 @@ bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
 07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
-spec for what it does, its PR for how it got there. Everything left is under
+spec for what it does, its PR for how it got there. **Current build: spec 14**
+(`specs/spec14/14-listening-taste.md`, roadmap line 5 — taste from the
+listener's own platforms, not playback from them). Everything else is under
 **Open** — engineering items first, then the by-ear passes.
 
 ## Open
