@@ -106,7 +106,9 @@ function biliFetch(answers: Record<string, unknown>, status = 200): { fetch: Bil
 // Captured from the real API (2026-09-06), values kept, ids shortened.
 const NAV = { code: 0, data: { isLogin: true, uname: 'FAWineLL', mid: 4486056 } }
 const FOLDERS = { code: 0, data: { list: [{ id: 66275456, title: 'default folder', media_count: 287 }, { id: 3387798356, title: 'japan', media_count: 1 }, { id: 946277156, title: 'algorithms', media_count: 0 }] } }
-const FAVLIST = { code: 0, data: { medias: [{ title: 'A whole series in one go', upper: { name: 'Fries Says Film' }, duration: 18488, bvid: 'BV1c94y1q7br', fav_time: 1786337563 }, { title: 'A beginner guide', upper: { name: 'Takumi' }, duration: 1405, bvid: 'BV1MubUzkEfp', fav_time: 1785600894 }], has_more: false } }
+// The third row is a video the platform has since taken down (attr bit 1):
+// its title is the platform's placeholder, not the listener's taste.
+const FAVLIST = { code: 0, data: { medias: [{ title: 'A whole series in one go', upper: { name: 'Fries Says Film' }, duration: 18488, bvid: 'BV1c94y1q7br', fav_time: 1786337563, attr: 0 }, { title: 'A beginner guide', upper: { name: 'Takumi' }, duration: 1405, bvid: 'BV1MubUzkEfp', fav_time: 1785600894 }, { title: 'video no longer available', upper: { name: 'account deleted' }, bvid: 'BV1gone', fav_time: 1785000000, attr: 9 }], has_more: false } }
 const WATCHLATER = { code: 0, data: { count: 1, list: [{ title: 'Later', owner: { name: 'Someone' }, duration: 300, bvid: 'BV1later', add_at: 1786000000 }] } }
 const AUDIO = { code: 0, data: { curPage: 1, pageCount: 1, totalSize: 1, pageSize: 30, data: [{ id: 123, title: 'My upload', author: 'FAWineLL', duration: 200 }] } }
 

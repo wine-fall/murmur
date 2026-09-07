@@ -24,7 +24,8 @@ import { ClaudeBrain, StubBrain } from './brain/brain.ts'
 import { LiveCadence, PacingCadence } from './director/cadence.ts'
 import { Compactor } from './memory/compaction.ts'
 import { packageVersion, type Config, ttsFromFile } from './config.ts'
-import type { Brain, Harness, MemoryStore, VoiceProvider } from './contracts.ts'
+import type { Brain, Catalogue, Harness, MemoryStore, VoiceProvider } from './contracts.ts'
+import type { SourceLine } from './host/ipc.ts'
 import {
   canOpenBrowser,
   copyToClipboard,
@@ -50,7 +51,13 @@ import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './brain/rwt.
 import { MusicProgrammer } from './music/music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './support/report.ts'
 import { SteerResponder } from './brain/steer-responder.ts'
-import { YtDlpMusicProvider } from './music/music.ts'
+import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
+import { SourceAuthWatch } from './music/sources/auth.ts'
+import { buildSource, CookieJars, defaultMounts, neteaseSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { runSources } from './music/sources/flow.ts'
+import { TasteRefresher } from './music/sources/refresh.ts'
+import { SourcesStore } from './music/sources/store.ts'
+import { SOURCE_NAMES, TasteReader } from './music/sources/taste.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLanguage, personaLine } from './brain/persona.ts'
 import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './setup/guide.ts'
@@ -237,6 +244,48 @@ export function musicWiringWanted(config: Config, hasBrain: boolean, setupMusicO
   return hasBrain && (config.musicEnabled ? setupMusicOk : true)
 }
 
+// The listener's taste (spec 14): the store behind sources.json, the digest
+// reader, the auth watch, the refresher, and the adapter wiring — one object
+// the music pipeline, the Director and the /sources conversation share.
+// Built for a real (claude) run only: a stub run never reads sources.json
+// (spec 14 §3.2, the isolation rule of spec 05 §3.7).
+export type TasteWiring = {
+  store: SourcesStore
+  reader: TasteReader
+  watch: SourceAuthWatch
+  refresher: TasteRefresher
+  build: SourceBuildDeps
+  // The catalogues search_music may name beyond youtube: the mounted cookie
+  // sources that can also play (spec 14 §2.4), read live.
+  catalogues: () => Catalogue[]
+  // The read-only lines the settings pane shows (spec 14 §3.1).
+  lines: () => SourceLine[]
+}
+
+export function buildTaste(config: Config, host: Host, ytdlp: YtDlpRunner = ytdlpRunner(config.ytdlpCmd)): TasteWiring | undefined {
+  if (config.brain !== 'claude') return undefined
+  const store = new SourcesStore({ path: config.sourcesPath, tasteDir: config.tasteDir, log: (m) => host.info(m) })
+  const reader = new TasteReader({ dir: config.tasteDir, ...(host.debug !== undefined && { log: host.debug.bind(host) }) })
+  const watch = new SourceAuthWatch({ store, host })
+  const build: SourceBuildDeps = { ytdlp, jars: new CookieJars(ytdlp), store, openUrl: openInBrowser }
+  const refresher = new TasteRefresher({ store, source: (id) => buildSource(id, store.read()[id]!, build), watch, host })
+  return {
+    store,
+    reader,
+    watch,
+    refresher,
+    build,
+    catalogues: () => store.mounted().filter((id): id is 'bilibili' | 'netease' => id === 'bilibili' || id === 'netease'),
+    lines: () => {
+      const file = store.read()
+      return store.mounted().map((id) => {
+        const entry = file[id]!
+        return { id, name: SOURCE_NAMES[id], status: entry.status, ...(entry.lastRefresh !== undefined && { refreshed: entry.lastRefresh }) }
+      })
+    },
+  }
+}
+
 // Music wiring (find+pull -> cadence -> engine), or undefined when the session
 // can never play music: a failed preflight or the stub brain (the harness
 // behind the pick task is the real SDK). The cadence reads the live settings,
@@ -247,8 +296,15 @@ function buildMusic(
   harness: Harness,
   engine: AudioEngine,
   host: Host,
+  taste: TasteWiring | undefined,
 ): MusicWiring {
-  const provider = new YtDlpMusicProvider({ binary: config.ytdlpCmd })
+  // With taste wired the provider consults the mounted sources per call
+  // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
+  // cookie-less provider it always was.
+  const provider = new YtDlpMusicProvider({
+    binary: config.ytdlpCmd,
+    ...(taste !== undefined && { sources: () => taste.store.read(), netease: neteaseSearch(taste.build) }),
+  })
   // The listener's policy file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).
   if (seedMusicPolicy(config.musicPolicyPath)) host.debug?.(`music.policy seeded ${config.musicPolicyPath}`)
@@ -267,8 +323,16 @@ function buildMusic(
     provider,
     model: config.musicModel,
     probe: (s) => probeStream(s, config.ffmpegCmd),
-    instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath)),
+    // The taste paragraph rides the instruction only while a digest exists.
+    instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath), { taste: taste !== undefined && taste.reader.digest() !== '' }),
     ...(listening !== undefined && { listening }),
+    ...(taste !== undefined && {
+      taste: {
+        catalogues: taste.catalogues,
+        onAuthFailure: (err) => taste.watch.note(err),
+        probeDurationS: (s) => probeDurationS(s),
+      },
+    }),
     // Discovery stage timings land in the dev log (issue #76).
     ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })
@@ -698,9 +762,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     )
   }
 
+  // The listener's taste (spec 14), on a real run only.
+  const taste = buildTaste(config, host)
   const music =
     musicWiringWanted(config, claude !== null, setupMusicOk) && claude !== null
-      ? buildMusic(config, settings, claude, engine, host)
+      ? buildMusic(config, settings, claude, engine, host, taste)
       : undefined
   const pacing = buildPacing(config, memory)
   // The agentic reply turn (spec 11): rides the same harness as the pick task,
@@ -872,6 +938,26 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(compactor !== undefined && { compactor }),
     ...(rwt !== undefined && { rwt }),
     ...(setupRecall !== undefined && { setupRecall }),
+    // The taste seams (spec 14): the digest for the pack, the mounts for the
+    // invitations, the background refresh, and the /sources conversation on
+    // the same floor parking /setup uses.
+    ...(taste !== undefined && {
+      taste: {
+        digest: () => taste.reader.digest(),
+        mounted: () => taste.store.mounted(),
+        maybeRefresh: () => void taste.refresher.maybeRefresh(),
+      },
+      sourcesRecall: () =>
+        runSources({
+          host,
+          store: taste.store,
+          quit,
+          refresher: taste.refresher,
+          watch: taste.watch,
+          mounts: defaultMounts(taste.build),
+          build: (id, entry) => buildSource(id, entry, taste.build),
+        }),
+    }),
     // The one production wiring of the desktop opener: the Director has no
     // default, so this is the only place a real browser can be launched from.
     openUrl: openInBrowser,
@@ -901,6 +987,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
         home: resolved.home,
         voiceConfigured: resolved.ttsUrl !== '',
         musicAvailable: music !== undefined,
+        ...(taste !== undefined && { sources: taste.lines() }),
       }),
       apply: (patch) => settings.set(patch),
     })

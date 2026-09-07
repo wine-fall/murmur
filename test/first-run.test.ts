@@ -8,6 +8,7 @@ import type { ProfileBootstrap } from '../src/setup/cc-tools.ts'
 import type { Brain, SeedAnswer, Task } from '../src/contracts.ts'
 import { quitLatch } from '../src/setup/guide.ts'
 import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/setup/first-run.ts'
+import { SOURCES_ONBOARDING_LINE } from '../src/music/sources/flow.ts'
 import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts/persona.ts'
 import { callTool, FakeHarness, FakeHost } from './fakes.ts'
 
@@ -391,5 +392,26 @@ describe('slice B execution (criteria 8 and 9)', () => {
     )
     expect(path).toBe(home)
     expect(existsSync(home)).toBe(true)
+  })
+})
+
+// spec 14 §3.9 / §5.11: one closing line about the music accounts, after
+// the persona is written and before the first beat; a run that leaves
+// during onboarding, or one that already has a persona, never hears it.
+describe('the sources onboarding line (spec 14 §3.9)', () => {
+  it('is said exactly once after the persona is written', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['call me Zach', 'company while I work', 'dry'])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed }))
+    expect(host.infos.filter((l) => l === SOURCES_ONBOARDING_LINE)).toHaveLength(1)
+    expect(host.infos.indexOf(SOURCES_ONBOARDING_LINE)).toBeGreaterThan(host.infos.findIndex((l) => l.includes('it lives at')))
+    expect(host.asks.some((a) => a.text === SOURCES_ONBOARDING_LINE)).toBe(false)
+  })
+
+  it('is not said when the listener leaves during onboarding', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['/quit'])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, quit: quitLatch() }))
+    expect(host.infos).not.toContain(SOURCES_ONBOARDING_LINE)
   })
 })

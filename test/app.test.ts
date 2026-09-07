@@ -24,6 +24,7 @@ import {
   buildVoice,
   escalatingSigint,
   musicWiringWanted,
+  buildTaste,
   resolvePersonaPath,
   runBootstrapProfileCli,
   runSetupCli,
@@ -69,6 +70,27 @@ describe('app wiring', () => {
     )
     expect(voice).toBeInstanceOf(StubVoice)
     expect(said.join('\n')).toContain('see the lines')
+  })
+
+  // spec 14 §3.2: a stub run never reads sources.json — the taste wiring
+  // simply does not exist there; a real run builds it around the home.
+  it('builds the taste wiring for the real brain only, around the resolved home', () => {
+    const home = emptyHome()
+    expect(buildTaste(config(['--brain', 'stub'], { MURMUR_HOME: home }), new FakeHost())).toBeUndefined()
+    const taste = buildTaste(config([], { MURMUR_HOME: home }), new FakeHost(), async () => '')!
+    expect(taste).toBeDefined()
+    expect(taste.catalogues()).toEqual([])
+    expect(taste.lines()).toEqual([])
+    expect(taste.reader.digest()).toBe('')
+    taste.store.mount('bilibili', { browser: 'chrome', mid: '1' }, new Date('2026-09-06T10:00:00Z'))
+    taste.store.mount('spotify', { clientId: 'c', refreshToken: '<redacted>', accessToken: '<redacted>', expiresAt: 'x' })
+    taste.store.markRefreshed('bilibili', new Date('2026-09-06T11:00:00Z'))
+    expect(taste.catalogues()).toEqual(['bilibili'])
+    expect(taste.lines()).toEqual([
+      { id: 'bilibili', name: 'Bilibili', status: 'ok', refreshed: '2026-09-06T11:00:00.000Z' },
+      { id: 'spotify', name: 'Spotify', status: 'ok' },
+    ])
+    expect(JSON.stringify(taste.lines())).not.toContain('<redacted>')
   })
 
   it('--setup / --setup-music need the real brain: a stub run refuses instead of hanging', async () => {

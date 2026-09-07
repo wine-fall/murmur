@@ -35,6 +35,9 @@ const MediaSchema = z.object({
   upper: z.object({ name: z.string().optional() }).nullish(),
   bvid: z.string().optional(),
   fav_time: z.number().optional(),
+  // Bit 1 set = the video was taken down; the row's title is the platform's
+  // placeholder, not something the listener kept.
+  attr: z.number().optional(),
 })
 const FavListSchema = z.object({ data: z.object({ medias: z.array(z.unknown()).nullish(), has_more: z.boolean().optional() }).nullish() })
 const ToViewSchema = z.object({ data: z.object({ list: z.array(z.unknown()).nullish() }).nullish() })
@@ -77,6 +80,7 @@ export class BilibiliClient {
       for (const raw of medias) {
         const media = MediaSchema.safeParse(raw)
         if (!media.success || media.data.title.trim() === '' || media.data.bvid === undefined) continue
+        if (((media.data.attr ?? 0) & 1) === 1) continue
         items.push({
           kind: 'favourite',
           title: media.data.title,

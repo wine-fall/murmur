@@ -17,6 +17,7 @@ import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from '../contracts.ts'
 import { isYes, lineReader, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from '../host/host.ts'
+import { SOURCES_ONBOARDING_LINE } from '../music/sources/flow.ts'
 import { claudeCodeRoot } from '../paths.ts'
 import { renderPersona } from '../brain/persona.ts'
 import { PERSONA_CHAR_CAP, FIRST_RUN_INTRO, PERSONA_MIN_CHARS, SEED_QUESTIONS } from '../prompts/persona.ts'
@@ -150,6 +151,10 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   if (trimmed) host.info('(it came back long, so the tail was trimmed — worth a read.)')
   host.info(`it lives at ${home} — edit it whenever you like; murmur never rewrites it.`)
   await offerBootstrap(deps, read)
+  // The one line about the music accounts (spec 14 §3.9): said here, once,
+  // on a real first run — never an ask, never repeated; the invitation
+  // carries it from then on.
+  host.info(SOURCES_ONBOARDING_LINE)
   return home
 }
 

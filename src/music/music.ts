@@ -117,20 +117,23 @@ export type YtDlpMusicProviderOptions = {
   netease?: NeteaseSearch
 }
 
+// The real runner: one yt-dlp subprocess per call. Shared with the taste
+// sources (spec 14 §2.8), which read the same binary.
+export function ytdlpRunner(binary = 'yt-dlp'): YtDlpRunner {
+  return async (args) => {
+    debug('music.ytdlp %s', args.join(' '))
+    const { stdout } = await run(binary, args, { maxBuffer: MAX_OUTPUT_BYTES })
+    return stdout
+  }
+}
+
 export class YtDlpMusicProvider implements MusicProvider {
   private run: YtDlpRunner
   private opts: YtDlpMusicProviderOptions
 
   constructor(opts: YtDlpMusicProviderOptions) {
-    const { binary = 'yt-dlp', run: runner } = opts
     this.opts = opts
-    this.run =
-      runner ??
-      (async (args) => {
-        debug('music.ytdlp %s', args.join(' '))
-        const { stdout } = await run(binary, args, { maxBuffer: MAX_OUTPUT_BYTES })
-        return stdout
-      })
+    this.run = opts.run ?? ytdlpRunner(opts.binary)
   }
 
   private sources(): SourcesFile {

@@ -150,7 +150,7 @@ export const GUIDE_BUILTINS = ['Bash', 'Read', 'Write', 'Edit', 'Glob', 'Grep', 
 // .env* the remote-voice creds, $MURMUR_HOME under ~/.murmur, the process
 // environment): any tool input referencing these is refused. Tested against
 // the WHOLE input, so a Grep path or a glob hits it too.
-export const SECRET_PATH = /\.env\b|voice\.json|\.murmur\b|\benviron\b/i
+export const SECRET_PATH = /\.env\b|voice\.json|sources\.json|\.murmur\b|\benviron\b/i
 
 // Bash-only atoms: a secret-shaped name, an environment dump (bare `env` is a
 // dump, `/usr/bin/env <program>` is a launcher), or a parameter expansion —
