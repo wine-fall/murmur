@@ -74,6 +74,29 @@ describe('mountSpotify', () => {
     expect(me.headers.Authorization).toBe('Bearer <redacted-access>')
   })
 
+  it('prints the consent URL for a listener whose browser did not open, and Esc cancels the wait', async () => {
+    const urls: string[] = []
+    let cancelled = false
+    const result = await mountSpotify('client-1', {
+      fetch: fakeFetch({}).fetch,
+      openUrl: () => {},
+      onUrl: (url) => void urls.push(url),
+      cancelled: () => cancelled,
+      listen: async () => ({
+        port: 39917,
+        code: () =>
+          new Promise((resolve) => {
+            cancelled = true
+            setTimeout(() => resolve('late'), 2_000).unref()
+          }),
+        close: () => {},
+      }),
+    })
+    expect(result).toEqual({ ok: false, reason: 'cancelled' })
+    expect(urls).toHaveLength(1)
+    expect(urls[0]).toContain('https://accounts.spotify.com/authorize')
+  })
+
   it('a callback that never arrives is the timeout outcome; a refused exchange is login-required', async () => {
     const silent = await mountSpotify('client-1', {
       fetch: fakeFetch({}).fetch,

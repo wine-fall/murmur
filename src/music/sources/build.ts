@@ -6,7 +6,7 @@
 
 import type { YtDlpRunner } from '../music.ts'
 import { BilibiliSource, mountBilibili } from './bilibili.ts'
-import { cookieHeader, exportCookieJar, type CookieRow } from './cookies.ts'
+import { cookieHeader, exportCookieJar, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
 import { mountNetease, NeteaseClient, NeteaseSource } from './netease.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
@@ -18,9 +18,12 @@ import { mountYouTube, YouTubeSource } from './youtube.ts'
 // How long an exported jar is trusted before yt-dlp is asked again.
 export const COOKIE_TTL_MS = 10 * 60_000
 
-const SITES = { bilibili: 'bilibili.com', netease: 'music.163.com' } as const
+const SITES = { youtube: 'youtube.com', bilibili: 'bilibili.com', netease: 'music.163.com' } as const
+type CookieSite = keyof typeof SITES
 
-// The jar cache: one export per browser (and profile) per TTL.
+// The jar cache: one export per browser (and profile) per site per TTL, and
+// only that site's rows are kept — the rest of the browser's store is
+// dropped the moment the export is read.
 export class CookieJars {
   private jars = new Map<string, { at: number; rows: CookieRow[] }>()
   private run: YtDlpRunner
@@ -33,14 +36,19 @@ export class CookieJars {
 
   // The Cookie header for one site from one browser, exported on demand.
   header(pick: BrowserPick, site: string): () => Promise<string> {
-    return async () => cookieHeader(await this.rows(pick), site)
+    return async () => cookieHeader(await this.rows(pick, site), site)
   }
 
-  private async rows(pick: BrowserPick): Promise<CookieRow[]> {
-    const key = `${pick.browser}:${pick.profile ?? ''}`
+  // A jar file for one yt-dlp call (playback, a list read), released after.
+  async lease(pick: BrowserPick, site: string): Promise<CookieLease> {
+    return writeJar(await this.rows(pick, site))
+  }
+
+  private async rows(pick: BrowserPick, site: string): Promise<CookieRow[]> {
+    const key = `${pick.browser}:${pick.profile ?? ''}:${site}`
     const cached = this.jars.get(key)
     if (cached !== undefined && this.now() - cached.at < COOKIE_TTL_MS) return cached.rows
-    const rows = await exportCookieJar(pick, this.run)
+    const rows = siteRows(await exportCookieJar(pick, this.run), site)
     this.jars.set(key, { at: this.now(), rows })
     return rows
   }
@@ -48,6 +56,15 @@ export class CookieJars {
   // A failed login is a reason to read the store again next time.
   drop(): void {
     this.jars.clear()
+  }
+}
+
+// The provider's cookie seam (spec 14 §2.5, as built): a jar lease for a
+// mounted cookie source, null when that source is not mounted.
+export function cookieLeaser(deps: Pick<SourceBuildDeps, 'jars' | 'store'>): (source: CookieSite) => Promise<CookieLease | null> {
+  return async (source) => {
+    const entry = deps.store.read()[source]
+    return entry === undefined ? null : deps.jars.lease(entry, SITES[source])
   }
 }
 
@@ -64,7 +81,7 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
   switch (id) {
     case 'youtube': {
       const e = entry as SourceEntry['youtube']
-      return new YouTubeSource(e, { run: deps.ytdlp })
+      return new YouTubeSource(e, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) })
     }
     case 'bilibili': {
       const e = entry as SourceEntry['bilibili']
@@ -88,10 +105,10 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
 
 export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
   return {
-    youtube: (b) => mountYouTube(b, deps.ytdlp),
+    youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
     bilibili: (b) => mountBilibili(b, { cookie: deps.jars.header(b, SITES.bilibili) }),
     netease: (b) => mountNetease(b, { cookie: deps.jars.header(b, SITES.netease) }),
-    spotify: (clientId, onRedirect) => mountSpotify(clientId, { openUrl: deps.openUrl, onRedirect }),
+    spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),
     qishui: (show, cancelled) => mountQishui({}, { show, cancelled }),
   }
 }

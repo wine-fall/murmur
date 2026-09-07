@@ -5,7 +5,7 @@
 // read-merge-write, so nothing can interleave. Cookie sources store the
 // browser NAME, never a cookie — yt-dlp reads the browser's store at call time.
 
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 import { z } from 'zod'
@@ -88,10 +88,14 @@ function droppedKeys(raw: unknown, kept: SourcesFile): boolean {
   return false
 }
 
+// Owner-only, like voice.json: the file carries a Spotify refresh token and a
+// Soda session, and the snapshots are the listener's own lists. The mode is
+// set on the temp file before the rename, so no world-readable instant exists.
 function atomicWrite(path: string, text: string): void {
   mkdirSync(dirname(path), { recursive: true })
   const tmp = `${path}.tmp`
-  writeFileSync(tmp, text, 'utf-8')
+  writeFileSync(tmp, text, { encoding: 'utf-8', mode: 0o600 })
+  chmodSync(tmp, 0o600)
   renameSync(tmp, path)
 }
 
@@ -102,13 +106,27 @@ export class SourcesStore {
   // Raised by the /sources flow for its whole conversation: the refresher
   // checks it and stays out (spec 14 §3.4, single writer).
   busy = false
+  // The file version (mtime + size) a warning was already said for: a
+  // corrupt file is reported once (§2.1), not on every read of a hot path.
+  private warnedFor = ''
 
   constructor(deps: SourcesStoreDeps) {
     this.deps = deps
   }
 
   read(): SourcesFile {
-    return readSourcesFile(this.deps.path, this.deps.log)
+    let version = ''
+    try {
+      const stat = statSync(this.deps.path)
+      version = `${stat.mtimeMs}:${stat.size}`
+    } catch {
+      // absent: nothing to warn about
+    }
+    return readSourcesFile(this.deps.path, (message) => {
+      if (version === this.warnedFor) return
+      this.warnedFor = version
+      this.deps.log?.(message)
+    })
   }
 
   mounted(): SourceId[] {

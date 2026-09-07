@@ -162,21 +162,24 @@ describe('CliHost', () => {
     expect(lines.join('\n')).toContain(`v${packageVersion()}`)
   })
 
-  // spec 14 §3.8: the plain host has no idle surface but its banner, so the
-  // invitation rows print there once, command first, the shared why after.
-  it('prints the invitation rows in the banner, derived from COMMANDS', () => {
+  // spec 14 §2.7/§3.8: the plain host has no idle surface, so it prints the
+  // boot-time invitation set once — the rows the engine actually computed,
+  // command first, the shared why after — and nothing on later changes.
+  it('prints the first invitation set once, under the banner, and never again', () => {
     const host = new CliHost(new PassThrough())
     const lines: string[] = []
     const log = vi.spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line))
     try {
       host.banner('a night host', { brain: 'stub', voice: 'stub' })
+      const sources = COMMANDS.find((c) => c.name === '/sources')!
+      host.invitations([{ command: '/sources', why: sources.blurb }])
+      host.invitations([{ command: '/bug', why: 'later' }])
     } finally {
       log.mockRestore()
     }
     const text = lines.join('\n')
-    for (const name of ['/sources', '/bug', '/feature-request']) {
-      const command = COMMANDS.find((c) => c.name === name)!
-      expect(text).toContain(`${command.name} · ${command.blurb}`)
-    }
+    expect(text).toContain(`/sources · ${COMMANDS.find((c) => c.name === '/sources')!.blurb}`)
+    expect(text).not.toContain('/bug')
+    expect(lines.filter((l) => l.includes('/sources'))).toHaveLength(1)
   })
 })

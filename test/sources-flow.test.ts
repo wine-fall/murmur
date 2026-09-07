@@ -47,9 +47,14 @@ function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> &
     youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
     bilibili: async (b) => (mounted.push(`bilibili:${b.browser}`), { ok: false, reason: 'login-required' }),
     netease: async (b) => (mounted.push(`netease:${b.browser}`), { ok: true, who: 'Chen X', entry: { browser: b.browser, userId: '1', likedPlaylistId: '2' } }),
-    spotify: async (clientId, onRedirect) => {
-      onRedirect('http://127.0.0.1:39917/callback')
+    spotify: async (clientId, hooks) => {
+      hooks.onRedirect('http://127.0.0.1:39917/callback')
+      hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
       mounted.push(`spotify:${clientId}`)
+      if (clientId === 'esc') {
+        host.pressEsc()
+        return hooks.cancelled() ? { ok: false, reason: 'cancelled' } : { ok: true, who: 'x', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
+      }
       return clientId === 'timeout' ? { ok: false, reason: 'timeout' } : { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
     },
     qishui: async (show, cancelled) => {
@@ -133,10 +138,18 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read().spotify).toMatchObject({ clientId: 'client-xyz', status: 'ok' })
   })
 
-  it('a Spotify callback that never arrives is the §3.7 line', async () => {
+  it('a Spotify callback that never arrives is the §3.7 line; the consent URL is printed either way', async () => {
     const { host, deps, store } = build(['mount spotify', 'timeout', 'done'])
     await runSources(deps)
     expect(host.infos).toContain("didn't hear back from Spotify — /sources to try again.")
+    expect(host.infos.some((l) => l.includes('https://accounts.spotify.com/authorize'))).toBe(true)
+    expect(store.read()).toEqual({})
+  })
+
+  it('Esc during the Spotify wait cancels and writes nothing', async () => {
+    const { host, deps, store } = build(['mount spotify', 'esc', 'done'])
+    await runSources(deps)
+    expect(host.infos).toContain('cancelled — nothing was written.')
     expect(store.read()).toEqual({})
   })
 

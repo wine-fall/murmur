@@ -171,6 +171,37 @@ describe('mountNetease + NeteaseSource', () => {
     expect(anon).toEqual({ ok: false, reason: 'login-required' })
   })
 
+  it('a snapshot on a cookie that no longer signs in is the typed failure, not an anonymous read', async () => {
+    // The playlist endpoints serve a public list without a login; a refresh
+    // that "worked" anonymously would report an expired mount as fine.
+    const source = new NeteaseSource(
+      { browser: 'chrome', userId: '42', likedPlaylistId: '7' },
+      { cookie: async () => '', fetch: fakeFetch({ ...answers, '/nuser/account/get': { code: 200, profile: null } }).fetch },
+    )
+    await expect(source.snapshot()).rejects.toMatchObject({ source: 'netease', reason: 'login-required' })
+  })
+
+  it('reads the titles the detail call already carries, and asks song detail only for the rest', async () => {
+    const withTracks = {
+      ...answers,
+      '/v6/playlist/detail': {
+        code: 200,
+        playlist: {
+          trackIds: [{ id: 1, at: 1757116800000 }, { id: 2 }],
+          tracks: [{ id: 1, name: 'Holocene', ar: [{ name: 'Bon Iver' }], dt: 344000 }],
+        },
+      },
+      '/v3/song/detail': { code: 200, songs: [{ id: 2, name: 'Groupies', ar: [{ name: 'Cheer Chen' }], dt: 215000 }] },
+    }
+    const { fetch, calls } = fakeFetch(withTracks)
+    const items = await new NeteaseClient({ cookie: async () => COOKIE, fetch }).playlistTracks('7', 500)
+    expect(items.map((i) => i.title)).toEqual(['Holocene', 'Groupies'])
+    expect(items[0]!.at).toBe('2025-09-06T00:00:00.000Z')
+    const detail = calls.filter((c) => c.url.endsWith('/v3/song/detail'))
+    expect(detail).toHaveLength(1)
+    expect(detail[0]!.body).toMatch(/^params=/)
+  })
+
   it('snapshots the liked list and the playlist names, within the bounds', async () => {
     const source = new NeteaseSource(
       { browser: 'chrome', userId: '42', likedPlaylistId: '7' },

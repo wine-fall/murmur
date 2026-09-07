@@ -6,14 +6,16 @@
 // once, and deleted. It never persists, and no cookie is ever stored by
 // murmur (§2.1: the browser NAME is what sources.json holds).
 
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { YtDlpRunner } from '../music.ts'
 import { browserArgs, type BrowserName } from './store.ts'
 
-export type CookieRow = { domain: string; name: string; value: string }
+// One jar row: what the clients read (domain, name, value) and the line
+// itself, so the rows a site needs can be written back as a jar for yt-dlp.
+export type CookieRow = { domain: string; name: string; value: string; line: string }
 
 // Netscape format: domain, flag, path, secure, expiry, name, value — tab
 // separated; a leading #HttpOnly_ marks a row rather than commenting it out.
@@ -24,21 +26,39 @@ export function parseNetscapeJar(text: string): CookieRow[] {
     if (line === '' || line.startsWith('#')) continue
     const parts = line.split('\t')
     if (parts.length < 7) continue
-    rows.push({ domain: parts[0]!, name: parts[5]!, value: parts[6]! })
+    rows.push({ domain: parts[0]!, name: parts[5]!, value: parts[6]!, line: raw })
   }
   return rows
 }
 
-// The Cookie header for one site: rows whose domain is the site or a parent
-// of it (`.music.163.com` serves music.163.com), in jar order.
+// The rows one site needs: domain is the site or a parent of it
+// (`.music.163.com` serves music.163.com), in jar order. Everything else in
+// the browser's store — every other site's session — is dropped here, at the
+// edge, so nothing but the mounted site's cookies is ever held.
+export function siteRows(rows: readonly CookieRow[], site: string): CookieRow[] {
+  return rows.filter((row) => {
+    const domain = row.domain.replace(/^\./, '')
+    return site === domain || site.endsWith(`.${domain}`)
+  })
+}
+
 export function cookieHeader(rows: readonly CookieRow[], site: string): string {
-  return rows
-    .filter((row) => {
-      const domain = row.domain.replace(/^\./, '')
-      return site === domain || site.endsWith(`.${domain}`)
-    })
+  return siteRows(rows, site)
     .map((row) => `${row.name}=${row.value}`)
     .join('; ')
+}
+
+// A jar yt-dlp can load (`--cookies <path>`) for the duration of one call:
+// written owner-only into its own temp directory, gone on release. This is
+// how playback and the list reads reach the browser's login without a
+// cookie-store unlock per spawn — the store is opened once per export.
+export type CookieLease = { path: string; args: string[]; release: () => void }
+
+export function writeJar(rows: readonly CookieRow[]): CookieLease {
+  const dir = mkdtempSync(join(tmpdir(), 'murmur-jar-'))
+  const path = join(dir, 'cookies.txt')
+  writeFileSync(path, `# Netscape HTTP Cookie File\n${rows.map((r) => r.line).join('\n')}\n`, { encoding: 'utf-8', mode: 0o600 })
+  return { path, args: ['--cookies', path], release: () => rmSync(dir, { recursive: true, force: true }) }
 }
 
 // A URL yt-dlp will not fetch under --simulate with no extractor claiming it;

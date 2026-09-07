@@ -150,7 +150,8 @@ type SourcesFile = {
 - **Cookie sources store the browser name, never the cookie.** The cookie is
   read by yt-dlp at call time (`--cookies-from-browser`). Nothing is copied.
 - Single writer: the `/sources` flow. Atomic write (tmp + rename), like
-  `settings.json` (12 §2.1).
+  `settings.json` (12 §2.1); owner-only (0600) like `voice.json`, the
+  snapshots too. A corrupt file is reported once per version of the file.
 
 ### 2.2 `TasteSource` and the snapshot
 
@@ -263,6 +264,15 @@ Hosts: `youtube.com`/`youtu.be`/`music.youtube.com` → youtube;
 No mount → no cookie flag → today's behaviour exactly (a listener with no
 account sees no change — acceptance §5.1).
 
+*As built (review round)*: the cookie reaches yt-dlp as a **leased jar**
+(`--cookies <tmp>`, owner-only, deleted when the call returns) rather than
+`--cookies-from-browser` on every spawn — yt-dlp opens and decrypts the
+whole browser store per spawn, and on macOS that is a Keychain prompt per
+pick unless the listener chose "Always Allow". The store is opened once per
+browser per site per ten minutes (`CookieJars`, `src/music/sources/build.ts`),
+only that site's rows are kept in memory, and `sources.json` still holds the
+browser name alone. The YouTube list reads take the same lease.
+
 ### 2.6 Typed auth failure — the contract this spec exists to fix
 
 Today an auth failure surfaces from `provider.resolve` as a generic error,
@@ -282,7 +292,11 @@ class SourceAuthError extends Error { readonly source: SourceId; readonly reason
   `geo`; HTTP 429 → `rate-limited`. Unknown text stays a plain error.
 - **`submit_pick`** returns `{ ok: false, reason: 'auth', source, detail }` —
   and the tool result text tells the model this catalogue is unavailable for
-  the rest of the task, so it does not retry it.
+  the rest of the task, so it does not retry it. *As built*: a lost login or
+  a rate limit closes the catalogue (youtube included — the default search
+  answers `unavailable` then); a `geo` block is one track's problem and only
+  costs that pick, since a rights-less VIP track says nothing about the
+  catalogue.
 - **The Director** surfaces it **once per session per source** as a host
   `info` line: *"your NetEase login has expired — type /sources to renew it;
   I'll pick from elsewhere meanwhile."* Dev log: `sources.auth <source>
@@ -292,7 +306,12 @@ class SourceAuthError extends Error { readonly source: SourceId; readonly reason
   handed to the pick task's tools by the app and reset by a successful mount
   or refresh; the Director itself holds no auth state.
 - **Taste refresh** on a failed source keeps the last snapshot and stamps the
-  digest with its date; it does not blank the taste.
+  digest with its date; it does not blank the taste. *As built*: a mount
+  whose status is `expired` is never re-read by the refresher — only a new
+  mount renews it (NetEase serves a public list anonymously, so a read that
+  "worked" would hide the lost login; the NetEase adapter also checks the
+  account before every snapshot) — and a failed read is not retried for an
+  hour, so a dead platform is not hit at every segment.
 - **The preview trap** (yt-dlp issue 14142): NetEase can return a 30-second
   preview instead of the track when rights are missing, with no error. The
   resolve path treats a NetEase clip whose duration is under 45 s while the

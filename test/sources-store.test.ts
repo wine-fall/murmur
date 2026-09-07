@@ -1,7 +1,7 @@
 // The mounted-sources file and the taste snapshots (spec 14 §2.1/§2.2): one
 // writer, atomic writes, a corrupt file that never crashes the radio, and the
 // cookie flag derived from a ref's host (§2.5).
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, statSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -34,13 +34,20 @@ describe('readSourcesFile', () => {
     expect(logs).toEqual([])
   })
 
-  it('treats a corrupt file as empty and says so once', () => {
-    const { path } = home()
+  it('treats a corrupt file as empty and says so once per version of the file, not per read', () => {
+    const { path, taste } = home()
     const logs: string[] = []
+    const store = new SourcesStore({ path, tasteDir: taste, log: (m) => logs.push(m) })
     writeFileSync(path, '{ not json')
-    expect(readSourcesFile(path, (m) => logs.push(m))).toEqual({})
+    expect(store.read()).toEqual({})
+    expect(store.read()).toEqual({})
+    expect(store.mounted()).toEqual([])
+    expect(logs).toHaveLength(1)
+    // The file changed: a new warning is earned.
     writeFileSync(path, JSON.stringify({ netease: { browser: 'netscape' } }))
-    expect(readSourcesFile(path, (m) => logs.push(m))).toEqual({})
+    utimesSync(path, new Date(), new Date(Date.now() + 5_000))
+    expect(store.read()).toEqual({})
+    expect(store.read()).toEqual({})
     expect(logs).toHaveLength(2)
   })
 })
@@ -56,6 +63,11 @@ describe('SourcesStore', () => {
     const written = JSON.parse(readFileSync(path, 'utf-8')) as { netease: { mountedAt: string; status: string } }
     expect(written.netease.mountedAt).toBe('2026-09-06T10:00:00.000Z')
     expect(written.netease.status).toBe('ok')
+    // Secret-bearing like voice.json (spec 14 §2.1): owner-only, the
+    // snapshot too (titles are listener data).
+    expect(statSync(path).mode & 0o777).toBe(0o600)
+    store.writeSnapshot({ source: 'netease', takenAt: 'x', items: [] })
+    expect(statSync(store.snapshotPath('netease')).mode & 0o777).toBe(0o600)
   })
 
   it('flips status through the same file the flow writes, keeping the entry', () => {

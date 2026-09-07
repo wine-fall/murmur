@@ -33,7 +33,7 @@ const LIKED_SPECIAL_TYPE = 5
 // spell it: every non-ASCII code unit as \uXXXX. The server checks the md5
 // over that exact text, so a raw UTF-8 title answers with an empty body.
 function asciiJson(value: unknown): string {
-  return JSON.stringify(value).replace(/[^\x00-\x7f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
+  return JSON.stringify(value).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
 }
 
 export function eapiParams(path: string, body: Record<string, unknown>, cookies: Record<string, string>): string {
@@ -69,7 +69,11 @@ const PlaylistsSchema = z.object({
   ),
 })
 const DetailSchema = z.object({
-  playlist: z.object({ trackIds: z.array(z.object({ id: z.number(), at: z.number().optional() })) }),
+  playlist: z.object({
+    trackIds: z.array(z.object({ id: z.number(), at: z.number().optional() })),
+    // The newest `n` tracks with their titles, when the platform sends them.
+    tracks: z.array(z.unknown()).optional(),
+  }),
 })
 const ArtistSchema = z.object({ name: z.string() })
 const SongSchema = z.object({
@@ -125,32 +129,40 @@ export class NeteaseClient {
   }
 
   // The newest `cap` tracks of a playlist as liked items. The detail call
-  // carries ids only, so titles come from song detail in batches.
+  // answers with the ids (and when each was kept) plus the titles of the
+  // first `n`; whatever it left untitled comes from song detail in batches.
   async playlistTracks(playlistId: string, cap: number): Promise<TasteItem[]> {
-    const detail = DetailSchema.parse(await this.call('/v6/playlist/detail', { id: playlistId, n: 100_000, s: 0 }))
+    const detail = DetailSchema.parse(await this.call('/v6/playlist/detail', { id: playlistId, n: cap, s: 0 }))
     const ids = detail.playlist.trackIds.slice(0, cap)
     const at = new Map(ids.map((t) => [t.id, t.at]))
-    const items: TasteItem[] = []
-    for (let i = 0; i < ids.length; i += DETAIL_BATCH) {
-      const batch = ids.slice(i, i + DETAIL_BATCH)
-      const json = await this.call('/v3/song/detail', { c: JSON.stringify(batch.map((t) => ({ id: t.id }))) })
-      for (const raw of SongsSchema.parse(json).songs) {
-        const song = SongSchema.safeParse(raw)
-        if (!song.success || song.data.name.trim() === '') continue
-        const kept = at.get(song.data.id)
-        const artist = artistLine(song.data)
-        const album = song.data.al?.name?.trim()
-        items.push({
-          kind: 'liked',
-          title: song.data.name,
-          ...(artist !== '' && { artist }),
-          ...(album && { album }),
-          ...(kept !== undefined && { at: new Date(kept).toISOString() }),
-          ref: `${SONG_URL}${song.data.id}`,
-        })
-      }
+    const titled = new Map<number, TasteItem>()
+    const keep = (raw: unknown): void => {
+      const song = SongSchema.safeParse(raw)
+      if (!song.success || song.data.name.trim() === '' || !at.has(song.data.id)) return
+      const kept = at.get(song.data.id)
+      const artist = artistLine(song.data)
+      const album = song.data.al?.name?.trim()
+      titled.set(song.data.id, {
+        kind: 'liked',
+        title: song.data.name,
+        ...(artist !== '' && { artist }),
+        ...(album && { album }),
+        ...(kept !== undefined && { at: new Date(kept).toISOString() }),
+        ref: `${SONG_URL}${song.data.id}`,
+      })
     }
-    return items
+    for (const raw of detail.playlist.tracks ?? []) keep(raw)
+    const missing = ids.filter((t) => !titled.has(t.id))
+    for (let i = 0; i < missing.length; i += DETAIL_BATCH) {
+      const batch = missing.slice(i, i + DETAIL_BATCH)
+      const json = await this.call('/v3/song/detail', { c: JSON.stringify(batch.map((t) => ({ id: t.id }))) })
+      for (const raw of SongsSchema.parse(json).songs) keep(raw)
+    }
+    // In the playlist's own order: newest kept first.
+    return ids.flatMap((t) => {
+      const item = titled.get(t.id)
+      return item === undefined ? [] : [item]
+    })
   }
 
   async search(query: string, limit: number): Promise<TrackCandidate[]> {
@@ -282,8 +294,11 @@ export class NeteaseSource implements TasteSource {
   }
 
   // The liked list IS the snapshot's body (spec 14 §3.5); the other playlists
-  // contribute their names only.
+  // contribute their names only. The login is checked first: the playlist
+  // endpoints serve a public list anonymously, and a snapshot that "worked"
+  // on a cookie that no longer signs in would hide an expired mount.
   async snapshot(): Promise<TasteSnapshot> {
+    if ((await this.client.account()) === null) throw new SourceAuthError('netease', 'login-required', 'the cookie no longer signs in')
     const liked = await this.client.playlistTracks(this.entry.likedPlaylistId, BOUNDS.liked)
     const playlists = (await this.client.playlists(this.entry.userId))
       .filter((p) => p.id !== this.entry.likedPlaylistId)

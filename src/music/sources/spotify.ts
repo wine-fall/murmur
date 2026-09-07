@@ -118,8 +118,16 @@ export type SpotifyMountDeps = SpotifyDeps & {
   random?: () => Buffer
   // The redirect URI, once bound — the flow prints it for the dashboard.
   onRedirect?: (uri: string) => void
+  // The consent URL — printed too, for a browser that did not open (ssh, a
+  // dead opener): the spawn's failure is invisible from here.
+  onUrl?: (url: string) => void
+  // Polled while waiting for the callback: the listener's Esc.
+  cancelled?: () => boolean
   timeoutMs?: number
 }
+
+// How often the wait looks at the cancel flag.
+const CANCEL_POLL_MS = 250
 
 const TokenSchema = z.object({ access_token: z.string(), refresh_token: z.string().optional(), expires_in: z.number() })
 const MeSchema = z.object({ id: z.string(), display_name: z.string().nullish() })
@@ -177,7 +185,7 @@ async function tokenCall(deps: SpotifyDeps, form: Record<string, string>): Promi
   }
 }
 
-export type SpotifyMountResult = MountResult<SpotifyEntry> | { ok: false; reason: 'timeout' }
+export type SpotifyMountResult = MountResult<SpotifyEntry> | { ok: false; reason: 'timeout' | 'cancelled' }
 
 // The mount (spec 14 §3.1): bind the callback, open the consent page in the
 // listener's browser, wait for the code, exchange it, read who.
@@ -188,8 +196,17 @@ export async function mountSpotify(clientId: string, deps: SpotifyMountDeps): Pr
     deps.onRedirect?.(redirect)
     const { verifier, challenge } = pkcePair(deps.random?.())
     const state = base64url(deps.random?.() ?? randomBytes(16))
-    deps.openUrl(spotifyAuthUrl(clientId, redirect, state, challenge))
-    const code = await listener.code(state, deps.timeoutMs ?? CALLBACK_TIMEOUT_MS)
+    const url = spotifyAuthUrl(clientId, redirect, state, challenge)
+    deps.onUrl?.(url)
+    deps.openUrl(url)
+    const code = await Promise.race([
+      listener.code(state, deps.timeoutMs ?? CALLBACK_TIMEOUT_MS),
+      (async (): Promise<'cancelled'> => {
+        while (deps.cancelled?.() !== true) await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_MS).unref())
+        return 'cancelled'
+      })(),
+    ])
+    if (code === 'cancelled') return { ok: false, reason: 'cancelled' }
     if (code === null) return { ok: false, reason: 'timeout' }
     const tokens = await tokenCall(deps, {
       grant_type: 'authorization_code',

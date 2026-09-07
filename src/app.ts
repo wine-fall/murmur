@@ -53,7 +53,7 @@ import { startReport, type ReportDeps, type ReportSession } from './support/repo
 import { SteerResponder } from './brain/steer-responder.ts'
 import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
-import { buildSource, CookieJars, defaultMounts, neteaseSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { buildSource, CookieJars, cookieLeaser, defaultMounts, neteaseSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
@@ -298,12 +298,12 @@ function buildMusic(
   host: Host,
   taste: TasteWiring | undefined,
 ): MusicWiring {
-  // With taste wired the provider consults the mounted sources per call
+  // With taste wired the provider leases the mounted host's jar per call
   // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
   // cookie-less provider it always was.
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
-    ...(taste !== undefined && { sources: () => taste.store.read(), netease: neteaseSearch(taste.build) }),
+    ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build) }),
   })
   // The listener's policy file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).

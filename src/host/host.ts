@@ -13,7 +13,7 @@ import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import { packageVersion } from '../config.ts'
-import { COMMANDS, type Invitation, type ProgramState } from './ipc.ts'
+import type { Invitation, ProgramState } from './ipc.ts'
 
 export interface Host {
   start(): void
@@ -192,13 +192,18 @@ export class CliHost implements Host {
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}   v${packageVersion()}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
-    // The invitation rows (spec 14 §3.8), command first and the shared why
-    // after — the plain host's one chance to say them.
-    for (const name of ['/sources', '/bug', '/feature-request']) {
-      const command = COMMANDS.find((c) => c.name === name)!
-      console.log(`│ ${command.name} · ${command.blurb}`)
-    }
     console.log('└──────────────────────────────────────────────────────────────')
+  }
+
+  // The boot-time invitation set (spec 14 §2.7), printed once under the
+  // banner — the plain host has no rest state to rotate, so the first set is
+  // its one chance to say the rows, command first and the shared why after.
+  private invited = false
+
+  invitations(rows: readonly Invitation[]): void {
+    if (this.invited) return
+    this.invited = true
+    for (const row of rows) console.log(`·  ${row.command} · ${row.why}`)
   }
 
   onRadioSegment(text: string): void {

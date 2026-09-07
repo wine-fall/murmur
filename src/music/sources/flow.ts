@@ -26,13 +26,15 @@ export const SOURCES_ONBOARDING_LINE =
 
 export type BrowserPick = { browser: BrowserName; profile?: string | undefined }
 
+export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: string) => void; cancelled: () => boolean }
+
 // The platform adapters behind the conversation, injectable so the flow is
 // tested with fakes and the real ones are wired once (build.ts).
 export type SourceMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
   bilibili(b: BrowserPick): Promise<MountResult<BilibiliEntry>>
   netease(b: BrowserPick): Promise<MountResult<NeteaseEntry>>
-  spotify(clientId: string, onRedirect: (uri: string) => void, cancelled: () => boolean): Promise<SpotifyMountResult>
+  spotify(clientId: string, hooks: SpotifyHooks): Promise<SpotifyMountResult>
   qishui(show: (url: string) => void, cancelled: () => boolean): Promise<QishuiMountResult>
 }
 
@@ -233,19 +235,25 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, read: () => Promise<strin
   host.info('opening Spotify in your browser — approve there; I\'ll wait up to three minutes (Esc cancels).')
   let result: SpotifyMountResult
   try {
-    result = await deps.mounts.spotify(
-      clientId,
-      (uri) => {
+    result = await deps.mounts.spotify(clientId, {
+      onRedirect: (uri) => {
         if (uri !== redirectUri(SPOTIFY_CALLBACK_PORT)) host.info(`listening at ${uri} — the usual port was taken, so add this one to the app too.`)
       },
+      onUrl: (url) => host.info(`if the browser did not open, approve here: ${url}`),
       cancelled,
-    )
+    })
   } catch (err) {
     host.info(`could not reach Spotify (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)
     return
   }
   if (!result.ok) {
-    host.info(result.reason === 'timeout' ? "didn't hear back from Spotify — /sources to try again." : 'Spotify did not accept that — check the Client ID and the redirect URI, then /sources again.')
+    host.info(
+      result.reason === 'timeout'
+        ? "didn't hear back from Spotify — /sources to try again."
+        : result.reason === 'cancelled'
+          ? 'cancelled — nothing was written.'
+          : 'Spotify did not accept that — check the Client ID and the redirect URI, then /sources again.',
+    )
     return
   }
   await finishMount(deps, 'spotify', result.who, result.entry)

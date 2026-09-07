@@ -65,16 +65,21 @@ export function musicTools(
   // Each candidate's stated length, for the preview trap at submit time.
   const stated = new Map<string, number>()
 
+  // A lost login or a rate limit closes the catalogue for the task; a geo
+  // block is one track's problem and only costs that pick.
   const authResult = (err: SourceAuthError) => {
     const catalogue = err.source as Catalogue
-    if ((CATALOGUES as readonly string[]).includes(catalogue)) closed.add(catalogue)
+    const closes = err.reason !== 'geo' && (CATALOGUES as readonly string[]).includes(catalogue)
+    if (closes) closed.add(catalogue)
     taste?.onAuthFailure?.(err)
     return reply({
       ok: false,
       reason: 'auth',
       source: err.source,
       detail: err.reason,
-      note: `${SOURCE_NAMES[err.source]} is unavailable for the rest of this task; do not search or submit it again. Catalogues still open: ${open().join(', ')}.`,
+      note: closes
+        ? `${SOURCE_NAMES[err.source]} is unavailable for the rest of this task; do not search or submit it again. Catalogues still open: ${open().join(', ')}.`
+        : `${SOURCE_NAMES[err.source]} cannot serve that track from here; pick another.`,
     })
   }
 
@@ -95,10 +100,10 @@ export function musicTools(
     },
     async (args) => {
       const catalogue = args.catalogue
-      if (catalogue !== undefined && catalogue !== 'youtube') {
-        if (!mounted.includes(catalogue)) return reply({ ok: false, reason: 'not-mounted', mounted: open() })
-        if (closed.has(catalogue)) return reply({ ok: false, reason: 'unavailable', mounted: open() })
+      if (catalogue !== undefined && catalogue !== 'youtube' && !mounted.includes(catalogue)) {
+        return reply({ ok: false, reason: 'not-mounted', mounted: open() })
       }
+      if (closed.has(catalogue ?? 'youtube')) return reply({ ok: false, reason: 'unavailable', mounted: open() })
       try {
         const candidates = await provider.search(args.query, args.limit, catalogue)
         for (const c of candidates) stated.set(c.ref, c.durationS)

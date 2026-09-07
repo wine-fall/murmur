@@ -7,35 +7,43 @@ import type { ContextPack, TrackCandidate } from '../src/contracts.ts'
 import { musicTools } from '../src/music/music-tools.ts'
 import { YtDlpMusicProvider } from '../src/music/music.ts'
 import { SourceAuthError } from '../src/music/sources/auth.ts'
-import type { SourcesFile } from '../src/music/sources/store.ts'
+import type { CookieLease } from '../src/music/sources/cookies.ts'
+import type { CookieSource } from '../src/music/sources/store.ts'
 import { buildFindMusicInstruction, buildMusicSituation, TASTE_GUIDANCE } from '../src/prompts/music.ts'
 import { buildRespondPrompt, buildSteerPrompt } from '../src/prompts/reply.ts'
 import { buildNextTalkPrompt, buildNextTalksPrompt, tasteBlock } from '../src/prompts/talk.ts'
 import { callTool, FakeMusicProvider } from './fakes.ts'
 
-const MOUNTED: SourcesFile = {
-  bilibili: { browser: 'brave', mid: '9', mountedAt: 'x', status: 'ok' },
-  netease: { browser: 'chrome', userId: '1', likedPlaylistId: '2', mountedAt: 'x', status: 'ok' },
+// A cookie seam with bilibili and netease mounted: a jar lease per call,
+// released after, and null for an unmounted host.
+function jars(mounted: CookieSource[] = ['bilibili', 'netease']) {
+  const released: string[] = []
+  const cookies = async (source: CookieSource): Promise<CookieLease | null> =>
+    mounted.includes(source) ? { path: `/jar/${source}`, args: ['--cookies', `/jar/${source}`], release: () => void released.push(source) } : null
+  return { cookies, released }
 }
 
 const hit = JSON.stringify({ title: 'Song', webpage_url: 'https://www.bilibili.com/video/BV1', uploader: 'up', duration: 200 })
 
 describe('YtDlpMusicProvider with mounted sources', () => {
-  it('searches bilibili through bilisearch with the cookie, youtube exactly as before', async () => {
+  it('searches bilibili through bilisearch with the leased jar, youtube exactly as before', async () => {
     const calls: string[][] = []
-    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), sources: () => MOUNTED })
+    const { cookies, released } = jars()
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies })
     const found = await provider.search('city pop', 5, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', '--cookies-from-browser', 'brave', 'bilisearch5:city pop'])
+    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', '--cookies', '/jar/bilibili', 'bilisearch5:city pop'])
+    expect(released).toEqual(['bilibili'])
     expect(found[0]).toMatchObject({ catalogue: 'bilibili', ref: 'https://www.bilibili.com/video/BV1' })
     await provider.search('city pop', 5)
     expect(calls[1]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch5:city pop'])
     await provider.search('city pop', 5, 'youtube')
     expect(calls[2]).toEqual(calls[1])
+    expect(released).toEqual(['bilibili']) // youtube search never touches the jar
   })
 
   it('bilibili search runs without a cookie when bilibili is not mounted', async () => {
     const calls: string[][] = []
-    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), sources: () => ({}) })
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies: jars([]).cookies })
     await provider.search('x', 3, 'bilibili')
     expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', 'bilisearch3:x'])
   })
@@ -48,21 +56,23 @@ describe('YtDlpMusicProvider with mounted sources', () => {
         return [{ ref: 'https://music.163.com/#/song?id=5', title: 't', uploader: 'a', durationS: 200, extra: {}, catalogue: 'netease' }]
       },
     }
-    const provider = new YtDlpMusicProvider({ run: async () => '', sources: () => MOUNTED, netease })
+    const provider = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies, netease })
     expect((await provider.search('q', 4, 'netease'))[0]?.ref).toBe('https://music.163.com/#/song?id=5')
     expect(searches).toEqual([['q', 4]])
-    const bare = new YtDlpMusicProvider({ run: async () => '', sources: () => MOUNTED })
+    const bare = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies })
     await expect(bare.search('q', 4, 'netease')).rejects.toThrow(/not mounted/)
   })
 
-  it('resolves with the cookie flag for a mounted host and without one otherwise (spec 14 §5.1)', async () => {
+  it('resolves with the leased jar for a mounted host and without one otherwise (spec 14 §5.1)', async () => {
     const calls: string[][] = []
-    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n'), sources: () => MOUNTED })
+    const { cookies, released } = jars()
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n'), cookies })
     await provider.resolve('https://music.163.com/#/song?id=5')
-    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies-from-browser', 'chrome', 'https://music.163.com/#/song?id=5'])
+    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies', '/jar/netease', 'https://music.163.com/#/song?id=5'])
+    expect(released).toEqual(['netease'])
     await provider.resolve('https://youtube.com/watch?v=a')
     expect(calls[1]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://youtube.com/watch?v=a'])
-    // No sources thunk at all = the pre-spec-14 provider, byte for byte.
+    // No cookie seam at all = the pre-spec-14 provider, byte for byte.
     const plain = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n') })
     await plain.resolve('https://music.163.com/#/song?id=5')
     expect(calls[2]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://music.163.com/#/song?id=5'])
@@ -74,7 +84,7 @@ describe('YtDlpMusicProvider with mounted sources', () => {
         run: async () => {
           throw Object.assign(new Error('Command failed: yt-dlp'), { stderr })
         },
-        sources: () => MOUNTED,
+        cookies: jars().cookies,
       })
     const expired = failing('ERROR: [netease:song] 5: Login required to download: <redacted>')
     await expect(expired.resolve('https://music.163.com/#/song?id=5')).rejects.toBeInstanceOf(SourceAuthError)
@@ -88,9 +98,19 @@ describe('YtDlpMusicProvider with mounted sources', () => {
       run: async () => {
         throw Object.assign(new Error('x'), { stderr: 'Login required' })
       },
-      sources: () => ({}),
+      cookies: jars([]).cookies,
     })
     await expect(nomount.resolve('https://music.163.com/#/song?id=5')).rejects.not.toBeInstanceOf(SourceAuthError)
+    // The jar is released on failure too.
+    const { cookies, released } = jars()
+    const broken = new YtDlpMusicProvider({
+      run: async () => {
+        throw new Error('boom')
+      },
+      cookies,
+    })
+    await expect(broken.resolve('https://music.163.com/#/song?id=5')).rejects.toThrow('boom')
+    expect(released).toEqual(['netease'])
   })
 })
 
@@ -134,6 +154,25 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     const again = await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
     expect(again).toEqual({ ok: false, reason: 'unavailable', mounted: ['youtube'] })
     expect(provider.searches).toHaveLength(0)
+  })
+
+  it('a closed youtube is closed for the default search too, and a geo block closes nothing', async () => {
+    const { provider, tools } = build({ mounted: ['netease'] })
+    provider.candidates = [{ ref: 'https://youtube.com/watch?v=a', title: 'S', uploader: 'U', durationS: 240, extra: {} }]
+    provider.failWith = new SourceAuthError('youtube', 'expired', '<redacted>')
+    await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })
+    expect(await callTool(tools, 'search_music', { query: 'q' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
+    expect(await callTool(tools, 'search_music', { query: 'q', catalogue: 'youtube' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
+    // A rights-less track is that track's problem, not the catalogue's.
+    const geo = build({ mounted: ['netease'] })
+    geo.provider.failWith = new SourceAuthError('netease', 'geo', '<redacted>')
+    const result = await callTool(geo.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    expect(result).toMatchObject({ ok: false, reason: 'auth', source: 'netease', detail: 'geo' })
+    expect(String(result.note)).toMatch(/pick another/)
+    expect(geo.auth).toHaveLength(1)
+    geo.provider.failWith = null
+    await callTool(geo.tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect(geo.provider.searches).toHaveLength(1)
   })
 
   it('a plain resolve failure is still just "pick another"', async () => {

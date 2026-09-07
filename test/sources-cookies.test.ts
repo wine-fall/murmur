@@ -1,10 +1,10 @@
 // The one cookie reader (spec 14 §2.8): yt-dlp exports the browser's jar to
 // a temp file, the small clients read what they need and the jar is gone.
-import { existsSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { cookieHeader, exportCookieJar, parseNetscapeJar } from '../src/music/sources/cookies.ts'
+import { cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
 
 // A Netscape jar as yt-dlp writes it, values redacted.
 const JAR = [
@@ -24,7 +24,9 @@ describe('parseNetscapeJar', () => {
   it('reads name, value and domain, HttpOnly rows included, and skips what does not parse', () => {
     const rows = parseNetscapeJar(JAR)
     expect(rows).toHaveLength(5)
-    expect(rows[2]).toEqual({ domain: '.bilibili.com', name: 'SESSDATA', value: '<redacted-sessdata>' })
+    expect(rows[2]).toMatchObject({ domain: '.bilibili.com', name: 'SESSDATA', value: '<redacted-sessdata>' })
+    // The line itself rides along, so a jar can be written back for yt-dlp.
+    expect(rows[2]!.line).toBe('#HttpOnly_.bilibili.com\tTRUE\t/\tTRUE\t1790000000\tSESSDATA\t<redacted-sessdata>')
   })
 
   it('builds a Cookie header for one site and nothing else', () => {
@@ -32,6 +34,22 @@ describe('parseNetscapeJar', () => {
     expect(cookieHeader(rows, 'bilibili.com')).toBe('SESSDATA=<redacted-sessdata>; DedeUserID=42')
     expect(cookieHeader(rows, 'music.163.com')).toBe('MUSIC_U=<redacted-music-u>; __csrf=<redacted-csrf>')
     expect(cookieHeader(rows, 'example.com')).toBe('')
+  })
+})
+
+describe('siteRows + writeJar', () => {
+  it('keeps one site\'s rows only, and writes them back as a jar yt-dlp can load, owner-only, gone on release', () => {
+    const rows = siteRows(parseNetscapeJar(JAR), 'bilibili.com')
+    expect(rows.map((r) => r.name)).toEqual(['SESSDATA', 'DedeUserID'])
+    const lease = writeJar(rows)
+    expect(lease.args).toEqual(['--cookies', lease.path])
+    const text = readFileSync(lease.path, 'utf-8')
+    expect(text.startsWith('# Netscape HTTP Cookie File')).toBe(true)
+    expect(text).toContain('#HttpOnly_.bilibili.com\tTRUE\t/\tTRUE\t1790000000\tSESSDATA\t<redacted-sessdata>')
+    expect(text).not.toContain('MUSIC_U')
+    expect(statSync(lease.path).mode & 0o777).toBe(0o600)
+    lease.release()
+    expect(existsSync(lease.path)).toBe(false)
   })
 })
 

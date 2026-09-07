@@ -21,15 +21,21 @@ const FAV = [
 const HISTORY = [line({ title: 'Bon Iver - Holocene - Official Video', uploader: null, channel: null, duration: 344, url: 'https://www.youtube.com/watch?v=TWcyIpul8OE' })].join('\n')
 const SUBS = [line({ title: 'Sally Jo', uploader: 'Sally Jo', channel: 'Sally Jo', duration: null, url: 'https://www.youtube.com/channel/UCB', id: 'UCB', ie_key: 'YoutubeTab' })].join('\n')
 
-function ytdlp(answers: Record<string, string>): { run: YtDlpRunner; calls: string[][] } {
+function ytdlp(answers: Record<string, string>) {
   const calls: string[][] = []
+  const released: string[] = []
   const run: YtDlpRunner = async (args) => {
     calls.push(args)
     const target = args.at(-1)!
     if (target in answers) return answers[target]!
     throw Object.assign(new Error('Command failed'), { stderr: `ERROR: unknown ${target}` })
   }
-  return { run, calls }
+  // The jar seam: one leased file per call, released after.
+  const lease = async (pick: { browser: string; profile?: string | undefined }) => {
+    const path = `/jar/${pick.browser}${pick.profile === undefined ? '' : `:${pick.profile}`}`
+    return { path, args: ['--cookies', path], release: () => void released.push(path) }
+  }
+  return { run, calls, released, deps: { run, lease } }
 }
 
 describe('flatEntries', () => {
@@ -48,20 +54,22 @@ describe('YouTube (spec 14 §2.8)', () => {
   const PLAYLIST = line({ id: 'LL', title: 'Liked videos', uploader: 'Zach G', channel: 'Zach G', playlist_count: 3, entries: [] })
 
   it('mounting reads who from the liked-videos playlist; no login is the typed reason', async () => {
-    const { run, calls } = ytdlp({ ':ytfav': PLAYLIST })
-    expect(await mountYouTube({ browser: 'chrome', profile: 'Default' }, run)).toEqual({
+    const { deps, calls, released } = ytdlp({ ':ytfav': PLAYLIST })
+    expect(await mountYouTube({ browser: 'chrome', profile: 'Default' }, deps)).toEqual({
       ok: true,
       who: 'Zach G',
       entry: { browser: 'chrome', profile: 'Default' },
     })
-    expect(calls[0]).toEqual(['--dump-single-json', '--flat-playlist', '--playlist-items', '0', '--no-warnings', '--cookies-from-browser', 'chrome:Default', ':ytfav'])
-    const { run: anon } = ytdlp({})
-    expect(await mountYouTube({ browser: 'firefox' }, anon)).toEqual({ ok: false, reason: 'login-required' })
+    expect(calls[0]).toEqual(['--dump-single-json', '--flat-playlist', '--playlist-items', '0', '--no-warnings', '--cookies', '/jar/chrome:Default', ':ytfav'])
+    expect(released).toEqual(['/jar/chrome:Default'])
+    const anon = ytdlp({})
+    expect(await mountYouTube({ browser: 'firefox' }, anon.deps)).toEqual({ ok: false, reason: 'login-required' })
+    expect(anon.released).toHaveLength(1)
   })
 
   it('snapshots liked, history and subscriptions within the bounds', async () => {
-    const { run, calls } = ytdlp({ ':ytfav': FAV, ':ythistory': HISTORY, ':ytsubs': SUBS })
-    const source = new YouTubeSource({ browser: 'chrome' }, { run, now: () => new Date('2026-09-06T10:00:00Z') })
+    const { deps, calls, released } = ytdlp({ ':ytfav': FAV, ':ythistory': HISTORY, ':ytsubs': SUBS })
+    const source = new YouTubeSource({ browser: 'chrome' }, { ...deps, now: () => new Date('2026-09-06T10:00:00Z') })
     const snapshot = await source.snapshot()
     expect(snapshot).toEqual({
       source: 'youtube',
@@ -79,14 +87,16 @@ describe('YouTube (spec 14 §2.8)', () => {
       ['200', ':ythistory'],
       ['100', ':ytsubs'],
     ])
+    expect(released).toHaveLength(3)
   })
 
   it('a cookie that no longer logs in throws the typed failure from the snapshot', async () => {
     const run: YtDlpRunner = async () => {
       throw Object.assign(new Error('x'), { stderr: 'ERROR: [youtube:tab] :ytfav: This video is only available for registered users.' })
     }
-    await expect(new YouTubeSource({ browser: 'chrome' }, { run }).snapshot()).rejects.toMatchObject({ source: 'youtube', reason: 'login-required' })
-    expect(await new YouTubeSource({ browser: 'chrome' }, { run }).verify()).toEqual({ ok: false, reason: 'login-required' })
+    const deps = { run, lease: ytdlp({}).deps.lease }
+    await expect(new YouTubeSource({ browser: 'chrome' }, deps).snapshot()).rejects.toMatchObject({ source: 'youtube', reason: 'login-required' })
+    expect(await new YouTubeSource({ browser: 'chrome' }, deps).verify()).toEqual({ ok: false, reason: 'login-required' })
   })
 })
 

@@ -132,17 +132,58 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
     expect(host.infos).toEqual(['still going on what I knew about your Spotify music as of 2026-07-20.'])
   })
 
-  it('a read that succeeds after an expiry clears the status and re-arms the once-per-session line', async () => {
+  it('a read that succeeds after an error clears the status and re-arms the once-per-session line', async () => {
     const { store, host, sources, refresher } = build()
     store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
-    store.setStatus('netease', 'expired', 'expired')
+    store.setStatus('netease', 'error', 'rate-limited')
     sources.set('netease', new FakeSource('netease'))
     await refresher.refreshAll()
     expect(store.read().netease?.status).toBe('ok')
     expect(store.read().netease).not.toHaveProperty('lastError')
-    sources.get('netease')!.fail = new SourceAuthError('netease', 'expired', 'x')
+    sources.get('netease')!.fail = new SourceAuthError('netease', 'rate-limited', 'x')
     await refresher.refreshAll()
     expect(host.infos).toHaveLength(1)
+  })
+
+  it('never re-reads an expired mount (that needs /sources), and backs off a failed read for an hour', async () => {
+    const clock = { now: NOW }
+    const { store, sources, refresher } = build()
+    Object.assign(refresher, { deps: { ...(refresher as unknown as { deps: object }).deps, now: () => clock.now } })
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    store.setStatus('netease', 'expired', 'expired')
+    const ne = new FakeSource('netease')
+    sources.set('netease', ne)
+    expect(refresher.maybeRefresh()).toBe(false)
+    expect(ne.snapshots).toBe(0)
+    store.setStatus('netease', 'ok')
+    ne.fail = new Error('down')
+    expect(refresher.maybeRefresh()).toBe(true)
+    await until(() => ne.snapshots === 1, 'the first attempt')
+    await new Promise((r) => setTimeout(r, 10))
+    // Poked again on the next segment: the failure is fresh, so nothing runs.
+    expect(refresher.maybeRefresh()).toBe(false)
+    clock.now = new Date(NOW.getTime() + 61 * 60_000)
+    expect(refresher.maybeRefresh()).toBe(true)
+    await until(() => ne.snapshots === 2, 'the retry an hour on')
+  })
+
+  it('a read that finishes after the source was unmounted writes nothing', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome' }, new Date('2026-09-01T00:00:00Z'))
+    const yt = new FakeSource('youtube')
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    yt.snapshot = async () => {
+      await gate
+      return { source: 'youtube', takenAt: NOW.toISOString(), items: yt.items }
+    }
+    sources.set('youtube', yt)
+    const running = refresher.refreshAll()
+    store.unmount('youtube')
+    release()
+    await running
+    expect(store.readSnapshot('youtube')).toBeNull()
+    expect(store.read()).toEqual({})
   })
 
   it('refreshAll reports per-source outcomes for the foreground /sources refresh', async () => {
@@ -157,5 +198,8 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
       { id: 'youtube', ok: true, count: 1 },
       { id: 'bilibili', ok: false, error: 'down' },
     ])
+    store.setStatus('bilibili', 'expired')
+    expect((await refresher.refreshAll()).at(-1)).toEqual({ id: 'bilibili', ok: false, error: 'expired' })
+    expect(bili.snapshots).toBe(1)
   })
 })

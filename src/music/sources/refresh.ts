@@ -11,6 +11,9 @@ import type { SourcesStore } from './store.ts'
 import { SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
 
 export const STALE_MS = 24 * 60 * 60_000
+// A read that failed is not tried again before this: a dead platform or a
+// rate limit must not be hit at every segment boundary.
+export const RETRY_MS = 60 * 60_000
 // Past this, a snapshot that cannot be refreshed is named on screen (§3.7).
 const OLD_MS = 30 * 24 * 60 * 60_000
 
@@ -30,6 +33,9 @@ export class TasteRefresher {
   private deps: TasteRefresherDeps
   private running: Promise<unknown> | null = null
   private saidOld = new Set<SourceId>()
+  // When each source was last tried, success or failure — in memory, so a
+  // restart tries again at once.
+  private tried = new Map<SourceId, number>()
 
   constructor(deps: TasteRefresherDeps) {
     this.deps = deps
@@ -39,11 +45,16 @@ export class TasteRefresher {
     return (this.deps.now ?? (() => new Date()))()
   }
 
-  // Which mounted sources are due: no snapshot yet, or last read over a day ago.
+  // Which mounted sources are due: no snapshot yet, or last read over a day
+  // ago — never one whose login is known to be gone (only /sources renews
+  // that), and never one tried within the retry window.
   private stale(): SourceId[] {
     const file = this.deps.store.read()
     const now = this.now().getTime()
     return this.deps.store.mounted().filter((id) => {
+      if (file[id]?.status === 'expired') return false
+      const tried = this.tried.get(id)
+      if (tried !== undefined && now - tried < RETRY_MS) return false
       if (this.deps.store.readSnapshot(id) === null) return true
       const stamp = file[id]?.lastRefresh ?? file[id]?.mountedAt ?? ''
       const at = new Date(stamp).getTime()
@@ -80,16 +91,24 @@ export class TasteRefresher {
 
   private async refreshOne(id: SourceId): Promise<RefreshOutcome> {
     const { store, host, watch } = this.deps
+    // An expired login is renewed by mounting again, never by re-reading:
+    // some platforms serve public lists anonymously, and a read that
+    // "works" would flip the status back to ok on a login that is gone.
+    if (store.read()[id]?.status === 'expired') return { id, ok: false, error: 'expired' }
     const source = this.deps.source(id)
     if (source === null) return { id, ok: false, error: 'no adapter for this entry' }
+    this.tried.set(id, this.now().getTime())
     const t = performance.now()
     try {
       const snapshot = await source.snapshot()
+      // The conversation may have unmounted it while the read was in flight:
+      // a snapshot for a source that is gone must not come back from the dead.
+      if (!store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       store.writeSnapshot(snapshot)
       store.markRefreshed(id, this.now())
-      // A read that works is a login that works: a status left behind by an
-      // earlier failure clears, and the once-per-session line re-arms.
-      if (store.read()[id]?.status !== 'ok') {
+      // A read that works clears an error left by an earlier failure, and
+      // the once-per-session line re-arms.
+      if (store.read()[id]?.status === 'error') {
         store.setStatus(id, 'ok')
         watch.reset(id)
       }
@@ -97,6 +116,7 @@ export class TasteRefresher {
       host.debug?.(`sources.refresh ${id} n=${snapshot.items.length} ${Math.round(performance.now() - t)}ms`)
       return { id, ok: true, count: snapshot.items.length }
     } catch (err) {
+      if (!store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       if (err instanceof SourceAuthError) {
         watch.note(err)
         return { id, ok: false, error: err.reason }
