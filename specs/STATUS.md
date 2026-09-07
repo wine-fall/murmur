@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-06 (spec 14 listening-taste drafted; roadmap line 5 retitled — build dispatched)_
+_Last updated: 2026-09-07 (spec 14 listening-taste built — PR #214; its by-ear pass is #213)_
 
 ## Where we are
 
@@ -21,9 +21,9 @@ bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
 07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
-spec for what it does, its PR for how it got there. **Current build: spec 14**
-(`specs/spec14/14-listening-taste.md`, roadmap line 5 — taste from the
-listener's own platforms, not playback from them). Everything else is under
+spec for what it does, its PR for how it got there. Spec 14 (listening-taste,
+roadmap line 5) is built; its acceptance on the listener's own accounts is the
+by-ear issue below. **No build is in flight.** Everything else is under
 **Open** — engineering items first, then the by-ear passes.
 
 ## Open
@@ -48,6 +48,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#197** (by-ear) Memory v1.5 by feel: fading, fold cadence, forgetting, how a recalled memory sounds — spec 05-01 §6.
 - **#198** (by-ear) The talk<->music transitions: announce hand-over and the slow lift — spec 03-02 §6.1.
 - **#202** (by-ear) Real-world topics as a friend would mention them, and the clock as bearings — spec 13 §5, spec 04 §3.4.
+- **#213** (by-ear) Listening-taste on the listener's own accounts: NetEase, Spotify, Soda, the expired line, the evening — spec 14 §5.12.
 
 ## Pinned — do not relitigate
 

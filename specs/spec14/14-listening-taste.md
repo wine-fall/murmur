@@ -1,6 +1,7 @@
 # spec/14 · listening-taste — the catalogues the listener already keeps
 
-> **Status**: **Drafted 2026-09-06**, not built. Replaces the "log in to the
+> **Status**: **Built 2026-09-07** (PR #214 — see "As built" notes inline,
+> marked *as built*). Drafted 2026-09-06. Replaces the "log in to the
 > catalogue" reading of [`../../ROADMAP.md`](../../ROADMAP.md) line 5 after a
 > requirements pass (session of 2026-09-06): the listener's goal is **better
 > picks from what murmur can learn about their taste**, not playback from a
@@ -286,7 +287,10 @@ class SourceAuthError extends Error { readonly source: SourceId; readonly reason
   `info` line: *"your NetEase login has expired — type /sources to renew it;
   I'll pick from elsewhere meanwhile."* Dev log: `sources.auth <source>
   <reason>`. `sources.json` gets `status: 'expired'` (single writer: the
-  Director calls the same store the `/sources` flow uses).
+  Director calls the same store the `/sources` flow uses). *As built*: the
+  once-per-session gate is `SourceAuthWatch` (`src/music/sources/auth.ts`),
+  handed to the pick task's tools by the app and reset by a successful mount
+  or refresh; the Director itself holds no auth state.
 - **Taste refresh** on a failed source keeps the last snapshot and stamps the
   digest with its date; it does not blank the taste.
 - **The preview trap** (yt-dlp issue 14142): NetEase can return a 30-second
@@ -326,7 +330,10 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   yt-dlp implements for URL resolution (yt-dlp is public-domain; the cipher
   is: AES-128-ECB over `"<path>-36cd479b6b5-<json>-36cd479b6b5-<md5>"` with a
   fixed key, hex-encoded — reimplemented in Node `crypto`, ~20 lines, pinned
-  by a golden vector produced once in a smoke against yt-dlp's Python).
+  by two golden vectors produced once in a smoke against yt-dlp's Python —
+  the second with a non-ASCII query, because the platform checks the digest
+  over the JSON spelled with `\uXXXX` escapes and answers raw UTF-8 with an
+  empty body).
   Endpoints: account (`who`, `userId`), the user's playlists (the first is the
   liked-songs playlist), playlist tracks (paged, cap §3.5), search
   (`cloudsearch`, type song). Cookie: read from the browser store **through
@@ -335,10 +342,17 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   cookie-store reader to maintain; the jar never persists).
 - **`bilibili.ts`** — `x/web-interface/nav` (who, `mid`) and
   `x/v3/fav/folder/created/list-all` (folders); folder contents, watch-later
-  and space audio through yt-dlp's extractors with the cookie.
+  and space audio read from the same web APIs yt-dlp's extractors call
+  (*as built*: yt-dlp's flat output for these lists carries ids alone, and a
+  taste is titles — so the client reads the JSON directly; a favourite whose
+  `attr` bit 1 is set is a taken-down video and is dropped). Playback of a
+  favourite still goes through yt-dlp with the cookie (§2.5).
 - **`spotify.ts`** — OAuth 2.0 **PKCE** (no client secret) against the
   listener's own registered app (`clientId`); local redirect
-  `http://127.0.0.1:<ephemeral>/callback`; scopes `user-top-read
+  `http://127.0.0.1:39917/callback` (*as built*: a registered redirect URI
+  must match exactly, port included, so the port is fixed and falls back to
+  an ephemeral one only when taken — the conversation prints whatever was
+  bound); scopes `user-top-read
   user-library-read playlist-read-private`; refresh handled on expiry;
   endpoints `/me`, `/me/top/artists`, `/me/top/tracks` (`medium_term`),
   `/me/tracks` (paged), `/me/playlists` (names). Browser opened through the
@@ -347,9 +361,12 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   cookie header, JSON): QR issue + status poll (the QR is scanned with
   **Douyin**, not the Soda app — the upstream flow's own text says so), `me`,
   own playlists, collection, daily mix. The QR is rendered in the terminal
-  as UTF-8 half-blocks via the `qrcode` package (**the one new dependency**:
-  MIT, no transitive runtime deps; a QR encoder is not a few lines — ponytail
-  rung 5). No decryption code exists anywhere in murmur.
+  as UTF-8 half-blocks via the `qrcode-generator` package (**the one new
+  dependency**: MIT, zero runtime dependencies — *as built*: `qrcode` on npm
+  carries three, so the zero-dependency encoder is the one that clears
+  ponytail rung 5). The daily mix answers a bare session with the app's
+  "not for this caller" status; that read is then empty, never a failure.
+  No decryption code exists anywhere in murmur.
 
 Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
@@ -361,8 +378,8 @@ rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 
 ### 3.1 `/sources` — the only entry
 
-A typed command in `COMMANDS` (10 §3.2-C) with the hint "your music
-accounts". It runs on the same floor-parking the `/setup` recall uses (03-03,
+A typed command in `COMMANDS` (10 §3.2-C) whose one blurb is the
+invitation's *why* (§3.8) — there is no second "hint" wording. It runs on the same floor-parking the `/setup` recall uses (03-03,
 amended 2026-08-19): the Director parks its loop, music plays on, the
 conversation runs through `Host.ask` / `info`, and the loop resumes.
 
@@ -481,7 +498,10 @@ The form, for all three:
     is. (Mounted-but-expired is not an invitation; it is the §2.6 line.)
   - `/bug` — only after the **first segment aired** (nothing to report before).
   - `/feature-request` — only after **10 minutes** in the session.
-  - A filed `/bug` or `/feature-request` leaves the set for the session.
+  - A used `/bug` or `/feature-request` leaves the set for the session
+    (*as built*: used = the command was typed; the report floor does not
+    report whether the draft was sent, and reaching for the command is the
+    moment the invitation has done its job).
 - **Cadence unchanged**: the TUI rotates the *given* set every three minutes,
   the talk-back line first. An empty set = the talk-back line only.
 - **No persisted "seen" state**: `/sources` fades by mounting; the others by
@@ -505,7 +525,7 @@ the invitation (§3.8) carries it from then on.
 
 - yt-dlp ≥ 2026.08 (present; `--cookies-from-browser`, `netease:*`,
   `BiliBiliSearch`, `youtube:favorites|history|subscriptions`).
-- `qrcode` (npm, MIT) — new, §2.8. Nothing else new.
+- `qrcode-generator` (npm, MIT, zero dependencies) — new, §2.8. Nothing else new.
 - Spec 12's settings store (read-only line), spec 10's `COMMANDS`, spec 03-03's
   floor parking and secret-path guard list, spec 05's pack.
 
@@ -581,6 +601,14 @@ is written and before the first segment; a run with a pre-seeded persona
 prints it zero times.
 
 ### 5.12 By-ear (one issue, user-run)
+
+*As built, 2026-09-07*: §5.1, §5.3, §5.5 (unit), §5.6, §5.8–§5.11 hold in
+the unit suite; §5.2 and §5.4's search half passed on the developer's own
+YouTube and Bilibili accounts (`scripts/sources-smoke.ts`; the NetEase
+search answered anonymously through the eapi transport). The developer has
+no readable NetEase login, no Spotify and no Soda account, so §5.2 for
+NetEase, §5.4's NetEase play, §5.5's smoke, §5.7 and §5.12 are the one
+by-ear issue's checklist.
 Does the radio pick *better* — more of what they would have chosen, fewer
 misses — over one real evening with NetEase and Spotify mounted, versus the
 evening before. Recorded as the spec's one by-ear issue; the eval that would
@@ -606,7 +634,7 @@ make it repeatable is #98.
 - **NetEase identity + search through eapi; playback through yt-dlp** — the
   one place where yt-dlp cannot search; keep it to the smallest client that
   fills that gap, and let yt-dlp keep owning resolution and VIP tiers.
-- **One new dependency (`qrcode`)**, named in §2.8 with the rung it clears.
+- **One new dependency (`qrcode-generator`)**, named in §2.8 with the rung it clears.
 - **Login is never required; the nudge is an invitation** (2026-09-06, user).
   One light form for `/sources`, `/bug`, `/feature-request`; kept in the
   input's rest state per spec 10 §3.2-C, but made context-gated and fading —
