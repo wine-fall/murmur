@@ -3,7 +3,7 @@
 // queue head in a centered card above the input. This module shapes the card's
 // text; app.tsx renders it (wrapping is <text>'s own — no hand-rolled folding).
 
-import { COMMANDS, type EngineMessage } from '../../src/host/ipc.ts'
+import { COMMANDS, type EngineMessage, type Invitation } from '../../src/host/ipc.ts'
 
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
@@ -103,19 +103,13 @@ export function commandMatches(typed: string): readonly Command[] {
   return COMMANDS.filter((command) => command.name.startsWith(line))
 }
 
-// The resting input's invitation (spec 10 §3.2-C), rotated slowly so the
-// feedback commands are eventually seen without a hint line ever entering the
-// transcript. The rows after the first are DERIVED from COMMANDS — the menu
-// and the invitation can never drift into two different wordings.
-const HINTED: readonly string[] = ['/bug', '/feature-request']
-export const INPUT_HINTS: readonly string[] = [
-  'type to talk back · / for commands',
-  // Name first, blurb after — the menu's own column order, and the half that
-  // survives when a narrow terminal clips the field (codex review).
-  ...COMMANDS.filter((command) => HINTED.includes(command.name)).map(
-    (command) => `${command.name} · ${command.blurb}`,
-  ),
-]
+// The resting input's invitations (spec 14 §3.8): the talk-back line first,
+// then the engine's CURRENT rows — context-gated and fading engine-side, so
+// the client only ever rotates what it was given. Command first, why after:
+// a narrow field clips the tail, and the command is the half worth keeping.
+export function inputHints(rows: readonly Invitation[]): string[] {
+  return ['type to talk back · / for commands', ...rows.map((row) => `${row.command} · ${row.why}`)]
+}
 
 // A lap slow enough to read as furniture rather than a blinking sign.
 export const HINT_ROTATE_MS = 3 * 60_000

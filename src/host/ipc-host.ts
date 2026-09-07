@@ -25,6 +25,7 @@ import {
   ndjson,
   PROTOCOL,
   type EngineMessage,
+  type Invitation,
   type ProgramState,
   type SettingsPatch,
   type SettingsSnapshot,
@@ -70,6 +71,9 @@ export class IpcHost implements Host {
   private settingsBridge: SettingsBridge | null = null
   private interruptHandler: (() => void) | null = null
   private mode: FloorMode = 'radio'
+  // The current invitation set (spec 14 §2.7); null until the Director has
+  // computed one. State, not replay — a fresh attach gets the current set.
+  private invited: readonly Invitation[] | null = null
   // Per queued line, in queue order, whether the host already echoed it on
   // arrival (§3.4) — this host is the queue's only writer and only taker, so
   // the two stay aligned. `takenEchoed` carries the flag of the line just
@@ -218,6 +222,7 @@ export class IpcHost implements Host {
     // snapshots stay out of the replay backlog above. The floor mode rides in
     // `hello` for the same reason: current state, never replay.
     this.sendSettings()
+    if (this.invited !== null) this.write(socket, { v: 1, type: 'invitations', rows: [...this.invited] })
   }
 
   // The handshake payload, built in one place so a client that attaches late
@@ -356,6 +361,13 @@ export class IpcHost implements Host {
 
   onInterrupt(handler: (() => void) | null): void {
     this.interruptHandler = handler
+  }
+
+  // The invitation set (spec 14 §2.7). Straight to the client, NOT send():
+  // it is a state, and adopt() hands a later attach the current one.
+  invitations(rows: readonly Invitation[]): void {
+    this.invited = rows
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'invitations', rows: [...rows] })
   }
 
   // A live identity change (the /setup recall swapped the voice provider):

@@ -92,3 +92,16 @@ export function musicPolicyPath(env: NodeJS.ProcessEnv = process.env): string {
 export function rwtPoolPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(cacheRoot(env), 'rwt.json')
 }
+
+// The mounted taste sources (spec 14 §2.1): beside voice.json because it is the
+// same kind of thing — re-obtainable configuration the listener can mount
+// again, and secret-bearing like it (a Spotify token, a Soda session).
+export function sourcesConfigPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(homeRoot(env), 'sources.json')
+}
+
+// One taste snapshot per source (spec 14 §2.2): rebuildable by a refresh, but
+// listener data by the master's own definition, so under data/ not cache/.
+export function tasteDir(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dataRoot(env), 'taste')
+}

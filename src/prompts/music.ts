@@ -82,8 +82,22 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
 
 export const MUSIC_POLICY_HEADER = 'Policy:'
 
-export function buildFindMusicInstruction(policy: string = DEFAULT_MUSIC_POLICY): string {
-  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}`
+// Search with taste in hand (spec 14 §3.3), rendered only when a digest rides
+// the situation: the kept music is a prior for style, never a playlist.
+export const TASTE_GUIDANCE = `With taste in hand: the block "What the listener keeps" below is what they
+actually keep on their own platforms — a strong prior for STYLE, not a list
+to replay. Pick for the moment. When a kept track genuinely fits, playing it is
+fine, but not two in a row. When their taste points at a Chinese
+catalogue, prefer a NetEase or Bilibili search where search_music lists it as
+available. In the announce, say where a pick came from only when it is theirs
+("one you've kept"), never otherwise.`
+
+export function buildFindMusicInstruction(
+  policy: string = DEFAULT_MUSIC_POLICY,
+  opts: { taste?: boolean } = {},
+): string {
+  const taste = opts.taste === true ? `\n\n${TASTE_GUIDANCE}` : ''
+  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}${taste}`
 }
 
 export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
@@ -94,14 +108,20 @@ export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
 // to do about a recently-played song is a taste rule, so it lives in the
 // replaceable policy (spec 03-01 §2.3), never here where a listener who
 // welcomes repeats could not overrule it.
-export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = []): string {
+// `taste` is the rendered digest (spec 14 §2.3): appended under its own
+// heading with the one instruction the spec adds; '' renders nothing.
+export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = [], taste = ''): string {
   const turns = recent.map((t) => `- ${t.role === 'radio' ? 'You' : 'Listener'}: ${t.text}`).join('\n')
   const avoidBlock =
     avoid.length === 0
       ? ''
       : `\nRecently played:\n${avoid.map((song) => `- ${song}`).join('\n')}\n`
+  const tasteBlock =
+    taste === ''
+      ? ''
+      : `\n${taste}\nPrefer what fits the moment; the listener's kept music is a strong prior, not a playlist to replay.\n`
   return (
-    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}` +
+    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}${tasteBlock}` +
     'Intent: a music break in the program. Pick something that fits the mood and\n' +
     "subjects of the conversation above (or the persona's taste if it is quiet)."
   )

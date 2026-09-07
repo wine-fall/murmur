@@ -710,6 +710,22 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       expect(c.types()).toEqual(['hello', 'info', 'settings'])
     })
 
+    // spec 14 §2.7: the invitation set is state like the floor mode — the
+    // attached client gets it live, a later attach gets the CURRENT one, and
+    // the replay backlog never carries a stale set.
+    it('carries the current invitation set to the client and to a later attach', async () => {
+      host.invitations([{ command: '/sources', why: 'better picks' }])
+      host.invitations([])
+      const c = await client()
+      c.attach()
+      await c.settle()
+      expect(c.types().filter((t) => t === 'invitations')).toHaveLength(1)
+      expect(c.received.find((m) => m.type === 'invitations')).toEqual({ v: 1, type: 'invitations', rows: [] })
+      host.invitations([{ command: '/bug', why: 'filed' }])
+      await c.settle()
+      expect(c.received.at(-1)).toEqual({ v: 1, type: 'invitations', rows: [{ command: '/bug', why: 'filed' }] })
+    })
+
     it('a set before the bridge is wired is dropped without a crash', async () => {
       const c = await client()
       c.attach()

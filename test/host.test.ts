@@ -6,6 +6,7 @@ import { PassThrough } from 'node:stream'
 import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion } from '../src/config.ts'
+import { COMMANDS } from '../src/host/ipc.ts'
 import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host/host.ts'
 
 describe('LineQueue', () => {
@@ -159,5 +160,23 @@ describe('CliHost', () => {
       log.mockRestore()
     }
     expect(lines.join('\n')).toContain(`v${packageVersion()}`)
+  })
+
+  // spec 14 §3.8: the plain host has no idle surface but its banner, so the
+  // invitation rows print there once, command first, the shared why after.
+  it('prints the invitation rows in the banner, derived from COMMANDS', () => {
+    const host = new CliHost(new PassThrough())
+    const lines: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line))
+    try {
+      host.banner('a night host', { brain: 'stub', voice: 'stub' })
+    } finally {
+      log.mockRestore()
+    }
+    const text = lines.join('\n')
+    for (const name of ['/sources', '/bug', '/feature-request']) {
+      const command = COMMANDS.find((c) => c.name === name)!
+      expect(text).toContain(`${command.name} · ${command.blurb}`)
+    }
   })
 })

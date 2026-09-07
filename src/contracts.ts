@@ -71,6 +71,9 @@ export type ContextPack = {
   // an assignment. Absent on most batches — the roll decides — and always
   // absent on an anchor or coda beat.
   readonly rwt?: { readonly title: string; readonly gist: string }
+  // The taste digest (spec 14 §2.3): what the listener keeps on the platforms
+  // they mounted, as background the host knows. '' or absent renders nothing.
+  readonly taste?: string
 }
 
 // --- real-world topics (spec 13) ------------------------------------------ //
@@ -204,12 +207,19 @@ export type TrackCandidate = {
   readonly uploader: string
   readonly durationS: number
   readonly extra: Readonly<Record<string, unknown>> // provider passthrough (viewCount, ...)
+  // Which catalogue answered (spec 14 §2.4). Absent = the default search.
+  readonly catalogue?: Catalogue
 }
+
+// Where a search can go (spec 14 §2.4): the catalogues that can also PLAY.
+// Spotify and Soda are taste sources only and are never a search target.
+export type Catalogue = 'youtube' | 'bilibili' | 'netease'
 
 // The low-level music source (spec 03-01 §2.2). No start/close: the default
 // adapter is a binary invoked per call, with nothing to warm or release.
+// `catalogue` is additive (spec 14 §2.4): absent means youtube, as before.
 export interface MusicProvider {
-  search(query: string, limit?: number): Promise<TrackCandidate[]>
+  search(query: string, limit?: number, catalogue?: Catalogue): Promise<TrackCandidate[]>
   resolve(ref: string): Promise<AudioClip> // AudioClip(kind: 'music')
 }
 

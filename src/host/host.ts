@@ -13,7 +13,7 @@ import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import { packageVersion } from '../config.ts'
-import type { ProgramState } from './ipc.ts'
+import { COMMANDS, type Invitation, type ProgramState } from './ipc.ts'
 
 export interface Host {
   start(): void
@@ -62,6 +62,10 @@ export interface Host {
   // A typed /settings wants the pane (spec 12 §3.6). Optional: a host without
   // one leaves it undefined and the Director points at the file instead.
   showSettings?(): void
+  // The current invitation set (spec 14 §2.7): the rows the input's rest
+  // state may rotate. Sent whenever the set changes. Optional: the plain host
+  // has no idle surface but its banner, which prints the boot-time rows once.
+  invitations?(rows: readonly Invitation[]): void
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
@@ -188,7 +192,12 @@ export class CliHost implements Host {
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}   v${packageVersion()}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
-    console.log('│ something broken or missing? /bug or /feature-request writes it up.')
+    // The invitation rows (spec 14 §3.8), command first and the shared why
+    // after — the plain host's one chance to say them.
+    for (const name of ['/sources', '/bug', '/feature-request']) {
+      const command = COMMANDS.find((c) => c.name === name)!
+      console.log(`│ ${command.name} · ${command.blurb}`)
+    }
     console.log('└──────────────────────────────────────────────────────────────')
   }
 

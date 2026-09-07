@@ -19,6 +19,8 @@ import {
   homeRoot,
   musicPolicyPath,
   rwtPoolPath,
+  sourcesConfigPath,
+  tasteDir,
   settingsPath,
   tuiSocketPath,
   voiceConfigPath,
@@ -113,6 +115,10 @@ export const ConfigSchema = z.object({
   // numbers are env-only by-ear knobs. The fetch rides the cheap tier.
   rwtEnabled: z.boolean().default(true),
   rwtPoolPath: z.string().default(() => rwtPoolPath()),
+
+  // --- listening taste (spec 14 §2.1/§2.2) -------------------------------- //
+  sourcesPath: z.string().default(() => sourcesConfigPath()),
+  tasteDir: z.string().default(() => tasteDir()),
   rwtModel: z.string().default('claude-haiku-4-5-20251001'),
   rwtP: z.coerce.number().min(0).max(1).default(0.35),
   rwtMinGap: z.coerce.number().int().nonnegative().default(1),
@@ -344,6 +350,8 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     memoryDir: join(dataRoot(env), 'memory'),
     musicPolicyPath: musicPolicyPath(env),
     rwtPoolPath: rwtPoolPath(env),
+    sourcesPath: sourcesConfigPath(env),
+    tasteDir: tasteDir(env),
     ...rwtFromEnv(env),
     listeningApiKey: env.MURMUR_LISTENING_API_KEY?.trim() ?? '',
     listeningUrl: env.MURMUR_LISTENING_URL?.trim() ?? '',

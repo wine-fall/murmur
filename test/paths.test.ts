@@ -7,6 +7,8 @@ import {
   homeRoot,
   musicPolicyPath,
   settingsPath,
+  sourcesConfigPath,
+  tasteDir,
   tuiSocketPath,
 } from '../src/paths.ts'
 
@@ -77,5 +79,14 @@ describe('the music policy file', () => {
   it('lives at the home root and moves with MURMUR_HOME', () => {
     expect(musicPolicyPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/music-policy.md')
     expect(musicPolicyPath({}).endsWith('/.murmur/music-policy.md')).toBe(true)
+  })
+})
+
+// spec 14 §2.1/§2.2: the mounted sources beside voice.json (re-obtainable
+// configuration), the taste snapshots under data/ (listener data).
+describe('listening-taste paths (spec 14)', () => {
+  it('sources.json sits at the home root and the snapshots under data/taste', () => {
+    expect(sourcesConfigPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/sources.json')
+    expect(tasteDir({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/data/taste')
   })
 })

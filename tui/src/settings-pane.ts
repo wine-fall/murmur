@@ -78,12 +78,34 @@ export function paneItems(snap: SettingsSnapshot): PaneItem[] {
   ]
 }
 
+// How long ago, in the coarsest unit that still reads as a time.
+function ago(iso: string, now: Date): string {
+  const s = Math.max(0, Math.round((now.getTime() - new Date(iso).getTime()) / 1000))
+  if (s < 60) return 'just now'
+  if (s < 3600) return `${Math.round(s / 60)}m ago`
+  if (s < 86_400) return `${Math.round(s / 3600)}h ago`
+  return `${Math.round(s / 86_400)}d ago`
+}
+
 // The read-only lines under the advanced divider (spec 12 §1): facts, never
-// secrets — the endpoint's existence, not the endpoint.
-export function paneFacts(snap: SettingsSnapshot): { label: string; value: string }[] {
+// secrets — the endpoint's existence, not the endpoint; one line per mounted
+// taste source (spec 14 §3.1) — its status and when it was last read, never
+// a browser name or a token.
+export function paneFacts(snap: SettingsSnapshot, now: Date = new Date()): { label: string; value: string }[] {
+  const sources = (snap.sources ?? []).map((source) => {
+    const read = source.refreshed === undefined ? '' : ` · read ${ago(source.refreshed, now)}`
+    const value =
+      source.status === 'ok'
+        ? `mounted${read}`
+        : source.status === 'expired'
+          ? 'expired · /sources to renew'
+          : `trouble reading${read}`
+    return { label: source.name, value }
+  })
   return [
     { label: 'stored at', value: snap.home },
     { label: 'voice endpoint', value: snap.voiceConfigured ? 'configured' : 'not configured' },
+    ...sources,
   ]
 }
 
