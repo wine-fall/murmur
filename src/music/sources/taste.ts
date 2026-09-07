@@ -9,6 +9,8 @@ import { join } from 'node:path'
 
 import { z } from 'zod'
 
+import type { AuthFailure } from './auth.ts'
+
 export const SOURCE_IDS = ['youtube', 'bilibili', 'netease', 'spotify', 'qishui'] as const
 export type SourceId = (typeof SOURCE_IDS)[number]
 
@@ -42,8 +44,22 @@ export const TasteSnapshotSchema = z.object({
 export type TasteItem = Readonly<z.infer<typeof TasteItemSchema>>
 export type TasteSnapshot = Readonly<z.infer<typeof TasteSnapshotSchema>>
 
-// The bounds (spec 14 §3.5). A snapshot file past the byte cap is a bug in the
-// adapter that wrote it, and is skipped rather than fed to a prompt.
+// One platform as murmur reads it (spec 14 §2.2): a cheap identity check
+// whose `who` the mount conversation echoes back, and the bounded snapshot.
+export type VerifyResult = { ok: true; who: string } | { ok: false; reason: AuthFailure }
+
+export interface TasteSource {
+  readonly id: SourceId
+  verify(): Promise<VerifyResult>
+  // May throw SourceAuthError; any other failure is a plain error.
+  snapshot(): Promise<TasteSnapshot>
+}
+
+// The per-source bounds (spec 14 §3.5).
+export const BOUNDS = { liked: 500, history: 200, playlist: 50, top: 50, subscription: 100 } as const
+
+// A snapshot file past the byte cap is a bug in the adapter that wrote it,
+// and is skipped rather than fed to a prompt.
 export const SNAPSHOT_MAX_BYTES = 1024 * 1024
 export const DIGEST_BUDGET = 1500
 const TOP_ARTISTS = 25
