@@ -97,6 +97,21 @@ describe('mountSpotify', () => {
     expect(urls[0]).toContain('https://accounts.spotify.com/authorize')
   })
 
+  it('stops watching for the cancel once the wait is settled', async () => {
+    // Promise.race does not cancel its loser: a poll left running would wake
+    // up every 250 ms for the rest of the session, once per Spotify attempt.
+    let polls = 0
+    await mountSpotify('client-1', {
+      fetch: fakeFetch({ '/api/token': TOKENS, '/v1/me': ME }).fetch,
+      openUrl: () => {},
+      cancelled: () => (polls++, false),
+      listen: async () => ({ port: 1, code: async () => 'code-1', close: () => {} }),
+    })
+    const settled = polls
+    await new Promise((r) => setTimeout(r, 900))
+    expect(polls).toBe(settled)
+  })
+
   it('a callback that never arrives is the timeout outcome; a refused exchange is login-required', async () => {
     const silent = await mountSpotify('client-1', {
       fetch: fakeFetch({}).fetch,

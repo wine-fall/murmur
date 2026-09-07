@@ -152,6 +152,13 @@ type SourcesFile = {
 - Single writer: the `/sources` flow. Atomic write (tmp + rename), like
   `settings.json` (12 §2.1); owner-only (0600) like `voice.json`, the
   snapshots too. A corrupt file is reported once per version of the file.
+- *As built (review round 2)*: the store carries an **epoch**, bumped by
+  every mount and unmount. A background read that started before one is
+  writing for an account that may be gone — its snapshot and any rotated
+  Spotify token are dropped on a changed epoch — and a remount deletes the
+  previous account's snapshot **before** reading the new one, so a first read
+  that fails leaves no taste rather than the wrong account's under a fresh
+  mount date.
 
 ### 2.2 `TasteSource` and the snapshot
 
@@ -213,6 +220,12 @@ snapshots (older than 30 days) still render, stamped with their date — a
 listener who stopped refreshing still has a taste.
 
 **Consumers**:
+
+*As built (review round 2)*: the reader renders only the sources
+`sources.json` currently holds. A snapshot file can outlive its mount — a
+corrupt file, a process that died between the unmount and the delete — and
+§5.1's "no account, no change" has to hold on the file that decides, not on
+whatever is left in `data/taste/`.
 
 - **Context pack** (05 §2.2): a new optional field `taste: string`. Rendered
   after the profile, before recent turns. Talk and steer prompts receive it
@@ -358,7 +371,12 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   (`cloudsearch`, type song). Cookie: read from the browser store **through
   yt-dlp** — `yt-dlp --cookies-from-browser <b> --cookies <tmpfile> …` writes
   a Netscape jar the client reads and deletes after the call (no second
-  cookie-store reader to maintain; the jar never persists).
+  cookie-store reader to maintain; the jar never persists). *As built (review
+round 2)*: the export is coalesced per browser per site — a cold YouTube
+snapshot reads three lists at once and they share one browser-store unlock —
+and an export that found nothing for the site is never cached, so a listener
+who signs in and retries at once reaches the browser again rather than the
+empty answer from a minute ago.
 - **`bilibili.ts`** — `x/web-interface/nav` (who, `mid`) and
   `x/v3/fav/folder/created/list-all` (folders); folder contents, watch-later
   and space audio read from the same web APIs yt-dlp's extractors call
@@ -376,7 +394,10 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   endpoints `/me`, `/me/top/artists`, `/me/top/tracks` (`medium_term`),
   `/me/tracks` (paged), `/me/playlists` (names). Browser opened through the
   Director's injected `openUrl` — never launched from a test.
-- **`qishui.ts`** — the Luna app transport (`User-Agent: Luna/<ver> Android`,
+- **`qishui.ts`** (*as built*: a dead session answers the account endpoints
+  with HTTP 200 and a non-zero status, which parses as empty lists — so that
+  status is read as the login being gone, or a refresh would silently replace
+  the last good snapshot with nothing) — the Luna app transport (`User-Agent: Luna/<ver> Android`,
   cookie header, JSON): QR issue + status poll (the QR is scanned with
   **Douyin**, not the Soda app — the upstream flow's own text says so), `me`,
   own playlists, collection, daily mix. The QR is rendered in the terminal
@@ -483,6 +504,14 @@ Digest ≤ 1500 chars (§2.3). A snapshot file over 1 MB is a bug.
 log is what a listener pastes into a bug report), never a cookie, token, or
 session value anywhere outside `sources.json`. The redaction rule is a unit
 test over the log writer with a snapshot fixture.
+
+*As built (review round 2)*, two paths the rule reaches that the draft did
+not name: the pick's `music.search` line logs the query's **size**, never its
+words (a taste-led search quotes a kept title, and yt-dlp echoes the whole
+search spec in its errors, so that is trimmed too); and the Soda login QR —
+an authorization URL — goes to a host surface that is shown and never
+mirrored (`Host.showPrivate`), since `info` is what the diagnostics keep. A
+front-end without that surface is told so rather than handed the code.
 
 ### 3.7 Failure modes, listener-facing text (exact)
 

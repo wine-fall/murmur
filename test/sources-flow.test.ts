@@ -32,7 +32,7 @@ class FakeSource implements TasteSource {
   }
 }
 
-function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts> } = {}) {
+function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts>; onCookieDrop?: () => void } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'murmur-flow-'))
   const store = new SourcesStore({ path: join(dir, 'sources.json'), tasteDir: join(dir, 'taste') })
   const host = new FakeHost()
@@ -65,7 +65,7 @@ function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> &
     },
     ...over.mounts,
   }
-  const { mounts: _mounts, ...rest } = over
+  const { mounts: _mounts, onCookieDrop, ...rest } = over
   const deps: SourcesFlowDeps = {
     host,
     store,
@@ -80,6 +80,7 @@ function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> &
     },
     platform: 'linux',
     now: () => NOW,
+    forgetCookies: onCookieDrop ?? (() => {}),
     ...rest,
   }
   return { store, host, mounted, deps, sources }
@@ -111,6 +112,31 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.debugs).toContain('sources.mount youtube')
     // The menu comes back with the mount listed.
     expect(host.infos.some((l) => l.startsWith('mounted: YouTube (1 liked, 1 playlist · read just now)'))).toBe(true)
+  })
+
+  it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
+    const { host, deps, store } = build(['mount netease', 'firefox', 'done'])
+    store.mount('netease', { browser: 'chrome', userId: 'old', likedPlaylistId: '1' })
+    store.writeSnapshot({ source: 'netease', takenAt: '2026-09-01T00:00:00.000Z', items: [{ kind: 'liked', title: 'the old account' }] })
+    // The first read of the new account fails: better no taste than the
+    // previous account's taste under a fresh mount date.
+    deps.build = () => {
+      const source = new FakeSource('netease')
+      source.fail = new Error('down')
+      return source
+    }
+    await runSources(deps)
+    expect(store.readSnapshot('netease')).toBeNull()
+    expect(store.read().netease?.userId).toBe('1')
+    expect(host.infos.some((l) => l.includes('could not read NetEase right now'))).toBe(true)
+  })
+
+  it('forgets the cached cookie export when a mount finds no login, so the retry after signing in works', async () => {
+    const dropped: number[] = []
+    const { host, deps } = build(['mount bilibili', 'firefox', 'done'], { onCookieDrop: () => dropped.push(1) })
+    await runSources(deps)
+    expect(host.infos).toContain('no Bilibili login in firefox — sign in there, then try /sources again.')
+    expect(dropped).toHaveLength(1)
   })
 
   it('a browser with no login says so in the §3.7 words and writes nothing', async () => {
@@ -153,14 +179,26 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read()).toEqual({})
   })
 
-  it('mounts Soda: the QR as half-blocks, the Douyin instruction, who', async () => {
+  it('mounts Soda: the QR on the unlogged surface, the Douyin instruction, who', async () => {
     const { host, deps, store, mounted } = build(['mount soda', 'done'])
     await runSources(deps)
     expect(mounted).toEqual(['qishui'])
-    const qr = host.infos.find((l) => l.includes('█'))!
+    // The QR encodes an authorization URL, so it goes to the screen only —
+    // host.info mirrors into the diagnostics a /bug report attaches (§3.6).
+    const qr = host.privates.find((l) => l.includes('█'))!
     expect(qr.split('\n').length).toBeGreaterThan(10)
+    expect(host.infos.join('\n')).not.toContain('█')
     expect(host.infos.some((l) => /Douyin/.test(l))).toBe(true)
     expect(store.read().qishui).toMatchObject({ sessionCookie: 's', status: 'ok' })
+  })
+
+  it('refuses the Soda mount on a host that cannot show a line off the record', async () => {
+    const { host, deps, store, mounted } = build(['mount soda', 'done'])
+    host.showPrivate = undefined
+    await runSources(deps)
+    expect(mounted).toEqual([])
+    expect(host.infos.some((l) => /cannot show the code here/.test(l))).toBe(true)
+    expect(store.read()).toEqual({})
   })
 
   it('Esc during the QR wait cancels and writes nothing', async () => {

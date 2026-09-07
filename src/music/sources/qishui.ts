@@ -159,11 +159,16 @@ export class QishuiClient {
     return { status, ...(sessionId !== undefined && { sessionId }) }
   }
 
-  // null = the session no longer signs in.
+  // null = the session no longer signs in (the mount path wants a plain
+  // answer, not an exception).
   async me(entry: QishuiEntry): Promise<{ id: string; who: string } | null> {
-    const json = await this.pc('/luna/pc/me', entry)
-    const code = StatusCodeSchema.safeParse(json)
-    if (code.success && code.data.status_code !== undefined && code.data.status_code !== 0) return null
+    let json: unknown
+    try {
+      json = await this.pc('/luna/pc/me', entry)
+    } catch (err) {
+      if (err instanceof SourceAuthError && err.reason === 'expired') return null
+      throw err
+    }
     const parsed = MeSchema.safeParse(json)
     if (!parsed.success) return null
     const info = parsed.data.my_info ?? parsed.data.user
@@ -240,7 +245,16 @@ export class QishuiClient {
     })
     if (response.status === 401 || response.status === 403) throw new SourceAuthError('qishui', 'expired', `HTTP ${response.status} on ${path}`)
     if (!response.ok) throw new Error(`qishui ${path}: HTTP ${response.status}`)
-    return response.json()
+    const json: unknown = await response.json()
+    // The platform answers a dead session with HTTP 200 and a non-zero
+    // status: parsed as empty arrays it would look like an account with
+    // nothing in it, and a refresh would quietly replace the last good
+    // snapshot. It is the login being gone.
+    const code = StatusCodeSchema.safeParse(json)
+    if (code.success && code.data.status_code !== undefined && code.data.status_code !== 0) {
+      throw new SourceAuthError('qishui', 'expired', `status ${code.data.status_code} on ${path}`)
+    }
+    return json
   }
 
   // One round trip with a timeout and one retry on a network error; a 429

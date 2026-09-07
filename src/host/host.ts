@@ -66,6 +66,11 @@ export interface Host {
   // state may rotate. Sent whenever the set changes. Optional: the plain host
   // has no idle surface but its banner, which prints the boot-time rows once.
   invitations?(rows: readonly Invitation[]): void
+  // A line the listener must see and the diagnostics must never keep (spec
+  // 14 §3.6): the Soda login QR encodes an authorization URL, and `info`
+  // mirrors into the log a /bug report attaches. A host without this seam is
+  // told so rather than shown the code — the flow refuses that mount.
+  showPrivate?: ((text: string) => void) | undefined
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
@@ -204,6 +209,11 @@ export class CliHost implements Host {
     if (this.invited) return
     this.invited = true
     for (const row of rows) console.log(`·  ${row.command} · ${row.why}`)
+  }
+
+  // Printed, never mirrored (see the seam's comment on Host).
+  showPrivate(text: string): void {
+    console.log(text)
   }
 
   onRadioSegment(text: string): void {

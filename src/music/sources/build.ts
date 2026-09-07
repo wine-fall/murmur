@@ -26,6 +26,9 @@ type CookieSite = keyof typeof SITES
 // dropped the moment the export is read.
 export class CookieJars {
   private jars = new Map<string, { at: number; rows: CookieRow[] }>()
+  // Exports in flight, per key: a cold YouTube snapshot reads three lists at
+  // once, and they must share one browser-store unlock, not spawn three.
+  private pending = new Map<string, Promise<CookieRow[]>>()
   private run: YtDlpRunner
   private now: () => number
 
@@ -44,13 +47,23 @@ export class CookieJars {
     return writeJar(await this.rows(pick, site))
   }
 
-  private async rows(pick: BrowserPick, site: string): Promise<CookieRow[]> {
+  private rows(pick: BrowserPick, site: string): Promise<CookieRow[]> {
     const key = `${pick.browser}:${pick.profile ?? ''}:${site}`
     const cached = this.jars.get(key)
-    if (cached !== undefined && this.now() - cached.at < COOKIE_TTL_MS) return cached.rows
-    const rows = siteRows(await exportCookieJar(pick, this.run), site)
-    this.jars.set(key, { at: this.now(), rows })
-    return rows
+    if (cached !== undefined && this.now() - cached.at < COOKIE_TTL_MS) return Promise.resolve(cached.rows)
+    const inflight = this.pending.get(key)
+    if (inflight !== undefined) return inflight
+    const work = (async () => {
+      const rows = siteRows(await exportCookieJar(pick, this.run), site)
+      // An export that found nothing for this site is not worth keeping: the
+      // listener is being told to sign in, and their retry must reach the
+      // browser again rather than this empty answer.
+      if (rows.length > 0) this.jars.set(key, { at: this.now(), rows })
+      return rows
+    })()
+    const tracked = work.finally(() => this.pending.delete(key))
+    this.pending.set(key, tracked)
+    return tracked
   }
 
   // A failed login is a reason to read the store again next time.
@@ -93,8 +106,15 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
     }
     case 'spotify': {
       const e = entry as SourceEntry['spotify']
-      // A rotated pair lands in the file through the store — single writer.
-      return new SpotifySource(e, { onTokens: (tokens) => deps.store.patch('spotify', tokens) })
+      // A rotated pair lands in the file through the store — single writer —
+      // and only while this is still the mount it was rotated for: a token
+      // refreshed for the old account must not patch the new one.
+      const epoch = deps.store.epoch
+      return new SpotifySource(e, {
+        onTokens: (tokens) => {
+          if (deps.store.epoch === epoch) deps.store.patch('spotify', tokens)
+        },
+      })
     }
     case 'qishui': {
       const e = entry as SourceEntry['qishui']

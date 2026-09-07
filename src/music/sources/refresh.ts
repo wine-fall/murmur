@@ -98,12 +98,15 @@ export class TasteRefresher {
     const source = this.deps.source(id)
     if (source === null) return { id, ok: false, error: 'no adapter for this entry' }
     this.tried.set(id, this.now().getTime())
+    // The mounts as they stand now: the conversation may unmount — or
+    // unmount and mount a different account — while this read is in flight,
+    // and a snapshot for the account that is gone must not land on the one
+    // that replaced it.
+    const epoch = store.epoch
     const t = performance.now()
     try {
       const snapshot = await source.snapshot()
-      // The conversation may have unmounted it while the read was in flight:
-      // a snapshot for a source that is gone must not come back from the dead.
-      if (!store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
+      if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       store.writeSnapshot(snapshot)
       store.markRefreshed(id, this.now())
       // A read that works clears an error left by an earlier failure, and
@@ -116,7 +119,7 @@ export class TasteRefresher {
       host.debug?.(`sources.refresh ${id} n=${snapshot.items.length} ${Math.round(performance.now() - t)}ms`)
       return { id, ok: true, count: snapshot.items.length }
     } catch (err) {
-      if (!store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
+      if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       if (err instanceof SourceAuthError) {
         watch.note(err)
         return { id, ok: false, error: err.reason }

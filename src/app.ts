@@ -265,7 +265,11 @@ export type TasteWiring = {
 export function buildTaste(config: Config, host: Host, ytdlp: YtDlpRunner = ytdlpRunner(config.ytdlpCmd)): TasteWiring | undefined {
   if (config.brain !== 'claude') return undefined
   const store = new SourcesStore({ path: config.sourcesPath, tasteDir: config.tasteDir, log: (m) => host.info(m) })
-  const reader = new TasteReader({ dir: config.tasteDir, ...(host.debug !== undefined && { log: host.debug.bind(host) }) })
+  const reader = new TasteReader({
+    dir: config.tasteDir,
+    mounted: () => store.mounted(),
+    ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+  })
   const watch = new SourceAuthWatch({ store, host })
   const build: SourceBuildDeps = { ytdlp, jars: new CookieJars(ytdlp), store, openUrl: openInBrowser }
   const refresher = new TasteRefresher({ store, source: (id) => buildSource(id, store.read()[id]!, build), watch, host })
@@ -956,6 +960,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
           watch: taste.watch,
           mounts: defaultMounts(taste.build),
           build: (id, entry) => buildSource(id, entry, taste.build),
+          forgetCookies: () => taste.build.jars.drop(),
         }),
     }),
     // The one production wiring of the desktop opener: the Director has no

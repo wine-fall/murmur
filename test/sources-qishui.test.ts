@@ -103,10 +103,23 @@ describe('QishuiClient (account reads, Luna PC transport)', () => {
     expect(new URL(calls[0]!.url).searchParams.get('aid')).toBe('386088')
   })
 
-  it('a dead session reads as no account; a 401 is expired; a 429 is rate limiting', async () => {
+  it('a dead session and a 401 both read as no account; a 429 is rate limiting', async () => {
+    // The mount asks "who is this?" and wants an answer, not an exception;
+    // the reads behind the snapshot are where a dead session throws.
     expect(await new QishuiClient({ fetch: fakeFetch({ '/luna/pc/me': { body: { status_code: 1000006, status_msg: 'login' } } }).fetch }).me(entry)).toBeNull()
-    await expect(new QishuiClient({ fetch: fakeFetch({ '/luna/pc/me': { body: {}, status: 401 } }).fetch }).me(entry)).rejects.toMatchObject({ source: 'qishui', reason: 'expired' })
+    expect(await new QishuiClient({ fetch: fakeFetch({ '/luna/pc/me': { body: {}, status: 401 } }).fetch }).me(entry)).toBeNull()
     await expect(new QishuiClient({ fetch: fakeFetch({ '/luna/pc/me': { body: {}, status: 429 } }).fetch }).me(entry)).rejects.toMatchObject({ reason: 'rate-limited' })
+    await expect(new QishuiClient({ fetch: fakeFetch({ '/luna/pc/me/playlist': { body: { status_code: 1000006 } } }).fetch }).playlists(entry)).rejects.toMatchObject({ source: 'qishui', reason: 'expired' })
+  })
+
+  it('a dead session on the account reads is the typed failure, never an empty snapshot', async () => {
+    // The PC endpoints answer HTTP 200 with a nonzero status_code; parsed as
+    // empty arrays, a refresh would replace the last good snapshot with
+    // nothing and never say the login is gone.
+    const dead = { body: { status_code: 1000006, status_msg: 'login' } }
+    const source = new QishuiSource(entry, { fetch: fakeFetch({ '/luna/pc/me': dead, '/luna/pc/me/playlist': dead, '/luna/pc/me/collection/mixed': dead }).fetch })
+    await expect(source.snapshot()).rejects.toMatchObject({ source: 'qishui', reason: 'expired' })
+    expect(await source.verify()).toEqual({ ok: false, reason: 'expired' })
   })
 
   it('snapshots the collection, the playlist names and the daily mix; a forbidden daily mix is simply empty', async () => {

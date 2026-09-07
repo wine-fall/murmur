@@ -4,7 +4,9 @@ import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
+import { COOKIE_TTL_MS, CookieJars } from '../src/music/sources/build.ts'
 import { cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
+import type { YtDlpRunner } from '../src/music/music.ts'
 
 // A Netscape jar as yt-dlp writes it, values redacted.
 const JAR = [
@@ -78,5 +80,56 @@ describe('exportCookieJar', () => {
     })
     expect(jar).toEqual([])
     expect(existsSync(path)).toBe(false)
+  })
+})
+
+// spec 14 §2.8 (review round): one export per browser per site per TTL — an
+// export that found nothing is never cached (the listener signs in and
+// retries at once), and concurrent readers share the one in-flight export
+// instead of spawning yt-dlp three times.
+describe('CookieJars', () => {
+  it('coalesces concurrent exports, caches a hit, never caches an empty one, and forgets on demand', async () => {
+    let exports = 0
+    let jar = JAR
+    const run: YtDlpRunner = async (args) => {
+      exports++
+      await new Promise((r) => setTimeout(r, 5))
+      writeFileSync(args[args.indexOf('--cookies') + 1]!, jar)
+      return ''
+    }
+    let clock = 0
+    const jars = new CookieJars(run, () => clock)
+    const pick = { browser: 'chrome' as const }
+    const three = await Promise.all([
+      jars.header(pick, 'bilibili.com')(),
+      jars.header(pick, 'bilibili.com')(),
+      jars.header(pick, 'bilibili.com')(),
+    ])
+    expect(exports).toBe(1)
+    expect(new Set(three).size).toBe(1)
+    expect(three[0]).toContain('SESSDATA=')
+    // Cached within the TTL, re-exported after it.
+    await jars.header(pick, 'bilibili.com')()
+    expect(exports).toBe(1)
+    clock = COOKIE_TTL_MS + 1
+    await jars.header(pick, 'bilibili.com')()
+    expect(exports).toBe(2)
+    // An export with nothing for the site is not worth caching: the listener
+    // is being told to sign in and try again.
+    jar = '# Netscape HTTP Cookie File\n'
+    clock = 2 * COOKIE_TTL_MS + 2
+    expect(await jars.header(pick, 'bilibili.com')()).toBe('')
+    expect(exports).toBe(3)
+    expect(await jars.header(pick, 'bilibili.com')()).toBe('')
+    expect(exports).toBe(4)
+    // A hit cached again, then dropped by hand.
+    jar = JAR
+    await jars.header(pick, 'bilibili.com')()
+    expect(exports).toBe(5)
+    await jars.header(pick, 'bilibili.com')()
+    expect(exports).toBe(5)
+    jars.drop()
+    await jars.header(pick, 'bilibili.com')()
+    expect(exports).toBe(6)
   })
 })

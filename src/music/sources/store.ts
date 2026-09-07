@@ -109,6 +109,10 @@ export class SourcesStore {
   // The file version (mtime + size) a warning was already said for: a
   // corrupt file is reported once (§2.1), not on every read of a hot path.
   private warnedFor = ''
+  // Bumped by every mount and unmount. A background read that started
+  // before one carries a snapshot (or a rotated token) for an account that
+  // may no longer be there, so its write is dropped on a changed epoch.
+  epoch = 0
 
   constructor(deps: SourcesStoreDeps) {
     this.deps = deps
@@ -135,14 +139,22 @@ export class SourcesStore {
   }
 
   mount<K extends SourceId>(id: K, entry: SourceInput[K], now: Date = new Date()): void {
+    this.epoch++
     this.update((file) => ({ ...file, [id]: { ...entry, mountedAt: now.toISOString(), status: 'ok' } }))
   }
 
   unmount(id: SourceId): void {
+    this.epoch++
     this.update((file) => {
       const { [id]: _gone, ...rest } = file
       return rest
     })
+    this.dropSnapshot(id)
+  }
+
+  // The snapshot alone: what a remount drops before reading the new account,
+  // so a failed first read leaves no taste rather than the old account's.
+  dropSnapshot(id: SourceId): void {
     rmSync(this.snapshotPath(id), { force: true })
   }
 

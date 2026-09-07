@@ -199,11 +199,19 @@ export async function mountSpotify(clientId: string, deps: SpotifyMountDeps): Pr
     const url = spotifyAuthUrl(clientId, redirect, state, challenge)
     deps.onUrl?.(url)
     deps.openUrl(url)
+    // Promise.race does not cancel its loser, so the watch is told when the
+    // wait is over: otherwise every Spotify attempt would leave a timer
+    // waking up every quarter second for the rest of the session.
+    let settled = false
     const code = await Promise.race([
-      listener.code(state, deps.timeoutMs ?? CALLBACK_TIMEOUT_MS),
-      (async (): Promise<'cancelled'> => {
-        while (deps.cancelled?.() !== true) await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_MS).unref())
-        return 'cancelled'
+      listener.code(state, deps.timeoutMs ?? CALLBACK_TIMEOUT_MS).finally(() => (settled = true)),
+      (async (): Promise<'cancelled' | null> => {
+        while (!settled) {
+          if (deps.cancelled?.() === true) return 'cancelled'
+          await new Promise((resolve) => setTimeout(resolve, CANCEL_POLL_MS).unref())
+        }
+        // The callback settled first: hand the race back to it.
+        return new Promise<never>(() => {})
       })(),
     ])
     if (code === 'cancelled') return { ok: false, reason: 'cancelled' }

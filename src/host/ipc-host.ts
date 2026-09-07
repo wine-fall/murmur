@@ -346,6 +346,14 @@ export class IpcHost implements Host {
     this.mirror('host', message)
   }
 
+  // Shown to whoever is watching now, kept nowhere: not mirrored into the
+  // dev log, and not in the replay backlog either — the one thing it carries
+  // (a login QR) expires in minutes, so a later attach must not be handed a
+  // dead code (see the seam's comment on Host).
+  showPrivate(text: string): void {
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'info', text })
+  }
+
   // A marked question (spec 10 §3.2-B). Deliberately NOT through send(): the
   // general replay backlog has no notion of "answered", and replaying a
   // settled question would reopen the dock on it (codex review). Pending asks

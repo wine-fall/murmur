@@ -256,7 +256,11 @@ describe('discovery instrumentation', () => {
     }).nextTrack(ctx)
 
     expect(lines[0]).toMatch(/^music\.pick start situation=\d+ch$/)
-    expect(lines).toContainEqual(expect.stringMatching(/^music\.search \d+ms hits=2 query="city pop"$/))
+    // spec 14 §3.6: a taste-led search quotes a kept title, and the dev log
+    // is what a /bug report attaches — its size, never its words.
+    expect(lines.some((l) => /^music\.search \d+ms hits=\d+ q=\d+ch$/.test(l))).toBe(true)
+    expect(lines.join('\n')).not.toContain('city pop')
+    expect(lines).toContainEqual(expect.stringMatching(/^music\.search \d+ms hits=2 q=8ch$/))
     expect(lines).toContainEqual(expect.stringMatching(/^music\.resolve \d+ms ok$/))
     expect(lines).toContainEqual(expect.stringMatching(/^music\.probe \d+ms ok$/))
     expect(lines.at(-1)).toMatch(/^music\.pick done \d+ms picked=yes$/)

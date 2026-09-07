@@ -47,6 +47,10 @@ export type SourcesFlowDeps = {
   mounts: SourceMounts
   // The live adapter for a freshly mounted entry, for the first snapshot.
   build: (id: SourceId, entry: SourceEntry[SourceId]) => TasteSource | null
+  // Drop whatever was cached from the browser's cookie store: a mount that
+  // found no login sends the listener off to sign in, and their retry has to
+  // reach the browser again rather than the answer from a minute ago.
+  forgetCookies?: () => void
   platform?: NodeJS.Platform
   now?: () => Date
 }
@@ -178,6 +182,10 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
   const now = deps.now ?? (() => new Date())
   host.info(`signed in as ${who}`)
   host.info(`reading what you keep on ${SOURCE_NAMES[id]}...`)
+  // A remount may be a different account: the previous one's snapshot goes
+  // before the new one is read, so a read that fails leaves no taste rather
+  // than the old account's taste under a fresh mount date.
+  store.dropSnapshot(id)
   store.mount(id, entry as never, now())
   watch.reset(id)
   host.debug?.(`sources.mount ${id}`)
@@ -213,6 +221,7 @@ async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string
     return
   }
   if (!result.ok) {
+    deps.forgetCookies?.()
     host.info(`no ${site} login in ${pick.browser} — sign in there, then try /sources again.`)
     return
   }
@@ -261,10 +270,18 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, read: () => Promise<strin
 
 async function mountQishuiFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
   const { host } = deps
+  // The QR is an authorization artifact: it goes to the screen only, never
+  // through `info` (which the diagnostics keep — §3.6). A host without that
+  // surface cannot be handed the code at all.
+  const show = host.showPrivate?.bind(host)
+  if (show === undefined) {
+    host.info('I cannot show the code here — run murmur in a terminal front-end to mount Soda Music.')
+    return
+  }
   host.info('Soda Music signs in with a Douyin scan: open the Douyin app, scan the code below, and confirm there. I\'ll wait up to three minutes (Esc cancels).')
   let result: QishuiMountResult
   try {
-    result = await deps.mounts.qishui((url) => host.info(qrHalfBlocks(url).join('\n')), cancelled)
+    result = await deps.mounts.qishui((url) => show(qrHalfBlocks(url).join('\n')), cancelled)
   } catch (err) {
     host.info(`could not reach Soda Music (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)
     return

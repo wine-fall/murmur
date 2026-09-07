@@ -167,6 +167,11 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
 
 export type TasteReaderDeps = {
   dir: string
+  // What is mounted right now (spec 14 §5.1): a snapshot file can outlive
+  // its mount — a corrupt sources.json, a process that died between the
+  // unmount and the delete — and a leftover file must not keep sending an
+  // account's titles to the brain. Absent = render whatever is on disk.
+  mounted?: () => readonly SourceId[]
   log?: (message: string) => void
   now?: () => Date
 }
@@ -187,10 +192,19 @@ export class TasteReader {
   }
 
   digest(): string {
+    const mounted = this.deps.mounted?.()
     let names: string[]
     try {
-      names = readdirSync(this.deps.dir).filter((n) => n.endsWith('.json')).sort()
+      names = readdirSync(this.deps.dir)
+        .filter((n) => n.endsWith('.json'))
+        .filter((n) => mounted === undefined || mounted.includes(n.slice(0, -'.json'.length) as SourceId))
+        .sort()
     } catch {
+      return ''
+    }
+    if (names.length === 0) {
+      this.key = ''
+      this.cached = ''
       return ''
     }
     const files = names.map((name) => {

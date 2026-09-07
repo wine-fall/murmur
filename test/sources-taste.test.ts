@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { renderTasteDigest, TasteReader, type TasteSnapshot } from '../src/music/sources/taste.ts'
+import { renderTasteDigest, TasteReader, type SourceId, type TasteSnapshot } from '../src/music/sources/taste.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 
@@ -127,6 +127,26 @@ describe('TasteReader', () => {
     utimesSync(join(d, 'spotify.json'), new Date(), new Date(Date.now() + 5_000))
     reader.digest()
     expect(reader.renders).toBe(3)
+  })
+
+  // spec 14 §5.1: with nothing mounted the pack carries no taste. A snapshot
+  // file can outlive its mount — a corrupt sources.json, a process that died
+  // between the unmount and the delete — and account-derived titles must not
+  // keep reaching the brain on the strength of a leftover file.
+  it('renders only what is mounted, and nothing at all when nothing is', () => {
+    const d = dir()
+    writeFileSync(join(d, 'netease.json'), JSON.stringify(netease))
+    writeFileSync(join(d, 'spotify.json'), JSON.stringify(spotify))
+    let mounted: SourceId[] = []
+    const reader = new TasteReader({ dir: d, mounted: () => mounted, now: () => NOW })
+    expect(reader.digest()).toBe('')
+    mounted = ['netease']
+    expect(reader.digest()).toBe(renderTasteDigest([netease], NOW))
+    mounted = ['netease', 'spotify']
+    expect(reader.digest()).toBe(renderTasteDigest([netease, spotify], NOW))
+    // The mounted set is part of the memo key, so an unmount lands at once.
+    mounted = []
+    expect(reader.digest()).toBe('')
   })
 
   it('a snapshot over the 1 MB bound is skipped as a bug, not rendered', () => {

@@ -167,6 +167,29 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
     await until(() => ne.snapshots === 2, 'the retry an hour on')
   })
 
+  it('a read that finishes after the listener remounted the source writes nothing', async () => {
+    // The conversation can unmount and mount again — a different account —
+    // while a background read is still awaiting the platform. Its snapshot
+    // belongs to the account that is gone.
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: 'old', likedPlaylistId: '1' }, new Date('2026-09-01T00:00:00Z'))
+    const ne = new FakeSource('netease')
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    ne.snapshot = async () => {
+      await gate
+      return { source: 'netease', takenAt: NOW.toISOString(), items: [{ kind: 'liked', title: 'the old account' }] }
+    }
+    sources.set('netease', ne)
+    const running = refresher.refreshAll()
+    store.unmount('netease')
+    store.mount('netease', { browser: 'firefox', userId: 'new', likedPlaylistId: '2' })
+    release()
+    await running
+    expect(store.readSnapshot('netease')).toBeNull()
+    expect(store.read().netease?.userId).toBe('new')
+  })
+
   it('a read that finishes after the source was unmounted writes nothing', async () => {
     const { store, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome' }, new Date('2026-09-01T00:00:00Z'))
