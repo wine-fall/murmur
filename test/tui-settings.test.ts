@@ -133,6 +133,26 @@ describe('paneFacts', () => {
     const bare = paneFacts(snap({}, { voiceConfigured: false }))
     expect(bare.map((f) => f.value).join(' ')).toContain('not configured')
   })
+
+  // spec 14 §3.1: one read-only line per mounted source — name, status, and
+  // when it was last read. Sources are not a knob, so nothing is adjustable.
+  it('lists each mounted source with its status and refresh age', () => {
+    const now = new Date('2026-09-06T12:00:00Z')
+    const facts = paneFacts(
+      snap({}, {
+        sources: [
+          { id: 'netease', name: 'NetEase', status: 'ok', refreshed: '2026-09-06T10:00:00.000Z' },
+          { id: 'spotify', name: 'Spotify', status: 'expired' },
+          { id: 'qishui', name: 'Soda Music', status: 'error', refreshed: '2026-09-01T10:00:00.000Z' },
+        ],
+      }),
+      now,
+    ).map((f) => `${f.label}: ${f.value}`)
+    expect(facts).toContain('NetEase: mounted · read 2h ago')
+    expect(facts).toContain('Spotify: expired · /sources to renew')
+    expect(facts).toContain('Soda Music: trouble reading · read 5d ago')
+    expect(paneFacts(snap())).toHaveLength(2)
+  })
 })
 
 // spec 12 §3.9: the one item a keypress cannot step through, because a language

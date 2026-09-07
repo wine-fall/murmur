@@ -19,11 +19,15 @@ export const PROTOCOL = 2
 // both read THIS list, so a new command lands everywhere at once. Order is
 // presentation only (the menu's rows, harmless-first — a stray Enter on the
 // fresh menu must never quit); the parser binds meanings to its own literals.
+// A blurb is the WHY — what the listener gets — in the host's register and
+// under 48 characters (spec 14 §3.8): the same words serve the menu row and
+// the resting invitation, so there is one copy of the wording.
 export const COMMANDS = [
   { name: '/settings', blurb: 'open the settings pane' },
+  { name: '/sources', blurb: 'your NetEase or Spotify likes make better picks' },
   { name: '/setup', blurb: 'call the setup guide' },
-  { name: '/bug', blurb: 'write up a bug, log attached' },
-  { name: '/feature-request', blurb: 'write up something you wish it did' },
+  { name: '/bug', blurb: "something broke? two lines and it's filed" },
+  { name: '/feature-request', blurb: 'wish it did something? say so' },
   { name: '/update', blurb: 'check npm for a newer murmur' },
   { name: '/quit', blurb: 'end the broadcast' },
 ] as const
@@ -112,15 +116,39 @@ export const SettingsPatchSchema = z.object({
 
 export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
 
+// One mounted taste source as the pane sees it (spec 14 §3.1): a name, a
+// status and when it was last read — never a browser name, never a token. The
+// ids are spelled out here rather than imported: this module is the one the
+// front-end ships with, so it carries no other engine module along.
+export const SourceLineSchema = z.object({
+  id: z.enum(['youtube', 'bilibili', 'netease', 'spotify', 'qishui']),
+  name: z.string(),
+  status: z.enum(['ok', 'expired', 'error']),
+  refreshed: z.string().optional(),
+})
+
+export type SourceLine = z.infer<typeof SourceLineSchema>
+
 // The read-only facts that ride the settings snapshot (spec 12 §2.5): where
 // the home resolved, and whether the voice endpoint / music pipeline exist —
-// never the key, never the URL.
+// never the key, never the URL. `sources` lists the mounted taste sources
+// (spec 14 §3.1); absent on a run with no taste wiring.
 export type SettingsSnapshot = {
   values: Settings
   home: string
   voiceConfigured: boolean
   musicAvailable: boolean
+  sources?: SourceLine[]
 }
+
+// An invitation (spec 14 §2.7): the one light form in which the radio
+// suggests a side-errand — the command, and the why in the host's register.
+export const InvitationSchema = z.object({
+  command: z.enum(['/sources', '/bug', '/feature-request']),
+  why: z.string(),
+})
+
+export type Invitation = z.infer<typeof InvitationSchema>
 
 const v = z.literal(ENVELOPE)
 
@@ -187,7 +215,12 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     voiceConfigured: z.boolean(),
     musicAvailable: z.boolean(),
     open: z.literal(true).optional(),
+    sources: z.array(SourceLineSchema).optional(),
   }),
+  // The CURRENT invitation set (spec 14 §2.7), replacing the previous one.
+  // Sent whenever the set changes, never on a timer. Stateful like `mode`:
+  // the host hands a fresh attach the current set, not a replayed one.
+  z.object({ v, type: z.literal('invitations'), rows: z.array(InvitationSchema) }),
   z.object({ v, type: z.literal('bye') }),
 ])
 

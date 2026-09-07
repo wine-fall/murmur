@@ -147,6 +147,18 @@ export function profileBlock(ctx: ContextPack): string {
   return profile ? `(What you know about the listener)\n${profile}\n\n` : ''
 }
 
+// The taste digest (spec 14 §2.3) as a second stable block behind the profile:
+// what the listener keeps on their own platforms, handed over as something the
+// host KNOWS — never a list to recite, never a reason to bring a song up.
+export function tasteBlock(ctx: ContextPack): string {
+  const taste = ctx.taste?.trim()
+  if (!taste) return ''
+  return (
+    `(What the listener keeps — background you know, not something to recite)\n${taste}\n` +
+    'Mention a kept song at most when the moment earns it.\n\n'
+  )
+}
+
 // The profile's first section alone, tags stripped (spec 13 §3.4): what the
 // listener follows is a search term, how they like to be spoken to is not.
 // A profile without the labelled section (PROFILE_SHAPE) yields nothing —
@@ -211,7 +223,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
     : 'The program is just starting. Open naturally with your first beat.'
-  return `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -223,7 +235,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
     : `The program is just starting. Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
     `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +

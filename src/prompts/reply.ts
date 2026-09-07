@@ -4,7 +4,7 @@
 
 import type { ContextPack, RecallHit } from '../contracts.ts'
 
-import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock } from './talk.ts'
+import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
 
 // Prompt for an in-persona reply to a typed user line. Carries the profile
 // block too (spec 05 §3.5): a direct reply is exactly where cross-session
@@ -13,7 +13,7 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   const transcript = renderTranscript(ctx, userText)
   const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
   return (
-    `${profileBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n` +
     `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
   )
 }
@@ -114,7 +114,7 @@ export function buildSteerPrompt(
     `${STEER_END_RULE}${STEER_REPLY_RULE}${opts.memoryWired ? MEMORY_GROUNDING : ''}`
   const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
   return (
-    `${profileBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n\n` +
     `Decide whether their words ask the program to DO something; act with the ` +
     `tools if so, then answer them.\n${rules}${armed}`
   )

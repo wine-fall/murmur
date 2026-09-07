@@ -13,7 +13,7 @@ import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import { packageVersion } from '../config.ts'
-import type { ProgramState } from './ipc.ts'
+import type { Invitation, ProgramState } from './ipc.ts'
 
 export interface Host {
   start(): void
@@ -62,6 +62,15 @@ export interface Host {
   // A typed /settings wants the pane (spec 12 §3.6). Optional: a host without
   // one leaves it undefined and the Director points at the file instead.
   showSettings?(): void
+  // The current invitation set (spec 14 §2.7): the rows the input's rest
+  // state may rotate. Sent whenever the set changes. Optional: the plain host
+  // has no idle surface but its banner, which prints the boot-time rows once.
+  invitations?(rows: readonly Invitation[]): void
+  // A line the listener must see and the diagnostics must never keep (spec
+  // 14 §3.6): the Soda login QR encodes an authorization URL, and `info`
+  // mirrors into the log a /bug report attaches. A host without this seam is
+  // told so rather than shown the code — the flow refuses that mount.
+  showPrivate?: ((text: string) => void) | undefined
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
@@ -188,8 +197,23 @@ export class CliHost implements Host {
     console.log(`│ brain: ${opts.brain}   voice: ${opts.voice}   v${packageVersion()}`)
     console.log(`│ persona: ${personaFirstLine}`)
     console.log('│ it speaks on its own. Type to talk back; /quit or Ctrl-C to stop.')
-    console.log('│ something broken or missing? /bug or /feature-request writes it up.')
     console.log('└──────────────────────────────────────────────────────────────')
+  }
+
+  // The boot-time invitation set (spec 14 §2.7), printed once under the
+  // banner — the plain host has no rest state to rotate, so the first set is
+  // its one chance to say the rows, command first and the shared why after.
+  private invited = false
+
+  invitations(rows: readonly Invitation[]): void {
+    if (this.invited) return
+    this.invited = true
+    for (const row of rows) console.log(`·  ${row.command} · ${row.why}`)
+  }
+
+  // Printed, never mirrored (see the seam's comment on Host).
+  showPrivate(text: string): void {
+    console.log(text)
   }
 
   onRadioSegment(text: string): void {

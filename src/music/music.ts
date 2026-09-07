@@ -1,24 +1,34 @@
 // The music source (spec 03-01 §2.2): search + resolve over the yt-dlp binary,
-// which covers YouTube and Bilibili with no login.
+// which covers YouTube and Bilibili with no login — and, with a mounted source
+// (spec 14 §2.5), the listener's own cookie for the host a ref belongs to,
+// leased as a jar file for the one call.
 //
 // search runs `--dump-json --flat-playlist ytsearch{limit}:<query>` — one
 // request for the whole result page (issue #76: a full per-hit extraction
 // measured ~10-17s per search; flat is ~2s) whose entries still carry the
 // judging signal (title, uploader, duration, view_count), so the brain can
 // reject junk (hour-long loops, low-quality re-uploads) and prefer official
-// audio. resolve runs `-f bestaudio/best` with `--print` and returns a STREAM
-// URL plus the track's length, never a download (master decision A); Phase 3's
-// engine decodes it, and spec 10 §3.3's rail counts against the length.
+// audio. Bilibili searches the same way through `bilisearch{limit}:`; NetEase
+// has no yt-dlp search, so a mounted NetEase client answers that catalogue
+// (spec 14 §2.8). resolve runs `-f bestaudio/best` with `--print` and returns a
+// STREAM URL plus the track's length, never a download (master decision A);
+// Phase 3's engine decodes it, and spec 10 §3.3's rail counts against the
+// length.
 //
 // yt-dlp's JSON is an untrusted boundary, so every hit is zod-parsed and a hit
-// that does not fit is skipped rather than coerced.
+// that does not fit is skipped rather than coerced. Its stderr is read once,
+// on failure, for the auth shapes spec 14 §2.6 names — and only for a host
+// that has a mount, because with nothing to renew there is nothing to say.
 
 import { execFile } from 'node:child_process'
 import { debuglog, promisify } from 'node:util'
 
 import { z } from 'zod'
 
-import type { AudioClip, MusicProvider, TrackCandidate } from '../contracts.ts'
+import type { AudioClip, Catalogue, MusicProvider, TrackCandidate } from '../contracts.ts'
+import { classifyAuthFailure, SourceAuthError } from './sources/auth.ts'
+import type { CookieLease } from './sources/cookies.ts'
+import { sourceOfRef, type CookieSource } from './sources/store.ts'
 
 const debug = debuglog('murmur')
 const run = promisify(execFile)
@@ -90,29 +100,89 @@ export function parseResolveOutput(stdout: string): { source: string; durationS:
 // or the network; the real runner is the yt-dlp subprocess.
 export type YtDlpRunner = (args: string[]) => Promise<string>
 
+// What a failed runner said. execFile's rejection carries stderr; an injected
+// runner's plain Error carries only its message.
+export function ytdlpFailureText(err: unknown): string {
+  const stderr = typeof err === 'object' && err !== null && 'stderr' in err ? err.stderr : undefined
+  return typeof stderr === 'string' && stderr.trim() !== '' ? stderr : String(err)
+}
+
+// The NetEase half of search (spec 14 §2.8): the one catalogue yt-dlp cannot
+// search. Wired only when NetEase is mounted.
+export type NeteaseSearch = { search(query: string, limit: number): Promise<TrackCandidate[]> }
+
+// The cookie seam (spec 14 §2.5): a leased jar for a mounted cookie source
+// (its `args` ride the call, `release` runs after), null when that source
+// is not mounted. Absent = no cookie ever: today's arguments byte for byte.
+export type CookieLeaser = (source: CookieSource) => Promise<CookieLease | null>
+
+export type YtDlpMusicProviderOptions = {
+  binary?: string
+  run?: YtDlpRunner
+  cookies?: CookieLeaser
+  netease?: NeteaseSearch
+}
+
+// The real runner: one yt-dlp subprocess per call. Shared with the taste
+// sources (spec 14 §2.8), which read the same binary.
+export function ytdlpRunner(binary = 'yt-dlp'): YtDlpRunner {
+  return async (args) => {
+    debug('music.ytdlp %s', args.join(' '))
+    const { stdout } = await run(binary, args, { maxBuffer: MAX_OUTPUT_BYTES })
+    return stdout
+  }
+}
+
 export class YtDlpMusicProvider implements MusicProvider {
   private run: YtDlpRunner
+  private opts: YtDlpMusicProviderOptions
 
-  constructor({ binary = 'yt-dlp', run: runner }: { binary?: string; run?: YtDlpRunner }) {
-    this.run =
-      runner ??
-      (async (args) => {
-        debug('music.ytdlp %s', args.join(' '))
-        const { stdout } = await run(binary, args, { maxBuffer: MAX_OUTPUT_BYTES })
-        return stdout
-      })
+  constructor(opts: YtDlpMusicProviderOptions) {
+    this.opts = opts
+    this.run = opts.run ?? ytdlpRunner(opts.binary)
   }
 
-  async search(query: string, limit = 5): Promise<TrackCandidate[]> {
-    return parseSearchOutput(await this.run(['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`]), limit)
+  async search(query: string, limit = 5, catalogue: Catalogue = 'youtube'): Promise<TrackCandidate[]> {
+    if (catalogue === 'netease') {
+      if (this.opts.netease === undefined) throw new Error('netease is not mounted')
+      return this.opts.netease.search(query, limit)
+    }
+    // Bilibili takes the cookie when there is one (better quality tiers); a
+    // YouTube search is exactly today's call, mounted or not.
+    const spec = `${catalogue === 'bilibili' ? 'bilisearch' : 'ytsearch'}${limit}:${query}`
+    const stdout = await this.withCookie(catalogue === 'bilibili' ? 'bilibili' : null, (cookie) =>
+      this.run(['--dump-json', '--flat-playlist', ...cookie, spec]),
+    )
+    return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
   }
 
   async resolve(ref: string): Promise<AudioClip> {
     // `--print` in place of `-g`: the same single extraction yields the stream
     // url AND the track's length, which is what a progress bar needs as its
     // denominator (spec 10 §3.3). Measured at no cost over the bare `-g`.
-    const printed = await this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ref])
+    const printed = await this.withCookie(sourceOfRef(ref), (cookie) =>
+      this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ...cookie, ref]),
+    )
     const { source, durationS } = parseResolveOutput(printed)
     return { source, kind: 'music', ...(durationS > 0 && { durationS }) }
+  }
+
+  // The call with the mounted host's jar leased around it, released after
+  // (success or failure). A failure for a mounted host is read for its auth
+  // shape (spec 14 §2.6); every other failure passes through as it always did.
+  private async withCookie(source: CookieSource | null, work: (cookie: string[]) => Promise<string>): Promise<string> {
+    const lease = source === null ? null : ((await this.opts.cookies?.(source)) ?? null)
+    try {
+      return await work(lease?.args ?? [])
+    } catch (err) {
+      if (source !== null && lease !== null) {
+        const text = ytdlpFailureText(err)
+        const reason = classifyAuthFailure(text)
+        if (reason !== null) throw new SourceAuthError(source, reason, text.trim().split('\n').at(-1) ?? '')
+      }
+      throw err
+    } finally {
+      lease?.release()
+    }
   }
 }

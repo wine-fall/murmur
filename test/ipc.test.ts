@@ -68,6 +68,32 @@ const ENGINE_MESSAGES: EngineMessage[] = [
     musicAvailable: false,
     open: true,
   },
+  // The current invitation set (spec 14 §2.7): replaces the previous one.
+  { v: 1, type: 'invitations', rows: [{ command: '/sources', why: 'your likes make better picks' }] },
+  { v: 1, type: 'invitations', rows: [] },
+  {
+    v: 1,
+    type: 'settings',
+    values: {
+      anchorsEnabled: true,
+      musicEnabled: true,
+      cadenceMode: 'every_n',
+      musicEveryN: 2,
+      gapSeconds: 2,
+      recentWindow: 12,
+      muted: false,
+      tuiPet: true,
+      rwtEnabled: true,
+    },
+    home: '/home/someone/.murmur',
+    voiceConfigured: true,
+    musicAvailable: true,
+    // One read-only line per mounted source (spec 14 §3.1): a fact, never a token.
+    sources: [
+      { id: 'netease', name: 'NetEase', status: 'ok', refreshed: '2026-09-06T10:00:00.000Z' },
+      { id: 'spotify', name: 'Spotify', status: 'expired' },
+    ],
+  },
   { v: 1, type: 'bye' },
 ]
 

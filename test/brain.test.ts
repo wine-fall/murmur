@@ -160,6 +160,11 @@ describe('guideOptions (spec 03-03 §5.1)', () => {
       for (const [tool, input] of [
         ['Read', { file_path: '/Users/zach/.personal/murmur/.env' }],
         ['Read', { file_path: '/Users/zach/.murmur/voice.json' }],
+        // spec 14 §2.1: the mounted sources carry a Spotify token and a Soda
+        // session; a relocated home does not match `.murmur`, so the name
+        // itself is on the list.
+        ['Read', { file_path: '/tmp/mh/sources.json' }],
+        ['Bash', { command: 'cat /tmp/mh/sources.json' }],
         ['Bash', { command: 'printenv MURMUR_TTS_API_KEY' }],
         ['Bash', { command: 'env | sort' }],
         // The review's bypass set: env-dumping builtins, indirection reads of

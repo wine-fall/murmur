@@ -7,17 +7,33 @@
 // non-terminating result that lets it pick another candidate. So "confirm the
 // pick is actually playable", "hand the clip back", and "end the task" are one
 // step, with no side channel and no re-resolve.
+//
+// With taste wired (spec 14 §2.4/§2.6) search_music takes a catalogue, and an
+// auth-shaped failure comes back TYPED — the model is told that catalogue is
+// closed for the rest of the task, and the Director hears about it once.
 
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { ListeningData, MusicProvider, TaskTool, TrackPick } from '../contracts.ts'
+import type { Catalogue, ListeningData, MusicProvider, TaskTool, TrackPick } from '../contracts.ts'
 import { ANNOUNCE_FIELD_DESCRIPTION } from '../prompts/music.ts'
+import { previewTrap, SourceAuthError } from './sources/auth.ts'
+import { sourceOfRef } from './sources/store.ts'
+import { SOURCE_NAMES } from './sources/taste.ts'
 
 // Pull-time playability check: given a resolved stream source, does it actually
 // decode? Injected — the real one belongs to the audio engine (Phase 3), so this
 // module stays free of it.
 export type StreamProbe = (source: string) => Promise<boolean>
+
+// The taste wiring (spec 14): which catalogues beyond youtube are mounted for
+// this task, where an auth failure is reported, and the decoded-length probe
+// the preview trap needs (netease refs only).
+export type TasteToolOptions = {
+  catalogues: () => readonly Catalogue[]
+  onAuthFailure?: (err: SourceAuthError) => void
+  probeDurationS?: (source: string) => Promise<number | null>
+}
 
 function reply(payload: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] }
@@ -32,21 +48,71 @@ function trimmed(value: string | undefined): string | undefined {
 // first thing that came to mind, small enough to stay a cheap turn.
 const SIMILAR_LIMIT = 8
 
+const CATALOGUES = ['youtube', 'bilibili', 'netease'] as const
+
 export function musicTools(
   provider: MusicProvider,
   finish: (pick: TrackPick) => void,
   probe?: StreamProbe,
   listening?: ListeningData,
+  taste?: TasteToolOptions,
 ): TaskTool[] {
+  // What this task may search: youtube always, the rest while mounted and
+  // not yet closed by an auth failure in this very task.
+  const mounted: Catalogue[] = ['youtube', ...(taste?.catalogues() ?? []).filter((c) => c !== 'youtube')]
+  const closed = new Set<Catalogue>()
+  const open = (): Catalogue[] => mounted.filter((c) => !closed.has(c))
+  // Each candidate's stated length, for the preview trap at submit time.
+  const stated = new Map<string, number>()
+
+  // A lost login or a rate limit closes the catalogue for the task; a geo
+  // block is one track's problem and only costs that pick.
+  const authResult = (err: SourceAuthError) => {
+    const catalogue = err.source as Catalogue
+    const closes = err.reason !== 'geo' && (CATALOGUES as readonly string[]).includes(catalogue)
+    if (closes) closed.add(catalogue)
+    taste?.onAuthFailure?.(err)
+    return reply({
+      ok: false,
+      reason: 'auth',
+      source: err.source,
+      detail: err.reason,
+      note: closes
+        ? `${SOURCE_NAMES[err.source]} is unavailable for the rest of this task; do not search or submit it again. Catalogues still open: ${open().join(', ')}.`
+        : `${SOURCE_NAMES[err.source]} cannot serve that track from here; pick another.`,
+    })
+  }
+
   const searchMusic = tool(
     'search_music',
     'Search for candidate tracks by query; returns candidates (ref, title, ' +
-      'uploader, durationS) to judge before picking.',
+      'uploader, durationS) to judge before picking.' +
+      (taste === undefined ? '' : ` Catalogues available now: ${mounted.join(', ')}.`),
     {
       query: z.string().describe('search terms for the track'),
       limit: z.number().int().min(1).max(10).optional().describe('max candidates (default 5)'),
+      catalogue: z
+        .enum(CATALOGUES)
+        .optional()
+        .describe(
+          'where to search; default youtube. bilibili and netease are available only when mounted — the tool result says which are',
+        ),
     },
-    async (args) => reply({ candidates: await provider.search(args.query, args.limit) }),
+    async (args) => {
+      const catalogue = args.catalogue
+      if (catalogue !== undefined && catalogue !== 'youtube' && !mounted.includes(catalogue)) {
+        return reply({ ok: false, reason: 'not-mounted', mounted: open() })
+      }
+      if (closed.has(catalogue ?? 'youtube')) return reply({ ok: false, reason: 'unavailable', mounted: open() })
+      try {
+        const candidates = await provider.search(args.query, args.limit, catalogue)
+        for (const c of candidates) stated.set(c.ref, c.durationS)
+        return reply({ candidates })
+      } catch (err) {
+        if (err instanceof SourceAuthError) return authResult(err)
+        throw err
+      }
+    },
   )
 
   const submitPick = tool(
@@ -68,7 +134,17 @@ export function musicTools(
       try {
         clip = await provider.resolve(ref)
       } catch (err) {
+        if (err instanceof SourceAuthError) return authResult(err)
         return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
+      }
+      // The preview trap (spec 14 §2.6): NetEase hands a rights-less request a
+      // 30 s clip with no error, so the decoded length is checked against the
+      // length the candidate claimed.
+      if (taste?.probeDurationS !== undefined && sourceOfRef(ref) === 'netease') {
+        const probed = await taste.probeDurationS(clip.source)
+        if (previewTrap(stated.get(ref) ?? 0, probed)) {
+          return authResult(new SourceAuthError('netease', 'login-required', `preview clip of ${String(probed)}s`))
+        }
       }
       // A resolved stream URL can still 403 in the decoder and never produce a
       // frame. Reject it now, during talk, so the announce never claims a track

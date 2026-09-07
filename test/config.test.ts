@@ -200,6 +200,12 @@ describe('real-world topics config', () => {
     expect(config).not.toHaveProperty('rwtPolicyPath')
   })
 
+  it('resolves the taste files under the same home (spec 14 §2.1)', () => {
+    const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
+    expect(config.sourcesPath).toBe('/tmp/mh/sources.json')
+    expect(config.tasteDir).toBe('/tmp/mh/data/taste')
+  })
+
   it('reads the roll and freshness numbers from env, and ignores a bad one with a warning', () => {
     const { config } = parseCli(
       [],

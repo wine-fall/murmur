@@ -41,6 +41,8 @@ import type {
 } from '../contracts.ts'
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState } from '../host/ipc.ts'
+import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
+import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
 import { INSTALL_COMMAND } from '../support/update.ts'
 import { buildMusicSituation } from '../prompts/music.ts'
@@ -58,6 +60,7 @@ const SETTINGS_COMMAND: (typeof COMMANDS)[number]['name'] = '/settings'
 const BUG_COMMAND: (typeof COMMANDS)[number]['name'] = '/bug'
 const FEATURE_COMMAND: (typeof COMMANDS)[number]['name'] = '/feature-request'
 const UPDATE_COMMAND: (typeof COMMANDS)[number]['name'] = '/update'
+const SOURCES_COMMAND: (typeof COMMANDS)[number]['name'] = '/sources'
 
 // The prefilled GitHub issue forms (.github/ISSUE_TEMPLATE): the template
 // itself carries the label, which is why the command points at a template
@@ -152,6 +155,7 @@ export type Steer =
   | { intent: 'bug' }
   | { intent: 'feature' }
   | { intent: 'update' }
+  | { intent: 'sources' }
   | { intent: 'talkback'; text: string }
   // A line the report floor took (§3.2-C): steerFromLine never returns this —
   // takeSteer does, for a line it handed to a flow that owns the keyboard. The
@@ -166,6 +170,7 @@ export function steerFromLine(line: string): Steer {
   if (trimmed === BUG_COMMAND) return { intent: 'bug' }
   if (trimmed === FEATURE_COMMAND) return { intent: 'feature' }
   if (trimmed === UPDATE_COMMAND) return { intent: 'update' }
+  if (trimmed === SOURCES_COMMAND) return { intent: 'sources' }
   return { intent: 'talkback', text: line }
 }
 
@@ -268,6 +273,21 @@ export type DirectorDeps = {
   // An auth-shaped voice failure, raised so the app can mark the endpoint as
   // failing — detectGaps then treats the configured endpoint as a gap (#97).
   onVoiceAuthFailure?: () => void
+  // The listener's taste (spec 14): the digest for the pack and the pick,
+  // what is mounted (the invitations' gate), and the background refresh the
+  // loop pokes once the broadcast has settled — never awaited. Absent on a
+  // stub run, which is what keeps sources.json unread there (§3.2).
+  taste?: {
+    digest(): string
+    mounted(): readonly SourceId[]
+    maybeRefresh(): void
+  }
+  // The /sources conversation (spec 14 §3.1): parks the loop like the /setup
+  // recall while the music plays on. Absent (stub runs): a pointer line.
+  sourcesRecall?: () => Promise<void>
+  // When /feature-request joins the invitations (spec 14 §3.8). A test knob
+  // like `random`; the shipped value is the spec's ten minutes.
+  featureInviteAfterMs?: number
   // The one place chance enters the loop: whether the coda rides a track's
   // outro, and how far before the end (spec 04 §3.3). Injectable so a test can
   // pin both; Math.random otherwise.
@@ -380,6 +400,49 @@ export class Director {
     }
   }
 
+  // The /sources recall (spec 14 §3.1): the same parking as /setup — the loop
+  // waits inside the conversation, whatever is on the air plays out. Single-
+  // flight for the same reason. A mount changes what is due, so the
+  // invitations are recomputed on the way back.
+  private inSources = false
+  private async recallSources(): Promise<void> {
+    if (this.deps.sourcesRecall === undefined) {
+      this.deps.host.info('music accounts are read on a real run — start murmur without --brain stub to mount one.')
+      return
+    }
+    if (this.inSources) return
+    this.inSources = true
+    try {
+      await this.deps.sourcesRecall()
+    } finally {
+      this.inSources = false
+      this.refreshInvitations()
+    }
+  }
+
+  // --- invitations (spec 14 §2.7) ------------------------------------------ //
+
+  private sessionStartedAt = new Date()
+  private segmentsAired = 0
+  private filed = new Set<'bug' | 'feature'>()
+  private lastInvitations: string | null = null
+
+  // Recompute the due set and send it only when it changed: the front-end
+  // hears one message per change, never a timer's heartbeat.
+  private refreshInvitations(): void {
+    const state: InvitationState = {
+      segmentsAired: this.segmentsAired,
+      sessionStartedAt: this.sessionStartedAt,
+      mounted: this.deps.taste?.mounted() ?? [],
+      filed: [...this.filed],
+    }
+    const rows = dueInvitations(state, new Date(), this.deps.featureInviteAfterMs ?? FEATURE_INVITE_AFTER_MS)
+    const key = JSON.stringify(rows)
+    if (key === this.lastInvitations) return
+    this.lastInvitations = key
+    this.deps.host.invitations?.(rows)
+  }
+
   // A feedback command (spec 10 §3.2-C): open the prefilled form, and print
   // the URL either way — over ssh, or with a dead opener, the printed line is
   // the whole affordance.
@@ -409,6 +472,24 @@ export class Director {
 
   async run(maxSegments?: number): Promise<void> {
     this.deps.host.start()
+    // The boot-time invitation set, and the one-shot mark at which the
+    // feature invitation joins (spec 14 §3.8). Unref'd: it must never hold
+    // the process open, and a fire after the run ends changes nothing.
+    this.sessionStartedAt = new Date()
+    this.refreshInvitations()
+    const featureMark = setTimeout(
+      () => this.refreshInvitations(),
+      this.deps.featureInviteAfterMs ?? FEATURE_INVITE_AFTER_MS,
+    )
+    featureMark.unref()
+    try {
+      await this.loop(maxSegments)
+    } finally {
+      clearTimeout(featureMark)
+    }
+  }
+
+  private async loop(maxSegments?: number): Promise<void> {
     // Prime the first pick immediately (issue #76): discovery is the measured
     // dominant first-music term and is independent of the cold talk batch —
     // serializing them cost the first song a ~25-35s head start. The persona
@@ -437,7 +518,12 @@ export class Director {
         this.talksSinceMusic++
       }
       produced++
+      this.segmentsAired = produced
+      this.refreshInvitations()
       this.deps.compactor?.maybeSchedule() // background, single-flight
+      // The taste refresh waits for the broadcast to settle (spec 14 §3.4:
+      // after the second beat), then runs off the loop like the fold.
+      if (produced >= 2) this.deps.taste?.maybeRefresh()
       const last = maxSegments !== undefined && produced >= maxSegments
       if (!last && !this.quit) await this.gap()
     }
@@ -496,6 +582,10 @@ export class Director {
   // keyboard changes hands. Single-flight: a second /bug while one is open is
   // already that report's material and never reaches this.
   private openReport(kind: 'bug' | 'feature'): void {
+    // Used is used (spec 14 §3.8): the invitation for this command fades for
+    // the session the moment the listener reached for it.
+    this.filed.add(kind)
+    this.refreshInvitations()
     const start = this.deps.reportRecall
     if (start === undefined) {
       this.openIssueForm(kind)
@@ -569,6 +659,11 @@ export class Director {
       if (steer.intent === 'setup') {
         await this.recallSetup()
         if (this.quit) return null // a /quit landed inside the conversation
+        continue
+      }
+      if (steer.intent === 'sources') {
+        await this.recallSources()
+        if (this.quit) return null
         continue
       }
       if (steer.intent === 'bug' || steer.intent === 'feature') {
@@ -678,6 +773,7 @@ export class Director {
     const now = new Date()
     const music = this.musicState()
     const scene = currentScene(now)
+    const taste = this.tasteDigest()
     return {
       persona: this.persona(),
       recent: queued.length === 0 ? recent : [...recent, ...turns],
@@ -691,7 +787,13 @@ export class Director {
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
       ...(rwt !== undefined && { rwt }),
+      ...(taste !== '' && { taste }),
     }
+  }
+
+  // The rendered digest (spec 14 §2.3), '' when there is none or no wiring.
+  private tasteDigest(): string {
+    return this.deps.taste?.digest() ?? ''
   }
 
   // The pack's real music status (spec 04 bugfix), most-live fact first: a
@@ -909,6 +1011,7 @@ export class Director {
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         this.deps.memory.recentSongs(AVOID_DEPTH),
+        this.tasteDigest(),
       ),
     }
   }
@@ -1306,6 +1409,12 @@ export class Director {
           steer = null
           continue
         }
+        if (steer.intent === 'sources') {
+          await this.recallSources()
+          if (this.quit) return
+          steer = null
+          continue
+        }
         if (steer.intent === 'bug' || steer.intent === 'feature') {
           this.openReport(steer.intent)
           steer = null
@@ -1387,6 +1496,11 @@ export class Director {
         // A command, not a turn: run the recall, then keep composing — unless
         // a /quit landed inside the conversation.
         await this.recallSetup()
+        if (this.quit) return null
+        continue
+      }
+      if (merged.intent === 'sources') {
+        await this.recallSources()
         if (this.quit) return null
         continue
       }

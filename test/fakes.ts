@@ -6,6 +6,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import type {
   AudioClip,
   Brain,
+  Catalogue,
   ContextPack,
   FetchedTopic,
   FetchTopicsRequest,
@@ -26,7 +27,7 @@ import type {
 } from '../src/contracts.ts'
 import type { DirectorSettings } from '../src/director/director.ts'
 import type { AskKind, FloorMode, Host } from '../src/host/host.ts'
-import type { ProgramState } from '../src/host/ipc.ts'
+import type { Invitation, ProgramState } from '../src/host/ipc.ts'
 import { LineQueue } from '../src/host/host.ts'
 
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
@@ -74,16 +75,19 @@ export async function callTool(
 
 export class FakeMusicProvider implements MusicProvider {
   candidates: TrackCandidate[] = []
-  searches: { query: string; limit: number | undefined }[] = []
+  searches: { query: string; limit: number | undefined; catalogue: Catalogue | undefined }[] = []
   // refs that fail to resolve (a dead link the model must pick away from)
   broken = new Set<string>()
+  // A typed failure every resolve throws (spec 14 §2.6: the expired cookie).
+  failWith: Error | null = null
 
-  async search(query: string, limit?: number): Promise<TrackCandidate[]> {
-    this.searches.push({ query, limit })
+  async search(query: string, limit?: number, catalogue?: Catalogue): Promise<TrackCandidate[]> {
+    this.searches.push({ query, limit, catalogue })
     return this.candidates
   }
 
   async resolve(ref: string): Promise<AudioClip> {
+    if (this.failWith !== null) throw this.failWith
     if (this.broken.has(ref)) throw new Error(`cannot resolve ${ref}`)
     return { source: `https://stream/${ref}`, kind: 'music' }
   }
@@ -306,6 +310,12 @@ export class FakeHost implements Host {
   states: ProgramState[] = []
   banners: { personaFirstLine: string; brain: string; voice: string }[] = []
   modes: FloorMode[] = []
+  // Every invitation set the engine sent (spec 14 §2.7), in order.
+  invited: Invitation[][] = []
+  // Lines shown but never mirrored into the diagnostics (spec 14 §3.6).
+  // A field, not a method, so a test can model a host without the seam.
+  privates: string[] = []
+  showPrivate: ((text: string) => void) | undefined = (text) => void this.privates.push(text)
   // Assign in a test to model a front-end with a settings pane (spec 12 §3.6);
   // left undefined, the host is the plain one and the Director degrades to info.
   showSettings?: () => void
@@ -366,6 +376,12 @@ export class FakeHost implements Host {
   onInterrupt(handler: (() => void) | null): void {
     this.interrupt = handler
   }
+
+  invitations(rows: readonly Invitation[]): void {
+    this.invited.push([...rows])
+  }
+
+
 
   // The listener's Esc. Noise when no flow has registered for it, exactly as
   // in a real front-end.

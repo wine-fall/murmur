@@ -7,6 +7,7 @@
 
 import type {
   AudioClip,
+  Catalogue,
   Harness,
   MusicContext,
   MusicProvider,
@@ -15,7 +16,7 @@ import type {
   TrackPick,
   TrackSource,
 } from '../contracts.ts'
-import { musicTools, type StreamProbe } from './music-tools.ts'
+import { musicTools, type StreamProbe, type TasteToolOptions } from './music-tools.ts'
 import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER } from '../prompts/music.ts'
 
 // Enough turns for several searches -> judge -> submit, and a couple of
@@ -43,6 +44,10 @@ export type MusicProgrammerDeps = {
   // Real listening data behind similar_music / top_tracks (spec 03-01 §2.3).
   // Absent when no key is configured; the pick then runs on search alone.
   listening?: ListeningData
+  // The taste wiring (spec 14 §2.4/§2.6): mounted catalogues, the auth
+  // report, the preview-trap probe. Absent = the tools are their pre-taste
+  // selves and search_music lists youtube alone.
+  taste?: TasteToolOptions
   // Per-stage discovery timing (spec 04 §3.1, issue #76): dev-log-only lines
   // that say where a pick's wall-clock goes. Optional — absent means silent.
   debug?: (message: string) => void
@@ -50,18 +55,30 @@ export type MusicProgrammerDeps = {
 
 const elapsed = (since: number) => `${Math.round(performance.now() - since)}ms`
 
+// yt-dlp echoes the whole search spec in its errors; the terms are the
+// listener's taste (spec 14 §3.6), so only the spec's head is kept.
+const SEARCH_SPEC = /\b(yt|bili)search\d*:.*/gs
+
+function withoutQuery(text: string): string {
+  return text.replace(SEARCH_SPEC, '$1search:<query>')
+}
+
 // Time each provider call on its way through, success or failure — the tail of
 // a slow pick must name its stage, not read as one opaque wait.
 function timedProvider(provider: MusicProvider, debug: (message: string) => void): MusicProvider {
   return {
-    async search(query: string, limit?: number): Promise<TrackCandidate[]> {
+    async search(query: string, limit?: number, catalogue?: Catalogue): Promise<TrackCandidate[]> {
       const t = performance.now()
+      const where = catalogue === undefined ? '' : ` catalogue=${catalogue}`
       try {
-        const hits = await provider.search(query, limit)
-        debug(`music.search ${elapsed(t)} hits=${hits.length} query="${query}"`)
+        const hits = await provider.search(query, limit, catalogue)
+        // The query's size, never its words (spec 14 §3.6): a taste-led
+        // search quotes a kept title, and the dev log is what a /bug report
+        // attaches. Same reading the situation's `NNNch` gets.
+        debug(`music.search ${elapsed(t)} hits=${hits.length} q=${query.length}ch${where}`)
         return hits
       } catch (err) {
-        debug(`music.search ${elapsed(t)} failed: ${String(err)}`)
+        debug(`music.search ${elapsed(t)} failed: ${withoutQuery(String(err))}${where}`)
         throw err
       }
     },
@@ -109,7 +126,7 @@ export class MusicProgrammer implements TrackSource {
       prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.listening),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.listening, this.deps.taste),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

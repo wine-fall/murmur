@@ -11,7 +11,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useKeyboard, usePaste, useRenderer, useTerminalDimensions, type InputProps } from '@opentui/react'
 import type { InputRenderable, ScrollBoxRenderable, TextareaRenderable } from '@opentui/core'
 
-import type { EngineMessage, ProgramState, SettingsSnapshot } from '../../src/host/ipc.ts'
+import type { EngineMessage, Invitation, ProgramState, SettingsSnapshot } from '../../src/host/ipc.ts'
 import { Bars, render } from './bars.ts'
 import {
   cardLines,
@@ -19,7 +19,7 @@ import {
   cardTopRow,
   commandMatches,
   HINT_ROTATE_MS,
-  INPUT_HINTS,
+  inputHints,
   isCommand,
   outbound,
   pageStep,
@@ -283,6 +283,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // renders it and sends patches, never local optimism. Mirrored into a ref so
   // the keyboard handler always sees the current pane, not a stale closure.
   const [settings, setSettings] = useState<SettingsSnapshot | null>(null)
+  // The engine's current invitation set (spec 14 §3.8): what the resting
+  // input may rotate through. Empty = the talk-back line alone.
+  const [invited, setInvited] = useState<Invitation[]>([])
+  const [hint, setHint] = useState(0)
   // Who holds the floor (spec 10 §3.4): the radio, the setup guide, or a
   // report being written. The engine owns the switch; this client only paints
   // it — strip, identity line, input ink — so the listener always knows who is
@@ -428,10 +432,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             home: message.home,
             voiceConfigured: message.voiceConfigured,
             musicAvailable: message.musicAvailable,
+            ...(message.sources !== undefined && { sources: message.sources }),
           })
           // Only the snapshot answering a typed /settings opens the pane; a
           // broadcast refresh just keeps an open one true.
           if (message.open === true) setPaneOpen(true)
+          break
+        case 'invitations':
+          // A new set restarts the lap on the talk-back line (spec 14 §3.8).
+          setInvited(message.rows)
+          setHint(0)
           break
         case 'viz':
           vizSink.current?.(message.bins)
@@ -641,15 +651,15 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     state?.kind === 'music' && state.startedAt !== undefined && (state.durationS ?? 0) > 0
       ? { startedAt: state.startedAt, durationS: state.durationS! }
       : null
-  // The resting invitation rotates through INPUT_HINTS (spec 10 §3.2-C), so a
-  // listener who never opens the menu still meets /bug and /feature-request.
-  // The lap runs regardless of the floor: it only shows where the placeholder
-  // is the idle one, and a returning listener should not restart at row 0.
-  const [hint, setHint] = useState(0)
+  // The resting invitation rotates through the engine's current rows (spec
+  // 14 §3.8), so a listener who never opens the menu still meets them. The
+  // lap runs regardless of the floor: it only shows where the placeholder is
+  // the idle one, and a returning listener should not restart at row 0.
+  const hints = inputHints(invited)
   useEffect(() => {
-    const timer = setInterval(() => setHint((i) => (i + 1) % INPUT_HINTS.length), HINT_ROTATE_MS)
+    const timer = setInterval(() => setHint((i) => (i + 1) % hints.length), HINT_ROTATE_MS)
     return () => clearInterval(timer)
-  }, [])
+  }, [hints.length])
   useEffect(() => {
     if (track === null) return
     setNow(Date.now())
@@ -1325,7 +1335,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               <input
                 ref={input}
                 focused={!paneOpen}
-                placeholder={paneOpen ? 'settings open — esc to return' : INPUT_HINTS[hint]}
+                placeholder={paneOpen ? 'settings open — esc to return' : hints[hint % hints.length]}
                 style={{
                   // The sky composition bounds the field and lets a quiet rule
                   // carry the rest of the row (concept 04's input line); long
