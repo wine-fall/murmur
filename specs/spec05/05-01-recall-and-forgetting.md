@@ -5,7 +5,10 @@
 > install (§1.1). Every §5 criterion is pinned by a unit test except 12 and 13,
 > which are the manual `make pack` and real-run passes recorded in the PR. Six
 > contracts moved between draft and build; each is marked **[built]** in place
-> below. Extends [`05-memory.md`](05-memory.md); nothing
+> below. **PR #218 (2026-09-08)** corrected two of them from the 2026-09-07
+> audit: the bootstrap follows the same `[stable]` rule as the fold (§3.3), and
+> `forget` reaches the `topic` keys in the ledger (§3.5). Extends
+> [`05-memory.md`](05-memory.md); nothing
 > in spec 05 is contradicted, only its "deferred to v1.5" items are delivered
 > and its compaction input is re-scoped.
 > **Part**: The Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6), v1.5:
@@ -283,6 +286,14 @@ older fact **replaces** it (keep the newer, one line); a one-off request is
 not a preference unless it recurs; mark identity facts (name, language, where
 they live, what they do) `[stable]`.
 
+**The bootstrap follows the same `[stable]` rule** (spec 06 slice B prompt,
+§3.6). Its output is the profile too, and the identity it reads out of the
+listener's Claude Code history — the name they go by, the language they speak,
+what they do — is exactly what `[stable]` exists for. Without the mark, a
+listener who does not repeat their own name on air inside `FACT_FADE_DAYS`
+loses the whole bootstrapped identity to the fade pass, which is the opposite
+of what a first profile is for.
+
 **Date post-pass** (deterministic, in `applyCompaction` and on load): any
 fact line without a `[seen ...]` tag gets today's date. This covers the
 spec-06 bootstrap output and hand edits without changing either writer.
@@ -397,17 +408,27 @@ cannot carry a flag portably.
    in `index.db` afterwards — verified. Nor would the row-count check that
    guards §3.4 have caught it, because recording as many new turns as were
    forgotten makes the counts agree again.
-5. A ledger event `kind: 'forget'` with key = the ISO time (no text) is
+5. **[built]** Ledger rows of `kind: 'topic'` whose key matches the same floor
+   are removed, and `ledger.jsonl` is rewritten atomically without them; every
+   other row survives byte-for-byte. A topic key is free text the model wrote
+   and can name a private detail outright ("what did you eat for lunch"), and
+   §3.6's reply prompt renders the recent ones into every talk pack as the
+   "recently covered — don't repeat" line, so a key left behind is a forgotten
+   detail still being read aloud to the model. The other kinds are untouched,
+   for the reason PR #209 set down: `song`, `rwt`, `anchor` and `setup` record
+   what AIRED, and dropping one makes the same track or news item come round
+   again as if new. A removed topic key counts towards `lines`.
+6. A ledger event `kind: 'forget'` with key = the ISO time (no text) is
    appended, so the host can acknowledge it did forget without keeping what.
-6. The in-memory recent window is filtered the same way, so the very next
-   pack no longer carries it.
-7. **[built]** Any fold already in flight is **dropped**. A compaction reads its
+7. The in-memory recent window, and the in-memory topic tail, are filtered the
+   same way, so the very next pack no longer carries either.
+8. **[built]** Any fold already in flight is **dropped**. A compaction reads its
    slice, then waits on a model call; a forget inside that window leaves the
    fold holding pre-forget text, and applying it would write the erased fact
    straight back into `profile.md` — reproduced. The store versions the slice
    against a forget counter and refuses a stale apply; nothing is lost, because
    the watermark did not move and the turns fold again next time.
-8. **[built]** The listener's own request is removed but **not counted**. It was
+9. **[built]** The listener's own request is removed but **not counted**. It was
    recorded as a turn before the reply turn ran and always carries its own
    words, so counting it would make the radio claim to have forgotten something
    every single time it was asked — the "found nothing" reply would be
