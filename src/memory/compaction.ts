@@ -20,9 +20,12 @@ export interface CompactionStore {
 type Fold = { promise: Promise<void>; done: () => boolean }
 
 // How long a shutdown flush may wait on the model before it gives up. A fold
-// is a full model call — measured at 53 s on a real run — so this is not a
-// generous version of "wait for it": it is only long enough to collect a fold
-// that was already nearly done, and Ctrl-C must feel like stopping.
+// is a full model call — 25 s, 39 s and 61 s on three measured Haiku runs over
+// a six-line slice — so no budget a Ctrl-C can tolerate will ever collect one
+// that started at shutdown. The budget stays small on purpose: it collects a
+// fold that was already nearly done, and everything it misses is folded by the
+// startup catch-up below on the very next boot, which is where the tail of a
+// short session actually lands.
 const FLUSH_TIMEOUT_MS = 3_000
 
 export class Compactor {
@@ -45,6 +48,17 @@ export class Compactor {
   // background fold. Returns whether it launched one.
   maybeSchedule(): boolean {
     if (!this.store.compactionDue()) return false
+    return this.launch()
+  }
+
+  // Startup catch-up (spec 05 §3.6): fold whatever the last session left
+  // owed, however little — a listener who types a line or two per session
+  // never reaches the threshold, and the shutdown flush cannot wait out a
+  // model call, so without this those lines never reach the profile. One
+  // background fold per boot; the store's slice is empty when nothing was
+  // admitted, so a session nobody typed in launches nothing.
+  catchUp(): boolean {
+    if (this.store.compactionSlice().turns.length === 0) return false
     return this.launch()
   }
 

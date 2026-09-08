@@ -13,7 +13,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 
 import { IdleSensor } from '../src/director/activity.ts'
+import type { Turn } from '../src/contracts.ts'
 import {
+  buildCompactor,
   buildHost,
   buildMemory,
   ensureTuiDeps,
@@ -392,6 +394,27 @@ describe('memory wiring', () => {
     expect(buildMemory(stub)).toBeInstanceOf(InProcessMemoryStore)
     // Stub isolation: the stub wiring never creates or touches the memory dir.
     expect(existsSync(join(dir, 'memory-stub'))).toBe(false)
+  })
+
+  // The startup catch-up (spec 05 §3.6) rides the persistent store only: a
+  // stub run keeps no history, so there is nothing owed and no brain to fold it.
+  it('a persistent run folds its owed backlog at boot; a stub run never folds', () => {
+    const dir = tmp()
+    const calls: number[] = []
+    const brain = {
+      compactProfile: async (_p: string, turns: readonly Turn[]) => {
+        calls.push(turns.length)
+        return 'folded'
+      },
+    }
+    const memoryDir = join(dir, 'memory')
+    const seeded = new PersistentMemoryStore({ dir: memoryDir })
+    seeded.record({ role: 'user', text: 'I switched to tea this month' })
+    const persistent = buildCompactor(new PersistentMemoryStore({ dir: memoryDir }), brain)
+    expect(persistent).toBeDefined()
+    expect(calls).toEqual([1])
+    expect(buildCompactor(new InProcessMemoryStore(), brain)).toBeUndefined()
+    expect(calls).toEqual([1])
   })
 
   it('homes the persona in memoryDir, and is pure: first run is what fills it', () => {

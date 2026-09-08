@@ -86,6 +86,23 @@ export function buildMemory(config: Config, log: (message: string) => void = () 
   return new InProcessMemoryStore()
 }
 
+// Off-the-loop profile compaction (spec 05 §3.6), only when persisting: a
+// dedicated cheap-tier brain folds history into profile.md. The catch-up fold
+// launches here, at boot — before the audio graph and the voice come up — so
+// its model call overlaps the boot instead of the first segment, and a profile
+// it lands is read by the first pack that is built after it (the profile is
+// read at fetch time). It never blocks: the fold is unawaited.
+export function buildCompactor(
+  memory: MemoryStore,
+  brain: Pick<Brain, 'compactProfile'>,
+  log: (message: string) => void = () => {},
+): Compactor | undefined {
+  if (!(memory instanceof PersistentMemoryStore)) return undefined
+  const compactor = new Compactor(memory, brain, log)
+  if (compactor.catchUp()) log('memory: folding what the last session left owed')
+  return compactor
+}
+
 // Where the persona lives for this run (spec 05 §3.2): homed in the memory dir
 // on a persistent run, the bundled seed directly on a stub run (no memory-dir
 // writes). Pure — what actually LANDS at that home is the first-run flow's call
@@ -632,12 +649,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const claude = config.brain === 'claude' ? new ClaudeBrain(config.model) : null
   const brain = claude ?? new StubBrain()
   const memory = buildMemory(config, (m) => host.info(m))
-  // Off-the-loop profile compaction (spec 05 §3.6), only when persisting: a
-  // dedicated cheap-tier brain folds history into profile.md.
-  const compactor =
-    memory instanceof PersistentMemoryStore
-      ? new Compactor(memory, new ClaudeBrain(config.compactModel), (m) => host.info(m))
-      : undefined
+  const compactor = buildCompactor(memory, new ClaudeBrain(config.compactModel), (m) =>
+    host.info(m),
+  )
 
   // The device decides the real rate (a 44.1 kHz headset ignores the request);
   // the decoder follows it, and the log names the clock the air runs on.

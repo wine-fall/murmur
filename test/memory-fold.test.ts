@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   FACT_FADE_DAYS,
+  InProcessMemoryStore,
   PersistentMemoryStore,
   admitsToFold,
   fadeFacts,
@@ -365,6 +366,63 @@ describe('PersistentMemoryStore.forget (spec 05-01 §3.5)', () => {
 })
 
 // Findings from the closing review, each pinned so it cannot come back.
+// A topic key is model-written text and can name a private detail ("what did
+// you eat for lunch"), and every talk prompt renders the recent ones as the
+// "don't repeat" line. Forget takes those; the other kinds record what AIRED
+// and stay, or the same item would be treated as new and told again.
+describe('forget scrubs topic keys from the ledger (spec 05-01 §3.5)', () => {
+  const seeded = () => {
+    const c = clock(at('2026-09-01'))
+    const path = dir()
+    const store = new PersistentMemoryStore({ dir: path, now: c.now })
+    store.recordEvent('topic', 'evening hunger deciding dinner')
+    store.recordEvent('song', 'Dinner Music — Someone')
+    store.recordEvent('rwt', 'A dinner summit ends without a deal')
+    store.recordEvent('anchor', 'dinner-bell')
+    store.recordEvent('setup', 'dinner')
+    store.recordEvent('topic', 'night walks')
+    store.record({ role: 'user', text: 'what I had for dinner is nobody\'s business' })
+    return { store, path }
+  }
+
+  it('drops matching topic keys, in memory and on disk, and counts them', () => {
+    const { store, path } = seeded()
+    const before = readFileSync(join(path, 'ledger.jsonl'), 'utf-8').split('\n')
+    const removed = store.forget('dinner')
+    expect(removed.lines).toBe(1)
+    expect(store.recentTopics(10)).toEqual(['night walks'])
+    const after = readFileSync(join(path, 'ledger.jsonl'), 'utf-8').split('\n')
+    // Every other kind survives byte-for-byte; only the topic row and the
+    // trailing forget event differ.
+    expect(after.filter((l) => !l.includes('"kind":"forget"'))).toEqual(
+      before.filter((l) => !l.includes('deciding dinner')),
+    )
+    expect(after.some((l) => l.includes('Dinner Music'))).toBe(true)
+    expect(after.some((l) => l.includes('dinner summit'))).toBe(true)
+    // And the scrub survives a reload — the file is the source of truth.
+    const reopened = new PersistentMemoryStore({ dir: path })
+    expect(reopened.recentTopics(10)).toEqual(['night walks'])
+    expect(reopened.recentSongs(10)).toEqual(['Dinner Music — Someone'])
+  })
+
+  it('uses the same relevance floor as the rows, so a phrase does not over-forget', () => {
+    const { store } = seeded()
+    // "the" and "thing" are stop words, "hunger" is the one real token.
+    expect(store.forget('the hunger thing').lines).toBe(1)
+    expect(store.recentTopics(10)).toEqual(['night walks'])
+  })
+
+  it('the in-process store scrubs its topics the same way', () => {
+    const store = new InProcessMemoryStore()
+    store.recordEvent('topic', 'evening hunger deciding dinner')
+    store.recordEvent('topic', 'night walks')
+    store.recordEvent('song', 'Dinner Music — Someone')
+    expect(store.forget('dinner').lines).toBe(1)
+    expect(store.recentTopics(10)).toEqual(['night walks'])
+    expect(store.recentSongs(10)).toEqual(['Dinner Music — Someone'])
+  })
+})
+
 describe('forget is actually forgetting (spec 05-01 §3.5)', () => {
   const seeded = (rows: string[]) => {
     const c = clock(at('2026-09-01'))
@@ -501,6 +559,24 @@ describe('recall on a short history (spec 05-01 §3.4)', () => {
     store.record({ role: 'radio', text: 'a quiet hour' })
     store.record({ role: 'user', text: 'do you remember the lantern?' })
     expect(store.recall('lantern', 5, 12)).toEqual([])
+  })
+})
+
+// The bootstrap may mark identity facts [stable] like the fold does (spec 05-01
+// §3.3): a name read out of Claude Code history is not something the listener
+// will repeat on air within 90 days, and it must not vanish for that.
+describe('a bootstrapped [stable] fact outlives the fade horizon (spec 05-01 §3.3)', () => {
+  it('keeps the stable line live 91 days on, and fades the rest', () => {
+    const bootstrapped = [
+      '(About the listener)',
+      '- Name they go by: Z; speaks Chinese [stable]',
+      '- Debugging a memory layer in TypeScript this week',
+    ].join('\n')
+    const stamped = stampDates(bootstrapped, '2026-09-08')
+    const { live, faded } = fadeFacts(stamped, at('2026-09-08') + (FACT_FADE_DAYS + 1) * 86400)
+    // Canonical tag order, the spec 05-01 §3.3 example's: [src] [seen] [stable].
+    expect(live).toContain('- Name they go by: Z; speaks Chinese [seen 2026-09-08] [stable]')
+    expect(faded).toEqual(['- Debugging a memory layer in TypeScript this week [seen 2026-09-08]'])
   })
 })
 

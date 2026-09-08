@@ -148,6 +148,28 @@ describe('Compactor', () => {
     expect(store.backlog).toEqual([])
   })
 
+  // A listener who types a line or two per session never reaches the
+  // threshold, and the shutdown flush cannot wait out a model call — so those
+  // lines stayed unfolded forever. Startup folds whatever is owed, however
+  // little, in the background (spec 05 §3.6 "catches killed sessions").
+  it('catchUp folds a below-threshold backlog once, in the background', async () => {
+    const { store, brain, compactor } = setup()
+    store.push('a', 1)
+    expect(compactor.catchUp()).toBe(true)
+    expect(compactor.catchUp()).toBe(false) // single-flight, like any fold
+    await until(() => brain.folding, 'fold started')
+    brain.finish()
+    await compactor.drain()
+    expect(store.applied).toEqual([{ profile: 'folded:1', throughTs: 1 }])
+  })
+
+  it('catchUp with an empty backlog schedules nothing', async () => {
+    const { brain, compactor } = setup()
+    expect(compactor.catchUp()).toBe(false)
+    await compactor.drain()
+    expect(brain.calls.length).toBe(0)
+  })
+
   it('flush with nothing pending is a no-op', async () => {
     const { brain, compactor } = setup()
     await compactor.flush()
