@@ -538,6 +538,11 @@ describe('profile bootstrap prompt (spec 06 slice B)', () => {
     expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('(Relationship & style)')
   })
 
+  it('may mark identity facts [stable], by the same rule the fold follows', () => {
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toContain('[stable]')
+    expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/name, language/)
+  })
+
   it('excludes secrets and surveillance-shaped detail', () => {
     expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/secret|credential/i)
     expect(BOOTSTRAP_PROFILE_INSTRUCTION).toMatch(/surveillance/i)

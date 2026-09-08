@@ -111,9 +111,17 @@ ${PROFILE_SHAPE}
 
 Record durable signal: the domains they work in, the tools and languages they
 use, how they phrase things, the problems that keep coming back, the hours they
-keep. EXCLUDE secrets, credentials, tokens, employer-confidential detail, and
-anything that reads as surveillance rather than acquaintance — this is a radio
-host getting acquainted, not a dossier.
+keep. Every fact is one line. Mark identity facts — name, language, where they
+live, what they do — [stable] at the end of the line, like the radio's own
+notes do:
+
+- Name they go by: Z; speaks Chinese [stable]
+
+Identity read from history is not something the listener will repeat on air,
+and an unmarked fact fades after three months. EXCLUDE secrets, credentials,
+tokens, employer-confidential detail, and anything that reads as surveillance
+rather than acquaintance — this is a radio host getting acquainted, not a
+dossier.
 
 Write it in the listener's own language, under ${PROFILE_CHAR_CAP} characters
 total, and pass it to submit_profile as plain text.`
