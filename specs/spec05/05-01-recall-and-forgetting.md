@@ -1,7 +1,7 @@
 # spec/05-01 · recall & forgetting — memory v1.5
 
 > **Status**: **Built 2026-09-03**; §3.3 and §3.6 revised **2026-09-08** (PR
-> #PRNUM) — the fold's output contract. A 2026-09-07 audit of the author's
+> #219) — the fold's output contract. A 2026-09-07 audit of the author's
 > install found the fold to be the profile's only writer and to be
 > provenance-free, unvalidated, and dated by the model: the profile on disk was
 > one v1 fold of the radio's own monologue, carrying a `[seen]` date that was a
