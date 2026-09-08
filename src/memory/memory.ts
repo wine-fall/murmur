@@ -60,8 +60,11 @@ export class InProcessMemoryStore implements MemoryStore {
     const before = this.turns.length
     this.turns = this.turns.filter((t) => !t.turn.text.toLowerCase().includes(needle))
     const kept = this.profileText.split('\n').filter((l) => !l.toLowerCase().includes(needle))
-    const lines = this.profileText.split('\n').length - kept.length
+    let lines = this.profileText.split('\n').length - kept.length
     this.profileText = kept.join('\n')
+    const topics = this.topics.filter((key) => !key.toLowerCase().includes(needle))
+    lines += this.topics.length - topics.length
+    this.topics = topics
     return { rows: before - this.turns.length, lines }
   }
 
@@ -396,9 +399,13 @@ export class PersistentMemoryStore implements MemoryStore {
     })
   }
 
-  // Physical removal, no backup (spec 05-01 §3.5): history rows, profile lines
-  // and faded lines go, the index is rebuilt, and the in-memory window is
-  // filtered so the very next pack no longer carries what went.
+  // Physical removal, no backup (spec 05-01 §3.5): history rows, profile lines,
+  // faded lines and topic ledger keys go, the index is rebuilt, and the
+  // in-memory window is filtered so the very next pack no longer carries what
+  // went. A topic key is model-written text that can name a private detail,
+  // and every talk prompt renders the recent ones — so it counts as a line the
+  // host held. The other ledger kinds stay: they record what AIRED, and taking
+  // one would make the same song or news item come round again as new.
   forget(what: string, askedIn = 0): { rows: number; lines: number } {
     const tokens = forgetTokens(what)
     if (tokens.length === 0) return { rows: 0, lines: 0 }
@@ -426,10 +433,14 @@ export class PersistentMemoryStore implements MemoryStore {
       if (row.ts === undefined || !asked.has(row.ts)) rows++
       return null
     })
-    const lines = this.forgetLines(this.profilePath, hit) + this.forgetLines(this.fadedPath, hit)
+    const lines =
+      this.forgetLines(this.profilePath, hit) +
+      this.forgetLines(this.fadedPath, hit) +
+      this.forgetTopics(hit)
     if (dropped === 0 && lines === 0) return { rows: 0, lines: 0 }
 
     this.profileText = this.readText(this.profilePath)
+    this.topics = this.topics.filter((key) => !hit(key))
     this.turns = this.turns.filter((t) => !hit(t.turn.text))
     this.backlog = this.backlog.filter((b) => !hit(b.turn.text))
     // The index holds every row's text verbatim, so a stale index.db is a copy
@@ -638,6 +649,28 @@ export class PersistentMemoryStore implements MemoryStore {
     const kept = lines.filter((line) => !hit(line))
     if (kept.length === lines.length) return 0
     atomicWrite(path, kept.join('\n'))
+    return lines.length - kept.length
+  }
+
+  // Drop matching `topic` rows from the ledger atomically; returns how many
+  // went. Every other row is kept byte-for-byte — an unparseable line included,
+  // as in rewriteHistory.
+  private forgetTopics(hit: (text: string) => boolean): number {
+    const text = this.readText(this.ledgerPath)
+    if (text === '') return 0
+    const lines = text.split('\n')
+    const kept = lines.filter((line) => {
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(line)
+      } catch {
+        return true
+      }
+      const row = ledgerRowSchema.safeParse(parsed)
+      return !(row.success && row.data.kind === 'topic' && hit(row.data.key))
+    })
+    if (kept.length === lines.length) return 0
+    atomicWrite(this.ledgerPath, kept.join('\n'))
     return lines.length - kept.length
   }
 
