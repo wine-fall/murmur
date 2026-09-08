@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 
 import type { LedgerKind, MemoryStore, RecallHit, Turn } from '../contracts.ts'
+import { ABOUT_HEADER, PROFILE_CHAR_CAP, PROFILE_LINE_CAP, STYLE_HEADER } from '../prompts/profile.ts'
 import { type IndexRow, RecallIndex, queryTokens } from './recall.ts'
 
 export class InProcessMemoryStore implements MemoryStore {
@@ -168,6 +169,146 @@ export function admitsToFold(text: string, steered: boolean): boolean {
 const FACT_LINE = /^\s*[^\s(]/
 const SEEN_TAG = /\[seen (\d{4}-\d{2}-\d{2})\]/
 
+// A fact's provenance (spec 05-01 §3.3): the listener lines it was learned
+// from. The fold cites them, the code reads the date back out of them, and a
+// forget that erases every cited line takes the fact with it. Without this a
+// profile line is unfalsifiable — which is how the host's own monologue ended
+// up on record as something the listener said.
+// Bumped when the profile's on-disk contract changes; meta.json carries the
+// version a file was written under, so an older one is migrated exactly once.
+export const PROFILE_SCHEMA = 1
+
+// Citations the code writes for itself, for the two writers with no listener
+// line behind them: the spec-06 bootstrap, and a person editing the file.
+const BOOTSTRAP_SRC = 'bootstrap'
+const HAND_SRC = 'hand'
+const CODE_SRC = new Set([BOOTSTRAP_SRC, HAND_SRC])
+
+// Milliseconds, not the raw float second the store stamps rows with: the model
+// has to copy the id back verbatim, and a whole number is what it copies
+// reliably. Two listener lines inside one millisecond share an id, which costs
+// nothing — both are listener lines from the same slice, so the fact is
+// attested either way, and it takes both of them being forgotten to orphan it.
+export const srcId = (ts: number): number => Math.round(ts * 1000)
+
+const TRAILING_TAG = /[ \t]*\[(?:src [^\]]*|seen \d{4}-\d{2}-\d{2}|stable)\][ \t]*$/
+
+type FactLine = { body: string; src: string | null; seen: string | null; stable: boolean }
+
+// Split a fact line into its text and its trailing tag run, in any order the
+// writer put them, so re-rendering is canonical: body [src] [seen] [stable].
+function splitTags(line: string): FactLine {
+  let rest = line.replace(/\s+$/, '')
+  const tags: FactLine = { body: rest, src: null, seen: null, stable: false }
+  for (;;) {
+    const match = TRAILING_TAG.exec(rest)
+    if (match === null) break
+    const tag = match[0].trim().slice(1, -1)
+    if (tag.startsWith('src ')) tags.src = tag.slice(4).trim()
+    else if (tag.startsWith('seen ')) tags.seen = tag.slice(5).trim()
+    else tags.stable = true
+    rest = rest.slice(0, match.index)
+  }
+  tags.body = rest
+  return tags
+}
+
+const renderFact = (tags: FactLine): string =>
+  `${tags.body}${tags.src === null ? '' : ` [src ${tags.src}]`}` +
+  `${tags.seen === null ? '' : ` [seen ${tags.seen}]`}${tags.stable ? ' [stable]' : ''}`
+
+// The listener-line ids behind a fact, or null when the citation is missing or
+// unreadable. `code` marks the bootstrap/hand citations, which have no line.
+function provenance(src: string | null): { ids: number[]; code: boolean } | null {
+  if (src === null) return null
+  const parts = src
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part !== '')
+  if (parts.length === 0) return null
+  const ids: number[] = []
+  let code = false
+  for (const part of parts) {
+    if (CODE_SRC.has(part)) code = true
+    else if (/^\d+$/.test(part)) ids.push(Number(part))
+    else return null
+  }
+  return { ids, code }
+}
+
+// A fact line's identity for the carry-over rule, which is everything but the
+// date: the code owns the date, so a fold that copies a line back with a
+// different one has still copied the line.
+const factKey = (line: string): string => {
+  const tags = splitTags(line)
+  return renderFact({ ...tags, seen: null })
+}
+
+// The fold's output contract (spec 05-01 §3.3). A fold either satisfies all of
+// it or is refused whole: a half-applied profile is a profile with invented
+// facts in it, and the turns are still on disk to be folded again next time.
+export function validateFold(
+  text: string,
+  allowed: ReadonlySet<number>,
+  previous: string,
+): { ok: true } | { ok: false; reason: string } {
+  const bad = (reason: string) => ({ ok: false as const, reason })
+  if ([...text].length > PROFILE_CHAR_CAP) return bad(`over the ${PROFILE_CHAR_CAP}-character cap`)
+  const start = text.indexOf(ABOUT_HEADER)
+  if (start === -1) return bad(`no ${ABOUT_HEADER} section`)
+  if (!text.includes(STYLE_HEADER)) return bad(`no ${STYLE_HEADER} section`)
+  // Commentary before the first label is the model talking about the fold, and
+  // the profile is read back to the host as things it knows.
+  if (text.slice(0, start).trim() !== '') return bad('preamble before the first section')
+
+  const carried = new Set(previous.split('\n').filter((line) => FACT_LINE.test(line)).map(factKey))
+  for (const line of text.split('\n')) {
+    if (!FACT_LINE.test(line)) continue
+    // A line repeated verbatim was already accepted by whoever wrote it;
+    // re-judging its shape would deadlock a profile the fold cannot rewrite.
+    if (carried.has(factKey(line))) continue
+    if (!line.trimStart().startsWith('- ')) return bad('a fact line that is not a bullet')
+    if ([...line].length > PROFILE_LINE_CAP) {
+      return bad(`a fact line over ${PROFILE_LINE_CAP} characters`)
+    }
+    const src = provenance(splitTags(line).src)
+    if (src === null || src.code || src.ids.length === 0) {
+      return bad('a fact with no listener line behind it')
+    }
+    for (const id of src.ids) {
+      if (!allowed.has(id)) return bad(`a fact citing ${id}, which is not in the slice`)
+    }
+  }
+  return { ok: true }
+}
+
+// Put every carried-over line back exactly as the file had it. The fold is
+// allowed to keep a fact by repeating its line, and the line's tags are the
+// code's bookkeeping — so a fold that repeats the words while quietly moving
+// the date, the citation or the [stable] mark gets the original back.
+function restoreCarried(text: string, previous: string): string {
+  const originals = new Map<string, string>()
+  for (const line of previous.split('\n')) {
+    if (FACT_LINE.test(line)) originals.set(factKey(line), line)
+  }
+  return text
+    .split('\n')
+    .map((line) => (FACT_LINE.test(line) ? (originals.get(factKey(line)) ?? line) : line))
+    .join('\n')
+}
+
+// Give every uncited fact line the citation the code owns for this writer.
+function citeAs(profile: string, src: string): string {
+  return profile
+    .split('\n')
+    .map((line) => {
+      if (!FACT_LINE.test(line)) return line
+      const tags = splitTags(line)
+      return tags.src === null ? renderFact({ ...tags, src }) : line
+    })
+    .join('\n')
+}
+
 // UTC, deliberately: a `[seen]` tag is only ever compared against another
 // `[seen]` tag over a 90-day horizon, so one consistent day boundary matters
 // and which one does not. Local days would make the same fact stamp differently
@@ -213,6 +354,17 @@ const FORGET_STOPWORDS = new Set([
 const forgetTokens = (what: string): string[] =>
   queryTokens(what).filter((t) => !FORGET_STOPWORDS.has(t))
 
+// A fact line whose every cited listener line has just been erased. The fold
+// may have worded it with none of the request's words, so the citation is the
+// only thing that can carry the erasure through to it. A bootstrap/hand
+// citation has no row behind it and is never orphaned this way.
+function orphaned(line: string, erased: ReadonlySet<number>): boolean {
+  if (!FACT_LINE.test(line)) return false
+  const src = provenance(splitTags(line).src)
+  if (src === null || src.code || src.ids.length === 0) return false
+  return src.ids.every((id) => erased.has(id))
+}
+
 // The relevance floor (spec 05-01 §3.5): a line must carry two of the request's
 // distinctive tokens, unless the request had only one — then that one IS the
 // request. Keeps "forget the coffee thing" from taking the whole month.
@@ -227,15 +379,23 @@ function forgetMatches(tokens: readonly string[], text: string): boolean {
   return tokens.length === 1 ? found === 1 : found >= 2
 }
 
-// Every fact line carries a date (spec 05-01 §3.3). Undated lines — the spec-06
-// bootstrap's output, a hand edit — are stamped with today, so they behave like
-// a fresh fact instead of never expiring.
+// Every fact line carries a date, and the code owns it (spec 05-01 §3.3): it is
+// the day of the newest listener line the fact cites, never a date the model
+// wrote. A bootstrap/hand citation has no line behind it, so such a line keeps
+// the date it already carries and gets today's the first time it is seen.
 export function stampDates(profile: string, today: string): string {
   return profile
     .split('\n')
-    .map((line) =>
-      FACT_LINE.test(line) && !SEEN_TAG.test(line) ? `${line.trimEnd()} [seen ${today}]` : line,
-    )
+    .map((line) => {
+      if (!FACT_LINE.test(line)) return line
+      const tags = splitTags(line)
+      const src = provenance(tags.src)
+      const seen =
+        src !== null && src.ids.length > 0
+          ? isoDay(Math.max(...src.ids) / 1000)
+          : (tags.seen ?? today)
+      return renderFact({ ...tags, seen })
+    })
     .join('\n')
 }
 
@@ -280,6 +440,9 @@ const ledgerRowSchema = z.object({
 // over at cutover with no migration.
 const metaSchema = z.object({
   compacted_through: z.number(),
+  // Absent = written before facts carried their source, so the profile beside
+  // it is migrated once on load (spec 05-01 §3.3).
+  profile_schema: z.number().default(0),
 })
 
 // A history row as it sits on disk, for the rewrite path: our own JSON, with
@@ -334,6 +497,8 @@ export class PersistentMemoryStore implements MemoryStore {
   // into profile.md (spec 05-01 §3.5).
   private forgetEpoch = 0
   private sliceEpoch = 0
+  // The listener lines the in-flight fold is allowed to cite (spec 05-01 §3.3).
+  private sliceCites: ReadonlySet<number> = new Set()
   private lastTs = 0
   // The gap this session opened across, measured once at load and then frozen
   // (spec 10 §3.7.3). undefined = no history on disk to measure from.
@@ -420,13 +585,18 @@ export class PersistentMemoryStore implements MemoryStore {
 
     let rows = 0
     let dropped = 0
+    // The citations of the rows that go: a fact whose every source is erased is
+    // erased too, however differently the fold worded it (spec 05-01 §3.5).
+    const erased = new Set<number>()
     this.rewriteHistory((row) => {
       if (typeof row.text !== 'string' || !hit(row.text)) return row
       dropped++
+      if (typeof row.ts === 'number') erased.add(srcId(row.ts))
       if (row.ts === undefined || !asked.has(row.ts)) rows++
       return null
     })
-    const lines = this.forgetLines(this.profilePath, hit) + this.forgetLines(this.fadedPath, hit)
+    const gone = (line: string) => hit(line) || orphaned(line, erased)
+    const lines = this.forgetLines(this.profilePath, gone) + this.forgetLines(this.fadedPath, gone)
     if (dropped === 0 && lines === 0) return { rows: 0, lines: 0 }
 
     this.profileText = this.readText(this.profilePath)
@@ -540,7 +710,7 @@ export class PersistentMemoryStore implements MemoryStore {
   // is untouched — a bootstrap consumes no backlog, so turns already recorded
   // are still owed to the next fold.
   writeProfile(text: string): void {
-    this.refreshProfile(text)
+    this.refreshProfile(text, { src: BOOTSTRAP_SRC })
   }
 
   // The listener's own turns and, for each, the host line it answered — never
@@ -560,10 +730,11 @@ export class PersistentMemoryStore implements MemoryStore {
           break
         }
       }
-      turns.push(entry.turn)
+      turns.push({ ...entry.turn, cite: srcId(entry.ts) })
       emitted = i
     })
     this.sliceEpoch = this.forgetEpoch
+    this.sliceCites = new Set(turns.filter((t) => t.cite !== undefined).map((t) => t.cite!))
     return {
       profile: this.profileText,
       turns,
@@ -571,17 +742,28 @@ export class PersistentMemoryStore implements MemoryStore {
     }
   }
 
-  applyCompaction(newProfile: string, throughTs: number): void {
+  // Returns whether the fold was accepted. Refusing costs nothing — the
+  // watermark did not move, so the same turns are folded again next time — and
+  // it is the only thing standing between the profile and an invented fact.
+  // The return is deliberately off the CompactionStore interface: the Compactor
+  // drives the fold, it does not adjudicate it.
+  applyCompaction(newProfile: string, throughTs: number): boolean {
     if (this.sliceEpoch !== this.forgetEpoch) {
-      // Dropping the fold costs nothing: the watermark did not move, so the
-      // turns are folded again next time — from sources the forget has cleaned.
+      // The fold is holding pre-forget text; applying it would write the erased
+      // fact straight back in.
       this.log('memory: dropping a fold that predates a forget')
-      return
+      return false
     }
-    this.refreshProfile(newProfile)
-    atomicWrite(this.metaPath, JSON.stringify({ compacted_through: throughTs }))
+    const checked = validateFold(newProfile, this.sliceCites, this.profileText)
+    if (!checked.ok) {
+      this.log(`memory: refusing a fold — ${checked.reason}; profile and watermark unchanged`)
+      return false
+    }
+    this.refreshProfile(restoreCarried(newProfile, this.profileText))
+    this.writeMeta(throughTs)
     this.watermark = throughTs
     this.backlog = this.backlog.filter((b) => b.ts > throughTs)
+    return true
   }
 
   // --- internals ------------------------------------------------------------ //
@@ -652,16 +834,63 @@ export class PersistentMemoryStore implements MemoryStore {
   // Date post-pass then fade pass, then the files (spec 05-01 §3.3). Fade runs
   // before the profile is ever served or capped, so old facts make room rather
   // than the model being asked to cut live ones to fit them.
-  private refreshProfile(text: string): void {
+  private refreshProfile(
+    text: string,
+    opts: { src?: string; force?: boolean } = {},
+  ): void {
     const now = this.now()
-    const stamped = stampDates(text, isoDay(now))
+    const cited = opts.src === undefined ? text : citeAs(text, opts.src)
+    const stamped = stampDates(cited, isoDay(now))
     const { live, faded } = fadeFacts(stamped, now)
-    if (live !== this.profileText) atomicWrite(this.profilePath, live)
-    if (faded.length > 0) {
-      appendFileSync(this.fadedPath, `${faded.join('\n')}\n`, 'utf-8')
-      for (const line of faded) this.recallIndex?.add({ ts: seenTs(line), role: 'faded', text: line })
-    }
+    if (opts.force === true || live !== this.profileText) atomicWrite(this.profilePath, live)
+    this.appendFaded(faded)
     this.profileText = live
+  }
+
+  // Append what has gone quiet, once. The same line fading again after every
+  // reload would otherwise stack up copies of itself inside recall, and the
+  // listener would hear the same forgotten fact returned three times.
+  private appendFaded(lines: readonly string[]): void {
+    if (lines.length === 0) return
+    const have = new Set(
+      this.readText(this.fadedPath)
+        .split('\n')
+        .map((line) => line.trim()),
+    )
+    const fresh = lines.filter((line) => !have.has(line.trim()))
+    if (fresh.length === 0) return
+    appendFileSync(this.fadedPath, `${fresh.join('\n')}\n`, 'utf-8')
+    for (const line of fresh) this.recallIndex?.add({ ts: seenTs(line), role: 'faded', text: line })
+  }
+
+  private writeMeta(throughTs = this.watermark): void {
+    atomicWrite(
+      this.metaPath,
+      JSON.stringify({ compacted_through: throughTs, profile_schema: PROFILE_SCHEMA }),
+    )
+  }
+
+  // A profile written before facts carried their source (spec 05-01 §3.3).
+  // What it claims to know was folded with no provenance and no validation —
+  // the host's own monologue included — so it leaves the prompts wholesale and
+  // lives on only in recall, where the listener has to ask for it.
+  private migrateProfile(raw: string): void {
+    const moved: string[] = []
+    const kept: string[] = []
+    for (const line of raw.split('\n')) {
+      if (FACT_LINE.test(line) && splitTags(line).src === null) moved.push(line)
+      else kept.push(line)
+    }
+    if (moved.length === 0) {
+      this.refreshProfile(raw, { src: HAND_SRC })
+      return
+    }
+    this.appendFaded(moved)
+    this.log(`memory: migrated ${moved.length} uncited profile lines out of the prompts`)
+    // Headers with nothing under them are noise in the pack, not a profile.
+    this.refreshProfile(kept.some((line) => FACT_LINE.test(line)) ? kept.join('\n') : '', {
+      force: true,
+    })
   }
 
   // Rewrite history.jsonl through `map` — the only non-append write to it
@@ -699,8 +928,12 @@ export class PersistentMemoryStore implements MemoryStore {
 
   // Strictly increasing stamps: the throughTs watermark then always separates
   // a compaction slice from turns recorded while the fold was in flight.
+  // A millisecond apart, not a microsecond: a row's citation id is its stamp in
+  // milliseconds (srcId), so anything finer would let two rows share an id —
+  // and a host line sharing a listener line's id is a host line the fold may
+  // cite (spec 05-01 §3.3).
   private stamp(): number {
-    this.lastTs = Math.max(this.now(), this.lastTs + 1e-6)
+    this.lastTs = Math.max(this.now(), this.lastTs + 1e-3)
     return this.lastTs
   }
 
@@ -762,15 +995,7 @@ export class PersistentMemoryStore implements MemoryStore {
   }
 
   private load(): void {
-    let profileRaw = ''
-    try {
-      profileRaw = readFileSync(this.profilePath, 'utf-8')
-    } catch {
-      profileRaw = ''
-    }
-    this.profileText = profileRaw
-    if (profileRaw !== '') this.refreshProfile(profileRaw)
-
+    let schema = 0
     let metaRaw: string | null = null
     try {
       metaRaw = readFileSync(this.metaPath, 'utf-8')
@@ -785,9 +1010,22 @@ export class PersistentMemoryStore implements MemoryStore {
         meta = null
       }
       const parsed = metaSchema.safeParse(meta)
-      if (parsed.success) this.watermark = parsed.data.compacted_through
-      else this.log('memory: meta.json unreadable; treating as never compacted')
+      if (parsed.success) {
+        this.watermark = parsed.data.compacted_through
+        schema = parsed.data.profile_schema
+      } else this.log('memory: meta.json unreadable; treating as never compacted')
     }
+
+    // The profile after the meta: its schema version decides whether an
+    // uncited line is legacy to migrate or a hand edit to adopt.
+    const profileRaw = this.readText(this.profilePath)
+    if (profileRaw !== '') {
+      if (schema < PROFILE_SCHEMA) this.migrateProfile(profileRaw)
+      else this.refreshProfile(profileRaw, { src: HAND_SRC })
+    }
+    // Stamped unconditionally: without it the next boot would read the
+    // citations this one just wrote as legacy and fade the profile away.
+    if (schema < PROFILE_SCHEMA) this.writeMeta()
 
     const cutoff = this.now() - RECENT_MAX_AGE_H * 3600
     for (const row of this.readJsonl(this.historyPath, historyRowSchema)) {

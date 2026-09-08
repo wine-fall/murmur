@@ -4,7 +4,7 @@
 
 import type { ContextPack, RecallHit } from '../contracts.ts'
 
-import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
+import { PROFILE_TAGS, OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
 
 // Prompt for an in-persona reply to a typed user line. Carries the profile
 // block too (spec 05 §3.5): a direct reply is exactly where cross-session
@@ -90,7 +90,9 @@ export function memoryBlock(hits: readonly RecallHit[]): string {
         : hit.role === 'radio'
           ? 'you said'
           : 'you knew, and had since let go'
-    return `- ${day}, ${who}: "${hit.text}"`
+    // A faded fact is a profile line: it carries the file's tags, and the host
+    // must be handed the fact, never the bookkeeping.
+    return `- ${day}, ${who}: "${hit.text.replaceAll(PROFILE_TAGS, '').trim()}"`
   })
   return `(From memory)\n${lines.join('\n')}`
 }

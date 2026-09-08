@@ -1,6 +1,15 @@
 # spec/05-01 · recall & forgetting — memory v1.5
 
-> **Status**: **Built 2026-09-03** — designed from a survey of open-source
+> **Status**: **Built 2026-09-03**; §3.3 and §3.6 revised **2026-09-08** (PR
+> #PRNUM) — the fold's output contract. A 2026-09-07 audit of the author's
+> install found the fold to be the profile's only writer and to be
+> provenance-free, unvalidated, and dated by the model: the profile on disk was
+> one v1 fold of the radio's own monologue, carrying a `[seen]` date that was a
+> migration stamp rather than a confirmation, and the spec-13 real-world search
+> was reading it as the listener's taste. The shape was right; the contract was
+> missing. Facts now cite the listener lines they came from, the code owns the
+> date, a malformed fold is refused whole, and a profile written before the
+> contract is migrated out of the prompts. Designed from a survey of open-source
 > agent-memory systems (§7) and from the real memory dir of the author's
 > install (§1.1). Every §5 criterion is pinned by a unit test except 12 and 13,
 > which are the manual `make pack` and real-run passes recorded in the PR. Six
@@ -264,39 +273,87 @@ their own local radio; the trust boundary is the file, already zod-parsed.
 
 ### 3.3 Dated, fading profile
 
-**Shape.** `profile.md` keeps its two spec-06 sections. Inside them every
-fact is one line ending in a date tag, optionally `[stable]`:
+**Shape.** `profile.md` keeps its two spec-06 sections. Inside them every fact
+is one `- ` bullet ending in the listener lines it was learned from, then the
+date the code derived from them, optionally `[stable]`:
 
 ```
 (About the listener)
-- Works on a personal radio project in the evenings [seen 2026-08-15]
-- Prefers tea; said they stopped drinking coffee [seen 2026-09-01]
-- Name they go by: Z; speaks Chinese [seen 2026-07-20] [stable]
+- Works on a personal radio project in the evenings [src 1788331027120] [seen 2026-08-15]
+- Prefers tea; said they stopped drinking coffee [src 1788417400500,1788503800900] [seen 2026-09-01]
+- Name they go by: Z; speaks Chinese [src bootstrap] [seen 2026-07-20] [stable]
 
 (Relationship & style)
-- Replies in short lines; does not expect guidance [seen 2026-08-30]
+- Replies in short lines; does not expect guidance [src 1788331099000] [seen 2026-08-30]
 ```
 
-**The fold's rules** (prompt, §3.6): derive facts only from `listener:` lines;
-a fact re-confirmed gets today's date; a newer statement that contradicts an
-older fact **replaces** it (keep the newer, one line); a one-off request is
-not a preference unless it recurs; mark identity facts (name, language, where
-they live, what they do) `[stable]`.
+**Citations (`[src ...]`).** A citation id is a history row's timestamp in
+milliseconds (`srcId`). The compaction slice prints the id on each listener
+line (`listener [id]:`); a `host:` line is printed with no id and therefore
+cannot be cited, which is what makes "derive facts only from the listener" a
+property of the file rather than a request in a prompt. Row stamps are spaced
+by at least a millisecond so an id is unique — a host line sharing a listener
+line's id would be a host line the fold may cite. Two citations belong to the
+code, not the model: `[src bootstrap]` for the spec-06 write-through, and
+`[src hand]` for a line a person edited in.
 
-**Date post-pass** (deterministic, in `applyCompaction` and on load): any
-fact line without a `[seen ...]` tag gets today's date. This covers the
-spec-06 bootstrap output and hand edits without changing either writer.
+**The fold's rules** (prompt, §3.6): derive facts only from `listener:` lines
+and cite them; keep a fact the exchange did not touch by repeating its line
+exactly as it stands; never write a `[seen ...]` tag; a newer statement that
+contradicts an older fact **replaces** it (keep the newer, one line); a one-off
+request is not a preference unless it recurs; mark identity facts (name,
+language, where they live, what they do) `[stable]`.
+
+**Output contract** (deterministic, in `applyCompaction`). A fold is accepted
+only if all of it holds, and is otherwise refused **whole** — `profile.md`,
+`meta.json` and the watermark are left byte-identical and one line is logged,
+so the same turns are folded again next time from unchanged sources:
+
+- both section labels are present, and nothing precedes the first;
+- the whole text is within `PROFILE_CHAR_CAP`;
+- every fact line is a `- ` bullet within `PROFILE_LINE_CAP` (160) characters;
+- every fact line cites at least one listener line from **this slice**.
+
+A line repeated verbatim from the current profile is exempt from all four: it
+was already accepted by whoever wrote it, and re-judging its shape would
+deadlock a profile the fold cannot rewrite. Such a line is restored from the
+file byte-for-byte, so a fold that repeats the words while quietly moving the
+date, the citation or the `[stable]` mark gets the original back.
+
+Half-applying is not on the table. A profile is read back to the host as things
+it knows; one invented line in it is indistinguishable from a fact, and the
+audit found exactly that on the real install.
+
+**Date post-pass** (deterministic, in `applyCompaction` and on load): a fact's
+`[seen]` is the day of the **newest listener line it cites** — the code's, never
+the model's. A `[src bootstrap]`/`[src hand]` line has no row behind it, so it
+keeps the date it carries and gets today's the first time it is seen.
 **[built]** A "fact line" is any non-blank line that is not a section header —
 not only a markdown bullet. Matching bullets alone left a bootstrapped profile
 written as prose permanently undated, and therefore permanently un-fadeable,
-which is exactly the compatibility this pass claims. **[built]** The fold is
-also told what today's date actually is: it runs under a neutral system prompt
-with no clock, and a model left to guess copies the year in the example — a
-syntactically valid tag that `stampDates` then preserves.
+which is exactly the compatibility this pass claims.
+
+**Migration (`profile_schema` in `meta.json`).** A profile written before the
+contract has no citations: what it claims to know was folded with no provenance
+and no validation, the radio's own monologue included. On the first load at a
+lower schema version every uncited fact line moves to `profile-faded.md` — the
+prompts go empty until the listener says something again, recall can still
+answer for what left, and the watermark is untouched. The version is then
+stamped, so exactly one migration ever runs; after it, an uncited line is a
+hand edit and is adopted with `[src hand]`. The decision to fade rather than
+tag the old lines `[src legacy]` was taken outright: what that profile "knew"
+was invented, and a radio that knows nothing for a while is the honest state.
+
+**Forget cascade.** A `forget` that erases history rows also drops every fact
+whose citations are **all** among them (§3.5). The fold's wording need share no
+word with the request, so the citation is the only thing that can carry an
+erasure through to a fact derived from the erased line.
 
 **Fade pass** (deterministic, in `applyCompaction` and on load): a line whose
 date is older than `FACT_FADE_DAYS` and is not `[stable]` moves to
-`profile-faded.md` (same line, verbatim, appended). Faded lines:
+`profile-faded.md` (same line, verbatim, appended **once** — a line that fades
+again after a reload must not stack up copies of itself inside recall). Faded
+lines:
 - are **not** rendered into any prompt (the stable prefix only carries live
   facts);
 - **are** in the recall index as `role: 'faded'`, so "you used to drink
@@ -443,7 +500,16 @@ over-forgets, the stop-word list and the two-token bar are the knobs.
 
 - **Compaction instruction**: rewritten around the §3.3 rules and the
   `host:`/`listener:` labels; keeps the two-section shape; states the
-  `[seen]`/`[stable]` syntax with one example line; keeps the char cap.
+  `[src ...]`/`[stable]` syntax with example lines, that a `[seen]` tag the
+  model writes is discarded, that a kept fact is repeated exactly, and that a
+  line breaking any rule costs the whole fold; keeps both char caps. The
+  transcript prints each listener line as `listener [id]:` and each host line
+  as `host:` with no id.
+- **Every renderer strips the tags.** `[src ...]` joins `[seen ...]` and
+  `[stable]` in `PROFILE_TAGS`, so the citation never reaches the stable prefix
+  (`profileBlock`), the spec-13 search terms (`aboutSection`), or a faded fact
+  quoted back to the host (`memoryBlock`). The tags are the file's bookkeeping;
+  the host is handed the fact.
 - **Reply prompt**: a `(From memory)` block renders recall hits as
   `- 2026-08-15, listener said: "..."` (host / faded labelled likewise); an
   added grounding line: *only mention a past moment that appears in the

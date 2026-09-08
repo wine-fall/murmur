@@ -4,6 +4,7 @@
 // builders. reply.ts reuses the shared renderers for the typed-line turns.
 
 import type { ContextPack } from '../contracts.ts'
+import { ABOUT_HEADER, STYLE_HEADER } from './profile.ts'
 
 // Output discipline appended to every Brain call: the result is fed straight
 // to TTS, so it must be clean spoken text with no markup or stage directions.
@@ -137,10 +138,11 @@ function pacingLines(ctx: ContextPack): string {
 // stable prefix (master §7 pillar 4). Empty -> nothing (degrade silently).
 //
 // A fact line ends in the fading ledger's bookkeeping — `[seen YYYY-MM-DD]`,
-// `[stable]` (spec 05-01 §3.3, src/memory/memory.ts). It is the file's business, not
+// `[stable]` and the `[src ...]` citation the fold's output contract requires
+// (spec 05-01 §3.3, src/memory/memory.ts). They are the file's business, not
 // the host's: the prompt carries the fact without its tags. Anchored to the
 // line end, so the same words inside a fact stay what the listener said.
-const PROFILE_TAGS = /(?:[ \t]*\[(?:seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
+export const PROFILE_TAGS = /(?:[ \t]*\[(?:src [^\]]*|seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
 
 export function profileBlock(ctx: ContextPack): string {
   const profile = ctx.profile?.replaceAll(PROFILE_TAGS, '').trim()
@@ -163,8 +165,6 @@ export function tasteBlock(ctx: ContextPack): string {
 // listener follows is a search term, how they like to be spoken to is not.
 // A profile without the labelled section (PROFILE_SHAPE) yields nothing —
 // the conservative reading, since the text leaves for a search task.
-const ABOUT_HEADER = '(About the listener)'
-const STYLE_HEADER = '(Relationship & style)'
 
 export function aboutSection(profile: string): string {
   const start = profile.indexOf(ABOUT_HEADER)

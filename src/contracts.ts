@@ -25,6 +25,11 @@ export type AudioClip = {
 export type Turn = {
   readonly role: 'radio' | 'user'
   readonly text: string
+  // The citation id for this line, set only on the listener lines of a
+  // compaction slice (spec 05-01 §3.1): the fold cites it, and the code reads
+  // the fact's date back out of it. Absent everywhere else, host lines
+  // included — a line with no id cannot become a fact about the listener.
+  readonly cite?: number
 }
 
 // One self-initiated talk beat from the batched call (spec 04 §3.2). `topic`

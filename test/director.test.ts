@@ -710,7 +710,9 @@ describe('Director — prepare-then-barge-in interjection', () => {
 describe('Director — memory wiring (spec 05)', () => {
   it('assembles the pack from the store: profile, covered topics, scene', async () => {
     const store = new PersistentMemoryStore({ dir: mkdtempSync(join(tmpdir(), 'murmur-dir-')) })
-    store.applyCompaction('knows jazz', 0)
+    // The bootstrap write-through, not a fold: a fold now has to cite the
+    // listener lines it learned from (spec 05-01 §3.3).
+    store.writeProfile('(About the listener)\nknows jazz')
     store.recordEvent('topic', 'rain')
     store.recordEvent('topic', 'coffee')
     const { brain, director } = setup({ memory: store })
