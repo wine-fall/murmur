@@ -3,7 +3,7 @@
 // follow the Web API reference; the user's account is the smoke (§5.7).
 import { describe, expect, it } from 'vitest'
 
-import { mountSpotify, pkcePair, redirectUri, SPOTIFY_CALLBACK_PORT, spotifyAuthUrl, SpotifySource, type SpotifyFetch } from '../src/music/sources/spotify.ts'
+import { BUNDLED_CLIENT_ID, listenForCallback, mountSpotify, pkcePair, redirectUri, SPOTIFY_CALLBACK_PORT, spotifyAuthUrl, SpotifySource, type SpotifyFetch } from '../src/music/sources/spotify.ts'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string }
 
@@ -31,7 +31,7 @@ describe('PKCE', () => {
   })
 
   it('builds the authorize URL with the three read scopes and the exact redirect', () => {
-    const url = new URL(spotifyAuthUrl('client-1', redirectUri(SPOTIFY_CALLBACK_PORT), 'state-1', 'chal'))
+    const url = new URL(spotifyAuthUrl('client-1', redirectUri(SPOTIFY_CALLBACK_PORT, 'client-1'), 'state-1', 'chal'))
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize')
     expect(url.searchParams.get('client_id')).toBe('client-1')
     expect(url.searchParams.get('response_type')).toBe('code')
@@ -196,5 +196,49 @@ describe('SpotifySource', () => {
   it('a 429 is rate limiting', async () => {
     const source = new SpotifySource(ENTRY, { fetch: fakeFetch({ '/v1/me/top/artists': () => ({ body: {}, status: 429 }) }).fetch, now: () => new Date('2026-09-06T10:00:00Z'), onTokens: () => {} })
     await expect(source.snapshot()).rejects.toMatchObject({ source: 'spotify', reason: 'rate-limited' })
+  })
+})
+
+describe('the redirect URI follows the client id that will be used', () => {
+  // OAuth matches a loopback redirect on its path — the port is ignored
+  // (RFC 8252 §7.3) — so the bundled id has to be sent to the path it was
+  // registered against, which is librespot's /login, not our own /callback.
+  it('the bundled id redirects to /login, an app of the listener\'s own to /callback', () => {
+    expect(redirectUri(SPOTIFY_CALLBACK_PORT, BUNDLED_CLIENT_ID)).toBe('http://127.0.0.1:39917/login')
+    expect(redirectUri(SPOTIFY_CALLBACK_PORT, 'an-app-of-their-own')).toBe('http://127.0.0.1:39917/callback')
+  })
+
+  it('mounting on the bundled id asks Spotify for /login and answers there', async () => {
+    let consent = ''
+    const listen = async () => {
+      const real = await listenForCallback(0)
+      return real
+    }
+    const listener = await listen()
+    try {
+      const mounting = mountSpotify(BUNDLED_CLIENT_ID, {
+        listen: async () => listener,
+        openUrl: (url) => (consent = url),
+        timeoutMs: 2000,
+        fetch: async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url).includes('/api/token')
+                ? { access_token: 'a', refresh_token: 'r', expires_in: 3600 }
+                : { display_name: 'Listener', id: 'listener-1' },
+            ),
+          ),
+      })
+      // Wait for the consent URL, then knock on the path it named.
+      while (consent === '') await new Promise((r) => setTimeout(r, 5))
+      const redirect = new URL(new URL(consent).searchParams.get('redirect_uri')!)
+      expect(redirect.pathname).toBe('/login')
+      const state = new URL(consent).searchParams.get('state')!
+      const answer = await fetch(`http://127.0.0.1:${listener.port}${redirect.pathname}?state=${encodeURIComponent(state)}&code=the-code`)
+      expect(answer.status).toBe(200)
+      await mounting
+    } finally {
+      listener.close()
+    }
   })
 })

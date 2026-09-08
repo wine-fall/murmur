@@ -160,9 +160,24 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos.some((l) => l.includes('one of chrome, chromium, brave, edge, firefox, safari, vivaldi, opera'))).toBe(true)
   })
 
+  // The bundled id is what an unconfigured machine mounts on — so the two
+  // tests below own the variable outright rather than reading whatever the
+  // developer running them has set.
+  const withClientIdEnv = async (value: string | undefined, body: () => Promise<void>): Promise<void> => {
+    const before = process.env[CLIENT_ID_ENV]
+    if (value === undefined) delete process.env[CLIENT_ID_ENV]
+    else process.env[CLIENT_ID_ENV] = value
+    try {
+      await body()
+    } finally {
+      if (before === undefined) delete process.env[CLIENT_ID_ENV]
+      else process.env[CLIENT_ID_ENV] = before
+    }
+  }
+
   it('mounts Spotify straight into the browser: no app to register, no client id asked for', async () => {
     const { host, deps, store, mounted } = build(['mount spotify', 'done'])
-    await runSources(deps)
+    await withClientIdEnv(undefined, () => runSources(deps))
     // The developer-portal walkthrough and its question are both gone: the
     // bundled client id carries the read-only scopes on its own.
     expect(host.infos.some((l) => l.includes('developer.spotify.com'))).toBe(false)
@@ -173,14 +188,9 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a listener with their own app overrides the bundled client id through the environment', async () => {
-    process.env[CLIENT_ID_ENV] = 'client-of-their-own'
-    try {
-      const { deps, mounted } = build(['mount spotify', 'done'])
-      await runSources(deps)
-      expect(mounted).toEqual(['spotify:client-of-their-own'])
-    } finally {
-      delete process.env[CLIENT_ID_ENV]
-    }
+    const { deps, mounted } = build(['mount spotify', 'done'])
+    await withClientIdEnv('client-of-their-own', () => runSources(deps))
+    expect(mounted).toEqual(['spotify:client-of-their-own'])
   })
 
   it('a Spotify callback that never arrives is the §3.7 line; the consent URL is printed either way', async () => {

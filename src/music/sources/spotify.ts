@@ -47,8 +47,16 @@ export type SpotifyFetch = (url: string, init?: RequestInit) => Promise<Response
 export type SpotifyEntry = { clientId: string; refreshToken: string; accessToken: string; expiresAt: string }
 export type SpotifyTokens = Pick<SpotifyEntry, 'accessToken' | 'refreshToken' | 'expiresAt'>
 
-export function redirectUri(port: number): string {
-  return `http://127.0.0.1:${port}/callback`
+// OAuth matches a loopback redirect on its path — the port is ignored
+// (RFC 8252 §7.3) — so each client id has to be sent to the path it was
+// registered against: librespot's /login for the bundled one, and the
+// /callback a listener with an app of their own was told to add.
+const BUNDLED_CALLBACK_PATH = '/login'
+const OWN_APP_CALLBACK_PATH = '/callback'
+export const CALLBACK_PATHS = [BUNDLED_CALLBACK_PATH, OWN_APP_CALLBACK_PATH]
+
+export function redirectUri(port: number, clientId: string = spotifyClientId()): string {
+  return `http://127.0.0.1:${port}${clientId === BUNDLED_CLIENT_ID ? BUNDLED_CALLBACK_PATH : OWN_APP_CALLBACK_PATH}`
 }
 
 const base64url = (buf: Buffer): string => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -85,7 +93,7 @@ export async function listenForCallback(preferredPort = SPOTIFY_CALLBACK_PORT): 
   let expectedState = ''
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    if (url.pathname !== '/callback') {
+    if (!CALLBACK_PATHS.includes(url.pathname)) {
       res.writeHead(404).end()
       return
     }
@@ -204,7 +212,7 @@ export type SpotifyMountResult = MountResult<SpotifyEntry> | { ok: false; reason
 export async function mountSpotify(clientId: string, deps: SpotifyMountDeps): Promise<SpotifyMountResult> {
   const listener = await (deps.listen ?? listenForCallback)()
   try {
-    const redirect = redirectUri(listener.port)
+    const redirect = redirectUri(listener.port, clientId)
     deps.onRedirect?.(redirect)
     const { verifier, challenge } = pkcePair(deps.random?.())
     const state = base64url(deps.random?.() ?? randomBytes(16))

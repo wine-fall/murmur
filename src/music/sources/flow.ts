@@ -232,12 +232,13 @@ async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string
 
 async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
   const { host } = deps
+  const clientId = spotifyClientId()
   host.info('opening Spotify in your browser — approve there; I\'ll wait up to three minutes (Esc cancels).')
   let result: SpotifyMountResult
   try {
-    result = await deps.mounts.spotify(spotifyClientId(), {
+    result = await deps.mounts.spotify(clientId, {
       onRedirect: (uri) => {
-        if (uri !== redirectUri(SPOTIFY_CALLBACK_PORT)) host.info(`listening at ${uri} — the usual port was taken.`)
+        if (uri !== redirectUri(SPOTIFY_CALLBACK_PORT, clientId)) host.info(`listening at ${uri} — the usual port was taken.`)
       },
       onUrl: (url) => host.info(`if the browser did not open, approve here: ${url}`),
       cancelled,
