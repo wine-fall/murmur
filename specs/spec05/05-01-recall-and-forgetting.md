@@ -5,7 +5,10 @@
 > install (§1.1). Every §5 criterion is pinned by a unit test except 12 and 13,
 > which are the manual `make pack` and real-run passes recorded in the PR. Six
 > contracts moved between draft and build; each is marked **[built]** in place
-> below. Extends [`05-memory.md`](05-memory.md); nothing
+> below. **PR #218 (2026-09-08)** corrected two of them from the 2026-09-07
+> audit: the bootstrap follows the same `[stable]` rule as the fold (§3.3), and
+> `forget` reaches the `topic` keys in the ledger (§3.5). Extends
+> [`05-memory.md`](05-memory.md); nothing
 > in spec 05 is contradicted, only its "deferred to v1.5" items are delivered
 > and its compaction input is re-scoped.
 > **Part**: The Memory layer (master [`../DESIGN.md`](../DESIGN.md) §6), v1.5:
