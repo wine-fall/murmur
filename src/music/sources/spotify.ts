@@ -1,9 +1,8 @@
 // Spotify as a read-only taste source (spec 14 §2.8, §6): OAuth 2.0 PKCE
-// against the listener's OWN registered app (no client secret, no bundled
-// client id — Development Mode ties quota to the app), a local redirect on
-// 127.0.0.1, refresh on expiry, and the platform's own rankings: top
-// artists, top tracks (medium term), liked tracks, playlist names. A free
-// account is enough; playback is out of scope by decision.
+// (no client secret), a local redirect on 127.0.0.1, refresh on expiry, and
+// the platform's own rankings: top artists, top tracks (medium term), liked
+// tracks, playlist names. A free account is enough; playback is out of scope
+// by decision.
 //
 // Every response is an untrusted boundary: zod at the edge, a refused
 // refresh as the typed failure.
@@ -27,6 +26,19 @@ export const CALLBACK_TIMEOUT_MS = 3 * 60_000
 // is fixed and only falls back to an ephemeral one when it is taken.
 export const SPOTIFY_CALLBACK_PORT = 39917
 const PAGE = 50
+// The client id murmur ships with: librespot's long-published "keymaster"
+// id. Since August 2026 Spotify's login5 mints *playback* credentials for
+// that id alone — but every scope above is a Web API read, which any client
+// id is granted, and murmur never plays a Spotify stream. So the listener is
+// spared registering an app of their own. One who would rather use theirs
+// sets MURMUR_SPOTIFY_CLIENT_ID.
+export const BUNDLED_CLIENT_ID = '65b708073fc0480ea92a077233ca87bd'
+export const CLIENT_ID_ENV = 'MURMUR_SPOTIFY_CLIENT_ID'
+
+export function spotifyClientId(env: NodeJS.ProcessEnv = process.env): string {
+  const own = env[CLIENT_ID_ENV]?.trim()
+  return own === undefined || own === '' ? BUNDLED_CLIENT_ID : own
+}
 // A token about to expire is refreshed rather than raced.
 const EXPIRY_SLACK_MS = 60_000
 

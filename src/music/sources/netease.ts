@@ -1,14 +1,12 @@
 // The NetEase client (spec 14 §2.8): the one catalogue yt-dlp cannot search
-// or answer "who am I" for. It speaks the eapi transport NetEase's own
-// clients use — the same mechanism yt-dlp (public domain) implements for URL
-// resolution, reimplemented here over node:crypto and pinned by a golden
-// vector produced from yt-dlp's Python. Playback stays yt-dlp's (§2.5); this
-// client only identifies, reads the kept lists, and searches.
+// or answer "who am I" for. It speaks the plaintext `music.163.com/api`
+// endpoints the platform's own web pages use — ordinary GETs carrying the
+// browser's cookie, no signing and no borrowed client key. Playback stays
+// yt-dlp's (§2.5); this client only identifies, reads the kept lists, and
+// searches (search answers anonymously, so it needs no cookie at all).
 //
 // Every response is an untrusted boundary: zod at the edge, and the login
 // codes NetEase answers with (-462, 301) become the typed auth failure.
-
-import { createCipheriv, createHash } from 'node:crypto'
 
 import { z } from 'zod'
 
@@ -17,33 +15,14 @@ import { SourceAuthError } from './auth.ts'
 import type { BrowserName } from './store.ts'
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
-const EAPI_KEY = 'e82ckenh8dichen8'
-const EAPI_BASE = 'https://interface3.music.163.com/eapi'
+const API_BASE = 'https://music.163.com/api'
 const SONG_URL = 'https://music.163.com/#/song?id='
 const DEFAULT_TIMEOUT_MS = 15_000
-// How many song ids one detail lookup carries.
-const DETAIL_BATCH = 200
+// These endpoints serve the web player, and answer an unbranded client with
+// empty results; a browser's own user agent is what they expect.
+const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 // NetEase's own marker for the account's liked-songs playlist.
 const LIKED_SPECIAL_TYPE = 5
-
-// The eapi cipher: AES-128-ECB over "<path>-36cd479b6b5-<json>-36cd479b6b5-<md5>",
-// hex-encoded. The JSON is the body plus the cookie dict under `header`,
-// compact separators, key order as given.
-// The JSON is spelled the way NetEase's clients (and yt-dlp's json.dumps)
-// spell it: every non-ASCII code unit as \uXXXX. The server checks the md5
-// over that exact text, so a raw UTF-8 title answers with an empty body.
-function asciiJson(value: unknown): string {
-  return JSON.stringify(value).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`)
-}
-
-export function eapiParams(path: string, body: Record<string, unknown>, cookies: Record<string, string>): string {
-  const text = asciiJson({ ...body, header: cookies })
-  const digest = createHash('md5').update(`nobody${path}use${text}md5forencrypt`, 'latin1').digest('hex')
-  const message = `${path}-36cd479b6b5-${text}-36cd479b6b5-${digest}`
-  const cipher = createCipheriv('aes-128-ecb', Buffer.from(EAPI_KEY, 'latin1'), null)
-  const encrypted = Buffer.concat([cipher.update(message, 'utf8'), cipher.final()])
-  return `params=${encrypted.toString('hex').toUpperCase()}`
-}
 
 export type NeteaseFetch = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -71,32 +50,36 @@ const PlaylistsSchema = z.object({
 const DetailSchema = z.object({
   playlist: z.object({
     trackIds: z.array(z.object({ id: z.number(), at: z.number().optional() })),
-    // The newest `n` tracks with their titles, when the platform sends them.
+    // The first `n` tracks in full — the whole list, at the bound we ask for.
     tracks: z.array(z.unknown()).optional(),
   }),
 })
 const ArtistSchema = z.object({ name: z.string() })
+// One song, in either of the two spellings the platform uses: the player's
+// (`ar`/`al`/`dt`) and the web search's (`artists`/`album`/`duration`).
 const SongSchema = z.object({
   id: z.number(),
   name: z.string(),
   ar: z.array(ArtistSchema).optional(),
+  artists: z.array(ArtistSchema).optional(),
   al: z.object({ name: z.string().optional() }).nullish(),
+  album: z.object({ name: z.string().optional() }).nullish(),
   dt: z.number().optional(),
+  duration: z.number().optional(),
 })
-const SongsSchema = z.object({ songs: z.array(z.unknown()) })
 const SearchSchema = z.object({ result: z.object({ songs: z.array(z.unknown()).optional() }).nullish() })
 
 export type NeteasePlaylist = { id: string; name: string; trackCount: number; liked: boolean; mine: boolean }
 
-const artistLine = (song: z.infer<typeof SongSchema>): string => (song.ar ?? []).map((a) => a.name.trim()).filter((n) => n !== '').join(' / ')
+type Song = z.infer<typeof SongSchema>
 
-function cookieValue(header: string, name: string): string | undefined {
-  return header
-    .split(';')
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(`${name}=`))
-    ?.slice(name.length + 1)
-}
+const artistLine = (song: Song): string =>
+  (song.ar ?? song.artists ?? [])
+    .map((a) => a.name.trim())
+    .filter((n) => n !== '')
+    .join(' / ')
+const albumName = (song: Song): string | undefined => (song.al ?? song.album)?.name?.trim()
+const durationMs = (song: Song): number => song.dt ?? song.duration ?? 0
 
 export class NeteaseClient {
   private deps: NeteaseClientDeps
@@ -128,20 +111,20 @@ export class NeteaseClient {
     }))
   }
 
-  // The newest `cap` tracks of a playlist as liked items. The detail call
-  // answers with the ids (and when each was kept) plus the titles of the
-  // first `n`; whatever it left untitled comes from song detail in batches.
+  // The newest `cap` tracks of a playlist as liked items. One read: the
+  // detail call answers with the ids (and when each was kept) plus the first
+  // `n` tracks in full, so asking for `n = cap` returns both halves at once.
   async playlistTracks(playlistId: string, cap: number): Promise<TasteItem[]> {
     const detail = DetailSchema.parse(await this.call('/v6/playlist/detail', { id: playlistId, n: cap, s: 0 }))
     const ids = detail.playlist.trackIds.slice(0, cap)
     const at = new Map(ids.map((t) => [t.id, t.at]))
     const titled = new Map<number, TasteItem>()
-    const keep = (raw: unknown): void => {
+    for (const raw of detail.playlist.tracks ?? []) {
       const song = SongSchema.safeParse(raw)
-      if (!song.success || song.data.name.trim() === '' || !at.has(song.data.id)) return
+      if (!song.success || song.data.name.trim() === '' || !at.has(song.data.id)) continue
       const kept = at.get(song.data.id)
       const artist = artistLine(song.data)
-      const album = song.data.al?.name?.trim()
+      const album = albumName(song.data)
       titled.set(song.data.id, {
         kind: 'liked',
         title: song.data.name,
@@ -151,14 +134,8 @@ export class NeteaseClient {
         ref: `${SONG_URL}${song.data.id}`,
       })
     }
-    for (const raw of detail.playlist.tracks ?? []) keep(raw)
-    const missing = ids.filter((t) => !titled.has(t.id))
-    for (let i = 0; i < missing.length; i += DETAIL_BATCH) {
-      const batch = missing.slice(i, i + DETAIL_BATCH)
-      const json = await this.call('/v3/song/detail', { c: JSON.stringify(batch.map((t) => ({ id: t.id }))) })
-      for (const raw of SongsSchema.parse(json).songs) keep(raw)
-    }
-    // In the playlist's own order: newest kept first.
+    // In the playlist's own order: newest kept first. An id the detail read
+    // left untitled (a track the platform withdrew) is dropped, not chased.
     return ids.flatMap((t) => {
       const item = titled.get(t.id)
       return item === undefined ? [] : [item]
@@ -166,18 +143,18 @@ export class NeteaseClient {
   }
 
   async search(query: string, limit: number): Promise<TrackCandidate[]> {
-    const json = await this.call('/cloudsearch/pc', { s: query, type: 1, limit, offset: 0, total: true })
+    const json = await this.call('/search/get', { s: query, type: 1, offset: 0, limit })
     const parsed = SearchSchema.parse(json)
     const candidates: TrackCandidate[] = []
     for (const raw of parsed.result?.songs ?? []) {
       const song = SongSchema.safeParse(raw)
       if (!song.success || song.data.name.trim() === '') continue
-      const album = song.data.al?.name?.trim()
+      const album = albumName(song.data)
       candidates.push({
         ref: `${SONG_URL}${song.data.id}`,
         title: song.data.name,
         uploader: artistLine(song.data),
-        durationS: Math.trunc((song.data.dt ?? 0) / 1000),
+        durationS: Math.trunc(durationMs(song.data) / 1000),
         extra: album ? { album } : {},
         catalogue: 'netease',
       })
@@ -185,43 +162,26 @@ export class NeteaseClient {
     return candidates.slice(0, limit)
   }
 
-  // One eapi round trip: timeout, one retry on a network error, none on an
-  // auth answer; the login codes and a 429 become the typed failure.
-  private async call(path: string, body: Record<string, unknown>): Promise<unknown> {
-    const header = await this.deps.cookie()
-    const musicU = cookieValue(header, 'MUSIC_U')
-    const csrf = cookieValue(header, '__csrf') ?? ''
-    const cookies: Record<string, string> = {
-      osver: 'undefined',
-      deviceId: 'undefined',
-      appver: '8.0.0',
-      versioncode: '140',
-      mobilename: 'undefined',
-      buildver: '1623435496',
-      resolution: '1920x1080',
-      __csrf: csrf,
-      os: 'pc',
-      channel: 'undefined',
-      requestId: `${(this.deps.now ?? (() => new Date()))().getTime()}_${String(Math.floor(Math.random() * 1000)).padStart(4, '0')}`,
-      ...(musicU !== undefined && { MUSIC_U: musicU }),
-    }
+  // One round trip: a plain GET carrying the browser's cookie as it stands,
+  // a timeout, one retry on a network error and none on an auth answer; the
+  // login codes and a 429 become the typed failure.
+  private async call(path: string, query: Record<string, string | number>): Promise<unknown> {
+    const url = new URL(`${API_BASE}${path}`)
+    for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value))
+    const cookie = await this.deps.cookie()
     const init: RequestInit = {
-      method: 'POST',
+      method: 'GET',
       headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        Referer: 'https://music.163.com',
-        Cookie: Object.entries(cookies)
-          .map(([k, v]) => `${k}=${v}`)
-          .join('; '),
+        'User-Agent': USER_AGENT,
+        Referer: 'https://music.163.com/',
+        ...(cookie !== '' && { Cookie: cookie }),
       },
-      body: eapiParams(`/api${path}`, body, cookies),
     }
-    const url = `${EAPI_BASE}${path}`
     let response: Response
     try {
-      response = await this.once(url, init)
+      response = await this.once(url.toString(), init)
     } catch {
-      response = await this.once(url, init)
+      response = await this.once(url.toString(), init)
     }
     if (response.status === 429) throw new SourceAuthError('netease', 'rate-limited', `HTTP 429 on ${path}`)
     if (!response.ok) throw new Error(`netease ${path}: HTTP ${response.status}`)

@@ -14,7 +14,7 @@ import type { MountResult, NeteaseEntry } from './netease.ts'
 import type { QishuiMountResult } from './qishui.ts'
 import { qrHalfBlocks } from './qishui.ts'
 import type { TasteRefresher } from './refresh.ts'
-import { redirectUri, SPOTIFY_CALLBACK_PORT, type SpotifyMountResult } from './spotify.ts'
+import { redirectUri, SPOTIFY_CALLBACK_PORT, spotifyClientId, type SpotifyMountResult } from './spotify.ts'
 import { BROWSERS, type BrowserName, type SourceEntry, type SourcesStore } from './store.ts'
 import { SOURCE_IDS, SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
 import type { YouTubeEntry } from './youtube.ts'
@@ -161,7 +161,7 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
         continue
       }
       if (verb === 'mount' && target !== undefined) {
-        if (target === 'spotify') await mountSpotifyFlow(deps, read, () => cancelled)
+        if (target === 'spotify') await mountSpotifyFlow(deps, () => cancelled)
         else if (target === 'qishui') await mountQishuiFlow(deps, () => cancelled)
         else await mountCookieFlow(deps, read, target, platform)
         continue
@@ -230,23 +230,14 @@ async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string
   else await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
 }
 
-const SPOTIFY_STEPS = (uri: string): string =>
-  'Spotify reads through an app of your own (free, one minute): 1) open https://developer.spotify.com/dashboard and create an app; ' +
-  `2) add this redirect URI exactly: ${uri} ; 3) save and copy the Client ID; 4) paste it here. ` +
-  'A shared client id is deliberately not bundled: Spotify ties quota to the app.'
-
-async function mountSpotifyFlow(deps: SourcesFlowDeps, read: () => Promise<string>, cancelled: () => boolean): Promise<void> {
+async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
   const { host } = deps
-  host.info(SPOTIFY_STEPS(redirectUri(SPOTIFY_CALLBACK_PORT)))
-  ask(host, 'your Spotify app\'s Client ID?', 'question')
-  const clientId = (await read()).trim()
-  if (clientId === '' || deps.quit.requested) return
   host.info('opening Spotify in your browser — approve there; I\'ll wait up to three minutes (Esc cancels).')
   let result: SpotifyMountResult
   try {
-    result = await deps.mounts.spotify(clientId, {
+    result = await deps.mounts.spotify(spotifyClientId(), {
       onRedirect: (uri) => {
-        if (uri !== redirectUri(SPOTIFY_CALLBACK_PORT)) host.info(`listening at ${uri} — the usual port was taken, so add this one to the app too.`)
+        if (uri !== redirectUri(SPOTIFY_CALLBACK_PORT)) host.info(`listening at ${uri} — the usual port was taken.`)
       },
       onUrl: (url) => host.info(`if the browser did not open, approve here: ${url}`),
       cancelled,
@@ -261,7 +252,7 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, read: () => Promise<strin
         ? "didn't hear back from Spotify — /sources to try again."
         : result.reason === 'cancelled'
           ? 'cancelled — nothing was written.'
-          : 'Spotify did not accept that — check the Client ID and the redirect URI, then /sources again.',
+          : 'Spotify did not accept that — /sources to try again.',
     )
     return
   }
