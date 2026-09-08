@@ -310,7 +310,10 @@ only if all of it holds, and is otherwise refused **whole** — `profile.md`,
 so the same turns are folded again next time from unchanged sources:
 
 - both section labels are present, and nothing precedes the first;
-- the whole text is within `PROFILE_CHAR_CAP`;
+- the text is within `PROFILE_CHAR_CAP` **measured with the tags stripped** —
+  the cap is on what the host is handed, and counting the code's own tags
+  against it would let an accepted profile become one the next fold can no
+  longer repeat back while the prompt tells it to repeat it;
 - every fact line is a `- ` bullet within `PROFILE_LINE_CAP` (160) characters;
 - every fact line cites at least one listener line from **this slice**.
 
@@ -328,10 +331,13 @@ audit found exactly that on the real install.
 `[seen]` is the day of the **newest listener line it cites** — the code's, never
 the model's. A `[src bootstrap]`/`[src hand]` line has no row behind it, so it
 keeps the date it carries and gets today's the first time it is seen.
-**[built]** A "fact line" is any non-blank line that is not a section header —
-not only a markdown bullet. Matching bullets alone left a bootstrapped profile
-written as prose permanently undated, and therefore permanently un-fadeable,
-which is exactly the compatibility this pass claims.
+**[built]** A "fact line" is any non-blank line that is not one of the two
+section labels, matched exactly — not only a markdown bullet, and not merely
+"does not start with a bracket". Matching bullets alone left a bootstrapped
+profile written as prose permanently undated, and therefore permanently
+un-fadeable, which is exactly the compatibility this pass claims; matching on
+the bracket let a fold invent a third parenthesized section that slipped past
+the citation, bullet and length rules and then never faded.
 
 **Migration (`profile_schema` in `meta.json`).** A profile written before the
 contract has no citations: what it claims to know was folded with no provenance
@@ -345,9 +351,12 @@ tag the old lines `[src legacy]` was taken outright: what that profile "knew"
 was invented, and a radio that knows nothing for a while is the honest state.
 
 **Forget cascade.** A `forget` that erases history rows also drops every fact
-whose citations are **all** among them (§3.5). The fold's wording need share no
-word with the request, so the citation is the only thing that can carry an
-erasure through to a fact derived from the erased line.
+with **no surviving cited line left** (§3.5) — judged against what is still on
+record, not against what this one ask removed, so a fact citing two lines the
+listener erases one at a time goes with the second. An unreadable history file
+cascades nothing: "could not look" is not evidence that every source is gone.
+The fold's wording need share no word with the request, so the citation is the
+only thing that can carry an erasure through to a fact derived from it.
 
 **Fade pass** (deterministic, in `applyCompaction` and on load): a line whose
 date is older than `FACT_FADE_DAYS` and is not `[stable]` moves to

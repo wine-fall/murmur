@@ -3,8 +3,9 @@
 // steer tools with the rules gated on what the program can actually do.
 
 import type { ContextPack, RecallHit } from '../contracts.ts'
+import { PROFILE_TAGS } from './profile.ts'
 
-import { PROFILE_TAGS, OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
+import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
 
 // Prompt for an in-persona reply to a typed user line. Carries the profile
 // block too (spec 05 §3.5): a direct reply is exactly where cross-session

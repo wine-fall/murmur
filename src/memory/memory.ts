@@ -10,7 +10,13 @@ import { join } from 'node:path'
 import { z } from 'zod'
 
 import type { LedgerKind, MemoryStore, RecallHit, Turn } from '../contracts.ts'
-import { ABOUT_HEADER, PROFILE_CHAR_CAP, PROFILE_LINE_CAP, STYLE_HEADER } from '../prompts/profile.ts'
+import {
+  ABOUT_HEADER,
+  PROFILE_CHAR_CAP,
+  PROFILE_LINE_CAP,
+  PROFILE_TAGS,
+  STYLE_HEADER,
+} from '../prompts/profile.ts'
 import { type IndexRow, RecallIndex, queryTokens } from './recall.ts'
 
 export class InProcessMemoryStore implements MemoryStore {
@@ -161,12 +167,17 @@ export function admitsToFold(text: string, steered: boolean): boolean {
   return true
 }
 
-// A fact is any line that is not a section header — a markdown bullet, or the
-// plain prose the spec-06 bootstrap and a hand edit both produce. Matching only
-// bullets left a bootstrapped profile permanently undated, which meant it never
-// aged out either. Headers are the parenthesized labels; blank lines are not
-// facts.
-const FACT_LINE = /^\s*[^\s(]/
+// A fact is any non-blank line that is not one of the two section labels — a
+// markdown bullet, or the plain prose the spec-06 bootstrap and a hand edit
+// both produce. Matching only bullets left a bootstrapped profile permanently
+// undated, which meant it never aged out either; matching "does not start with
+// a bracket" let a fold invent a third parenthesized section that slipped past
+// the citation, bullet and length rules and then never faded. The two labels
+// are matched exactly, and everything else is a claim about the listener.
+const isFact = (line: string): boolean => {
+  const text = line.trim()
+  return text !== '' && text !== ABOUT_HEADER && text !== STYLE_HEADER
+}
 const SEEN_TAG = /\[seen (\d{4}-\d{2}-\d{2})\]/
 
 // A fact's provenance (spec 05-01 §3.3): the listener lines it was learned
@@ -253,7 +264,13 @@ export function validateFold(
   previous: string,
 ): { ok: true } | { ok: false; reason: string } {
   const bad = (reason: string) => ({ ok: false as const, reason })
-  if ([...text].length > PROFILE_CHAR_CAP) return bad(`over the ${PROFILE_CHAR_CAP}-character cap`)
+  // The cap is on the profile the host is handed, so the code's own tags are
+  // not counted against it: counting them lets an accepted profile become one
+  // the next fold can no longer repeat back, while the prompt tells it to
+  // repeat it — a profile frozen for good.
+  if ([...text.replaceAll(PROFILE_TAGS, '')].length > PROFILE_CHAR_CAP) {
+    return bad(`over the ${PROFILE_CHAR_CAP}-character cap`)
+  }
   const start = text.indexOf(ABOUT_HEADER)
   if (start === -1) return bad(`no ${ABOUT_HEADER} section`)
   if (!text.includes(STYLE_HEADER)) return bad(`no ${STYLE_HEADER} section`)
@@ -261,9 +278,9 @@ export function validateFold(
   // the profile is read back to the host as things it knows.
   if (text.slice(0, start).trim() !== '') return bad('preamble before the first section')
 
-  const carried = new Set(previous.split('\n').filter((line) => FACT_LINE.test(line)).map(factKey))
+  const carried = new Set(previous.split('\n').filter((line) => isFact(line)).map(factKey))
   for (const line of text.split('\n')) {
-    if (!FACT_LINE.test(line)) continue
+    if (!isFact(line)) continue
     // A line repeated verbatim was already accepted by whoever wrote it;
     // re-judging its shape would deadlock a profile the fold cannot rewrite.
     if (carried.has(factKey(line))) continue
@@ -289,11 +306,11 @@ export function validateFold(
 function restoreCarried(text: string, previous: string): string {
   const originals = new Map<string, string>()
   for (const line of previous.split('\n')) {
-    if (FACT_LINE.test(line)) originals.set(factKey(line), line)
+    if (isFact(line)) originals.set(factKey(line), line)
   }
   return text
     .split('\n')
-    .map((line) => (FACT_LINE.test(line) ? (originals.get(factKey(line)) ?? line) : line))
+    .map((line) => (isFact(line) ? (originals.get(factKey(line)) ?? line) : line))
     .join('\n')
 }
 
@@ -302,7 +319,7 @@ function citeAs(profile: string, src: string): string {
   return profile
     .split('\n')
     .map((line) => {
-      if (!FACT_LINE.test(line)) return line
+      if (!isFact(line)) return line
       const tags = splitTags(line)
       return tags.src === null ? renderFact({ ...tags, src }) : line
     })
@@ -354,15 +371,18 @@ const FORGET_STOPWORDS = new Set([
 const forgetTokens = (what: string): string[] =>
   queryTokens(what).filter((t) => !FORGET_STOPWORDS.has(t))
 
-// A fact line whose every cited listener line has just been erased. The fold
-// may have worded it with none of the request's words, so the citation is the
-// only thing that can carry the erasure through to it. A bootstrap/hand
+// A fact line with no surviving listener line behind it. The fold may have
+// worded it with none of the request's words, so the citation is the only
+// thing that can carry an erasure through to it. Judged against what is LEFT
+// in history rather than against what this ask removed: a fact citing two
+// lines that the listener erases one at a time has no source left after the
+// second ask, and neither ask on its own would have said so. A bootstrap/hand
 // citation has no row behind it and is never orphaned this way.
-function orphaned(line: string, erased: ReadonlySet<number>): boolean {
-  if (!FACT_LINE.test(line)) return false
+function orphaned(line: string, surviving: ReadonlySet<number>): boolean {
+  if (!isFact(line)) return false
   const src = provenance(splitTags(line).src)
   if (src === null || src.code || src.ids.length === 0) return false
-  return src.ids.every((id) => erased.has(id))
+  return src.ids.every((id) => !surviving.has(id))
 }
 
 // The relevance floor (spec 05-01 §3.5): a line must carry two of the request's
@@ -387,7 +407,7 @@ export function stampDates(profile: string, today: string): string {
   return profile
     .split('\n')
     .map((line) => {
-      if (!FACT_LINE.test(line)) return line
+      if (!isFact(line)) return line
       const tags = splitTags(line)
       const src = provenance(tags.src)
       const seen =
@@ -409,7 +429,7 @@ export function fadeFacts(profile: string, nowSeconds: number): { live: string; 
   for (const line of profile.split('\n')) {
     const seen = SEEN_TAG.exec(line)
     const stale = seen !== null && Date.parse(`${seen[1]}T00:00:00Z`) / 1000 < horizon
-    if (FACT_LINE.test(line) && stale && !line.includes('[stable]')) faded.push(line)
+    if (isFact(line) && stale && !line.includes('[stable]')) faded.push(line)
     else live.push(line)
   }
   return { live: live.join('\n'), faded }
@@ -585,17 +605,25 @@ export class PersistentMemoryStore implements MemoryStore {
 
     let rows = 0
     let dropped = 0
-    // The citations of the rows that go: a fact whose every source is erased is
-    // erased too, however differently the fold worded it (spec 05-01 §3.5).
-    const erased = new Set<number>()
-    this.rewriteHistory((row) => {
+    // What is still on record after the rewrite: a fact whose every cited line
+    // is gone is erased too, however differently the fold worded it
+    // (spec 05-01 §3.5).
+    const surviving = new Set<number>()
+    const read = this.rewriteHistory((row) => {
+      if (typeof row.ts === 'number' && (typeof row.text !== 'string' || !hit(row.text))) {
+        surviving.add(srcId(row.ts))
+      }
       if (typeof row.text !== 'string' || !hit(row.text)) return row
       dropped++
-      if (typeof row.ts === 'number') erased.add(srcId(row.ts))
       if (row.ts === undefined || !asked.has(row.ts)) rows++
       return null
     })
-    const gone = (line: string) => hit(line) || orphaned(line, erased)
+    // An unreadable history is not evidence that every source is gone: without
+    // the file there is nothing to check citations against, and cascading on
+    // that would erase the whole profile.
+    const gone = read
+      ? (line: string) => hit(line) || orphaned(line, surviving)
+      : (line: string) => hit(line)
     const lines = this.forgetLines(this.profilePath, gone) + this.forgetLines(this.fadedPath, gone)
     if (dropped === 0 && lines === 0) return { rows: 0, lines: 0 }
 
@@ -799,7 +827,7 @@ export class PersistentMemoryStore implements MemoryStore {
       text: row.text,
     }))
     for (const line of this.readText(this.fadedPath).split('\n')) {
-      if (FACT_LINE.test(line)) rows.push({ ts: seenTs(line), role: 'faded', text: line })
+      if (isFact(line)) rows.push({ ts: seenTs(line), role: 'faded', text: line })
     }
     return rows
   }
@@ -878,7 +906,7 @@ export class PersistentMemoryStore implements MemoryStore {
     const moved: string[] = []
     const kept: string[] = []
     for (const line of raw.split('\n')) {
-      if (FACT_LINE.test(line) && splitTags(line).src === null) moved.push(line)
+      if (isFact(line) && splitTags(line).src === null) moved.push(line)
       else kept.push(line)
     }
     if (moved.length === 0) {
@@ -888,7 +916,7 @@ export class PersistentMemoryStore implements MemoryStore {
     this.appendFaded(moved)
     this.log(`memory: migrated ${moved.length} uncited profile lines out of the prompts`)
     // Headers with nothing under them are noise in the pack, not a profile.
-    this.refreshProfile(kept.some((line) => FACT_LINE.test(line)) ? kept.join('\n') : '', {
+    this.refreshProfile(kept.some((line) => isFact(line)) ? kept.join('\n') : '', {
       force: true,
     })
   }
@@ -897,12 +925,15 @@ export class PersistentMemoryStore implements MemoryStore {
   // (spec 05-01 §3.2/§3.5), atomic so a reader never sees a torn file. A row
   // the mapper drops is gone; an unparseable line is kept verbatim rather than
   // silently deleted by a repair the listener did not ask for.
-  private rewriteHistory(map: (row: RawRow) => RawRow | null): void {
+  // Returns whether the file was there to rewrite: a caller reasoning about
+  // what is left on record has to know the difference between "nothing" and
+  // "could not look".
+  private rewriteHistory(map: (row: RawRow) => RawRow | null): boolean {
     let text: string
     try {
       text = readFileSync(this.historyPath, 'utf-8')
     } catch {
-      return
+      return false
     }
     const kept: string[] = []
     for (const line of text.split('\n')) {
@@ -924,6 +955,7 @@ export class PersistentMemoryStore implements MemoryStore {
     const rewritten = kept.length === 0 ? '' : `${kept.join('\n')}\n`
     // A request that matched nothing must not touch the file at all.
     if (rewritten !== text) atomicWrite(this.historyPath, rewritten)
+    return true
   }
 
   // Strictly increasing stamps: the throughTs watermark then always separates

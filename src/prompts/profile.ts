@@ -24,6 +24,14 @@ export const COMPACTION_SYSTEM_PROMPT =
 export const ABOUT_HEADER = '(About the listener)'
 export const STYLE_HEADER = '(Relationship & style)'
 
+// The tags every fact line trails: the `[src ...]` citation the fold's output
+// contract requires, the `[seen ...]` date the code derives from it, and
+// `[stable]` (spec 05-01 §3.3, src/memory/memory.ts). They are the file's
+// bookkeeping, not the host's: every renderer strips them, and the char cap is
+// measured on what is left. Anchored to the line end, so the same words inside
+// a fact stay what the listener said.
+export const PROFILE_TAGS = /(?:[ \t]*\[(?:src [^\]]*|seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
+
 const PROFILE_SHAPE = `The profile has exactly two labelled sections, in this order:
 
 (About the listener)

@@ -4,7 +4,7 @@
 // builders. reply.ts reuses the shared renderers for the typed-line turns.
 
 import type { ContextPack } from '../contracts.ts'
-import { ABOUT_HEADER, STYLE_HEADER } from './profile.ts'
+import { ABOUT_HEADER, PROFILE_TAGS, STYLE_HEADER } from './profile.ts'
 
 // Output discipline appended to every Brain call: the result is fed straight
 // to TTS, so it must be clean spoken text with no markup or stage directions.
@@ -138,11 +138,6 @@ function pacingLines(ctx: ContextPack): string {
 // stable prefix (master §7 pillar 4). Empty -> nothing (degrade silently).
 //
 // A fact line ends in the fading ledger's bookkeeping — `[seen YYYY-MM-DD]`,
-// `[stable]` and the `[src ...]` citation the fold's output contract requires
-// (spec 05-01 §3.3, src/memory/memory.ts). They are the file's business, not
-// the host's: the prompt carries the fact without its tags. Anchored to the
-// line end, so the same words inside a fact stay what the listener said.
-export const PROFILE_TAGS = /(?:[ \t]*\[(?:src [^\]]*|seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
 
 export function profileBlock(ctx: ContextPack): string {
   const profile = ctx.profile?.replaceAll(PROFILE_TAGS, '').trim()

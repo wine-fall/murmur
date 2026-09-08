@@ -3,7 +3,7 @@
 // refused whole, and a profile written before the contract is migrated out of
 // the prompts rather than trusted.
 
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -256,5 +256,89 @@ describe('faded file dedupe (audit P1-5)', () => {
     const faded = readFileSync(join(path, 'profile-faded.md'), 'utf-8')
     expect(faded.split('\n').filter((l) => l.includes('An ancient fact'))).toHaveLength(1)
     expect(statSync(join(path, 'profile-faded.md')).size).toBeGreaterThan(0)
+  })
+})
+
+
+// Findings from the codex peer review, each pinned so it cannot come back.
+describe('peer review (PR #fold-contract)', () => {
+  it('refuses a parenthesized line the model invented as a third section', () => {
+    const c = clock(at('2026-09-05'))
+    const path = dir()
+    const store = loaded(path, c.now)
+    const slice = store.compactionSlice()
+    // Anything but the two labels is a fact and is judged as one — otherwise a
+    // line in brackets slips past the bullet, length and citation rules, lands
+    // in the prompts undated, and never fades.
+    expect(store.applyCompaction(shaped('(Lives in Paris)'), slice.throughTs)).toBe(false)
+    expect(store.profile()).toBe('')
+  })
+
+  it('drops a fact once its LAST surviving source is forgotten, across two asks', () => {
+    const c = clock(at('2026-09-05'))
+    const path = dir()
+    const store = new PersistentMemoryStore({ dir: path, now: c.now, compactEvery: 1 })
+    store.record({ role: 'user', text: 'my friend Sarah moved to Lisbon last spring' })
+    store.record({ role: 'user', text: 'and James went with her that same summer' })
+    const slice = store.compactionSlice()
+    const [sarah, james] = slice.turns.filter((t) => t.cite !== undefined)
+
+    expect(
+      store.applyCompaction(
+        shaped(`- Two people close to them left the country [src ${sarah!.cite},${james!.cite}]`),
+        slice.throughTs,
+      ),
+    ).toBe(true)
+
+    // One source erased: the other still attests the fact, so it stays.
+    expect(store.forget('Sarah').rows).toBe(1)
+    expect(store.profile()).toContain('left the country')
+    // The last one goes, and the fact derived from both goes with it — the
+    // erasing ask shares no word with how the fold worded it.
+    expect(store.forget('James').rows).toBe(1)
+    expect(store.profile()).not.toContain('left the country')
+    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).not.toContain('left the country')
+  })
+
+  it('leaves the profile alone when the history file cannot be read', () => {
+    const c = clock(at('2026-09-05'))
+    const path = dir()
+    const store = loaded(path, c.now)
+    const slice = store.compactionSlice()
+    const cite = slice.turns.find((t) => t.cite !== undefined)!.cite
+    expect(store.applyCompaction(shaped(`- The desk faces the window [src ${cite}]`), slice.throughTs)).toBe(
+      true,
+    )
+    rmSync(join(path, 'history.jsonl'))
+    // No history to check citations against is not evidence that every source
+    // is gone: a missing file must never read as a mass erasure.
+    store.forget('Lisbon')
+    expect(readFileSync(join(path, 'profile.md'), 'utf-8')).toContain('The desk faces the window')
+  })
+
+  // The cap is on what the host is handed. Counting the code's own tags against
+  // it lets an accepted profile become one the next fold can no longer repeat,
+  // and the prompt tells the fold to repeat it — a profile frozen for good.
+  it('accepts a profile near the cap and accepts it again, verbatim, next fold', () => {
+    const c = clock(at('2026-09-05'))
+    const path = dir()
+    const store = loaded(path, c.now)
+    const first = store.compactionSlice()
+    const cite = first.turns.find((t) => t.cite !== undefined)!.cite
+    // Under the cap as the host reads it, over it once the code's own tags are
+    // on — and each carried line is then longer than the per-line cap too.
+    const facts = Array.from({ length: 11 }, (_, i) => `- ${'x'.repeat(125)}${i} [src ${cite}]`)
+    expect(store.applyCompaction(shaped(...facts), first.throughTs)).toBe(true)
+    expect([...store.profile()].length).toBeGreaterThan(PROFILE_CHAR_CAP)
+
+    store.record({ role: 'user', text: 'one more durable thing about the week' })
+    const second = store.compactionSlice()
+    // The fold keeps every fact by repeating its line exactly, as instructed.
+    const kept = store
+      .profile()
+      .split('\n')
+      .filter((line) => line.startsWith('- '))
+    expect(store.applyCompaction(shaped(...kept), second.throughTs)).toBe(true)
+    expect(store.profile()).toContain('x'.repeat(125))
   })
 })
