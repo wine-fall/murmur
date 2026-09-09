@@ -358,17 +358,15 @@ line in the transcript about the program itself**.
 
 Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
 
-- **`netease.ts`** — the "eapi" transport NetEase's own clients use and
-  yt-dlp implements for URL resolution (yt-dlp is public-domain; the cipher
-  is: AES-128-ECB over `"<path>-36cd479b6b5-<json>-36cd479b6b5-<md5>"` with a
-  fixed key, hex-encoded — reimplemented in Node `crypto`, ~20 lines, pinned
-  by two golden vectors produced once in a smoke against yt-dlp's Python —
-  the second with a non-ASCII query, because the platform checks the digest
-  over the JSON spelled with `\uXXXX` escapes and answers raw UTF-8 with an
-  empty body).
-  Endpoints: account (`who`, `userId`), the user's playlists (the first is the
-  liked-songs playlist), playlist tracks (paged, cap §3.5), search
-  (`cloudsearch`, type song). Cookie: read from the browser store **through
+- **`netease.ts`** — the plaintext `music.163.com/api` endpoints the
+  platform's own web pages serve: ordinary GETs carrying the browser's cookie
+  as it stands, no signing and no borrowed client key.
+  Endpoints: `/api/nuser/account/get` (`who`, `userId`), `/api/user/playlist`
+  (the liked-songs list is marked `specialType=5`), `/api/v6/playlist/detail`
+  (`n` = the §3.5 cap: one read returns the whole list titled *and* dated —
+  `trackIds[].at` is when each was kept), and `/api/search/get` (type song),
+  which answers anonymously and needs no cookie at all.
+  Cookie: read from the browser store **through
   yt-dlp** — `yt-dlp --cookies-from-browser <b> --cookies <tmpfile> …` writes
   a Netscape jar the client reads and deletes after the call (no second
   cookie-store reader to maintain; the jar never persists). *As built (review
@@ -443,12 +441,28 @@ with a scripted host:
 3. First `snapshot()` in the foreground with a progress line (counts, not
    titles); write `sources.json` + the snapshot; "done — I'll keep it fresh".
 
-**Mount, Spotify**: ask for the client id (with the four-step "register an app"
-instruction the reference documents; redirect URI printed verbatim for them
-to paste into the dashboard); open the browser; wait for the callback; then
-as above. A shared/public client id is deliberately not bundled: Spotify's
-Development Mode (since 2026-02) ties quota and user allow-lists to the app,
-and a pooled id gets pooled 429s.
+**Mount, Spotify**: open the browser straight away; wait for the callback;
+then as above. Nothing is asked for. *Revised 2026-09-08*: the four-step
+"register an app" instruction and the Client ID question are gone. murmur
+bundles librespot's published keymaster client id, which every Web API scope
+here is granted — Spotify reserves that id for *playback* credentials only,
+and murmur never plays a Spotify stream. `MURMUR_SPOTIFY_CLIENT_ID` still
+takes an app of one's own.
+
+Two consequences of the bundled id, both measured on the real platform:
+
+- **The redirect path follows the id.** A loopback redirect is matched on its
+  path, the port being ignored (RFC 8252 §7.3), so the bundled id goes to
+  librespot's registered `http://127.0.0.1:<port>/login` and an app of the
+  listener's own keeps the `/callback` it was told to add. The listener
+  answers both.
+- **A pooled id does get pooled 429s** — the reason this spec once refused to
+  bundle one, and it was right. It is not a reason to refuse: a 429 whose
+  `Retry-After` fits a ten-second budget is waited out and the read retried
+  once. What must never happen is what did: `/me` answered 429 seven seconds
+  after a *successful* consent, and the mount was discarded — an
+  authorization the listener had just given, refresh token and all, thrown
+  away over seven seconds.
 
 **Mount, Soda**: print the QR; poll status every 2 s for up to 3 min; the
 listener scans with Douyin; then as above. Esc cancels (the host `interrupt`
@@ -653,10 +667,11 @@ prints it zero times.
 *As built, 2026-09-07*: §5.1, §5.3, §5.5 (unit), §5.6, §5.8–§5.11 hold in
 the unit suite; §5.2 and §5.4's search half passed on the developer's own
 YouTube and Bilibili accounts (`scripts/sources-smoke.ts`; the NetEase
-search answered anonymously through the eapi transport). The developer has
-no readable NetEase login, no Spotify and no Soda account, so §5.2 for
-NetEase, §5.4's NetEase play, §5.5's smoke, §5.7 and §5.12 are the one
-by-ear issue's checklist.
+search answered anonymously). *Amended 2026-09-09*: §5.2 for NetEase now
+holds on the developer's own account through the plaintext transport —
+identity, 186 liked tracks all dated, 50 playlist names, search — and the
+Spotify mount was driven end to end on the bundled client id. §5.4's NetEase
+play, §5.5's smoke, §5.7 and §5.12 remain the one by-ear issue's checklist.
 Does the radio pick *better* — more of what they would have chosen, fewer
 misses — over one real evening with NetEase and Spotify mounted, versus the
 evening before. Recorded as the spec's one by-ear issue; the eval that would
@@ -679,9 +694,17 @@ make it repeatable is #98.
   same; a copied cookie is a liability with no benefit.
 - **Deterministic mount dialogue, not a guide-brain task** — every step is a
   fixed question; a model adds cost and non-determinism to nothing.
-- **NetEase identity + search through eapi; playback through yt-dlp** — the
-  one place where yt-dlp cannot search; keep it to the smallest client that
-  fills that gap, and let yt-dlp keep owning resolution and VIP tiers.
+- **NetEase identity + search through the plaintext API; playback through
+  yt-dlp** — the one place where yt-dlp cannot search; keep it to the smallest
+  client that fills that gap, and let yt-dlp keep owning resolution and VIP
+  tiers. *Revised 2026-09-08*: that client first spoke the signed "eapi"
+  transport, which meant shipping a borrowed AES key. The plaintext `/api/`
+  endpoints answer all four reads without one, and 20 side-by-side queries
+  across Chinese, English and Japanese returned byte-identical rankings, so
+  the cipher bought nothing that had to be paid for. The known cost is
+  durability: these endpoints are undocumented and being tightened
+  (`/api/search/get/web` already answers empty), where eapi is the live path
+  the platform's own clients use.
 - **One new dependency (`qrcode-generator`)**, named in §2.8 with the rung it clears.
 - **Login is never required; the nudge is an invitation** (2026-09-06, user).
   One light form for `/sources`, `/bug`, `/feature-request`; kept in the
@@ -694,8 +717,7 @@ None of these is a dependency. Licences noted because they decide what may
 be *borrowed* at all; murmur is MIT (#206) and stays MIT.
 
 - **yt-dlp** (Unlicense / public domain): `yt_dlp/extractor/neteasemusic.py`
-  (eapi cipher, tier walk, `-462` → login required, the preview behaviour of
-  issue 14142), `youtube.py` (`:ytfav`, `:ythistory`), `bilibili.py`
+  (tier walk, `-462` → login required, the preview behaviour of issue 14142), `youtube.py` (`:ytfav`, `:ythistory`), `bilibili.py`
   (`BiliBiliSearch`, favourites). The cookie-store reader is used as a
   binary, never reimplemented.
 - **`guowenye/qishui-api`** (MIT): the Luna transport, QR issue/poll,
