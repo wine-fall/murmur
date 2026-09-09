@@ -3,12 +3,12 @@ import { describe, expect, it } from 'vitest'
 import type { ContextPack } from '../src/contracts.ts'
 import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION } from '../src/prompts/music.ts'
 import { buildSeedPersonaPrompt, PERSONA_CHAR_CAP, SEED_QUESTIONS, withLanguage } from '../src/prompts/persona.ts'
-import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP } from '../src/prompts/profile.ts'
+import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP, PROFILE_LINE_CAP } from '../src/prompts/profile.ts'
 import { buildRespondPrompt, buildSteerPrompt, memoryBlock } from '../src/prompts/reply.ts'
 import { buildFetchTopicsPrompt, DEFAULT_RWT_POLICY, RWT_FETCH_SYSTEM_PROMPT, RWT_POLICY_HEADER } from '../src/prompts/rwt.ts'
 import { buildFixMusicPrompt, buildSetupPrompt, VISIT_PERSONA, GUIDE_PERSONA } from '../src/prompts/setup.ts'
 import { STATUS_MICROCOPY, statusMicrocopy } from '../src/prompts/status.ts'
-import { ACTIVITY_GUIDANCE, buildNextTalkPrompt, buildNextTalksPrompt, CUE_GUIDANCE, CODA_CUE, MUSIC_OUTLASTS_RULE, aboutSection } from '../src/prompts/talk.ts'
+import { ACTIVITY_GUIDANCE, buildNextTalkPrompt, buildNextTalksPrompt, CUE_GUIDANCE, CODA_CUE, MUSIC_OUTLASTS_RULE, aboutSection, profileBlock } from '../src/prompts/talk.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
 
@@ -418,13 +418,15 @@ describe('compaction prompt', () => {
   it('carries the profile, the transcript, and the size cap', () => {
     const p = buildCompactionPrompt('knows jazz', [
       { role: 'radio', text: 'evening' },
-      { role: 'user', text: 'long day' },
+      { role: 'user', text: 'long day', cite: 1788331027120 },
     ])
     expect(p).toContain('(Current profile)\nknows jazz')
     // host:/listener: labels, not role names — the fold reads a conversation,
     // and only the listener's half may become a fact (spec 05-01 §3.1).
+    // The listener's line carries the id the fold has to cite; the host's line
+    // carries none, so nothing it says can become a fact (spec 05-01 §3.3).
     expect(p).toContain('host: evening')
-    expect(p).toContain('listener: long day')
+    expect(p).toContain('listener [1788331027120]: long day')
     expect(p).not.toContain('radio: evening')
     expect(p).toContain(String(PROFILE_CHAR_CAP))
   })
@@ -436,14 +438,25 @@ describe('compaction prompt', () => {
     expect(p).toContain('2026-09-03')
   })
 
-  // spec 05-01 §3.3: dates, decay and contradiction are carried by the line
-  // syntax, so the fold must state it — and derive facts from one half only.
-  it('states the dated-fact syntax and the listener-only rule', () => {
+  // spec 05-01 §3.3: provenance, decay and contradiction are carried by the
+  // line syntax, so the fold must state it — and derive facts from one half
+  // only. The date is the code's, and the prompt has to say so: a model that
+  // writes its own [seen] is the defect this contract exists to close.
+  it('states the citation syntax, the listener-only rule, and whose the date is', () => {
     const p = buildCompactionPrompt('x', [])
-    expect(p).toMatch(/\[seen \d{4}-\d{2}-\d{2}\]/)
+    expect(p).toMatch(/\[src \d+\]/)
     expect(p).toContain('[stable]')
-    expect(p).toMatch(/listener:/)
+    expect(p).toMatch(/listener \[id\]:/)
     expect(p).toMatch(/contradict/i)
+    expect(p).toMatch(/never write a `\[seen \.\.\.\]` tag yourself/i)
+    expect(p).toContain(String(PROFILE_LINE_CAP))
+  })
+
+  // The whole point of the id: a fact can only come from a line that has one.
+  it('gives a host line no id to cite', () => {
+    const p = buildCompactionPrompt('x', [{ role: 'radio', text: 'the light outside' }])
+    expect(p).toContain('host: the light outside')
+    expect(p).not.toMatch(/host \[\d+\]/)
   })
 
   it('placeholders an empty profile and empty transcript', () => {
@@ -952,6 +965,43 @@ describe('the fetch prompt (spec 13 §3.3)', () => {
 
 // spec 13 §3.4: only the (About the listener) section leaves for the fetch —
 // (Relationship & style) is tone, and tone is not a search term.
+// The citation is the file's bookkeeping. It reaches three renderers — the
+// stable prefix, the rwt search terms, and a quoted faded memory — and leaking
+// it into any of them puts `[src 1788331027120]` in front of the model
+// (spec 05-01 §3.3).
+describe('profile tags never reach a prompt (spec 05-01 §3.3)', () => {
+  const cited = `(About the listener)
+- Follows the Premier League [src 1788331027120] [seen 2026-09-01]
+- Name they go by: Z [src bootstrap] [seen 2026-06-01] [stable]
+
+(Relationship & style)
+- Short replies land [src 1788331099000] [seen 2026-09-01]`
+
+  it('strips the citation from the stable prefix', () => {
+    const block = profileBlock({ persona: 'p', recent: [], profile: cited })
+    expect(block).toContain('- Follows the Premier League')
+    expect(block).not.toContain('[src ')
+    expect(block).not.toContain('[seen ')
+  })
+
+  it('strips the citation from the rwt search terms', () => {
+    expect(aboutSection(cited)).toBe('- Follows the Premier League\n- Name they go by: Z')
+  })
+
+  it('strips the citation from a faded fact quoted back to the host', () => {
+    const block = memoryBlock([
+      {
+        ts: Date.parse('2026-06-01T00:00:00Z') / 1000,
+        role: 'faded',
+        text: '- Drinks coffee at night [src bootstrap] [seen 2026-06-01]',
+        score: 1,
+      },
+    ])
+    expect(block).toContain('"- Drinks coffee at night"')
+    expect(block).not.toContain('[src ')
+  })
+})
+
 describe('aboutSection (spec 13 §3.4)', () => {
   const profile = `(About the listener)
 Follows the Premier League. [seen 2026-09-01]

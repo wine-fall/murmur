@@ -3,6 +3,7 @@
 // steer tools with the rules gated on what the program can actually do.
 
 import type { ContextPack, RecallHit } from '../contracts.ts'
+import { PROFILE_TAGS } from './profile.ts'
 
 import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
 
@@ -90,7 +91,9 @@ export function memoryBlock(hits: readonly RecallHit[]): string {
         : hit.role === 'radio'
           ? 'you said'
           : 'you knew, and had since let go'
-    return `- ${day}, ${who}: "${hit.text}"`
+    // A faded fact is a profile line: it carries the file's tags, and the host
+    // must be handed the fact, never the bookkeeping.
+    return `- ${day}, ${who}: "${hit.text.replaceAll(PROFILE_TAGS, '').trim()}"`
   })
   return `(From memory)\n${lines.join('\n')}`
 }

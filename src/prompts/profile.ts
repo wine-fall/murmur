@@ -8,6 +8,10 @@ import type { Turn } from '../contracts.ts'
 // small (master §7 pillar 4). By-feel tunable (spec 05 §6).
 export const PROFILE_CHAR_CAP = 1500
 
+// Hard cap on one fact line. A fact that needs a paragraph is a summary of the
+// exchange, not a durable fact (spec 05-01 §3.3). By-feel tunable (spec 05 §6).
+export const PROFILE_LINE_CAP = 160
+
 // A neutral system framing (not the persona) keeps the fold as bookkeeping,
 // not the host speaking.
 export const COMPACTION_SYSTEM_PROMPT =
@@ -17,6 +21,17 @@ export const COMPACTION_SYSTEM_PROMPT =
 // (spec 05 §3.6, extended by spec 06 slice C) and the one-shot bootstrap (spec
 // 06 slice B). Both produce the SAME two sections so the first compaction
 // merges into a bootstrapped profile instead of fighting it.
+export const ABOUT_HEADER = '(About the listener)'
+export const STYLE_HEADER = '(Relationship & style)'
+
+// The tags every fact line trails: the `[src ...]` citation the fold's output
+// contract requires, the `[seen ...]` date the code derives from it, and
+// `[stable]` (spec 05-01 §3.3, src/memory/memory.ts). They are the file's
+// bookkeeping, not the host's: every renderer strips them, and the char cap is
+// measured on what is left. Anchored to the line end, so the same words inside
+// a fact stay what the listener said.
+export const PROFILE_TAGS = /(?:[ \t]*\[(?:src [^\]]*|seen \d{4}-\d{2}-\d{2}|stable)\])+[ \t]*$/gm
+
 const PROFILE_SHAPE = `The profile has exactly two labelled sections, in this order:
 
 (About the listener)
@@ -38,25 +53,35 @@ the radio talking to itself, and nothing in it is a fact about the listener.
 
 ${PROFILE_SHAPE}
 
-Every fact is one line, and ends with the date it was last confirmed:
+Every fact is one line, a \`- \` bullet, and ends with the listener lines it was
+learned from:
 
-- Stopped drinking coffee; prefers tea [seen 2026-09-01]
-- Name they go by: Z; speaks Chinese [seen 2026-07-20] [stable]
+- Stopped drinking coffee; prefers tea [src 1788331027120]
+- Walks by the river most evenings [src 1788331020500,1788331099000]
 
 Rules for the lines:
-- A fact the listener confirms again gets TODAY's date, stated below.
+- Cite ONLY the ids printed on the \`listener [id]:\` lines below. A \`host:\` line
+  has no id and can never be cited; nothing it says is a fact about the listener.
+- A fact drawn from several listener lines cites all of them, comma-separated.
+- To KEEP a fact from the current profile that this exchange did not touch,
+  repeat its line EXACTLY as it stands, every tag included.
+- Never write a \`[seen ...]\` tag yourself. The date is computed from the
+  citation; a date you write is discarded.
 - A newer statement that contradicts an older fact REPLACES it — keep the newer
   line, drop the old one; never keep both.
 - A one-off request ("play something else") is not a preference unless it recurs.
 - Mark identity facts — name, language, where they live, what they do — [stable].
-- Keep the existing date on a fact this exchange did not touch.
+- Keep a line to ${PROFILE_LINE_CAP} characters or fewer.
+
+A line that breaks any of these costs the whole fold: the profile is left
+exactly as it was.
 
 Drop: ephemera, one-off small talk, anything transient. Merge — do not simply
 append; rewrite the profile so it stays coherent and non-repetitive.
 
 Return ONLY the updated profile text, both sections under their labels, in the
 listener's own language, under ${PROFILE_CHAR_CAP} characters total. No preamble
-or commentary.
+or commentary — the first thing you write is the section label.
 `
 
 // The compaction turn: current profile + the listener-only slice to fold
@@ -72,8 +97,11 @@ export function buildCompactionPrompt(
 ): string {
   const current = profile.trim() || '(no profile yet)'
   const lines =
-    transcript.map((t) => `${t.role === 'radio' ? 'host' : 'listener'}: ${t.text}`).join('\n') ||
-    '(nothing)'
+    transcript
+      .map((t) =>
+        t.role === 'radio' ? `host: ${t.text}` : `listener [${t.cite ?? 'no id'}]: ${t.text}`,
+      )
+      .join('\n') || '(nothing)'
   return (
     `${COMPACTION_INSTRUCTION}\n` +
     `(Today is ${today}.)\n\n` +

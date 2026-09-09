@@ -19,6 +19,25 @@ import {
 
 const dir = () => mkdtempSync(join(tmpdir(), 'murmur-fold-'))
 
+// Seed a profile that already satisfies the output contract (spec 05-01 §3.3):
+// cited lines, and a meta.json at the current schema, so the store adopts it
+// instead of migrating it out of the prompts.
+function seedProfile(path: string, lines: readonly string[], through = 0): void {
+  writeFileSync(join(path, 'profile.md'), lines.join('\n'))
+  writeFileSync(
+    join(path, 'meta.json'),
+    JSON.stringify({ compacted_through: through, profile_schema: 1 }),
+  )
+}
+
+// The listener line ids a fold may cite, newest last.
+const cites = (turns: readonly { cite?: number }[]): number[] =>
+  turns.filter((t) => t.cite !== undefined).map((t) => t.cite!)
+
+// Two labelled sections with the given facts under the first.
+const shaped = (...facts: string[]) =>
+  ['(About the listener)', ...facts, '', '(Relationship & style)'].join('\n')
+
 // Unix seconds for a UTC date, so every dated assertion is clock-injected.
 const at = (iso: string) => Date.parse(`${iso}T12:00:00Z`) / 1000
 
@@ -176,16 +195,16 @@ describe('date post-pass (spec 05-01 §3.3)', () => {
 describe('fade pass (spec 05-01 §3.3)', () => {
   const profile = [
     '(About the listener)',
-    '- Drinks coffee at night [seen 2026-01-01]',
-    '- Name they go by: Z [seen 2026-01-01] [stable]',
-    '- Moved the desk under the window [seen 2026-08-30]',
+    '- Drinks coffee at night [src hand] [seen 2026-01-01]',
+    '- Name they go by: Z [src hand] [seen 2026-01-01] [stable]',
+    '- Moved the desk under the window [src hand] [seen 2026-08-30]',
   ].join('\n')
 
   it('moves a stale line out verbatim and keeps a stable one of the same age', () => {
     const { live, faded } = fadeFacts(profile, at('2026-09-01'))
-    expect(faded).toEqual(['- Drinks coffee at night [seen 2026-01-01]'])
-    expect(live).toContain('- Name they go by: Z [seen 2026-01-01] [stable]')
-    expect(live).toContain('- Moved the desk under the window [seen 2026-08-30]')
+    expect(faded).toEqual(['- Drinks coffee at night [src hand] [seen 2026-01-01]'])
+    expect(live).toContain('- Name they go by: Z [src hand] [seen 2026-01-01] [stable]')
+    expect(live).toContain('- Moved the desk under the window [src hand] [seen 2026-08-30]')
     expect(live).not.toContain('Drinks coffee')
   })
 
@@ -197,26 +216,36 @@ describe('fade pass (spec 05-01 §3.3)', () => {
   it('writes the faded line to profile-faded.md and drops it from the profile', () => {
     const c = clock(at('2026-09-01'))
     const path = dir()
-    writeFileSync(join(path, 'profile.md'), profile)
+    seedProfile(path, [profile])
     const store = new PersistentMemoryStore({ dir: path, now: c.now })
     expect(store.profile()).not.toContain('Drinks coffee')
     expect(store.profile()).toContain('Name they go by: Z')
     expect(readFileSync(join(path, 'profile.md'), 'utf-8')).not.toContain('Drinks coffee')
     expect(readFileSync(join(path, 'profile-faded.md'), 'utf-8')).toContain(
-      '- Drinks coffee at night [seen 2026-01-01]',
+      '- Drinks coffee at night [src hand] [seen 2026-01-01]',
     )
   })
 
   it('dates and fades what the fold returns, before the profile is served', () => {
-    const c = clock(at('2026-09-01'))
+    const c = clock(at('2025-01-01'))
     const path = dir()
     const store = new PersistentMemoryStore({ dir: path, now: c.now })
+    store.record({ role: 'user', text: 'a thing I said a very long time ago' })
+    c.advance(at('2026-09-01') - at('2025-01-01'))
     store.record({ role: 'user', text: 'something durable about the week' })
-    store.applyCompaction(
-      ['(About the listener)', '- Prefers tea', '- An ancient fact [seen 2025-01-01]'].join('\n'),
-      store.compactionSlice().throughTs,
-    )
-    expect(store.profile()).toContain('- Prefers tea [seen 2026-09-01]')
+    const slice = store.compactionSlice()
+    const [ancient, recent] = cites(slice.turns)
+
+    // Both facts arrive in the same fold; only the date each one cites decides
+    // which of them still speaks.
+    expect(
+      store.applyCompaction(
+        shaped(`- Prefers tea [src ${recent}]`, `- An ancient fact [src ${ancient}]`),
+        slice.throughTs,
+      ),
+    ).toBe(true)
+    expect(store.profile()).toContain('- Prefers tea [src ')
+    expect(store.profile()).toContain('[seen 2026-09-01]')
     expect(store.profile()).not.toContain('An ancient fact')
     expect(readFileSync(join(path, 'profile-faded.md'), 'utf-8')).toContain('An ancient fact')
   })
@@ -280,14 +309,11 @@ describe('PersistentMemoryStore.forget (spec 05-01 §3.5)', () => {
   const build = () => {
     const c = clock(at('2026-09-01'))
     const path = dir()
-    writeFileSync(
-      join(path, 'profile.md'),
-      [
-        '(About the listener)',
-        '- Drinks coffee at night [seen 2026-08-30]',
-        '- Moved the desk under the window [seen 2026-08-30]',
-      ].join('\n'),
-    )
+    seedProfile(path, [
+      '(About the listener)',
+      '- Drinks coffee at night [src hand] [seen 2026-08-30]',
+      '- Moved the desk under the window [src hand] [seen 2026-08-30]',
+    ])
     const store = new PersistentMemoryStore({ dir: path, now: c.now })
     store.record({ role: 'user', text: 'I drink coffee until far too late' })
     store.record({ role: 'radio', text: 'the desk under the window sounds good' })
@@ -473,22 +499,28 @@ describe('forget beats a fold that is already in flight (spec 05-01 §3.5)', () 
   it('refuses a compaction whose slice predates the forget', () => {
     const c = clock(at('2026-09-01'))
     const path = dir()
-    writeFileSync(join(path, 'profile.md'), '(About the listener)\n- Likes the quiet hour [seen 2026-08-30]')
+    seedProfile(path, [shaped('- Likes the quiet hour [src hand] [seen 2026-08-30]')])
     const store = new PersistentMemoryStore({ dir: path, now: c.now })
     store.record({ role: 'user', text: 'my friend Sarah moved to Lisbon last spring' })
 
     // The fold reads its slice, then waits on the model...
     const slice = store.compactionSlice()
+    const [sarah] = cites(slice.turns)
     // ...and the listener asks to forget while it waits.
     expect(store.forget('Sarah').rows).toBe(1)
     // The fold comes back holding a profile derived from what is now erased.
-    store.applyCompaction('(About the listener)\n- Friend Sarah, in Lisbon', slice.throughTs)
+    expect(
+      store.applyCompaction(shaped(`- Friend Sarah, in Lisbon [src ${sarah}]`), slice.throughTs),
+    ).toBe(false)
 
     expect(store.profile()).not.toContain('Sarah')
     expect(readFileSync(join(path, 'profile.md'), 'utf-8')).not.toContain('Sarah')
     // A fold started AFTER the forget still applies normally.
+    store.record({ role: 'user', text: 'the kettle is on again this evening' })
     const fresh = store.compactionSlice()
-    store.applyCompaction('(About the listener)\n- Likes tea', fresh.throughTs)
+    expect(
+      store.applyCompaction(shaped(`- Likes tea [src ${cites(fresh.turns)[0]}]`), fresh.throughTs),
+    ).toBe(true)
     expect(store.profile()).toContain('Likes tea')
   })
 })
@@ -542,7 +574,8 @@ describe('a bootstrapped [stable] fact outlives the fade horizon (spec 05-01 §3
     ].join('\n')
     const stamped = stampDates(bootstrapped, '2026-09-08')
     const { live, faded } = fadeFacts(stamped, at('2026-09-08') + (FACT_FADE_DAYS + 1) * 86400)
-    expect(live).toContain('- Name they go by: Z; speaks Chinese [stable] [seen 2026-09-08]')
+    // Canonical tag order, the spec 05-01 §3.3 example's: [src] [seen] [stable].
+    expect(live).toContain('- Name they go by: Z; speaks Chinese [seen 2026-09-08] [stable]')
     expect(faded).toEqual(['- Debugging a memory layer in TypeScript this week [seen 2026-09-08]'])
   })
 })
