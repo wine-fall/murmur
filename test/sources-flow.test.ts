@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest'
 import { SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { runSources, SOURCES_ONBOARDING_LINE, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
+import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
@@ -32,7 +33,13 @@ class FakeSource implements TasteSource {
   }
 }
 
-function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts>; onCookieDrop?: () => void } = {}) {
+type SpotifyOutcome = 'ok' | 'timeout' | 'esc'
+
+function build(
+  lines: string[],
+  over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts>; onCookieDrop?: () => void } = {},
+  spotifyOutcome: SpotifyOutcome = 'ok',
+) {
   const dir = mkdtempSync(join(tmpdir(), 'murmur-flow-'))
   const store = new SourcesStore({ path: join(dir, 'sources.json'), tasteDir: join(dir, 'taste') })
   const host = new FakeHost()
@@ -51,11 +58,11 @@ function build(lines: string[], over: Partial<Omit<SourcesFlowDeps, 'mounts'>> &
       hooks.onRedirect('http://127.0.0.1:39917/callback')
       hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
       mounted.push(`spotify:${clientId}`)
-      if (clientId === 'esc') {
+      if (spotifyOutcome === 'esc') {
         host.pressEsc()
         return hooks.cancelled() ? { ok: false, reason: 'cancelled' } : { ok: true, who: 'x', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
       }
-      return clientId === 'timeout' ? { ok: false, reason: 'timeout' } : { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
+      return spotifyOutcome === 'timeout' ? { ok: false, reason: 'timeout' } : { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
     },
     qishui: async (show, cancelled) => {
       show('https://example.com/qr')
@@ -153,19 +160,41 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos.some((l) => l.includes('one of chrome, chromium, brave, edge, firefox, safari, vivaldi, opera'))).toBe(true)
   })
 
-  it('mounts Spotify: the four steps, the redirect URI verbatim, the client id, who', async () => {
-    const { host, deps, store, mounted } = build(['mount spotify', 'client-xyz', 'done'])
-    await runSources(deps)
-    const steps = host.infos.find((l) => l.includes('developer.spotify.com/dashboard'))!
-    expect(steps).toContain('http://127.0.0.1:39917/callback')
-    expect(host.asks.some((a) => /client id/i.test(a.text))).toBe(true)
-    expect(mounted).toEqual(['spotify:client-xyz'])
+  // The bundled id is what an unconfigured machine mounts on — so the two
+  // tests below own the variable outright rather than reading whatever the
+  // developer running them has set.
+  const withClientIdEnv = async (value: string | undefined, body: () => Promise<void>): Promise<void> => {
+    const before = process.env[CLIENT_ID_ENV]
+    if (value === undefined) delete process.env[CLIENT_ID_ENV]
+    else process.env[CLIENT_ID_ENV] = value
+    try {
+      await body()
+    } finally {
+      if (before === undefined) delete process.env[CLIENT_ID_ENV]
+      else process.env[CLIENT_ID_ENV] = before
+    }
+  }
+
+  it('mounts Spotify straight into the browser: no app to register, no client id asked for', async () => {
+    const { host, deps, store, mounted } = build(['mount spotify', 'done'])
+    await withClientIdEnv(undefined, () => runSources(deps))
+    // The developer-portal walkthrough and its question are both gone: the
+    // bundled client id carries the read-only scopes on its own.
+    expect(host.infos.some((l) => l.includes('developer.spotify.com'))).toBe(false)
+    expect(host.asks.some((a) => /client id/i.test(a.text))).toBe(false)
+    expect(mounted).toEqual([`spotify:${BUNDLED_CLIENT_ID}`])
     expect(host.infos).toContain('signed in as Listener')
-    expect(store.read().spotify).toMatchObject({ clientId: 'client-xyz', status: 'ok' })
+    expect(store.read().spotify).toMatchObject({ clientId: BUNDLED_CLIENT_ID, status: 'ok' })
+  })
+
+  it('a listener with their own app overrides the bundled client id through the environment', async () => {
+    const { deps, mounted } = build(['mount spotify', 'done'])
+    await withClientIdEnv('client-of-their-own', () => runSources(deps))
+    expect(mounted).toEqual(['spotify:client-of-their-own'])
   })
 
   it('a Spotify callback that never arrives is the §3.7 line; the consent URL is printed either way', async () => {
-    const { host, deps, store } = build(['mount spotify', 'timeout', 'done'])
+    const { host, deps, store } = build(['mount spotify', 'done'], {}, 'timeout')
     await runSources(deps)
     expect(host.infos).toContain("didn't hear back from Spotify — /sources to try again.")
     expect(host.infos.some((l) => l.includes('https://accounts.spotify.com/authorize'))).toBe(true)
@@ -173,7 +202,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('Esc during the Spotify wait cancels and writes nothing', async () => {
-    const { host, deps, store } = build(['mount spotify', 'esc', 'done'])
+    const { host, deps, store } = build(['mount spotify', 'done'], {}, 'esc')
     await runSources(deps)
     expect(host.infos).toContain('cancelled — nothing was written.')
     expect(store.read()).toEqual({})

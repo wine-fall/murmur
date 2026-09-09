@@ -1,9 +1,8 @@
 // Spotify as a read-only taste source (spec 14 §2.8, §6): OAuth 2.0 PKCE
-// against the listener's OWN registered app (no client secret, no bundled
-// client id — Development Mode ties quota to the app), a local redirect on
-// 127.0.0.1, refresh on expiry, and the platform's own rankings: top
-// artists, top tracks (medium term), liked tracks, playlist names. A free
-// account is enough; playback is out of scope by decision.
+// (no client secret), a local redirect on 127.0.0.1, refresh on expiry, and
+// the platform's own rankings: top artists, top tracks (medium term), liked
+// tracks, playlist names. A free account is enough; playback is out of scope
+// by decision.
 //
 // Every response is an untrusted boundary: zod at the edge, a refused
 // refresh as the typed failure.
@@ -27,16 +26,42 @@ export const CALLBACK_TIMEOUT_MS = 3 * 60_000
 // is fixed and only falls back to an ephemeral one when it is taken.
 export const SPOTIFY_CALLBACK_PORT = 39917
 const PAGE = 50
+// The client id murmur ships with: librespot's long-published "keymaster"
+// id. Since August 2026 Spotify's login5 mints *playback* credentials for
+// that id alone — but every scope above is a Web API read, which any client
+// id is granted, and murmur never plays a Spotify stream. So the listener is
+// spared registering an app of their own. One who would rather use theirs
+// sets MURMUR_SPOTIFY_CLIENT_ID.
+export const BUNDLED_CLIENT_ID = '65b708073fc0480ea92a077233ca87bd'
+export const CLIENT_ID_ENV = 'MURMUR_SPOTIFY_CLIENT_ID'
+
+export function spotifyClientId(env: NodeJS.ProcessEnv = process.env): string {
+  const own = env[CLIENT_ID_ENV]?.trim()
+  return own === undefined || own === '' ? BUNDLED_CLIENT_ID : own
+}
 // A token about to expire is refreshed rather than raced.
 const EXPIRY_SLACK_MS = 60_000
+// The bundled client id is shared with every other librespot-based tool, so
+// a short 429 is ordinary weather rather than a failure: it is waited out.
+// Longer than this and the read gives up instead of holding the flow — the
+// mount is already written by then, so /sources retries cheaply.
+const RETRY_AFTER_BUDGET_MS = 10_000
 
 export type SpotifyFetch = (url: string, init?: RequestInit) => Promise<Response>
 
 export type SpotifyEntry = { clientId: string; refreshToken: string; accessToken: string; expiresAt: string }
 export type SpotifyTokens = Pick<SpotifyEntry, 'accessToken' | 'refreshToken' | 'expiresAt'>
 
-export function redirectUri(port: number): string {
-  return `http://127.0.0.1:${port}/callback`
+// OAuth matches a loopback redirect on its path — the port is ignored
+// (RFC 8252 §7.3) — so each client id has to be sent to the path it was
+// registered against: librespot's /login for the bundled one, and the
+// /callback a listener with an app of their own was told to add.
+const BUNDLED_CALLBACK_PATH = '/login'
+const OWN_APP_CALLBACK_PATH = '/callback'
+export const CALLBACK_PATHS = [BUNDLED_CALLBACK_PATH, OWN_APP_CALLBACK_PATH]
+
+export function redirectUri(port: number, clientId: string = spotifyClientId()): string {
+  return `http://127.0.0.1:${port}${clientId === BUNDLED_CLIENT_ID ? BUNDLED_CALLBACK_PATH : OWN_APP_CALLBACK_PATH}`
 }
 
 const base64url = (buf: Buffer): string => buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
@@ -73,7 +98,7 @@ export async function listenForCallback(preferredPort = SPOTIFY_CALLBACK_PORT): 
   let expectedState = ''
   const server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-    if (url.pathname !== '/callback') {
+    if (!CALLBACK_PATHS.includes(url.pathname)) {
       res.writeHead(404).end()
       return
     }
@@ -110,6 +135,8 @@ export type SpotifyDeps = {
   fetch?: SpotifyFetch
   timeoutMs?: number
   now?: () => Date
+  // Injected so a test can watch the throttle wait without taking it.
+  sleep?: (ms: number) => Promise<void>
 }
 
 export type SpotifyMountDeps = SpotifyDeps & {
@@ -192,7 +219,7 @@ export type SpotifyMountResult = MountResult<SpotifyEntry> | { ok: false; reason
 export async function mountSpotify(clientId: string, deps: SpotifyMountDeps): Promise<SpotifyMountResult> {
   const listener = await (deps.listen ?? listenForCallback)()
   try {
-    const redirect = redirectUri(listener.port)
+    const redirect = redirectUri(listener.port, clientId)
     deps.onRedirect?.(redirect)
     const { verifier, challenge } = pkcePair(deps.random?.())
     const state = base64url(deps.random?.() ?? randomBytes(16))
@@ -304,7 +331,13 @@ class SpotifyClient {
       await this.refresh()
       response = await this.bearer(path, query)
     }
-    if (response.status === 429) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+    if (response.status === 429) {
+      const waitMs = Number(response.headers.get('retry-after') ?? '0') * 1000
+      if (waitMs <= 0 || waitMs > RETRY_AFTER_BUDGET_MS) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+      await (this.deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(waitMs)
+      response = await this.bearer(path, query)
+      if (response.status === 429) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+    }
     if (response.status === 401 || response.status === 403) throw new SourceAuthError('spotify', 'expired', `HTTP ${response.status} on ${path}`)
     if (!response.ok) throw new Error(`spotify ${path}: HTTP ${response.status}`)
     return response.json()

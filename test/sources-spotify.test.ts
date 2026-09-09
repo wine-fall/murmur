@@ -3,7 +3,7 @@
 // follow the Web API reference; the user's account is the smoke (§5.7).
 import { describe, expect, it } from 'vitest'
 
-import { mountSpotify, pkcePair, redirectUri, SPOTIFY_CALLBACK_PORT, spotifyAuthUrl, SpotifySource, type SpotifyFetch } from '../src/music/sources/spotify.ts'
+import { BUNDLED_CLIENT_ID, listenForCallback, mountSpotify, pkcePair, redirectUri, SPOTIFY_CALLBACK_PORT, spotifyAuthUrl, SpotifySource, type SpotifyFetch } from '../src/music/sources/spotify.ts'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string }
 
@@ -31,7 +31,7 @@ describe('PKCE', () => {
   })
 
   it('builds the authorize URL with the three read scopes and the exact redirect', () => {
-    const url = new URL(spotifyAuthUrl('client-1', redirectUri(SPOTIFY_CALLBACK_PORT), 'state-1', 'chal'))
+    const url = new URL(spotifyAuthUrl('client-1', redirectUri(SPOTIFY_CALLBACK_PORT, 'client-1'), 'state-1', 'chal'))
     expect(url.origin + url.pathname).toBe('https://accounts.spotify.com/authorize')
     expect(url.searchParams.get('client_id')).toBe('client-1')
     expect(url.searchParams.get('response_type')).toBe('code')
@@ -196,5 +196,112 @@ describe('SpotifySource', () => {
   it('a 429 is rate limiting', async () => {
     const source = new SpotifySource(ENTRY, { fetch: fakeFetch({ '/v1/me/top/artists': () => ({ body: {}, status: 429 }) }).fetch, now: () => new Date('2026-09-06T10:00:00Z'), onTokens: () => {} })
     await expect(source.snapshot()).rejects.toMatchObject({ source: 'spotify', reason: 'rate-limited' })
+  })
+})
+
+describe('the redirect URI follows the client id that will be used', () => {
+  // OAuth matches a loopback redirect on its path — the port is ignored
+  // (RFC 8252 §7.3) — so the bundled id has to be sent to the path it was
+  // registered against, which is librespot's /login, not our own /callback.
+  it('the bundled id redirects to /login, an app of the listener\'s own to /callback', () => {
+    expect(redirectUri(SPOTIFY_CALLBACK_PORT, BUNDLED_CLIENT_ID)).toBe('http://127.0.0.1:39917/login')
+    expect(redirectUri(SPOTIFY_CALLBACK_PORT, 'an-app-of-their-own')).toBe('http://127.0.0.1:39917/callback')
+  })
+
+  it('mounting on the bundled id asks Spotify for /login and answers there', async () => {
+    let consent = ''
+    const listen = async () => {
+      const real = await listenForCallback(0)
+      return real
+    }
+    const listener = await listen()
+    try {
+      const mounting = mountSpotify(BUNDLED_CLIENT_ID, {
+        listen: async () => listener,
+        openUrl: (url) => (consent = url),
+        timeoutMs: 2000,
+        fetch: async (url) =>
+          new Response(
+            JSON.stringify(
+              String(url).includes('/api/token')
+                ? { access_token: 'a', refresh_token: 'r', expires_in: 3600 }
+                : { display_name: 'Listener', id: 'listener-1' },
+            ),
+          ),
+      })
+      // Wait for the consent URL, then knock on the path it named.
+      while (consent === '') await new Promise((r) => setTimeout(r, 5))
+      const redirect = new URL(new URL(consent).searchParams.get('redirect_uri')!)
+      expect(redirect.pathname).toBe('/login')
+      const state = new URL(consent).searchParams.get('state')!
+      const answer = await fetch(`http://127.0.0.1:${listener.port}${redirect.pathname}?state=${encodeURIComponent(state)}&code=the-code`)
+      expect(answer.status).toBe(200)
+      await mounting
+    } finally {
+      listener.close()
+    }
+  })
+})
+
+describe('a throttled read waits rather than throwing the mount away (spec 14 §3.7)', () => {
+  // The bundled client id is shared with every other librespot-based tool,
+  // so a short 429 is ordinary weather. Discarding a completed consent over
+  // seven seconds would cost the listener the whole authorization.
+  const entry = { clientId: BUNDLED_CLIENT_ID, refreshToken: 'r', accessToken: 'a', expiresAt: '2099-01-01T00:00:00.000Z' }
+
+  it('honours Retry-After and returns the read that follows', async () => {
+    const waits: number[] = []
+    let calls = 0
+    const fetch: SpotifyFetch = async () => {
+      calls++
+      return calls === 1
+        ? new Response('{"error":{"status":429}}', { status: 429, headers: { 'retry-after': '2' } })
+        : new Response(JSON.stringify({ display_name: 'Listener', id: 'l1' }))
+    }
+    const source = new SpotifySource(entry, { fetch, sleep: async (ms) => void waits.push(ms), onTokens: () => {} })
+    expect(await source.verify()).toEqual({ ok: true, who: 'Listener' })
+    expect(waits).toEqual([2000])
+    expect(calls).toBe(2)
+  })
+
+  it('gives up as rate-limited when the throttle outlasts the budget', async () => {
+    const waits: number[] = []
+    const fetch: SpotifyFetch = async () => new Response('{"error":{"status":429}}', { status: 429, headers: { 'retry-after': '30' } })
+    const source = new SpotifySource(entry, { fetch, sleep: async (ms) => void waits.push(ms), onTokens: () => {} })
+    await expect(source.snapshot()).rejects.toMatchObject({ source: 'spotify', reason: 'rate-limited' })
+    // A wait longer than the budget is never taken: it fails fast instead.
+    expect(waits).toEqual([])
+  })
+  it('a throttle on the identity read does not throw away a consent already given', async () => {
+    // Observed on the real platform (2026-09-08): consent granted, code
+    // exchanged, and then /me answered 429 with Retry-After 7 — which used
+    // to surface as "could not reach Spotify" and lose the whole mount.
+    const waits: number[] = []
+    let me = 0
+    const listener = await listenForCallback(0)
+    let consent = ''
+    try {
+      const mounting = mountSpotify(BUNDLED_CLIENT_ID, {
+        listen: async () => listener,
+        openUrl: (url) => (consent = url),
+        timeoutMs: 2000,
+        sleep: async (ms) => void waits.push(ms),
+        fetch: async (url) => {
+          if (String(url).includes('/api/token')) return new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', expires_in: 3600 }))
+          me++
+          return me === 1
+            ? new Response('{"error":{"status":429}}', { status: 429, headers: { 'retry-after': '7' } })
+            : new Response(JSON.stringify({ display_name: 'Listener', id: 'l1' }))
+        },
+      })
+      while (consent === '') await new Promise((r) => setTimeout(r, 5))
+      const state = new URL(consent).searchParams.get('state')!
+      await fetch(`http://127.0.0.1:${listener.port}/login?state=${encodeURIComponent(state)}&code=the-code`)
+      const result = await mounting
+      expect(result).toMatchObject({ ok: true, who: 'Listener' })
+      expect(waits).toEqual([7000])
+    } finally {
+      listener.close()
+    }
   })
 })
