@@ -41,6 +41,11 @@ export function spotifyClientId(env: NodeJS.ProcessEnv = process.env): string {
 }
 // A token about to expire is refreshed rather than raced.
 const EXPIRY_SLACK_MS = 60_000
+// The bundled client id is shared with every other librespot-based tool, so
+// a short 429 is ordinary weather rather than a failure: it is waited out.
+// Longer than this and the read gives up instead of holding the flow — the
+// mount is already written by then, so /sources retries cheaply.
+const RETRY_AFTER_BUDGET_MS = 10_000
 
 export type SpotifyFetch = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -130,6 +135,8 @@ export type SpotifyDeps = {
   fetch?: SpotifyFetch
   timeoutMs?: number
   now?: () => Date
+  // Injected so a test can watch the throttle wait without taking it.
+  sleep?: (ms: number) => Promise<void>
 }
 
 export type SpotifyMountDeps = SpotifyDeps & {
@@ -324,7 +331,13 @@ class SpotifyClient {
       await this.refresh()
       response = await this.bearer(path, query)
     }
-    if (response.status === 429) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+    if (response.status === 429) {
+      const waitMs = Number(response.headers.get('retry-after') ?? '0') * 1000
+      if (waitMs <= 0 || waitMs > RETRY_AFTER_BUDGET_MS) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+      await (this.deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms))))(waitMs)
+      response = await this.bearer(path, query)
+      if (response.status === 429) throw new SourceAuthError('spotify', 'rate-limited', `HTTP 429 on ${path}`)
+    }
     if (response.status === 401 || response.status === 403) throw new SourceAuthError('spotify', 'expired', `HTTP ${response.status} on ${path}`)
     if (!response.ok) throw new Error(`spotify ${path}: HTTP ${response.status}`)
     return response.json()
