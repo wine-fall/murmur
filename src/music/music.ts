@@ -27,7 +27,7 @@ import { z } from 'zod'
 
 import type { AudioClip, Catalogue, MusicProvider, TrackCandidate } from '../contracts.ts'
 import { classifyAuthFailure, SourceAuthError } from './sources/auth.ts'
-import type { CookieLease } from './sources/cookies.ts'
+import { BrowserCookieError, type CookieLease } from './sources/cookies.ts'
 import { sourceOfRef, type CookieSource } from './sources/store.ts'
 
 const debug = debuglog('murmur')
@@ -171,7 +171,19 @@ export class YtDlpMusicProvider implements MusicProvider {
   // (success or failure). A failure for a mounted host is read for its auth
   // shape (spec 14 §2.6); every other failure passes through as it always did.
   private async withCookie(source: CookieSource | null, work: (cookie: string[]) => Promise<string>): Promise<string> {
-    const lease = source === null ? null : ((await this.opts.cookies?.(source)) ?? null)
+    // A cookie store that cannot be read is a mount diagnosis, not a reason
+    // to refuse the call: a public track resolves anonymously, exactly as it
+    // did before the reader learned to report its failures. /sources is where
+    // the obstacle gets said out loud.
+    let lease: CookieLease | null = null
+    if (source !== null) {
+      try {
+        lease = (await this.opts.cookies?.(source)) ?? null
+      } catch (err) {
+        if (!(err instanceof BrowserCookieError)) throw err
+        debug('music.cookies %s unreadable: %s', source, err.reason)
+      }
+    }
     try {
       return await work(lease?.args ?? [])
     } catch (err) {

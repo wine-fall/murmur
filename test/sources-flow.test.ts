@@ -11,6 +11,8 @@ import { SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { runSources, SOURCES_ONBOARDING_LINE, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
+import { BrowserCookieError } from '../src/music/sources/cookies.ts'
+import { CHROME_PROFILE_ENV } from '../src/music/sources/flow.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
@@ -53,7 +55,10 @@ function build(
   const mounts: SourceMounts = {
     youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
     bilibili: async (b) => (mounted.push(`bilibili:${b.browser}`), { ok: false, reason: 'login-required' }),
-    netease: async (b) => (mounted.push(`netease:${b.browser}`), { ok: true, who: 'Chen X', entry: { browser: b.browser, userId: '1', likedPlaylistId: '2' } }),
+    netease: async (b) => (
+      mounted.push(`netease:${b.browser}`),
+      { ok: true, who: 'Chen X', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }), userId: '1', likedPlaylistId: '2' } }
+    ),
     spotify: async (clientId, hooks) => {
       hooks.onRedirect('http://127.0.0.1:39917/callback')
       hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
@@ -103,26 +108,23 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.busy).toBe(false)
   })
 
-  it('mounts a cookie source: browser question, verify, first snapshot, written, said', async () => {
-    const { host, deps, store, mounted } = build(['mount youtube', 'chrome:Profile 1', 'done'], { platform: 'darwin' })
+  it('mounts a cookie source without asking anything: Chrome is read, verified, snapshotted, said', async () => {
+    const { host, deps, store, mounted } = build(['mount youtube', 'done'], { platform: 'darwin' })
     await runSources(deps)
-    const browserAsk = host.asks[1]!.text
-    expect(browserAsk).toMatch(/Which browser are you signed in to YouTube with\?/)
-    expect(browserAsk).toMatch(/Keychain/)
-    expect(browserAsk).toMatch(/Full Disk Access/)
-    expect(browserAsk).toMatch(/Firefox/)
-    expect(mounted).toEqual(['youtube:chrome:Profile 1'])
+    // The browser question is gone entirely — murmur reads the one browser
+    // it also opens for signing in, so there is nothing to get wrong.
+    expect(host.asks.some((a) => /which browser/i.test(a.text))).toBe(false)
+    expect(mounted).toEqual(['youtube:chrome:'])
     expect(host.infos).toContain('signed in as Zach G')
     expect(host.infos.some((l) => /^done — 2 items from YouTube; I'll keep it fresh\.$/.test(l))).toBe(true)
-    expect(store.read().youtube).toMatchObject({ browser: 'chrome', profile: 'Profile 1', status: 'ok' })
+    expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok' })
     expect(store.readSnapshot('youtube')?.items).toHaveLength(2)
     expect(host.debugs).toContain('sources.mount youtube')
-    // The menu comes back with the mount listed.
     expect(host.infos.some((l) => l.startsWith('mounted: YouTube (1 liked, 1 playlist · read just now)'))).toBe(true)
   })
 
   it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
-    const { host, deps, store } = build(['mount netease', 'firefox', 'done'])
+    const { host, deps, store } = build(['mount netease', 'done'])
     store.mount('netease', { browser: 'chrome', userId: 'old', likedPlaylistId: '1' })
     store.writeSnapshot({ source: 'netease', takenAt: '2026-09-01T00:00:00.000Z', items: [{ kind: 'liked', title: 'the old account' }] })
     // The first read of the new account fails: better no taste than the
@@ -138,26 +140,64 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos.some((l) => l.includes('could not read NetEase right now'))).toBe(true)
   })
 
-  it('forgets the cached cookie export when a mount finds no login, so the retry after signing in works', async () => {
+  it('no login opens the sign-in page in Chrome and waits, instead of sending the listener away', async () => {
     const dropped: number[] = []
-    const { host, deps } = build(['mount bilibili', 'firefox', 'done'], { onCookieDrop: () => dropped.push(1) })
+    const opened: string[] = []
+    // First read finds no login; after the listener signs in and presses
+    // Enter, the second read finds one.
+    let attempt = 0
+    const { host, deps, store } = build(['mount bilibili', '', 'done'], {
+      onCookieDrop: () => dropped.push(1),
+      openUrl: (url) => opened.push(url),
+      mounts: {
+        bilibili: async () => (attempt++ === 0 ? { ok: false, reason: 'login-required' } : { ok: true, who: 'Zach G', entry: { browser: 'chrome', mid: '42' } }),
+      },
+    })
     await runSources(deps)
-    expect(host.infos).toContain('no Bilibili login in firefox — sign in there, then try /sources again.')
+    expect(opened).toEqual(['https://passport.bilibili.com/login'])
+    expect(host.infos.some((l) => /opened Bilibili in Chrome/.test(l))).toBe(true)
+    expect(host.asks.some((a) => /press enter/i.test(a.text))).toBe(true)
+    // The cached export is dropped, or the retry would answer from the read
+    // taken before they signed in.
     expect(dropped).toHaveLength(1)
+    expect(host.infos).toContain('signed in as Zach G')
+    expect(store.read().bilibili).toMatchObject({ browser: 'chrome', status: 'ok' })
   })
 
-  it('a browser with no login says so in the §3.7 words and writes nothing', async () => {
-    const { host, deps, store } = build(['mount bilibili', 'firefox', 'done'])
+  it('still no login after the wait says so plainly and writes nothing', async () => {
+    const { host, deps, store } = build(['mount bilibili', '', 'done'], {
+      openUrl: () => {},
+      mounts: { bilibili: async () => ({ ok: false, reason: 'login-required' }) },
+    })
     await runSources(deps)
-    expect(host.infos).toContain('no Bilibili login in firefox — sign in there, then try /sources again.')
+    expect(host.infos).toContain('still no Bilibili login in Chrome — /sources when you have signed in.')
     expect(store.read()).toEqual({})
   })
 
-  it('an unknown browser name is refused without a call', async () => {
-    const { host, deps, mounted } = build(['mount netease', 'netscape', 'done'])
-    await runSources(deps)
-    expect(mounted).toEqual([])
-    expect(host.infos.some((l) => l.includes('one of chrome, chromium, brave, edge, firefox, safari, vivaldi, opera'))).toBe(true)
+  // The four lies: a browser that is not installed, a cookie store the
+  // terminal may not read, and a missing yt-dlp all used to read as "you are
+  // not signed in", which is advice that cannot work.
+  it('names the real obstacle when the cookie store cannot be read at all', async () => {
+    const cases = [
+      ['no-browser', /I could not find Chrome/],
+      ['no-permission', /Full Disk Access|permission/i],
+      ['no-ytdlp', /yt-dlp/],
+    ] as const
+    for (const [reason, matcher] of cases) {
+      const { host, deps, store } = build(['mount netease', 'done'], {
+        platform: 'darwin',
+        mounts: {
+          netease: async () => {
+            throw new BrowserCookieError('chrome', reason, 'yt-dlp said so')
+          },
+        },
+      })
+      await runSources(deps)
+      expect(host.infos.some((l) => matcher.test(l))).toBe(true)
+      // Never the advice that cannot work.
+      expect(host.infos.some((l) => /sign in there/.test(l))).toBe(false)
+      expect(store.read()).toEqual({})
+    }
   })
 
   // The bundled id is what an unconfigured machine mounts on — so the two
@@ -174,6 +214,62 @@ describe('runSources (spec 14 §3.1)', () => {
       else process.env[CLIENT_ID_ENV] = before
     }
   }
+
+  it('Esc during the sign-in wait cancels: nothing is re-read and nothing is written', async () => {
+    // Esc and Enter both hand back an empty line, so the flow has to consult
+    // the cancel latch — or an Esc would mount the account anyway.
+    let attempts = 0
+    let escape: () => void = () => {}
+    const built = build(['mount bilibili', '', 'done'], {
+      openUrl: () => {},
+      mounts: {
+        bilibili: async () => {
+          attempts++
+          if (attempts === 1) {
+            escape()
+            return { ok: false, reason: 'login-required' }
+          }
+          return { ok: true, who: 'Zach G', entry: { browser: 'chrome', mid: '42' } }
+        },
+      },
+    })
+    const { host, deps, store } = built
+    escape = () => host.pressEsc()
+    await runSources(deps)
+    expect(attempts).toBe(1)
+    expect(store.read()).toEqual({})
+    expect(host.infos).not.toContain('signed in as Zach G')
+  })
+
+  it('an unreadable cookie store quotes yt-dlp rather than claiming Chrome is missing', async () => {
+    const { host, deps } = build(['mount netease', 'done'], {
+      platform: 'win32',
+      mounts: {
+        netease: async () => {
+          throw new BrowserCookieError('chrome', 'unreadable', 'ERROR: Failed to decrypt with DPAPI')
+        },
+      },
+    })
+    await runSources(deps)
+    expect(host.infos.some((l) => /DPAPI/.test(l))).toBe(true)
+    expect(host.infos.some((l) => /could not find Chrome/i.test(l))).toBe(false)
+  })
+
+  // yt-dlp reads "the most recently accessed profile" when none is named, so
+  // a second Chrome profile can silently move a mount to another account.
+  // The question used to let a listener pin one; the environment does now.
+  it('pins the Chrome profile named in the environment', async () => {
+    const before = process.env[CHROME_PROFILE_ENV]
+    process.env[CHROME_PROFILE_ENV] = 'Profile 2'
+    try {
+      const { deps, store } = build(['mount netease', 'done'])
+      await runSources(deps)
+      expect(store.read().netease).toMatchObject({ browser: 'chrome', profile: 'Profile 2' })
+    } finally {
+      if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
+      else process.env[CHROME_PROFILE_ENV] = before
+    }
+  })
 
   it('mounts Spotify straight into the browser: no app to register, no client id asked for', async () => {
     const { host, deps, store, mounted } = build(['mount spotify', 'done'])

@@ -3,6 +3,8 @@
 // client plus the list APIs — shapes captured from real runs, values kept.
 import { describe, expect, it } from 'vitest'
 
+import { BrowserCookieError } from '../src/music/sources/cookies.ts'
+
 import { BilibiliClient, BilibiliSource, mountBilibili, type BilibiliFetch } from '../src/music/sources/bilibili.ts'
 import { flatEntries } from '../src/music/sources/flat.ts'
 import { mountYouTube, YouTubeSource } from '../src/music/sources/youtube.ts'
@@ -178,5 +180,24 @@ describe('Bilibili (spec 14 §2.8)', () => {
     await expect(busy.nav()).rejects.toMatchObject({ source: 'bilibili', reason: 'rate-limited' })
     const gone = new BilibiliClient({ cookie: async () => 'x', fetch: biliFetch({ '/x/v3/fav/folder/created/list-all': { code: -101, message: '<not logged in>' } }).fetch })
     await expect(gone.folders('1')).rejects.toMatchObject({ source: 'bilibili', reason: 'login-required' })
+  })
+})
+
+describe('a cookie store that cannot be read is not a missing login', () => {
+  // who() classifies yt-dlp auth failures and answers null (login-required)
+  // for anything else. A BrowserCookieError is not an auth answer at all —
+  // swallowed, it sent a listener with no yt-dlp to a Google sign-in page.
+  it('mountYouTube lets a BrowserCookieError through', async () => {
+    await expect(
+      mountYouTube(
+        { browser: 'chrome' },
+        {
+          run: async () => '',
+          lease: async () => {
+            throw new BrowserCookieError('chrome', 'no-ytdlp', 'spawn yt-dlp ENOENT')
+          },
+        },
+      ),
+    ).rejects.toBeInstanceOf(BrowserCookieError)
   })
 })

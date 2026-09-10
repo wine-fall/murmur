@@ -77,9 +77,45 @@ describe('exportCookieJar', () => {
     const jar = await exportCookieJar({ browser: 'firefox' }, async (args) => {
       path = args[args.indexOf('--cookies') + 1]!
       throw new Error('could not find firefox cookies database')
-    })
-    expect(jar).toEqual([])
+    }).catch((err: unknown) => err)
+    expect(jar).toMatchObject({ reason: 'no-browser' })
     expect(existsSync(path)).toBe(false)
+  })
+
+  // Five different failures used to arrive as one empty jar, and the flow
+  // read every one of them as "you are not signed in" — which sent a Safari
+  // user to sign in again forever. yt-dlp says which it is; keep its words.
+  it('tells a missing browser, a refused cookie store and a missing yt-dlp apart', async () => {
+    const thrown = async (message: string, extra: Record<string, unknown> = {}): Promise<unknown> =>
+      exportCookieJar({ browser: 'chrome' }, async () => {
+        throw Object.assign(new Error(message), extra)
+      }).catch((err: unknown) => err)
+
+    expect(await thrown('ERROR: could not find chrome cookies database in \'/Users/x/Library\'')).toMatchObject({
+      source: 'chrome',
+      reason: 'no-browser',
+    })
+    expect(await thrown('ERROR: [Errno 1] Operation not permitted: \'/Users/x/Library/Containers/com.apple.Safari\'')).toMatchObject({
+      reason: 'no-permission',
+    })
+    expect(await thrown('spawn yt-dlp ENOENT', { code: 'ENOENT' })).toMatchObject({ reason: 'no-ytdlp' })
+    // A failure yt-dlp words differently — a locked database, a DPAPI
+    // decrypt failure on Windows — must not be reported as "Chrome is not
+    // installed", which is a fix that cannot work.
+    expect(await thrown('ERROR: Could not copy Chrome cookie database')).toMatchObject({ reason: 'unreadable' })
+    expect(await thrown('ERROR: Failed to decrypt with DPAPI')).toMatchObject({ reason: 'unreadable' })
+    // The detail carries yt-dlp's own words, so a listener can be told what
+    // actually went wrong rather than a guess.
+    const err = await thrown('ERROR: [Errno 1] Operation not permitted: \'/x\'')
+    expect(String((err as { detail: string }).detail)).toContain('Operation not permitted')
+  })
+
+  it('an export that worked but holds no row for the site is not a failure — it is a missing login', async () => {
+    const rows = await exportCookieJar({ browser: 'chrome' }, async (args) => {
+      writeFileSync(args[args.indexOf('--cookies') + 1]!, JAR)
+      return ''
+    })
+    expect(cookieHeader(rows, 'example.invalid')).toBe('')
   })
 })
 

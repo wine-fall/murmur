@@ -431,15 +431,45 @@ with a scripted host:
   what would you like to do? [mount <name> | refresh | unmount <name> | done]
 ```
 
-**Mount, cookie sources (YouTube / Bilibili / NetEase)**:
-1. "Which browser are you signed in to <site> with?" — list of `BrowserName`,
-   with the note that yt-dlp reads its cookie store; **macOS**: Chrome-family
-   triggers one Keychain password prompt (say so *before* it appears); Safari
-   needs Full Disk Access for the terminal; Firefox prompts nothing.
-2. `verify()` → "signed in as <who>" or the typed failure in plain words
-   ("that browser has no <site> login — sign in there first, then come back").
-3. First `snapshot()` in the foreground with a progress line (counts, not
+**Mount, cookie sources (YouTube / Bilibili / NetEase)**: nothing is asked.
+*Revised 2026-09-10*: the browser question is gone. murmur reads **Chrome**,
+and opens the sign-in page in **Chrome specifically** — one browser for both
+halves, so the listener cannot sign in somewhere murmur will not look.
+
+1. Read Chrome's cookie store for the site.
+2. **A login is there** → `verify()` → "signed in as <who>".
+3. **No login** → open the site's sign-in page with `chromeOpenerFor` (macOS
+   `open -a "Google Chrome"`), say so, and wait on "press Enter when you have
+   signed in". On Enter, drop the cached export — it answers from before they
+   signed in — and read once more. Still nothing → "still no <site> login in
+   Chrome — /sources when you have signed in". Never a dead end that sends
+   them back through the whole conversation.
+4. **The store could not be read at all** is a different answer, and says
+   which: Chrome not installed, the terminal not allowed to read its cookie
+   store (macOS: Full Disk Access), no yt-dlp, or unreadable for a reason not
+   modelled — a locked database, a Windows DPAPI decrypt failure — which is
+   quoted rather than guessed at. These used to arrive as an empty jar and be
+   reported as "you are not signed in": advice that cannot work, and that
+   loops a Safari user forever. yt-dlp names the failure in its stderr;
+   `classifyCookieFailure` keeps its words and `BrowserCookieError` carries
+   them to the flow. Only a mount is told; **playback degrades to anonymous**
+   as it always did, so an unreadable store never stops a public track from
+   resolving.
+5. First `snapshot()` in the foreground with a progress line (counts, not
    titles); write `sources.json` + the snapshot; "done — I'll keep it fresh".
+
+`$MURMUR_CHROME_PROFILE` pins a Chrome profile. It matters because yt-dlp
+reads "the most recently accessed profile" when none is named, so a second
+profile can otherwise move a mount to another account between refreshes; the
+question used to let a listener pin one, and this keeps that without asking
+the many who have a single profile.
+
+The cost, accepted: a listener who uses only Firefox or Safari cannot mount
+these three. It buys the removal of every failure the question created — an
+uninstalled browser, an unreadable store, a login in the wrong one — and of
+the `BrowserName` list, the `chrome:Profile 1` syntax and the paragraph of
+per-browser caveats that had to be read before answering. Existing mounts
+keep whatever browser they were made with; only new ones are Chrome.
 
 **Mount, Spotify**: open the browser straight away; wait for the callback;
 then as above. Nothing is asked for. *Revised 2026-09-08*: the four-step
@@ -607,9 +637,10 @@ description lists only `youtube`; a real `--plain` run's pick and play are
 byte-identical in their yt-dlp arguments to today's (dev-log diff).
 
 ### 5.2 Mount, cookie source (smoke, each of the three)
-`/sources` → mount → browser named → "signed in as <who>" matches the real
-account → snapshot written with `items.length > 0` → the digest names an
-artist the developer recognises as theirs.
+`/sources` → mount → "signed in as <who>" matches the real account →
+snapshot written with `items.length > 0` → the digest names an artist the
+developer recognises as theirs. With no login in Chrome: the sign-in page
+opens **in Chrome**, and Enter after signing in completes the mount.
 
 ### 5.3 Taste reaches the brain (unit + dev log)
 Fixture snapshots → `renderTasteDigest` golden output; a fake-brain pick

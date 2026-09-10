@@ -9,6 +9,7 @@ import {
   BUG_FORM_URL,
   Director,
   FEATURE_FORM_URL,
+  chromeOpenerFor,
   openerFor,
   steerFromLine,
   type DirectorDeps,
@@ -133,6 +134,16 @@ describe('Director — /bug and /feature-request', () => {
     host.type('/quit')
     await run
     expect(brain.respondCalls).toEqual([])
+  })
+
+  // The taste sources read Chrome's cookie store, so the sign-in page has to
+  // open in Chrome — not in whatever the machine's default browser is. A
+  // listener sent to Safari would sign in where murmur never looks.
+  it('pins Chrome for the sign-in page, per platform', () => {
+    const url = 'https://music.163.com/'
+    expect(chromeOpenerFor('darwin', url)).toEqual({ command: 'open', args: ['-a', 'Google Chrome', url] })
+    expect(chromeOpenerFor('linux', url)).toEqual({ command: 'google-chrome', args: [url] })
+    expect(chromeOpenerFor('win32', url)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `"${url}"`] })
   })
 
   it('picks the desktop opener per platform, never spawn\'s deprecated shell form', () => {

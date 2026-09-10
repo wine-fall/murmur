@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { parseResolveOutput, parseSearchOutput, YtDlpMusicProvider } from '../src/music/music.ts'
+import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 
 // One line of real-shaped `yt-dlp --dump-json` output.
 function hit(overrides: Record<string, unknown> = {}): string {
@@ -127,6 +128,29 @@ describe('YtDlpMusicProvider', () => {
   it('leaves durationS off the clip when yt-dlp does not know the length', async () => {
     const provider = new YtDlpMusicProvider({ run: async () => 'NA\nhttps://stream/audio\n' })
     expect(await provider.resolve('ref')).toEqual({ source: 'https://stream/audio', kind: 'music' })
+  })
+
+  // A browser store that cannot be read is a mount diagnosis, not a reason
+  // to stop playing music: a public NetEase track resolves anonymously, as
+  // it did before the cookie reader learned to report its failures.
+  it('still resolves a mounted source anonymously when its cookie store cannot be read', async () => {
+    const calls: string[][] = []
+    let asked = 0
+    const provider = new YtDlpMusicProvider({
+      run: async (args) => {
+        calls.push(args)
+        return '215\nhttps://stream.example/audio\n'
+      },
+      cookies: async () => {
+        asked++
+        throw new BrowserCookieError('chrome', 'no-permission', 'Operation not permitted')
+      },
+    })
+    const clip = await provider.resolve('https://music.163.com/#/song?id=5')
+    expect(asked).toBe(1)
+    expect(clip.source).toBe('https://stream.example/audio')
+    // The resolve ran with no cookie args, rather than not running at all.
+    expect(calls[0]).not.toContain('--cookies')
   })
 })
 

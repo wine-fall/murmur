@@ -34,7 +34,7 @@ import {
   runGh,
   spawnClipboard,
 } from './support/deliver.ts'
-import { Director, openInBrowser, type MusicWiring, type PacingWiring } from './director/director.ts'
+import { Director, openInBrowser, openInChrome, type MusicWiring, type PacingWiring } from './director/director.ts'
 import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './support/update.ts'
 import { AudioEngine } from './audio/engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './audio/ffmpeg.ts'
@@ -975,6 +975,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
           mounts: defaultMounts(taste.build),
           build: (id, entry) => buildSource(id, entry, taste.build),
           forgetCookies: () => taste.build.jars.drop(),
+          openUrl: openInChrome,
         }),
     }),
     // The one production wiring of the desktop opener: the Director has no

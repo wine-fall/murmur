@@ -10,8 +10,49 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { z } from 'zod'
+
 import type { YtDlpRunner } from '../music.ts'
 import { browserArgs, type BrowserName } from './store.ts'
+
+// Why a cookie store could not be read. yt-dlp says which in its stderr, and
+// the three are answered with three different things: install it, grant the
+// terminal access, install yt-dlp. An export that succeeds but holds no row
+// for the site is NOT one of these — that is simply a missing login.
+export type CookieFailure = 'no-browser' | 'no-permission' | 'no-ytdlp' | 'unreadable'
+
+export class BrowserCookieError extends Error {
+  readonly source: BrowserName
+  readonly reason: CookieFailure
+  readonly detail: string
+  constructor(source: BrowserName, reason: CookieFailure, detail: string) {
+    super(`${source}: ${reason}`)
+    this.name = 'BrowserCookieError'
+    this.source = source
+    this.reason = reason
+    this.detail = detail
+  }
+}
+
+// execFile rejects with the child's own output attached; that text is the
+// only evidence of which failure this was, so it is read at the boundary and
+// narrowed here rather than discarded.
+const SpawnFailure = z.object({ message: z.string().optional(), stderr: z.string().optional(), code: z.string().optional() })
+
+export function classifyCookieFailure(err: unknown): { reason: CookieFailure; detail: string } {
+  const parsed = SpawnFailure.safeParse(err)
+  const fields = parsed.success ? parsed.data : {}
+  const detail = (fields.stderr ?? '').trim() !== '' ? fields.stderr!.trim() : (fields.message ?? String(err)).trim()
+  if (fields.code === 'ENOENT' || /\bENOENT\b/.test(detail)) return { reason: 'no-ytdlp', detail }
+  if (/operation not permitted|permission denied/i.test(detail)) return { reason: 'no-permission', detail }
+  // Only yt-dlp's own words for an absent store may claim the browser is not
+  // installed. Everything else — a locked database, a DPAPI decrypt failure —
+  // is unreadable for a reason we do not model, and is quoted rather than
+  // guessed at: telling someone to install the Chrome they are running is a
+  // fix that cannot work.
+  if (/could not find .* cookies database|no such file or directory/i.test(detail)) return { reason: 'no-browser', detail }
+  return { reason: 'unreadable', detail }
+}
 
 // One jar row: what the clients read (domain, name, value) and the line
 // itself, so the rows a site needs can be written back as a jar for yt-dlp.
@@ -72,14 +113,20 @@ export async function exportCookieJar(
   const dir = mkdtempSync(join(tmpdir(), 'murmur-jar-'))
   const path = join(dir, 'cookies.txt')
   try {
-    // The extraction of the bogus URL fails; that is expected and ignored —
-    // the jar is written by yt-dlp's exit regardless.
-    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL]).catch(() => '')
+    // The extraction of the bogus URL fails; that is expected — the jar is
+    // written by yt-dlp's exit regardless. A run that wrote no jar at all is
+    // a real failure, and its own words say which one.
+    let failure: unknown = null
+    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL]).catch((err: unknown) => {
+      failure = err
+      return ''
+    })
     let text: string
     try {
       text = readFileSync(path, 'utf-8')
     } catch {
-      return []
+      const { reason, detail } = classifyCookieFailure(failure)
+      throw new BrowserCookieError(entry.browser, reason, detail)
     }
     return parseNetscapeJar(text)
   } finally {

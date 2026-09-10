@@ -84,8 +84,25 @@ export function openerFor(platform: NodeJS.Platform, url: string): { command: st
 
 // The desktop opener the app wires in. Exported rather than defaulted: the
 // Director must never be able to reach a real browser on its own.
+// The taste sources read Chrome's cookie store, so a sign-in page must open
+// in Chrome specifically: sent to the machine's default browser, a listener
+// would sign in somewhere murmur never looks.
+export function chromeOpenerFor(platform: NodeJS.Platform, url: string): { command: string; args: string[] } {
+  if (platform === 'darwin') return { command: 'open', args: ['-a', 'Google Chrome', url] }
+  // Quoted for the same reason as `openerFor`: cmd re-parses its own line.
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', 'chrome', `"${url}"`] }
+  return { command: 'google-chrome', args: [url] }
+}
+
+export function openInChrome(url: string): void {
+  spawnDetached(chromeOpenerFor(process.platform, url))
+}
+
 export function openInBrowser(url: string): void {
-  const { command, args } = openerFor(process.platform, url)
+  spawnDetached(openerFor(process.platform, url))
+}
+
+function spawnDetached({ command, args }: { command: string; args: string[] }): void {
   const child = spawn(command, args, { stdio: 'ignore', detached: true })
   child.on('error', () => {}) // a missing opener is not a crash; the printed URL stands in
   child.unref()
