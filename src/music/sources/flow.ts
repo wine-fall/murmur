@@ -9,13 +9,14 @@ import type { Host } from '../../host/host.ts'
 import { ask } from '../../host/host.ts'
 import { escPulse, lineReader, type QuitLatch } from '../../setup/guide.ts'
 import { AUTH_LINES, type SourceAuthWatch } from './auth.ts'
+import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
 import type { QishuiMountResult } from './qishui.ts'
 import { qrHalfBlocks } from './qishui.ts'
 import type { TasteRefresher } from './refresh.ts'
 import { redirectUri, SPOTIFY_CALLBACK_PORT, spotifyClientId, type SpotifyMountResult } from './spotify.ts'
-import { BROWSERS, type BrowserName, type SourceEntry, type SourcesStore } from './store.ts'
+import type { BrowserName, SourceEntry, SourcesStore } from './store.ts'
 import { SOURCE_IDS, SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
 import type { YouTubeEntry } from './youtube.ts'
 
@@ -51,6 +52,9 @@ export type SourcesFlowDeps = {
   // found no login sends the listener off to sign in, and their retry has to
   // reach the browser again rather than the answer from a minute ago.
   forgetCookies?: () => void
+  // Opens a URL in the browser murmur also reads (Chrome), so the listener
+  // cannot sign in somewhere murmur will not look.
+  openUrl?: (url: string) => void
   platform?: NodeJS.Platform
   now?: () => Date
 }
@@ -109,20 +113,30 @@ function statusLine(store: SourcesStore, now: Date): string {
   return `mounted: ${rows.join(' · ')}${available.length === 0 ? '' : ` · available: ${available.join(', ')}`}`
 }
 
-function parseBrowser(line: string): BrowserPick | null {
-  const [name, ...rest] = line.trim().split(':')
-  const browser = BROWSERS.find((b) => b === name?.toLowerCase())
-  if (browser === undefined) return null
-  const profile = rest.join(':').trim()
-  return { browser, ...(profile !== '' && { profile }) }
+// The one browser murmur reads — and the one it opens for signing in, so
+// the two can never disagree. Asking which browser only ever produced
+// answers murmur then had to fail on: a browser that is not installed, one
+// whose cookie store it may not read, or one never signed in to (§3.1).
+const CHROME = 'chrome' as const
+
+// Where each source is signed in, opened in Chrome when no login is found.
+const SIGN_IN_URL: Record<CookieSource, string> = {
+  youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
+  bilibili: 'https://passport.bilibili.com/login',
+  netease: 'https://music.163.com/',
 }
 
-const BROWSER_QUESTION = (site: string, platform: NodeJS.Platform): string =>
-  `Which browser are you signed in to ${site} with? One of ${BROWSERS.join(', ')} — add :profile for a named profile (chrome:Profile 1). ` +
-  'yt-dlp reads that browser\'s cookie store; the cookie itself is never copied or saved.' +
-  (platform === 'darwin'
-    ? ' On macOS a Chrome-family browser asks for your Keychain password once (that is the cookie store unlocking); Safari needs Full Disk Access for this terminal; Firefox asks nothing.'
-    : '')
+// What to say when the cookie store cannot be read at all. Each of these
+// used to arrive as "sign in there", which is advice that cannot work: no
+// one can sign in to a browser they do not have, and signing in again never
+// grants a terminal Full Disk Access.
+function obstacleLine(reason: CookieFailure, platform: NodeJS.Platform): string {
+  if (reason === 'no-ytdlp') return 'I need yt-dlp to read a browser login, and I cannot find it — `brew install yt-dlp`, then /sources again.'
+  if (reason === 'no-browser') return 'I could not find Chrome on this machine — the taste sources read your Chrome login, so they need it installed.'
+  return platform === 'darwin'
+    ? 'Chrome is here, but I am not allowed to read its cookie store — give this terminal Full Disk Access (System Settings → Privacy & Security), then /sources again.'
+    : "Chrome is here, but I am not allowed to read its cookie store — check this terminal's permissions, then /sources again."
+}
 
 export async function runSources(deps: SourcesFlowDeps): Promise<void> {
   const { host, store, quit } = deps
@@ -204,26 +218,41 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
 async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string>, id: CookieSource, platform: NodeJS.Platform): Promise<void> {
   const { host } = deps
   const site = SOURCE_NAMES[id]
-  ask(host, BROWSER_QUESTION(site, platform), 'question')
-  const answer = await read()
-  if (answer.trim() === '' || deps.quit.requested) return
-  const pick = parseBrowser(answer)
-  if (pick === null) {
-    host.info(`that is not a browser I can read — one of ${BROWSERS.join(', ')}.`)
-    return
+  const pick: BrowserPick = { browser: CHROME }
+  host.info(`checking ${site} in Chrome...`)
+  type CookieMount = MountResult<YouTubeEntry> | MountResult<BilibiliEntry> | MountResult<NeteaseEntry>
+  const attempt = async (): Promise<CookieMount | null> => {
+    try {
+      return await deps.mounts[id](pick)
+    } catch (err) {
+      if (err instanceof BrowserCookieError) {
+        host.info(obstacleLine(err.reason, platform))
+        host.debug?.(`sources.cookies ${id} ${err.reason}: ${err.detail}`)
+        return null
+      }
+      host.info(`could not reach ${site} (${err instanceof Error ? err.message : String(err)}) — try /sources again in a moment.`)
+      return null
+    }
   }
-  host.info(`checking ${site} in ${pick.browser}...`)
-  let result: MountResult<YouTubeEntry> | MountResult<BilibiliEntry> | MountResult<NeteaseEntry>
-  try {
-    result = await deps.mounts[id](pick)
-  } catch (err) {
-    host.info(`could not reach ${site} (${err instanceof Error ? err.message : String(err)}) — try /sources again in a moment.`)
-    return
-  }
+  let result = await attempt()
+  if (result === null) return
   if (!result.ok) {
+    // Not a dead end: open the page they sign in on, in the browser that
+    // will then be read, and wait — rather than sending them back through
+    // the whole /sources conversation.
+    deps.openUrl?.(SIGN_IN_URL[id])
+    host.info(`no ${site} login yet — opened ${site} in Chrome; sign in there.`)
+    ask(host, 'press Enter when you have signed in (or leave it to stop).', 'question')
+    await read()
+    if (deps.quit.requested) return
+    // The cached export answers from before they signed in; drop it first.
     deps.forgetCookies?.()
-    host.info(`no ${site} login in ${pick.browser} — sign in there, then try /sources again.`)
-    return
+    result = await attempt()
+    if (result === null) return
+    if (!result.ok) {
+      host.info(`still no ${site} login in Chrome — /sources when you have signed in.`)
+      return
+    }
   }
   if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
   else if (id === 'bilibili') await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
