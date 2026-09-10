@@ -11,6 +11,7 @@ import { z } from 'zod'
 import type { YtDlpRunner } from '../music.ts'
 import { ytdlpFailureText } from '../music.ts'
 import { classifyAuthFailure, SourceAuthError } from './auth.ts'
+import { BrowserCookieError } from './cookies.ts'
 import type { CookieLease } from './cookies.ts'
 import { flatEntries } from './flat.ts'
 import type { MountResult } from './netease.ts'
@@ -44,6 +45,10 @@ async function who(entry: YouTubeEntry, deps: YouTubeDeps): Promise<string | nul
   try {
     stdout = await leased(deps, entry, (cookie) => deps.run(['--dump-single-json', '--flat-playlist', '--playlist-items', '0', '--no-warnings', ...cookie, ':ytfav']))
   } catch (err) {
+    // A cookie store that could not be read at all is not an answer about
+    // the login: swallowed as one, it sends a listener with no yt-dlp to a
+    // sign-in page that cannot help them.
+    if (err instanceof BrowserCookieError) throw err
     const reason = classifyAuthFailure(ytdlpFailureText(err))
     if (reason !== null && reason !== 'login-required') throw new SourceAuthError('youtube', reason, ytdlpFailureText(err).slice(0, 200))
     return null

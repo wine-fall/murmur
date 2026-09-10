@@ -19,7 +19,7 @@ import { browserArgs, type BrowserName } from './store.ts'
 // the three are answered with three different things: install it, grant the
 // terminal access, install yt-dlp. An export that succeeds but holds no row
 // for the site is NOT one of these — that is simply a missing login.
-export type CookieFailure = 'no-browser' | 'no-permission' | 'no-ytdlp'
+export type CookieFailure = 'no-browser' | 'no-permission' | 'no-ytdlp' | 'unreadable'
 
 export class BrowserCookieError extends Error {
   readonly source: BrowserName
@@ -45,7 +45,13 @@ export function classifyCookieFailure(err: unknown): { reason: CookieFailure; de
   const detail = (fields.stderr ?? '').trim() !== '' ? fields.stderr!.trim() : (fields.message ?? String(err)).trim()
   if (fields.code === 'ENOENT' || /\bENOENT\b/.test(detail)) return { reason: 'no-ytdlp', detail }
   if (/operation not permitted|permission denied/i.test(detail)) return { reason: 'no-permission', detail }
-  return { reason: 'no-browser', detail }
+  // Only yt-dlp's own words for an absent store may claim the browser is not
+  // installed. Everything else — a locked database, a DPAPI decrypt failure —
+  // is unreadable for a reason we do not model, and is quoted rather than
+  // guessed at: telling someone to install the Chrome they are running is a
+  // fix that cannot work.
+  if (/could not find .* cookies database|no such file or directory/i.test(detail)) return { reason: 'no-browser', detail }
+  return { reason: 'unreadable', detail }
 }
 
 // One jar row: what the clients read (domain, name, value) and the line

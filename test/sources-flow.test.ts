@@ -12,6 +12,7 @@ import { runSources, SOURCES_ONBOARDING_LINE, type SourceMounts, type SourcesFlo
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
+import { CHROME_PROFILE_ENV } from '../src/music/sources/flow.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
@@ -54,7 +55,10 @@ function build(
   const mounts: SourceMounts = {
     youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
     bilibili: async (b) => (mounted.push(`bilibili:${b.browser}`), { ok: false, reason: 'login-required' }),
-    netease: async (b) => (mounted.push(`netease:${b.browser}`), { ok: true, who: 'Chen X', entry: { browser: b.browser, userId: '1', likedPlaylistId: '2' } }),
+    netease: async (b) => (
+      mounted.push(`netease:${b.browser}`),
+      { ok: true, who: 'Chen X', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }), userId: '1', likedPlaylistId: '2' } }
+    ),
     spotify: async (clientId, hooks) => {
       hooks.onRedirect('http://127.0.0.1:39917/callback')
       hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
@@ -210,6 +214,62 @@ describe('runSources (spec 14 §3.1)', () => {
       else process.env[CLIENT_ID_ENV] = before
     }
   }
+
+  it('Esc during the sign-in wait cancels: nothing is re-read and nothing is written', async () => {
+    // Esc and Enter both hand back an empty line, so the flow has to consult
+    // the cancel latch — or an Esc would mount the account anyway.
+    let attempts = 0
+    let escape: () => void = () => {}
+    const built = build(['mount bilibili', '', 'done'], {
+      openUrl: () => {},
+      mounts: {
+        bilibili: async () => {
+          attempts++
+          if (attempts === 1) {
+            escape()
+            return { ok: false, reason: 'login-required' }
+          }
+          return { ok: true, who: 'Zach G', entry: { browser: 'chrome', mid: '42' } }
+        },
+      },
+    })
+    const { host, deps, store } = built
+    escape = () => host.pressEsc()
+    await runSources(deps)
+    expect(attempts).toBe(1)
+    expect(store.read()).toEqual({})
+    expect(host.infos).not.toContain('signed in as Zach G')
+  })
+
+  it('an unreadable cookie store quotes yt-dlp rather than claiming Chrome is missing', async () => {
+    const { host, deps } = build(['mount netease', 'done'], {
+      platform: 'win32',
+      mounts: {
+        netease: async () => {
+          throw new BrowserCookieError('chrome', 'unreadable', 'ERROR: Failed to decrypt with DPAPI')
+        },
+      },
+    })
+    await runSources(deps)
+    expect(host.infos.some((l) => /DPAPI/.test(l))).toBe(true)
+    expect(host.infos.some((l) => /could not find Chrome/i.test(l))).toBe(false)
+  })
+
+  // yt-dlp reads "the most recently accessed profile" when none is named, so
+  // a second Chrome profile can silently move a mount to another account.
+  // The question used to let a listener pin one; the environment does now.
+  it('pins the Chrome profile named in the environment', async () => {
+    const before = process.env[CHROME_PROFILE_ENV]
+    process.env[CHROME_PROFILE_ENV] = 'Profile 2'
+    try {
+      const { deps, store } = build(['mount netease', 'done'])
+      await runSources(deps)
+      expect(store.read().netease).toMatchObject({ browser: 'chrome', profile: 'Profile 2' })
+    } finally {
+      if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
+      else process.env[CHROME_PROFILE_ENV] = before
+    }
+  })
 
   it('mounts Spotify straight into the browser: no app to register, no client id asked for', async () => {
     const { host, deps, store, mounted } = build(['mount spotify', 'done'])

@@ -99,6 +99,11 @@ describe('exportCookieJar', () => {
       reason: 'no-permission',
     })
     expect(await thrown('spawn yt-dlp ENOENT', { code: 'ENOENT' })).toMatchObject({ reason: 'no-ytdlp' })
+    // A failure yt-dlp words differently — a locked database, a DPAPI
+    // decrypt failure on Windows — must not be reported as "Chrome is not
+    // installed", which is a fix that cannot work.
+    expect(await thrown('ERROR: Could not copy Chrome cookie database')).toMatchObject({ reason: 'unreadable' })
+    expect(await thrown('ERROR: Failed to decrypt with DPAPI')).toMatchObject({ reason: 'unreadable' })
     // The detail carries yt-dlp's own words, so a listener can be told what
     // actually went wrong rather than a guess.
     const err = await thrown('ERROR: [Errno 1] Operation not permitted: \'/x\'')

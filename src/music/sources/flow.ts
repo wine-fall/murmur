@@ -119,6 +119,17 @@ function statusLine(store: SourcesStore, now: Date): string {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
+// yt-dlp reads "the most recently accessed profile" when none is named, so a
+// listener with a second Chrome profile could find a mount reading the wrong
+// account. The removed question let them pin one; this does, without asking
+// the many who have only one profile.
+export const CHROME_PROFILE_ENV = 'MURMUR_CHROME_PROFILE'
+
+function chromePick(env: NodeJS.ProcessEnv = process.env): BrowserPick {
+  const profile = env[CHROME_PROFILE_ENV]?.trim()
+  return { browser: CHROME, ...(profile !== undefined && profile !== '' && { profile }) }
+}
+
 // Where each source is signed in, opened in Chrome when no login is found.
 const SIGN_IN_URL: Record<CookieSource, string> = {
   youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
@@ -130,9 +141,10 @@ const SIGN_IN_URL: Record<CookieSource, string> = {
 // used to arrive as "sign in there", which is advice that cannot work: no
 // one can sign in to a browser they do not have, and signing in again never
 // grants a terminal Full Disk Access.
-function obstacleLine(reason: CookieFailure, platform: NodeJS.Platform): string {
+function obstacleLine(reason: CookieFailure, detail: string, platform: NodeJS.Platform): string {
   if (reason === 'no-ytdlp') return 'I need yt-dlp to read a browser login, and I cannot find it — `brew install yt-dlp`, then /sources again.'
   if (reason === 'no-browser') return 'I could not find Chrome on this machine — the taste sources read your Chrome login, so they need it installed.'
+  if (reason === 'unreadable') return `I could not read Chrome's cookie store, and yt-dlp did not say why in a way I know: ${detail}`
   return platform === 'darwin'
     ? 'Chrome is here, but I am not allowed to read its cookie store — give this terminal Full Disk Access (System Settings → Privacy & Security), then /sources again.'
     : "Chrome is here, but I am not allowed to read its cookie store — check this terminal's permissions, then /sources again."
@@ -177,7 +189,7 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       if (verb === 'mount' && target !== undefined) {
         if (target === 'spotify') await mountSpotifyFlow(deps, () => cancelled)
         else if (target === 'qishui') await mountQishuiFlow(deps, () => cancelled)
-        else await mountCookieFlow(deps, read, target, platform)
+        else await mountCookieFlow(deps, read, target, platform, () => cancelled)
         continue
       }
       host.info("I didn't catch that — mount <name>, refresh, unmount <name>, or done.")
@@ -215,10 +227,16 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
   }
 }
 
-async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string>, id: CookieSource, platform: NodeJS.Platform): Promise<void> {
+async function mountCookieFlow(
+  deps: SourcesFlowDeps,
+  read: () => Promise<string>,
+  id: CookieSource,
+  platform: NodeJS.Platform,
+  cancelled: () => boolean,
+): Promise<void> {
   const { host } = deps
   const site = SOURCE_NAMES[id]
-  const pick: BrowserPick = { browser: CHROME }
+  const pick = chromePick()
   host.info(`checking ${site} in Chrome...`)
   type CookieMount = MountResult<YouTubeEntry> | MountResult<BilibiliEntry> | MountResult<NeteaseEntry>
   const attempt = async (): Promise<CookieMount | null> => {
@@ -226,7 +244,7 @@ async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string
       return await deps.mounts[id](pick)
     } catch (err) {
       if (err instanceof BrowserCookieError) {
-        host.info(obstacleLine(err.reason, platform))
+        host.info(obstacleLine(err.reason, err.detail, platform))
         host.debug?.(`sources.cookies ${id} ${err.reason}: ${err.detail}`)
         return null
       }
@@ -242,9 +260,12 @@ async function mountCookieFlow(deps: SourcesFlowDeps, read: () => Promise<string
     // the whole /sources conversation.
     deps.openUrl?.(SIGN_IN_URL[id])
     host.info(`no ${site} login yet — opened ${site} in Chrome; sign in there.`)
-    ask(host, 'press Enter when you have signed in (or leave it to stop).', 'question')
+    ask(host, 'press Enter when you have signed in (or Esc to stop).', 'question')
     await read()
-    if (deps.quit.requested) return
+    // Esc answers the read with '' exactly as Enter does, so the latch is
+    // what separates "I have signed in" from "stop" — without it an Esc
+    // would go on to mount the account anyway.
+    if (cancelled() || deps.quit.requested) return
     // The cached export answers from before they signed in; drop it first.
     deps.forgetCookies?.()
     result = await attempt()

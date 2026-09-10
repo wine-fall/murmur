@@ -446,13 +446,23 @@ halves, so the listener cannot sign in somewhere murmur will not look.
    them back through the whole conversation.
 4. **The store could not be read at all** is a different answer, and says
    which: Chrome not installed, the terminal not allowed to read its cookie
-   store (macOS: Full Disk Access), or no yt-dlp. These three used to arrive
-   as an empty jar and be reported as "you are not signed in" — advice that
-   cannot work, and that loops a Safari user forever. yt-dlp names the
-   failure in its stderr; `classifyCookieFailure` keeps its words and
-   `BrowserCookieError` carries them to the flow.
+   store (macOS: Full Disk Access), no yt-dlp, or unreadable for a reason not
+   modelled — a locked database, a Windows DPAPI decrypt failure — which is
+   quoted rather than guessed at. These used to arrive as an empty jar and be
+   reported as "you are not signed in": advice that cannot work, and that
+   loops a Safari user forever. yt-dlp names the failure in its stderr;
+   `classifyCookieFailure` keeps its words and `BrowserCookieError` carries
+   them to the flow. Only a mount is told; **playback degrades to anonymous**
+   as it always did, so an unreadable store never stops a public track from
+   resolving.
 5. First `snapshot()` in the foreground with a progress line (counts, not
    titles); write `sources.json` + the snapshot; "done — I'll keep it fresh".
+
+`$MURMUR_CHROME_PROFILE` pins a Chrome profile. It matters because yt-dlp
+reads "the most recently accessed profile" when none is named, so a second
+profile can otherwise move a mount to another account between refreshes; the
+question used to let a listener pin one, and this keeps that without asking
+the many who have a single profile.
 
 The cost, accepted: a listener who uses only Firefox or Safari cannot mount
 these three. It buys the removal of every failure the question created — an
