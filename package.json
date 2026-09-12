@@ -7,6 +7,25 @@
     "type": "git",
     "url": "git+https://github.com/wine-fall/murmur.git"
   },
+  "homepage": "https://wine-fall.github.io/murmur/",
+  "bugs": {
+    "url": "https://github.com/wine-fall/murmur/issues"
+  },
+  "keywords": [
+    "ai",
+    "radio",
+    "companion",
+    "claude",
+    "claude-code",
+    "claude-agent-sdk",
+    "tts",
+    "fish-speech",
+    "voice",
+    "terminal",
+    "tui",
+    "cli",
+    "music"
+  ],
   "type": "module",
   "packageManager": "pnpm@11.5.0",
   "engines": {

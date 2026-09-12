@@ -7,6 +7,15 @@
 
 # murmur
 
+[![npm version](https://img.shields.io/npm/v/murmur-radio)](https://www.npmjs.com/package/murmur-radio)
+[![npm downloads](https://img.shields.io/npm/dm/murmur-radio)](https://www.npmjs.com/package/murmur-radio)
+[![license: MIT](https://img.shields.io/badge/license-MIT-a9b665)](LICENSE)
+[![node >=24](https://img.shields.io/badge/node-%3E%3D24-d8a657)](package.json)
+
+```bash
+npm install -g murmur-radio && murmur
+```
+
 **A companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
 <p align="center">

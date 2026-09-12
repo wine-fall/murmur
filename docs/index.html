@@ -4,7 +4,39 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>murmur — a whole radio station, for an audience of one</title>
-<meta name="description" content="A local-first companion radio with an agent for a brain. It talks on its own, plays music, repairs its own setup by talking, and hands your replies to an agent. Open-source, MIT-licensed.">
+<meta name="description" content="A companion radio with an agent for a brain. It talks on its own, plays music, repairs its own setup by talking, and hands your replies to an agent. Open-source, MIT-licensed.">
+<link rel="canonical" href="https://wine-fall.github.io/murmur/">
+<link rel="sitemap" type="application/xml" href="https://wine-fall.github.io/murmur/sitemap.xml">
+<meta property="og:type" content="website">
+<meta property="og:title" content="murmur — a whole radio station, for an audience of one">
+<meta property="og:description" content="A companion radio with an agent for a brain. It talks on its own, plays music, repairs its own setup by talking, and hands your replies to an agent. Open-source, MIT-licensed.">
+<meta property="og:url" content="https://wine-fall.github.io/murmur/">
+<meta property="og:image" content="https://wine-fall.github.io/murmur/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The murmur mascot, a figure whispering behind a raised hand, next to the line: A whole radio station, for an audience of one.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="murmur — a whole radio station, for an audience of one">
+<meta name="twitter:description" content="A companion radio with an agent for a brain. It talks on its own, plays music, repairs its own setup by talking, and hands your replies to an agent. Open-source, MIT-licensed.">
+<meta name="twitter:image" content="https://wine-fall.github.io/murmur/og.png">
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "murmur",
+  "operatingSystem": "macOS, Linux",
+  "applicationCategory": "DeveloperApplication",
+  "license": "https://opensource.org/license/mit",
+  "url": "https://wine-fall.github.io/murmur/",
+  "codeRepository": "https://github.com/wine-fall/murmur",
+  "description": "A companion radio with an agent for a brain. It talks on its own, plays music, repairs its own setup by talking, and hands your replies to an agent. Open-source, MIT-licensed.",
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  }
+}
+</script>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23282828'/%3E%3Ctext x='30' y='46' font-family='monospace' font-size='36' text-anchor='middle' fill='%23d4be98'%3Em%3C/text%3E%3Cpath d='M46 30q5-2 7-7M44 20q3-3 3-7' stroke='%23d8a657' stroke-width='4.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -294,13 +326,13 @@
       <div class="hero-left">
         <h1 data-en="A whole radio station, for an audience of one." data-zh="一整座电台，只播给你一个人。">A whole radio station, for an audience of one.</h1>
         <p class="sub"
-           data-en="murmur is a local-first companion radio with an agent for a brain. It finds something to talk about, puts on a song, and comes back to keep going. Type back whenever you like, and it answers in a voice that sounds human."
-           data-zh="murmur 是一台本地优先的陪伴电台，大脑是一个 agent。它自己找话题开口，放一首歌，回来接着说。想说话就用键盘回它——它用一把像人的声音回答。">
-          murmur is a local-first companion radio with an agent for a brain. It finds something to talk about, puts on a song, and comes back to keep going. Type back whenever you like, and it answers in a voice that sounds human.</p>
+           data-en="murmur is a companion radio with an agent for a brain. It finds something to talk about, puts on a song, and comes back to keep going. Type back whenever you like, and it answers in a voice that sounds human."
+           data-zh="murmur 是一台陪伴电台，大脑是一个 agent。它自己找话题开口，放一首歌，回来接着说。你打一行字，它就开口回你。声音一出来，屋子好像就没那么空了。">
+          murmur is a companion radio with an agent for a brain. It finds something to talk about, puts on a song, and comes back to keep going. Type back whenever you like, and it answers in a voice that sounds human.</p>
         <pre class="quick" aria-label="Quick start"><code><span class="p">$</span> git clone https://github.com/wine-fall/murmur
 <span class="p">$</span> cd murmur &amp;&amp; make dev   <span class="c" data-en="# the radio comes on the air" data-zh="# 电台就开播了"># the radio comes on the air</span></code></pre>
         <p class="hero-meta">
-          <span data-en="local-first" data-zh="本地优先">local-first</span>
+          <span data-en="always on the air" data-zh="一直在播">always on the air</span>
           <span data-en="open-source, MIT" data-zh="开源 · MIT">open-source, MIT</span>
           <span data-en="keyboard in, voice out" data-zh="键盘输入 · 语音输出">keyboard in, voice out</span>
         </p>
@@ -372,7 +404,7 @@
              data-zh="这一段还在播，下一段已经在写、在配音。说话和音乐来回交接，中间没有空档。">While one segment plays, the next is already being written and voiced. Talk hands over to music and back without a gap.</p>
         </div>
         <div class="fact">
-          <h3 data-en="A voice that sounds human" data-zh="一把像人的声音">A voice that sounds human</h3>
+          <h3 data-en="A voice that sounds human" data-zh="听着是个人在说话">A voice that sounds human</h3>
           <p data-en="Sentence-paced speech with a pinned timbre, riding over the music with proper ducking: it lowers the song to talk, and never cuts it."
              data-zh="按句换气、音色固定的语音，压着音乐说话——说话时把歌压低，从不掐断。">Sentence-paced speech with a pinned timbre, riding over the music with proper ducking: it lowers the song to talk, and never cuts it.</p>
         </div>
@@ -409,7 +441,7 @@
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
           <span data-en="Read the source" data-zh="去看源码">Read the source</span>
         </a>
-        <p class="cta-note" data-en="Node ≥ 24 · pnpm · your agent login (Claude Code today), or run fully offline with a stub brain." data-zh="Node ≥ 24 · pnpm · 本地 agent 登录（现在是 Claude Code）——或者用 stub 大脑完全离线跑。">Node ≥ 24 · pnpm · your agent login (Claude Code today), or run fully offline with <code>--brain stub</code>.</p>
+        <p class="cta-note" data-en="Node ≥ 24 · pnpm · your agent login (Claude Code today), or a stub brain that needs no login." data-zh="Node ≥ 24 · pnpm · 你的 agent 登录（现在是 Claude Code），或者用 stub 大脑，不用登录。">Node ≥ 24 · pnpm · your agent login (Claude Code today), or a stub brain that needs no login.</p>
       </div>
     </div>
   </section>
