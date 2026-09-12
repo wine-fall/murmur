@@ -66,6 +66,8 @@ What remains is acceptance **by ear** — pacing over a real day, onboarding in 
 real terminal, how the steering feels — plus a handful of engineering debts.
 What is being built right now is [`specs/STATUS.md`](specs/STATUS.md); where it
 goes next, in order, is [`ROADMAP.md`](ROADMAP.md).
+Engineering notes, with the numbers measured along the way, are in
+[`docs/blog/`](docs/blog/).
 
 ## Requirements
 
