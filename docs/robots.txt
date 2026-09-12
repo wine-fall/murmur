@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://wine-fall.github.io/murmur/sitemap.xml

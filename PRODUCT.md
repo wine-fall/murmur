@@ -20,7 +20,7 @@ machine's locale by default, English where it says nothing.
 
 murmur exists as a counter-position: most AI projects today are marketing,
 AI short-form drama, or productivity tooling. murmur is none of these — it is
-**AI that sits closer to the person**. A local-first companion radio with an
+**AI that sits closer to the person**. A companion radio with an
 agent for a brain (Claude today; the brain is a swappable seam): always on the
 air, it finds its own topics, plays music,
 and answers in a voice that sounds human when you type to it. The

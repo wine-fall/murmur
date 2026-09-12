@@ -4,7 +4,7 @@ Read this first, every session. It is the routing card, not the design.
 
 ## What this is
 
-A fully-local companion "radio" — always on the air, Claude as its brain, a
+A companion "radio" — always on the air, Claude as its brain, a
 voice that sounds human, keyboard-driven replies. Vision: `README.md`.
 Master spec: `specs/DESIGN.md`. Do not duplicate either here; go read them.
 
