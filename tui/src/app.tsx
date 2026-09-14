@@ -624,7 +624,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // the input row) must be clear of rasters too.
   const cardTop =
     asks.length > 0
-      ? cardTopRow(asks[0]!.text, cols, dims.height)
+      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind)
       : menuOpen
         ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
         : null
@@ -1191,12 +1191,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // The divider stands between the facts and the choices: above the
           // first option row when the card carries its own, else above the
           // closing invite (legacy checklist shape).
-          const divideAt = lines.some((l) => l.role === 'option')
-            ? lines.findIndex((l) => l.role === 'option')
-            : lines.length - 1
+          const options = lines.some((l) => l.role === 'option')
+          const divideAt = options ? lines.findIndex((l) => l.role === 'option') : lines.length - 1
           return (
             <box
-              title={cardTitle(head.kind, head.no ?? 0, facts)}
+              title={cardTitle(head.kind, head.no ?? 0, head.text)}
               style={{
                 border: true,
                 borderStyle: 'rounded',
@@ -1250,8 +1249,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   </box>
                 )
               ) : (
+                // A menu's empty line is its exit (the /sources flow reads
+                // '' as done), a seed's is a skip — say the one that is true.
                 <box style={{ marginTop: 1 }}>
-                  <text style={{ fg: QUIET }}>{'Enter skips'}</text>
+                  <text style={{ fg: QUIET }}>{options ? 'Enter - done' : 'Enter skips'}</text>
                 </box>
               )}
               {/* The answer is typed INTO the card (user decision, 2026-08-11):

@@ -8,12 +8,16 @@ import { COMMANDS, type EngineMessage, type Invitation } from '../../src/host/ip
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
 
-// The border title, padded so the frame breathes around it. Questions carry a
-// light counter — a run of seeds reads as progress; a consent names its
-// skippability; a card carrying the checklist is the pre-broadcast check
-// (ref B3), whatever kind delivered it.
-export function cardTitle(kind: AskKind, count: number, checklist: boolean): string {
-  if (checklist) return ' pre-broadcast check '
+// The border title, padded so the frame breathes around it. A seed question
+// carries a light counter — a run of them reads as progress; a menu (a
+// question with option rows, like /sources) is not a step in a run, so it
+// carries none; a consent names its skippability; a card carrying the
+// checklist is the pre-broadcast check (ref B3), whatever kind delivered
+// it. All read from the ask text alone — zero wire additions.
+export function cardTitle(kind: AskKind, count: number, text: string): string {
+  const lines = cardLines(text)
+  if (kind === 'question' && lines.some((l) => l.role === 'option')) return ' murmur is asking '
+  if (lines.some((l) => l.role === 'ready' || l.role === 'gap')) return ' pre-broadcast check '
   return kind === 'consent'
     ? ' murmur needs a yes · optional '
     : ` murmur is asking · #${String(count)} `
@@ -56,7 +60,7 @@ export function cardLines(text: string): CardLine[] {
 // width and chrome math replayed as a number. The raster layer needs it: a
 // kitty image sits ABOVE text cells, so while the card is up the sky's images
 // may keep the stage (dimmed) only where the card cannot reach.
-export function cardRows(text: string, cols: number): number {
+export function cardRows(text: string, cols: number, kind: AskKind): number {
   const width = Math.min(Math.floor(cols * 0.55), cols - 4)
   const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
   const lines = cardLines(text)
@@ -68,9 +72,10 @@ export function cardRows(text: string, cols: number): number {
     rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
   }
   if (facts) rows += 1 // the divider above the options
-  // A checklist card's choices are its own option rows; only the plain
-  // consent/question cards keep the renderer's action row.
-  if (!facts) rows += 2 // the action row (its top margin + the line)
+  // A consent checklist's choices are its own option rows; every other card
+  // keeps the renderer's action row (a question's Enter hint stays even
+  // above status rows — the /sources menu).
+  if (!(facts && kind === 'consent')) rows += 2 // the action row (its top margin + the line)
   rows += 2 // the in-card answer field (its top margin + the input)
   rows += 4 // border (2) + vertical padding (2)
   rows += 1 // the gap row between the floating card and the bottom rule
@@ -80,8 +85,8 @@ export function cardRows(text: string, cols: number): number {
 // The first terminal row the card can touch: the card floats anchored to the
 // window's bottom rule (the quiet line that keeps the frame closed), so its
 // top is the window height minus its own rows. Rasters end above this.
-export function cardTopRow(text: string, cols: number, height: number): number {
-  return Math.max(1, height - 1 - cardRows(text, cols))
+export function cardTopRow(text: string, cols: number, height: number, kind: AskKind): number {
+  return Math.max(1, height - 1 - cardRows(text, cols, kind))
 }
 
 // What a submitted line becomes on the wire. While a question is docked,
@@ -103,12 +108,13 @@ export function commandMatches(typed: string): readonly Command[] {
   return COMMANDS.filter((command) => command.name.startsWith(line))
 }
 
-// The resting input's invitations (spec 14 §3.8): the talk-back line first,
-// then the engine's CURRENT rows — context-gated and fading engine-side, so
+// The resting input's invitations (spec 14 §3.8): the talk-back line first
+// (the page keys named, since the log scrolls no other way — master §3.6
+// keeps the mouse out), then the engine's CURRENT rows — context-gated and fading engine-side, so
 // the client only ever rotates what it was given. Command first, why after:
 // a narrow field clips the tail, and the command is the half worth keeping.
 export function inputHints(rows: readonly Invitation[]): string[] {
-  return ['type to talk back · / for commands', ...rows.map((row) => `${row.command} · ${row.why}`)]
+  return ['type to talk back · / for commands · PgUp/PgDn scrolls', ...rows.map((row) => `${row.command} · ${row.why}`)]
 }
 
 // A lap slow enough to read as furniture rather than a blinking sign.

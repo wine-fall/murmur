@@ -91,7 +91,7 @@ describe('the command list', () => {
 // commands are eventually seen without a line ever entering the transcript.
 describe('the input hints (spec 14 §3.8)', () => {
   it('rests on the talk-back invitation first, then the engine\'s current rows', () => {
-    expect(inputHints([])).toEqual(['type to talk back · / for commands'])
+    expect(inputHints([])).toEqual(['type to talk back · / for commands · PgUp/PgDn scrolls'])
     const hints = inputHints([
       { command: '/sources', why: 'your NetEase or Spotify likes make better picks' },
       { command: '/bug', why: "something broke? two lines and it's filed" },
@@ -99,7 +99,7 @@ describe('the input hints (spec 14 §3.8)', () => {
     // Command first: a narrow field clips the tail, and the command is the
     // half worth keeping (codex review).
     expect(hints).toEqual([
-      'type to talk back · / for commands',
+      'type to talk back · / for commands · PgUp/PgDn scrolls',
       '/sources · your NetEase or Spotify likes make better picks',
       "/bug · something broke? two lines and it's filed",
     ])
@@ -111,13 +111,20 @@ describe('the input hints (spec 14 §3.8)', () => {
 })
 
 describe('cardTitle', () => {
-  it('names the kind, and counts the questions so a run of them reads as progress', () => {
-    expect(cardTitle('question', 3, false)).toBe(' murmur is asking · #3 ')
-    expect(cardTitle('consent', 5, false)).toBe(' murmur needs a yes · optional ')
+  it('names the kind, and counts the seed questions so a run of them reads as progress', () => {
+    expect(cardTitle('question', 3, 'what do you listen to on a slow morning?')).toBe(' murmur is asking · #3 ')
+    expect(cardTitle('consent', 5, 'run brew outdated? [y/N]')).toBe(' murmur needs a yes · optional ')
   })
 
   it('a card carrying the checklist is the pre-broadcast check, whatever its kind', () => {
-    expect(cardTitle('consent', 1, true)).toBe(' pre-broadcast check ')
+    expect(cardTitle('consent', 1, 'summary.\nok brain - on\n-- voice - off\n>> y - fix')).toBe(' pre-broadcast check ')
+  })
+
+  it('a menu — a question with option rows — carries no counter: it is not a step in a run', () => {
+    const menu = 'what would you like to do? mount <name> | done\n>> mount netease - NetEase'
+    expect(cardTitle('question', 4, menu)).toBe(' murmur is asking ')
+    const withMounted = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n>> mount netease - NetEase'
+    expect(cardTitle('question', 4, withMounted)).toBe(' murmur is asking ')
   })
 })
 
@@ -172,12 +179,12 @@ describe('cardRows / cardTopRow', () => {
   it('counts content, chrome, and the in-card answer field', () => {
     // 2 unwrapped content rows + action row (2) + answer field (2)
     // + border and padding (4) + the bottom margin (1).
-    expect(cardRows(CONSENT, 200)).toBe(11)
+    expect(cardRows(CONSENT, 200, 'consent')).toBe(11)
   })
 
   it('wrapped lines take their real height, so a long command still clears the card', () => {
     const long = `setup assistant wants to run [Bash]: ${'x'.repeat(300)}\nallow? [y/N]`
-    expect(cardRows(long, 120)).toBeGreaterThan(cardRows(CONSENT, 120))
+    expect(cardRows(long, 120, 'consent')).toBeGreaterThan(cardRows(CONSENT, 120, 'consent'))
   })
 
   it('a checklist card adds its divider row; option rows replace the action row', () => {
@@ -185,12 +192,20 @@ describe('cardRows / cardTopRow', () => {
       'summary.\nok brain - on the air\n-- voice - silent\n>> y - fix them now\n>> Enter - not now'
     // 5 content rows (options included) + the divider + field (2) + chrome (4)
     // + margin (1) — a checklist card carries no separate action row.
-    expect(cardRows(checklist, 200)).toBe(13)
+    expect(cardRows(checklist, 200, 'consent')).toBe(13)
+  })
+
+  it('a question menu keeps its action row even above status rows — only a consent checklist drops it', () => {
+    const menu = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n>> mount netease - NetEase'
+    // 4 content rows (the lead splits at '? ') + divider + action row (2)
+    // + field (2) + chrome (4) + margin (1).
+    expect(cardRows(menu, 200, 'question')).toBe(14)
+    expect(cardRows(menu, 200, 'consent')).toBe(12)
   })
 
   it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
-    expect(cardTopRow(CONSENT, 200, 50)).toBe(50 - 1 - cardRows(CONSENT, 200))
-    expect(cardTopRow(CONSENT, 200, 8)).toBe(1)
+    expect(cardTopRow(CONSENT, 200, 50, 'consent')).toBe(50 - 1 - cardRows(CONSENT, 200, 'consent'))
+    expect(cardTopRow(CONSENT, 200, 8, 'consent')).toBe(1)
   })
 })
 
