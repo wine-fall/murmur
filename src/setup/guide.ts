@@ -25,7 +25,7 @@ import {
   toolDetail,
 } from '../brain/brain.ts'
 import type { GuideCapable, GuideSession, LedgerKind, SteerSettingsActions, TaskTool } from '../contracts.ts'
-import { ask, type Host } from '../host/host.ts'
+import { ask, type Host, QUIT } from '../host/host.ts'
 import { LANGUAGE_MAX } from '../host/ipc.ts'
 import { expandUser } from '../paths.ts'
 import { HostedVoice } from '../voice/hosted-voice.ts'
@@ -127,7 +127,7 @@ export function quitLatch(): QuitLatch {
   return latch
 }
 
-export const QUIT = '/quit'
+export { QUIT }
 
 // The Esc event (spec 10 §3.4): a PULSE, not a latch. Each fire answers the
 // read that was waiting with '' and re-arms; a fire with nobody waiting is

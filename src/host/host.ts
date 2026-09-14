@@ -39,6 +39,12 @@ export interface Host {
   // handler for its own duration (null to unregister); a host without the
   // seam — or an engine with no flow registered — treats Esc as noise.
   onInterrupt?(handler: (() => void) | null): void
+  // A typed /quit, reported the moment it ARRIVES rather than when a read
+  // takes it (spec 06 §3.4). A long model call has no read open, so a queued
+  // /quit used to wait for the call to end — minutes, with nothing to do but
+  // watch. The line still queues for whoever reads next: this is the side
+  // channel, the reader's own recognition stays the second guard.
+  onQuit?(handler: () => void): void
   // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
   // the radio, the setup guide, or a report being written. A front-end with a
   // face paints the switch; the plain host reads fine without one — its
@@ -115,6 +121,8 @@ export function devLogMirror(devLog: string | undefined): (name: string, message
   }
 }
 
+export const QUIT = '/quit'
+
 export class LineQueue {
   private lines: string[] = []
   // The single shared wait-for-a-line promise. Memoized so that every race
@@ -161,6 +169,7 @@ export class CliHost implements Host {
 
   private input: NodeJS.ReadableStream
   private mirror: (name: string, message: string) => void
+  private quitHandler: (() => void) | null = null
 
   constructor(
     input: NodeJS.ReadableStream = process.stdin,
@@ -176,8 +185,15 @@ export class CliHost implements Host {
     this.started = true
     // On EOF readline just stops emitting lines; the radio plays on.
     createInterface({ input: this.input })
-      .on('line', (line) => this.queue.push(line))
+      .on('line', (line) => {
+        if (line.trim() === QUIT) this.quitHandler?.()
+        this.queue.push(line)
+      })
       .on('close', () => this.markEof())
+  }
+
+  onQuit(handler: () => void): void {
+    this.quitHandler = handler
   }
 
   eof(): Promise<void> {

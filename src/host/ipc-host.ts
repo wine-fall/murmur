@@ -17,7 +17,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { devLogMirror, LineQueue, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
+import { devLogMirror, LineQueue, QUIT, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
 import {
   COMMANDS,
   decodeTuiMessage,
@@ -70,6 +70,7 @@ export class IpcHost implements Host {
   private vizWanted: { on: boolean; fps: number | undefined } | null = null
   private settingsBridge: SettingsBridge | null = null
   private interruptHandler: (() => void) | null = null
+  private quitHandler: (() => void) | null = null
   private mode: FloorMode = 'radio'
   // The current invitation set (spec 14 §2.7); null until the Director has
   // computed one. State, not replay — a fresh attach gets the current set.
@@ -146,6 +147,7 @@ export class IpcHost implements Host {
         if (COMMANDS.some((c) => trimmed === c.name || trimmed.startsWith(`${c.name} `))) {
           this.mirror('tui', `command received: ${trimmed}`)
         }
+        if (trimmed === QUIT) this.quitHandler?.()
         // The oldest pending ask is what this line answers, if any is —
         // lineReader consumes in exactly this order.
         this.pendingAsks.shift()
@@ -365,6 +367,10 @@ export class IpcHost implements Host {
     this.pendingAsks.push(message)
     if (this.client !== null) this.write(this.client, message)
     this.mirror('host', text)
+  }
+
+  onQuit(handler: () => void): void {
+    this.quitHandler = handler
   }
 
   onInterrupt(handler: (() => void) | null): void {

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { agenticOptions, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain/brain.ts'
+import { agenticOptions, generateText, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain/brain.ts'
 import type { ContextPack, GuideRequest, GuideSession } from '../src/contracts.ts'
 import { renderPersona } from '../src/brain/persona.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
@@ -576,5 +576,51 @@ describe('cleanBeats', () => {
 
   it('a bare beat stays bare — no optional fields invented (spec 04 §3.2)', () => {
     expect(cleanBeats([{ text: 'a' }], 5)).toEqual([{ text: 'a' }])
+  })
+})
+
+describe('generateText under an AbortSignal (spec 06 §3.4: the seed call is interruptible)', () => {
+  const assistant = (text: string): SDKAssistantMessage =>
+    ({ type: 'assistant', message: { content: [{ type: 'text', text }] } }) as SDKAssistantMessage
+
+  it('forwards the signal to the SDK controller, and throws instead of returning the partial text', async () => {
+    let sdkSignal: AbortSignal | undefined
+    // The SDK's behavior under abort: the stream ends, without a result.
+    const fakeQuery = ({ options }: { options?: { abortController?: AbortController } }) => {
+      sdkSignal = options?.abortController?.signal
+      return (async function* () {
+        yield assistant('partial')
+        await new Promise<void>((resolve) => sdkSignal?.addEventListener('abort', () => resolve(), { once: true }))
+      })()
+    }
+    const abort = new AbortController()
+    const pending = generateText(fakeQuery as never, 'sys', 'prompt', 'model-x', abort.signal)
+    await new Promise((r) => setImmediate(r))
+    abort.abort(new Error('the listener left'))
+    await expect(pending).rejects.toThrow('the listener left')
+    expect(sdkSignal?.aborted).toBe(true)
+  })
+
+  it('a signal already aborted never starts the query (codex review)', async () => {
+    let started = 0
+    const fakeQuery = () => {
+      started++
+      return (async function* () {
+        yield assistant('never')
+      })()
+    }
+    const abort = new AbortController()
+    abort.abort(new Error('already gone'))
+    await expect(generateText(fakeQuery as never, 'sys', 'prompt', 'model-x', abort.signal)).rejects.toThrow('already gone')
+    expect(started).toBe(0)
+  })
+
+  it('without a signal, the joined text comes back as before', async () => {
+    const fakeQuery = () =>
+      (async function* () {
+        yield assistant('hello ')
+        yield assistant('there')
+      })()
+    expect(await generateText(fakeQuery as never, 'sys', 'prompt', 'model-x')).toBe('hello there')
   })
 })
