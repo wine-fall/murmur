@@ -54,15 +54,13 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
 
 3. Do not choose out of memory. The songs that come to mind first are the ones
    that come to mind first for everyone, every time; that is how a radio ends
-   up playing six artists forever. Where similar_music is available, seed it
-   with an artist or track that fits the frame and treat what it returns —
-   real co-listening data — as the field to choose from.
+   up playing six artists forever. Reach from the frame instead of from the
+   name: the scene it belongs to, the year, the label, who they played with,
+   what the listener already keeps — and search for that.
 
 4. Then ask which of theirs. A fresh artist and their one famous single is the
-   same habit wearing a new coat. Where top_tracks is available it says what
-   people actually play by an artist; read a few names down it rather than
-   stopping at the top. Where it is not, reach past the one song of theirs
-   everybody knows.
+   same habit wearing a new coat. Reach past the one song of theirs everybody
+   knows — an album track, the second single, the one that fits this hour.
 
 5. Search for the specific thing. "<artist> <title>" finds a record; a mood
    phrase finds whatever is popular. search_music executes exactly what you

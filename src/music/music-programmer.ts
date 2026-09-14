@@ -11,7 +11,6 @@ import type {
   Harness,
   MusicContext,
   MusicProvider,
-  ListeningData,
   TrackCandidate,
   TrackPick,
   TrackSource,
@@ -41,9 +40,6 @@ export type MusicProgrammerDeps = {
   // policy file is hot, so an edit lands on the next song without a restart.
   instruction?: () => string
   probe?: StreamProbe
-  // Real listening data behind similar_music / top_tracks (spec 03-01 §2.3).
-  // Absent when no key is configured; the pick then runs on search alone.
-  listening?: ListeningData
   // The taste wiring (spec 14 §2.4/§2.6): mounted catalogues, the auth
   // report, the preview-trap probe. Absent = the tools are their pre-taste
   // selves and search_music lists youtube alone.
@@ -126,7 +122,7 @@ export class MusicProgrammer implements TrackSource {
       prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.listening, this.deps.taste),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

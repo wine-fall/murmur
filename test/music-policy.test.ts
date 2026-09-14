@@ -61,6 +61,17 @@ describe('seedMusicPolicy', () => {
     expect(readFileSync(fileIn(dir), 'utf-8')).not.toMatch(/MURMUR_[A-Z_]+/)
   })
 
+  // Same reason, one step further: a tool named here is a tool the listener
+  // is invited to direct, and the file outlives the tool list.
+  it('does not name a tool the pick task no longer has', () => {
+    const dir = home()
+    seedMusicPolicy(fileIn(dir))
+    const text = readFileSync(fileIn(dir), 'utf-8')
+    for (const gone of ['similar_music', 'top_tracks']) {
+      expect(text).not.toContain(gone)
+    }
+  })
+
   it('never overwrites what the listener wrote', () => {
     const dir = home()
     writeFileSync(fileIn(dir), '- mine\n', 'utf-8')

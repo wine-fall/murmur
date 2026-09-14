@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ListeningData, MusicContext, TaskTool } from '../src/contracts.ts'
-import { MusicProgrammer, type MusicProgrammerDeps, renderMusicContext } from '../src/music/music-programmer.ts'
+import type { MusicContext, TaskTool } from '../src/contracts.ts'
+import { MusicProgrammer, renderMusicContext } from '../src/music/music-programmer.ts'
 import { MUSIC_CONTEXT_HEADER } from '../src/prompts/music.ts'
 
 import { callTool, FakeHarness, FakeMusicProvider } from './fakes.ts'
@@ -109,80 +109,9 @@ describe('MusicProgrammer.nextTrack', () => {
   })
 })
 
-// spec 03-01 §2.3: real co-listening data as a third tool, so the candidate
-// pool is not bounded by what the model happens to remember. Unwired (no key)
-// the task is exactly its two-tool self.
-describe('the listening-data tools', () => {
-  const listening: ListeningData = {
-    artists: async (artist, limit) => [`similar-to-${artist}`, 'Grouper'].slice(0, limit),
-    tracks: async (artist, track) => [{ title: `like-${track}`, artist }],
-    topTracks: async (artist, limit) => [`most-played-by-${artist}`, 'Second Most'].slice(0, limit),
-  }
-
-  const toolNames = async (deps: Partial<MusicProgrammerDeps>): Promise<string[]> => {
-    let names: string[] = []
-    const harness = new FakeHarness(async (tools: TaskTool[]) => {
-      names = tools.map((t) => t.name)
-    })
-    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku', ...deps }).nextTrack(ctx)
-    return names
-  }
-
-  it('are offered only when a data source is wired', async () => {
-    expect(await toolNames({})).toEqual(['search_music', 'submit_pick'])
-    expect(await toolNames({ listening })).toEqual(['search_music', 'similar_music', 'top_tracks', 'submit_pick'])
-  })
-
-  // The song-level half of the habit: a fresh artist, then their one famous
-  // track. Play counts answer "which of theirs", recall does not.
-  it('answer which song by an artist with play counts, not recall', async () => {
-    let result: Record<string, unknown> | null = null
-    const harness = new FakeHarness(async (tools) => {
-      result = await callTool(tools, 'top_tracks', { artist: 'Fleet Foxes', limit: 1 })
-    })
-    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku', listening }).nextTrack(ctx)
-    expect(result).toEqual({ tracks: ['most-played-by-Fleet Foxes'] })
-  })
-
-  it('returns similar artists for a seed artist, similar tracks for a seed track', async () => {
-    let byArtist: Record<string, unknown> | null = null
-    let byTrack: Record<string, unknown> | null = null
-    const harness = new FakeHarness(async (tools) => {
-      byArtist = await callTool(tools, 'similar_music', { artist: 'Bon Iver', limit: 2 })
-      byTrack = await callTool(tools, 'similar_music', { artist: 'Bon Iver', track: 'Holocene' })
-    })
-    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku', listening }).nextTrack(ctx)
-
-    expect(byArtist).toEqual({ artists: ['similar-to-Bon Iver', 'Grouper'] })
-    expect(byTrack).toEqual({ tracks: [{ title: 'like-Holocene', artist: 'Bon Iver' }] })
-  })
-
-  // A dead lookup must cost the pick a turn, not the whole song: the task
-  // still has search_music and can submit without ever widening.
-  it('hands a failed lookup back to the model instead of killing the task', async () => {
-    const dead: ListeningData = {
-      artists: async () => {
-        throw new Error('last.fm artist.getsimilar failed: HTTP 503')
-      },
-      tracks: async () => [],
-      topTracks: async () => [],
-    }
-    let result: Record<string, unknown> | null = null
-    const harness = new FakeHarness(async (tools) => {
-      result = await callTool(tools, 'similar_music', { artist: 'Bon Iver' })
-      await callTool(tools, 'submit_pick', { ref: 'good', why: 'searched the old way' })
-    })
-    const pick = await new MusicProgrammer({
-      brain: harness,
-      provider: provider(),
-      model: 'haiku',
-      listening: dead,
-    }).nextTrack(ctx)
-
-    expect(result).toEqual({ ok: false, error: 'last.fm artist.getsimilar failed: HTTP 503' })
-    expect(pick?.clip.source).toBe('https://stream/good')
-  })
-
+// Everything after the pick is committed: a ref that will not resolve, a
+// stream that does not actually play, a task that ends empty.
+describe('the pick task, when a candidate does not hold up', () => {
   it('lets the model pick again when a ref will not resolve', async () => {
     const music = provider()
     music.broken.add('loop')
