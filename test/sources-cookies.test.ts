@@ -1,11 +1,12 @@
 // The one cookie reader (spec 14 §2.8): yt-dlp exports the browser's jar to
 // a temp file, the small clients read what they need and the jar is gone.
 import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { dirname } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { COOKIE_TTL_MS, CookieJars } from '../src/music/sources/build.ts'
-import { cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
+import { classifyCookieFailure, cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
 import type { YtDlpRunner } from '../src/music/music.ts'
 
 // A Netscape jar as yt-dlp writes it, values redacted.
@@ -108,6 +109,34 @@ describe('exportCookieJar', () => {
     // actually went wrong rather than a guess.
     const err = await thrown('ERROR: [Errno 1] Operation not permitted: \'/x\'')
     expect(String((err as { detail: string }).detail)).toContain('Operation not permitted')
+  })
+
+  // MURMUR_CHROME_PROFILE naming a profile Chrome has never opened: yt-dlp
+  // words it exactly as an absent browser ("could not find ... cookies
+  // database"), but Chrome IS installed — its user-data root is there and only
+  // the profile directory is not. "Install Chrome" is a fix that cannot work.
+  it('a missing profile under a present Chrome is no-profile, named; a missing root stays no-browser', () => {
+    const root = '/Users/x/Library/Application Support/Google/Chrome'
+    const stderr = `ERROR: could not find chrome cookies database in "${root}/Murmur Fresh"`
+    const onlyRoot = (path: string): boolean => path === root
+    const named = { profile: 'Murmur Fresh', exists: onlyRoot }
+    expect(classifyCookieFailure(new Error(stderr), named)).toMatchObject({ reason: 'no-profile', profile: 'Murmur Fresh' })
+    expect(classifyCookieFailure(new Error(stderr), { ...named, exists: () => false })).toMatchObject({ reason: 'no-browser' })
+    // The path present as well → that is a real store, not a missing one;
+    // nothing here claims to know why, so it stays no-browser.
+    expect(classifyCookieFailure(new Error(stderr), { ...named, exists: () => true })).toMatchObject({ reason: 'no-browser' })
+    // No profile asked for: yt-dlp quotes the user-data root itself, whose
+    // parent (Google/) exists whenever any Google app was ever run. That is
+    // Chrome absent, not a profile named "Chrome" missing.
+    const rootStderr = `ERROR: could not find chrome cookies database in "${root}"`
+    expect(classifyCookieFailure(new Error(rootStderr), { exists: (path) => path === dirname(root) })).toMatchObject({ reason: 'no-browser' })
+    // The quoted path is read to its closing quote, so an apostrophe in the
+    // profile name does not cut it short.
+    const apostrophe = `ERROR: could not find chrome cookies database in "${root}/Murmur's Fresh"`
+    expect(classifyCookieFailure(new Error(apostrophe), { profile: "Murmur's Fresh", exists: onlyRoot })).toMatchObject({
+      reason: 'no-profile',
+      profile: "Murmur's Fresh",
+    })
   })
 
   it('an export that worked but holds no row for the site is not a failure — it is a missing login', async () => {

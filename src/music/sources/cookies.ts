@@ -6,9 +6,9 @@
 // once, and deleted. It never persists, and no cookie is ever stored by
 // murmur (§2.1: the browser NAME is what sources.json holds).
 
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
@@ -16,21 +16,25 @@ import type { YtDlpRunner } from '../music.ts'
 import { browserArgs, type BrowserName } from './store.ts'
 
 // Why a cookie store could not be read. yt-dlp says which in its stderr, and
-// the three are answered with three different things: install it, grant the
-// terminal access, install yt-dlp. An export that succeeds but holds no row
-// for the site is NOT one of these — that is simply a missing login.
-export type CookieFailure = 'no-browser' | 'no-permission' | 'no-ytdlp' | 'unreadable'
+// each is answered with a different thing: install the browser, open the
+// named profile once (or unset the knob that named it), grant the terminal
+// access, install yt-dlp. An export that succeeds but holds no row for the
+// site is NOT one of these — that is simply a missing login.
+export type CookieFailure = 'no-browser' | 'no-profile' | 'no-permission' | 'no-ytdlp' | 'unreadable'
 
 export class BrowserCookieError extends Error {
   readonly source: BrowserName
   readonly reason: CookieFailure
   readonly detail: string
-  constructor(source: BrowserName, reason: CookieFailure, detail: string) {
+  // The profile directory yt-dlp looked for and did not find (no-profile only).
+  readonly profile: string | undefined
+  constructor(source: BrowserName, reason: CookieFailure, detail: string, profile?: string) {
     super(`${source}: ${reason}`)
     this.name = 'BrowserCookieError'
     this.source = source
     this.reason = reason
     this.detail = detail
+    this.profile = profile
   }
 }
 
@@ -39,12 +43,25 @@ export class BrowserCookieError extends Error {
 // narrowed here rather than discarded.
 const SpawnFailure = z.object({ message: z.string().optional(), stderr: z.string().optional(), code: z.string().optional() })
 
-export function classifyCookieFailure(err: unknown): { reason: CookieFailure; detail: string } {
+export function classifyCookieFailure(
+  err: unknown,
+  { profile, exists = existsSync }: { profile?: string | undefined; exists?: (path: string) => boolean } = {},
+): { reason: CookieFailure; detail: string; profile?: string } {
   const parsed = SpawnFailure.safeParse(err)
   const fields = parsed.success ? parsed.data : {}
   const detail = (fields.stderr ?? '').trim() !== '' ? fields.stderr!.trim() : (fields.message ?? String(err)).trim()
   if (fields.code === 'ENOENT' || /\bENOENT\b/.test(detail)) return { reason: 'no-ytdlp', detail }
   if (/operation not permitted|permission denied/i.test(detail)) return { reason: 'no-permission', detail }
+  // yt-dlp words an absent profile exactly as an absent browser. When a
+  // profile was asked for, the path it quotes is <user-data root>/<profile>:
+  // the root present and the profile not is a profile Chrome has never
+  // opened (MURMUR_CHROME_PROFILE naming one that does not exist), and
+  // "install Chrome" cannot fix that. With no profile asked for the quoted
+  // path is the root itself, and its parent existing proves nothing.
+  const missing = /could not find .* cookies database in (["'])(.+?)\1/i.exec(detail)?.[2]
+  if (missing !== undefined && profile !== undefined && basename(missing) === profile && !exists(missing) && exists(dirname(missing))) {
+    return { reason: 'no-profile', detail, profile }
+  }
   // Only yt-dlp's own words for an absent store may claim the browser is not
   // installed. Everything else — a locked database, a DPAPI decrypt failure —
   // is unreadable for a reason we do not model, and is quoted rather than
@@ -125,8 +142,8 @@ export async function exportCookieJar(
     try {
       text = readFileSync(path, 'utf-8')
     } catch {
-      const { reason, detail } = classifyCookieFailure(failure)
-      throw new BrowserCookieError(entry.browser, reason, detail)
+      const { reason, detail, profile } = classifyCookieFailure(failure, { profile: entry.profile })
+      throw new BrowserCookieError(entry.browser, reason, detail, profile)
     }
     return parseNetscapeJar(text)
   } finally {
