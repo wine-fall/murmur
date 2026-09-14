@@ -115,17 +115,16 @@ function counts(store: SourcesStore, id: SourceId): string {
 
 // What the listener types for a source — one of the NAMES keys.
 // The menu is a list to tick (spec 14 §3.1): one row per source, ticked
-// when it is mounted and signed in, its note the state; a refresh row once
-// anything is mounted. An expired login rests UNTICKED — ticking it is the
-// sign-in again — so an unchanged submit never unmounts what only needs
-// renewing.
+// when it is mounted (an expired login included — unticking it is how it
+// is forgotten without signing in), its note the state; a refresh row once
+// anything is mounted.
 function menuRows(store: SourcesStore, now: Date): MenuRow[] {
   const file = store.read()
   const rows: MenuRow[] = SOURCE_IDS.map((id) => {
     const entry = file[id]
     const label = SOURCE_NAMES[id]
     if (entry === undefined) return { key: id, label, note: 'not connected', checked: false }
-    if (entry.status === 'expired') return { key: id, label, note: 'expired — tick to sign in again', checked: false }
+    if (entry.status === 'expired') return { key: id, label, note: 'expired — untick to forget it, tick refresh to sign in again', checked: true }
     return { key: id, label, note: `${counts(store, id)} · ${ago(entry.lastRefresh, now)}`, checked: true }
   })
   return store.mounted().length > 0 ? [...rows, REFRESH_ROW] : rows
@@ -137,7 +136,27 @@ function menuRows(store: SourcesStore, now: Date): MenuRow[] {
 // the same menu and answers with numbers or names.
 function menuText(rows: readonly MenuRow[], results: readonly string[]): string {
   const numbered = rows.map((row, i) => `>> ${i + 1}) [${row.checked ? 'x' : ' '}] ${row.label} - ${row.note}`)
-  return [QUESTION, ...results, ...numbered].join('\n')
+  return [QUESTION, ...mergeRows(results), ...numbered].join('\n')
+}
+
+// Rows that end the same way share one: three cookie sources behind one
+// Full Disk Access obstacle are one gap row naming all three, not three
+// copies of a long line — which is what pushed the card off an 80x24 screen.
+function mergeRows(rows: readonly string[]): string[] {
+  const byTail = new Map<string, { marker: string; names: string[] }>()
+  for (const row of rows) {
+    const match = /^(ok|--) (.+?) — (.+)$/s.exec(row)
+    if (match === null) {
+      byTail.set(row, { marker: '', names: [] })
+      continue
+    }
+    const [, marker, name, tail] = match as unknown as [string, string, string, string]
+    const key = `${marker} — ${tail}`
+    const seen = byTail.get(key)
+    if (seen === undefined) byTail.set(key, { marker, names: [name] })
+    else seen.names.push(name)
+  }
+  return [...byTail.entries()].map(([key, { marker, names }]) => (names.length === 0 ? key : `${marker} ${names.join(', ')} — ${key.slice(marker.length + 3)}`))
 }
 
 // A typed answer as the set of keys it names: the list's own keys (the TUI),
@@ -251,19 +270,26 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
         continue
       }
       // The diff against what stands: unticked-and-mounted goes, ticked-and-
-      // not (or expired) is signed in, refresh re-reads. Nothing changed = done.
+      // not is signed in, refresh re-reads (an expired login is signed in
+      // again first — a re-read cannot renew it). Nothing changed = done.
       const file = store.read()
-      const toUnmount = store.mounted().filter((id) => file[id]?.status !== 'expired' && !picked.has(id))
-      const toMount = SOURCE_IDS.filter((id) => picked.has(id) && (file[id] === undefined || file[id].status === 'expired'))
+      const toUnmount = store.mounted().filter((id) => !picked.has(id))
       const doRefresh = picked.has('refresh')
+      const toRenew = doRefresh ? store.mounted().filter((id) => file[id]?.status === 'expired' && picked.has(id)) : []
+      const toMount = SOURCE_IDS.filter((id) => picked.has(id) && file[id] === undefined)
       if (toUnmount.length === 0 && toMount.length === 0 && !doRefresh) return
       for (const id of toUnmount) results.push(unmount(deps, id))
-      if (doRefresh) results.push(...(await refresh(deps)))
-      // Mounts last: each may wait on a sign-in, and an Esc there ends the
-      // submit — the rows already done stay done.
-      for (const id of toMount) {
+      // Sign-ins may wait on the listener, and an Esc there ends the submit
+      // — the rows already done stay done, the rest are not started.
+      const stopped = (): boolean => cancelled || quit.requested
+      for (const id of toRenew) {
+        if (stopped()) break
         results.push(await mountOne(deps, read, id, platform, () => cancelled))
-        if (cancelled || quit.requested) break
+      }
+      if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
+      for (const id of toMount) {
+        if (stopped()) break
+        results.push(await mountOne(deps, read, id, platform, () => cancelled))
       }
     }
   } finally {

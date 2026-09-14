@@ -158,9 +158,9 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
-    // A signed-in mount is not re-run from the list; an expired one is, and
-    // that is the remount.
-    const { host, deps, store } = build(['netease', 'netease'])
+    // A signed-in mount is not re-run from the list; an expired one is
+    // renewed by refresh, and that is the remount.
+    const { host, deps, store } = build(['netease refresh', 'netease'])
     store.mount('netease', { browser: 'chrome', userId: 'old', likedPlaylistId: '1' })
     store.setStatus('netease', 'expired')
     store.writeSnapshot({ source: 'netease', takenAt: '2026-09-01T00:00:00.000Z', items: [{ kind: 'liked', title: 'the old account' }] })
@@ -444,22 +444,30 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('lists an expired mount as one to renew', async () => {
-    // An expired login rests unticked — ticking it signs in again; an
-    // unchanged submit leaves it alone rather than unmounting it.
-    const { host, deps, store, mounted } = build([''])
+    // An expired login stays ticked (it is mounted): an unchanged submit
+    // leaves it alone, unticking forgets it, refresh signs it in again.
+    const { host, deps, store, mounted } = build(['netease'])
     store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     store.setStatus('netease', 'expired')
     await runSources(deps)
-    expect(host.asks[0]!.text.split('\n')).toContain('>> 3) [ ] NetEase - expired — tick to sign in again')
+    expect(host.asks[0]!.text.split('\n')).toContain('>> 3) [x] NetEase - expired — untick to forget it, tick refresh to sign in again')
     expect(host.asks).toHaveLength(1)
     expect(mounted).toEqual([])
     expect(store.read().netease?.status).toBe('expired')
-    const renew = build(['netease', 'netease'])
+    // Forgetting needs no sign-in: the entry and the snapshot go (codex review).
+    const forget = build(['', ''])
+    forget.store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
+    forget.store.setStatus('netease', 'expired')
+    await runSources(forget.deps)
+    expect(forget.store.read()).toEqual({})
+    expect(forget.mounted).toEqual([])
+    const renew = build(['netease refresh', 'netease'])
     renew.store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     renew.store.setStatus('netease', 'expired')
     await runSources(renew.deps)
     expect(renew.mounted).toEqual(['netease:chrome'])
     expect(renew.store.read().netease?.status).toBe('ok')
+    expect(renew.host.asks[1]!.text.split('\n')[1]).toBe('ok NetEase — signed in as Chen X · 1 liked, 1 playlist')
   })
 
   it('a line it does not understand asks again with the miss in the card; /quit leaves through the latch', async () => {
@@ -520,6 +528,42 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(stopped.deps)
     expect(stopped.mounted).toEqual([`spotify:${BUNDLED_CLIENT_ID}`])
     expect(stopped.host.asks[1]!.text.split('\n')[1]).toBe('-- Spotify — stopped — nothing was written')
+  })
+
+  it('Esc during a refresh ends the submit before the mounts that were still to come (codex review)', async () => {
+    const { host, deps, store, mounted, sources } = build(['youtube netease refresh', 'youtube'])
+    store.mount('youtube', { browser: 'chrome' })
+    const yt = new FakeSource('youtube')
+    yt.snapshot = async () => {
+      host.pressEsc()
+      return { source: 'youtube', takenAt: NOW.toISOString(), items: [] }
+    }
+    sources.set('youtube', yt)
+    await runSources(deps)
+    expect(mounted).toEqual([])
+    expect(store.mounted()).toEqual(['youtube'])
+  })
+
+  it('sources that fail for one reason share one row, so three obstacles fit an 80x24 card (codex review)', async () => {
+    const { host, deps, store } = build(['youtube bilibili netease', ''], {
+      platform: 'darwin',
+      mounts: {
+        youtube: async () => {
+          throw new BrowserCookieError('chrome', 'no-permission', '')
+        },
+        bilibili: async () => {
+          throw new BrowserCookieError('chrome', 'no-permission', '')
+        },
+        netease: async () => {
+          throw new BrowserCookieError('chrome', 'no-permission', '')
+        },
+      },
+    })
+    await runSources(deps)
+    const rows = host.asks[1]!.text.split('\n').filter((l) => l.startsWith('-- '))
+    expect(rows).toHaveLength(1)
+    expect(rows[0]!.startsWith('-- YouTube, Bilibili, NetEase — Chrome is here, but I am not allowed')).toBe(true)
+    expect(store.read()).toEqual({})
   })
 
   it('Esc on the menu leaves without touching anything — the empty line it produces is not an empty selection', async () => {

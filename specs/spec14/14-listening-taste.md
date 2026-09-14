@@ -433,14 +433,15 @@ ok NetEase — signed in as Chen X · 312 liked          ← last submit's resul
 >> 1) [ ] YouTube - not connected
 >> 2) [ ] Bilibili - not connected
 >> 3) [x] NetEase - 312 liked · read just now
->> 4) [ ] Spotify - expired — tick to sign in again
+>> 4) [x] Spotify - expired — untick to forget it, tick refresh to sign in again
 >> 5) [ ] Soda Music - not connected
 >> 6) [ ] refresh - re-read every connected account now   ← only once something is mounted
 ```
 
-- **Ticked = mounted and signed in.** An expired login rests *unticked*
-  with its note; ticking it is the sign-in again. Nothing connected → no
-  refresh row.
+- **Ticked = mounted**, an expired login included: unticking it is how it
+  is *forgotten* — entry and snapshot gone — without a sign-in the listener
+  may not be able to give (codex review). Nothing connected → no refresh
+  row.
 - **The answer is a `line`**: the ticked keys in row order, space-joined
   (`netease refresh`), `''` for nothing ticked. The TUI's list produces it
   (10 §3.3); the plain host's listener types numbers or names
@@ -449,16 +450,22 @@ ok NetEase — signed in as Chen X · 312 liked          ← last submit's resul
   word the flow cannot place fails the whole line ("I didn't catch
   "<word>" — numbers or names from the list") and nothing is applied.
 - **Submit = a diff against what stands.** Unticked-and-mounted →
-  unmount; ticked-and-not (or expired) → the mount flow below, in row
-  order; `refresh` → re-read now. Order: unmounts, refresh, then mounts
-  last, since a mount may wait on a sign-in and an Esc there ends the
-  submit (rows already done stay done). **Nothing changed + Enter = done.**
+  unmount; ticked-and-not → the mount flow below, in row order; `refresh`
+  → re-read now, and an expired login ticked alongside it goes through the
+  mount flow first (a re-read cannot renew it). Order: unmounts, renewals,
+  refresh, then new mounts, since a sign-in may wait on the listener and an
+  Esc there ends the submit — rows already done stay done, the rest are not
+  started (the cancel is checked before each step, not after). **Nothing
+  changed + Enter = done.**
   Esc on the menu leaves without touching anything; so does a front-end
   going away (the reader's EOF `''`) — neither is an empty selection.
 - **Every result lands IN the next card** as a ready/gap row, in the mount
   flow's own words — `ok NetEase — signed in as Chen X · 312 liked`,
   `-- NetEase — <the obstacle line>`, `-- Spotify — stopped — nothing was
-  written` — as well as in the log through `info`. The TUI floats the card
+  written` — as well as in the log through `info`. Rows that end the same
+  way share one (`-- YouTube, Bilibili, NetEase — Chrome is here, but …`):
+  three cookie sources behind one obstacle must still fit an 80x24 card
+  (verified: 22 rows). The TUI floats the card
   over the log (10 §3.3), so a result printed *under* it was the failure
   mode this replaces: the card closed and reopened and the listener saw
   nothing happen (#231).

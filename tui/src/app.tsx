@@ -525,6 +525,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       if (key.name === 'down') return repick(pickMove(pick, 1, options.length))
       if (key.name === 'space') return repick(pickToggle(pick, options, head.multi === true))
       if (key.name === 'return') {
+        settleLog()
         setAsks((queue) => queue.slice(1))
         return wire.line(pickAnswer(pick, options))
       }
@@ -588,16 +589,21 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     }
   })
 
+  // Speaking is a decision to be at the bottom: a listener who paged up to
+  // re-read something and then answered would otherwise be left staring at
+  // the old screen while the reply they asked for lands out of sight — the
+  // scrollbox holds a manual scroll until it is returned to the end. Refs
+  // only, so the list card's Enter (a keyboard handler) can call it too.
+  const settleLog = (): void => {
+    if (log.current !== null) log.current.scrollTo(log.current.scrollHeight)
+    heldAway.current = false
+  }
+
   const submit = (text: string): void => {
     if (input.current !== null) input.current.value = ''
     composer.current?.setText('')
     setDraftLines(1)
-    // Speaking is a decision to be at the bottom: a listener who paged up to
-    // re-read something and then answered would otherwise be left staring at
-    // the old screen while the reply they asked for lands out of sight — the
-    // scrollbox holds a manual scroll until it is returned to the end.
-    if (log.current !== null) log.current.scrollTo(log.current.scrollHeight)
-    heldAway.current = false
+    settleLog()
     const chosen = menu.current.open ? menu.current.selected : null
     retype('')
     // Enter on the open menu runs the highlighted command, not the prefix.
