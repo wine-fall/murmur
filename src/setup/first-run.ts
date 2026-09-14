@@ -7,15 +7,16 @@
 // stdin degrades to the bundled seed, because the radio always boots.
 //
 // Slice B (the optional Claude Code history -> profile bootstrap) is offered
-// here and runs unawaited in the background, the same posture spec 05 §3.6 uses
-// for startup catch-up compaction.
+// here, before the persona call, and runs unawaited in the background once the
+// persona is written — the same posture spec 05 §3.6 uses for startup
+// catch-up compaction.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from '../contracts.ts'
-import { isYes, lineReader, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
+import { isYes, lineReader, QUIT, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from '../host/host.ts'
 import { SOURCES_ONBOARDING_LINE } from '../music/sources/flow.ts'
 import { claudeCodeRoot } from '../paths.ts'
@@ -25,6 +26,8 @@ import { BOOTSTRAP_OFFER, BOOTSTRAP_PROFILE_INSTRUCTION, BOOTSTRAP_PROFILE_SYSTE
 
 // Bounded agentic budget for the one-shot bootstrap (spec 06 §3.4/§6).
 const BOOTSTRAP_MAX_TURNS = 12
+// Typed on a seed question: step back to the previous one.
+const BACK = '/back'
 
 // The spec-05 store surface slice B needs (spec 06 §2.4). Impl-level and
 // deliberately NOT on the MemoryStore contract: the Director never writes the
@@ -100,11 +103,23 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   const read = lineReader(host, quit)
 
   host.info(FIRST_RUN_INTRO)
-  const answers: SeedAnswer[] = []
-  for (const question of SEED_QUESTIONS) {
-    ask(host, question, 'question')
-    answers.push({ question, answer: (await read()).trim() })
+  const given: string[] = SEED_QUESTIONS.map(() => '')
+  // An index walk, not a for-of: '/back' steps to the previous question, which
+  // is re-asked with the earlier answer riding as a card note; an empty line
+  // there keeps that answer (the least surprising reading of Enter).
+  for (let i = 0; i < given.length; ) {
+    const question = SEED_QUESTIONS[i]!
+    const earlier = given[i]!
+    ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question')
+    const line = (await read()).trim()
+    if (line === BACK) {
+      if (i > 0) i--
+      continue
+    }
+    if (line !== '') given[i] = line
+    i++
   }
+  const answers: SeedAnswer[] = SEED_QUESTIONS.map((question, i) => ({ question, answer: given[i]! }))
 
   // Leaving is not answering (codex review): a /quit run keeps the bundled
   // seed for THIS boot but writes no persona marker — the next boot asks
@@ -115,6 +130,12 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
     host.info('no answers — starting with the default voice; you can edit it later.')
     return useBundledSeed(deps)
   }
+
+  // Asked BEFORE the persona call: that call is the long silent wait, and a
+  // consent surfacing a minute later reads as a question after the end. The
+  // task itself launches only once the persona is written (below).
+  const bootstrap = await offerBootstrap(deps, read)
+  if (quit.requested) return deps.fallbackSeedPath
 
   let persona: string
   // Writing the persona is a model call the listener waits on with nothing
@@ -150,7 +171,21 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   host.info(`here is who you will be listening to: ${persona.split('\n')[0] ?? ''}`)
   if (trimmed) host.info('(it came back long, so the tail was trimmed — worth a read.)')
   host.info(`it lives at ${home} — edit it whenever you like; murmur never rewrites it.`)
-  await offerBootstrap(deps, read)
+  // A /quit typed during the wait is still queued — nobody was reading — and
+  // the listener is leaving: honor it here rather than launch a task they
+  // will not stay for. One macrotask beat separates "a line is queued" from
+  // "nothing typed"; any other line stays queued for the radio.
+  const queued = await Promise.race([host.peekLine(), new Promise<undefined>((r) => setTimeout(r, 0))])
+  if (queued?.trim() === QUIT) {
+    host.takeLine()
+    quit.fire()
+  }
+  if (bootstrap !== null && !quit.requested) {
+    host.info('reading in the background; the program starts now.')
+    // Unawaited on purpose: the bootstrap must never delay the first beat, and
+    // runProfileBootstrap is total, so there is no rejection to escape here.
+    void runProfileBootstrap(bootstrap)
+  }
   // The one line about the music accounts (spec 14 §3.9): said here, once,
   // on a real first run — never an ask, never repeated; the invitation
   // carries it from then on.
@@ -160,27 +195,25 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
 
 // The slice-B offer (spec 06 §3.4): explicit consent, default no, asked once
 // and never re-asked — the existence of persona.md is the only first-run
-// marker, so there is no "already offered" state to keep.
-async function offerBootstrap(deps: FirstRunDeps, read: ReadLine): Promise<void> {
+// marker, so there is no "already offered" state to keep. Returns the task to
+// launch on a yes, null otherwise: asking and running are separate moments.
+async function offerBootstrap(deps: FirstRunDeps, read: ReadLine): Promise<BootstrapDeps | null> {
   const { harness } = deps
-  if (harness === undefined) return // no real brain: nothing to run the task on
+  if (harness === undefined) return null // no real brain: nothing to run the task on
   // One multi-line ask: the question leads, the framing rides as card notes
   // (ref B2); the plain host prints the same lines in the same order.
   ask(deps.host, BOOTSTRAP_OFFER.join('\n'), 'consent')
   if (!isYes(await read())) {
     deps.host.info('skipped — murmur will get to know you as it goes.')
-    return
+    return null
   }
-  deps.host.info('reading in the background; the program starts now.')
-  // Unawaited on purpose: the bootstrap must never delay the first beat, and
-  // runProfileBootstrap is total, so there is no rejection to escape here.
-  void runProfileBootstrap({
+  return {
     harness,
     memory: deps.memory,
     host: deps.host,
     model: deps.model,
     ...(deps.ccRoot !== undefined && { ccRoot: deps.ccRoot }),
-  })
+  }
 }
 
 export type BootstrapDeps = {

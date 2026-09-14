@@ -7,8 +7,9 @@
 > carries `model` (the good tier, §3.3) and an optional `ccRoot` (injectable
 > data root, defaulting to `paths.claudeCodeRoot()`); `ProfileWritable` lives in
 > `src/setup/first-run.ts` beside its consumer, the way `CompactionStore` lives in
-> `compaction.ts`; slice B is offered only when onboarding actually produced a
-> persona, so a run that skipped every question is not asked a fourth question.
+> `compaction.ts`; slice B is offered only when onboarding actually got an
+> answer, so a run that skipped every question is not asked a fourth question,
+> and its task launches only once a persona was written.
 > The by-feel constants (`PERSONA_CHAR_CAP`, `MAX_SESSIONS`, `MAX_READ_CHARS`,
 > `BOOTSTRAP_MAX_TURNS`) remain tunable (§6).
 > **Owed**: criterion 12's first-run pass in a real terminal (user-run), and the
@@ -230,7 +231,8 @@ No new call, no new field. `COMPACTION_INSTRUCTION` (`src/prompts/`, spec 05
 2. The host prints a short framing line (what murmur is, that these questions
    shape the voice, that an empty line skips a question).
 3. Ask the **~3 seed questions** in order (§3.2), reading each answer with the
-   serialized reader. An empty answer = skipped.
+   serialized reader. An empty answer = skipped; `/back` re-asks the previous
+   question with the earlier answer shown, and an empty line there keeps it.
 4. If **every** answer is empty (including the non-interactive/EOF case): log
    one line, copy the bundled seed, done — no Brain call.
 5. Otherwise `brain.seedPersona(answers)` → persona text → atomic write to
@@ -299,8 +301,10 @@ are interchangeable to spec 01's loader.
 
 ### 3.4 Slice B — consent, execution, and the one-shot rule
 
-**Offered during first run**, immediately after the persona is written, and only
-when a harness is available (a real brain). One prompt, `[y/N]`, default **no**:
+**Offered during first run**, right after the seed answers and before the
+persona call (so the consent is on screen before the long wait, not after it),
+and only when a harness is available (a real brain). One prompt, `[y/N]`,
+default **no**:
 
 - The offer states plainly: it reads your local Claude Code history to get to
   know you; the transcripts stay on this machine, but **excerpts it chooses to

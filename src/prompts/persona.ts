@@ -45,7 +45,7 @@ export const SEED_QUESTIONS = [
 export const FIRST_RUN_INTRO =
   "This is murmur's first run, so it has no voice yet. Three short questions " +
   'shape the host you will be listening to — answer in a line each, or press ' +
-  'Enter to skip any of them.'
+  'Enter to skip any of them. Type /back to return to the previous question.'
 
 // Neutral framing (not a persona): this call writes a character, it does not
 // speak as one.
