@@ -207,7 +207,13 @@ async function offerSources(deps: FirstRunDeps, read: ReadLine): Promise<void> {
   if (recall === undefined) return
   ask(deps.host, SOURCES_OFFER.join('\n'), 'consent')
   if (!isYes(await read())) return
-  await recall()
+  // Total, like everything else on the first run: a store that cannot be
+  // written costs the connection, never the persona or the broadcast.
+  try {
+    await recall()
+  } catch (err) {
+    deps.host.info(`could not finish connecting (${String(err)}) — /sources to try again later.`)
+  }
 }
 
 // The slice-B offer (spec 06 §3.4): explicit consent, default no, asked once

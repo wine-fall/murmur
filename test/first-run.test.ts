@@ -450,6 +450,19 @@ describe('the sources offer (spec 14 §3.9)', () => {
     })
   }
 
+  it('a conversation that throws costs the connection, never the first run (codex review)', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const brain = new FakeSeeder()
+    const path = await runFirstRun(
+      deps({ host, brain, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => { throw new Error('EACCES: sources.json.tmp') } }),
+    )
+    expect(path).toBe(home)
+    expect(existsSync(home)).toBe(true)
+    expect(brain.calls).toHaveLength(1)
+    expect(host.infos.some((l) => l.includes('EACCES') && l.includes('/sources'))).toBe(true)
+  })
+
   it('comes after the slice-B consent — every question asked, then one more', async () => {
     const { memoryDir, seed } = workspace()
     const host = scriptedHost([...answered(), 'n', 'n'])
