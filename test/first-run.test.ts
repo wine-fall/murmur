@@ -8,7 +8,7 @@ import type { ProfileBootstrap } from '../src/setup/cc-tools.ts'
 import type { Brain, SeedAnswer, Task } from '../src/contracts.ts'
 import { quitLatch } from '../src/setup/guide.ts'
 import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/setup/first-run.ts'
-import { SOURCES_ONBOARDING_LINE } from '../src/music/sources/flow.ts'
+import { SOURCES_OFFER } from '../src/music/sources/flow.ts'
 import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts/persona.ts'
 import { callTool, FakeHarness, FakeHost } from './fakes.ts'
 
@@ -395,24 +395,125 @@ describe('slice B execution (criteria 8 and 9)', () => {
   })
 })
 
-// spec 14 §3.9 / §5.11: one closing line about the music accounts, after
-// the persona is written and before the first beat; a run that leaves
-// during onboarding, or one that already has a persona, never hears it.
-describe('the sources onboarding line (spec 14 §3.9)', () => {
-  it('is said exactly once after the persona is written', async () => {
-    const { memoryDir, seed } = workspace()
-    const host = scriptedHost(['call me Zach', 'company while I work', 'dry'])
-    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed }))
-    expect(host.infos.filter((l) => l === SOURCES_ONBOARDING_LINE)).toHaveLength(1)
-    expect(host.infos.indexOf(SOURCES_ONBOARDING_LINE)).toBeGreaterThan(host.infos.findIndex((l) => l.includes('it lives at')))
-    expect(host.asks.some((a) => a.text === SOURCES_ONBOARDING_LINE)).toBe(false)
+// spec 14 §3.9 / §5.11: the taste sources are offered as ONE consent card,
+// once, on a real first run — after the slice-B consent, before the persona
+// call — and a yes runs the /sources conversation itself. A run without the
+// seam (no taste: a stub run) never sees the card.
+describe('the sources offer (spec 14 §3.9)', () => {
+  const answered = () => ['call me Zach', 'company', 'dry']
+  const sourcesCard = (host: FakeHost) => host.asks.find((a) => a.kind === 'consent' && a.text === SOURCES_OFFER.join('\n'))
+
+  it('a yes runs the /sources conversation, before the persona call', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const brain = new FakeSeeder()
+    let calls = 0
+    let seedCallsWhenRun = -1
+    const sourcesRecall = async () => {
+      calls++
+      seedCallsWhenRun = brain.calls.length
+    }
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed, sourcesRecall }))
+    expect(calls).toBe(1)
+    expect(seedCallsWhenRun).toBe(0)
+    expect(brain.calls).toHaveLength(1)
+    expect(existsSync(home)).toBe(true)
   })
 
-  it('is not said when the listener leaves during onboarding', async () => {
+  it('ships as one consent card: the question leads, two quiet notes ride along, no info line', async () => {
     const { memoryDir, seed } = workspace()
-    const host = scriptedHost(['/quit'])
-    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, quit: quitLatch() }))
-    expect(host.infos).not.toContain(SOURCES_ONBOARDING_LINE)
+    const host = scriptedHost([...answered(), 'n'])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }))
+    const card = sourcesCard(host)
+    const lines = card?.text.split('\n') ?? []
+    expect(lines).toHaveLength(3)
+    expect(lines[0]).toMatch(/\? \[y\/N\]$/)
+    expect(card?.text).toContain('/sources')
+    expect(host.infos.join('\n')).not.toContain('/sources')
+  })
+
+  for (const [name, reply] of [
+    ['declining', 'n'],
+    ['a stray line', 'maybe later'],
+    ['an empty line', ''],
+  ] as const) {
+    it(`${name} runs nothing and writes nothing`, async () => {
+      const { memoryDir, seed, home } = workspace()
+      const memory = new FakeProfileStore()
+      let calls = 0
+      const host = scriptedHost([...answered(), reply])
+      await runFirstRun(deps({ host, memory, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void calls++ }))
+      expect(calls).toBe(0)
+      expect(memory.writes).toEqual([])
+      // The persona still lands: declining the sources is not leaving.
+      expect(existsSync(home)).toBe(true)
+    })
+  }
+
+  it('a conversation that throws costs the connection, never the first run (codex review)', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const brain = new FakeSeeder()
+    const path = await runFirstRun(
+      deps({ host, brain, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => { throw new Error('EACCES: sources.json.tmp') } }),
+    )
+    expect(path).toBe(home)
+    expect(existsSync(home)).toBe(true)
+    expect(brain.calls).toHaveLength(1)
+    expect(host.infos.some((l) => l.includes('EACCES') && l.includes('/sources'))).toBe(true)
+  })
+
+  it('comes after the slice-B consent — every question asked, then one more', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'n', 'n'])
+    await runFirstRun(deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }))
+    const consents = host.asks.filter((a) => a.kind === 'consent')
+    expect(consents).toHaveLength(2)
+    expect(consents[0]!.text).toContain('Claude Code history')
+    expect(consents[1]!.text).toBe(SOURCES_OFFER.join('\n'))
+  })
+
+  it('without the seam (a stub run, no taste) the card is never shown', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed }))
+    expect(sourcesCard(host)).toBeUndefined()
+  })
+
+  it('a closed stdin never reaches the card', async () => {
+    const { memoryDir, seed } = workspace()
+    let calls = 0
+    const host = scriptedHost([], { eof: true })
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void calls++ }))
+    expect(calls).toBe(0)
+    expect(sourcesCard(host)).toBeUndefined()
+  })
+
+  it('/quit at the card leaves like /quit at the slice-B consent: no persona call, no marker', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost([...answered(), '/quit'])
+    const brain = new FakeSeeder()
+    const quit = quitLatch()
+    let calls = 0
+    const path = await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed, quit, sourcesRecall: async () => void calls++ }))
+    expect(quit.requested).toBe(true)
+    expect(calls).toBe(0)
+    expect(brain.calls).toHaveLength(0)
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it('a /quit typed inside the /sources conversation ends the first run the same way', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const quit = quitLatch()
+    const host = scriptedHost([...answered(), 'y'])
+    const brain = new FakeSeeder()
+    // The conversation reads the latch's own /quit: modelled as the flow
+    // returning after the listener left.
+    const path = await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed, quit, sourcesRecall: async () => quit.fire() }))
+    expect(brain.calls).toHaveLength(0)
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
   })
 })
 
@@ -556,12 +657,5 @@ describe('the slice B offer comes before the persona call (spec 06 §3.4)', () =
     await runFirstRun(deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed }))
     expect(harness.calls).toBe(1)
     expect(host.takeLine()).toBe('hello there')
-  })
-
-  it('the sources line is still the last thing said', async () => {
-    const { memoryDir, seed } = workspace()
-    const host = scriptedHost([...answered(), 'n'])
-    await runFirstRun(deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed }))
-    expect(host.infos.at(-1)).toBe(SOURCES_ONBOARDING_LINE)
   })
 })

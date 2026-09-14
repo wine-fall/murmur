@@ -319,6 +319,13 @@ default **no**:
 - **No new state file marks "already offered."** The existence of `persona.md`
   is the first-run marker, and the offer only ever happens on a first run.
 
+**The taste-sources card** (spec 14 §3.9) follows immediately, on the same
+footing: one `consent` ask, default no, once, before the persona call — so
+the first run asks everything it will ever ask and then waits once. A yes
+runs the `/sources` conversation right there and returns here; a no writes
+nothing. It is shown only when the taste wiring exists (a real brain), and
+`/quit` on it ends the run exactly as `/quit` on the slice-B consent does.
+
 **Execution** (accepted case):
 - The task is launched **in the background after the radio is on air** — the
   same posture spec 05 §3.6 uses for startup catch-up compaction. It must never
