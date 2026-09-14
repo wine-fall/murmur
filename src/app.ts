@@ -581,6 +581,7 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
       targets,
       explicit: true,
       quit,
+      settings: buildSettingsStore(config, (m) => host.info(m)),
     })
   } finally {
     offSigint()
@@ -714,6 +715,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // and a successful swap clears it.
   const voiceAuthDown = { current: false }
   const targets = setupTargets(config, { voiceFailing: () => voiceAuthDown.current })
+  // The live settings authority (spec 12 §2.4), seeded from the merged config:
+  // everything below reads it instead of captured scalars. Built BEFORE the
+  // setup conversation, which turns its language knob (§3.9); the voice knobs
+  // that conversation can change are not settings, so nothing here waits on it.
+  const settings = buildSettingsStore(config, (m) => host.info(m))
   let setupMusicOk = false
   if (claude !== null && !quit.requested) {
     const outcome = await runSetup({
@@ -721,6 +727,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       guide: claude,
       targets,
       quit,
+      settings,
       ...(memory instanceof PersistentMemoryStore && { ledger: memory }),
     })
     setupMusicOk = outcome.musicOk
@@ -739,9 +746,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // that is actually playing, not the one the flags asked for. `let`: the
   // /setup recall re-resolves the same way and swaps the live provider.
   let resolved = voiceAfterSetup(config, targets.voiceConfig())
-  // The live settings authority (spec 12 §2.4), seeded from the fully resolved
-  // config: everything below reads it instead of captured scalars.
-  const settings = buildSettingsStore(resolved, (m) => host.info(m))
   // The delegate is what everything holds; the provider behind it can be
   // swapped by the /setup recall without anyone noticing (spec 10 §3.4).
   let liveVoice = buildVoice(resolved, (m) => host.info(m))
@@ -802,7 +806,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const setupRecall =
     claude !== null
       ? async (): Promise<void> => {
-          const outcome = await runSetup({ host, guide: claude, targets, quit, explicit: true })
+          const outcome = await runSetup({ host, guide: claude, targets, quit, explicit: true, settings })
           const next = voiceAfterSetup(config, targets.voiceConfig())
           if (voiceChanged(resolved, next)) {
             resolved = next

@@ -131,6 +131,19 @@ The official installer is \`curl -fsSL https://bun.sh/install | bash\`. Say
 what it does, run it, and afterwards verify with \`${bunCmd} --version\`.`
 }
 
+// The language murmur speaks is a settings knob (spec 12 \u00a73.9), not a voice:
+// the guide once answered "speak Chinese" with the two presets and promised the
+// male voice would read Chinese next boot — a promise no voice tool keeps,
+// because no voice tool touches the language. Stated wherever the voice is.
+const LANGUAGE_RULE = `**The language it speaks is NOT the voice.** The two are separate knobs: a
+voice (\`create_voice\`, \`write_voice_config\`) is a timbre and decides nothing
+about the language, and every voice reads whatever language the host speaks.
+Any ask about the language — "speak Chinese", "switch to Japanese", "back to
+your own language" — is \`set_language\` with the language's name (an empty
+string returns it to the persona's own default). It takes effect from the next
+line on the air; say so, and say plainly that the voice stays as it is. Never
+promise that picking or changing a voice will make murmur speak a language.`
+
 function voiceSection(): string {
   return `**The voice has no endpoint yet.**
 murmur speaks through a hosted text-to-speech endpoint, and none is configured,
@@ -198,7 +211,9 @@ missing model saves nothing — if it comes back with an error, explain what the
 error means and let them correct it.
 
 Do NOT write \`.env\` or any other file for this, and do not ask them to. The
-\`write_voice_config\` tool is the only supported way to set the endpoint.`
+\`write_voice_config\` tool is the only supported way to set the endpoint.
+
+${LANGUAGE_RULE}`
 }
 
 // The whole onboarding surface as ONE conversation (spec 03-03 §7.1): the gaps
@@ -244,10 +259,13 @@ What you can actually change from here:
   - **The endpoint itself.** \`write_voice_config\` re-points murmur at another
     server or another hosted voice id, and proves it with one real line before
     saving.
+  - **The language it speaks.** \`set_language\` — see below.
   - Anything else they raise, with the tools you have — but only what they ask
     for.
 
 ${VOICE_SECRECY}
+
+${LANGUAGE_RULE}
 
 When they are done, say so in one short sentence and stop.
 `
@@ -280,7 +298,7 @@ may also tell you to skip any individual piece; if they do, move on to the
 next without arguing.
 
 ${sections.join('\n\n---\n\n')}
-
+${gaps.some((gap) => gap.kind === 'voice') ? '' : `\n---\n\n${LANGUAGE_RULE}\n`}
 When every piece is either fixed or explicitly skipped, say so in one short
 sentence and stop.
 `

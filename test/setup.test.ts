@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -21,6 +21,10 @@ import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import type { PreflightResult } from '../src/setup/startup.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_PROBE_LINE } from '../src/voice/voice-config.ts'
 import { encodeWav } from '../src/audio/wav.ts'
+import type { Settings } from '../src/host/ipc.ts'
+import { SETTINGS_FILE, SettingsStore } from '../src/host/settings.ts'
+import { withLanguage } from '../src/prompts/persona.ts'
+import { callTool } from './fakes.ts'
 
 const OK: PreflightResult = { ok: true, reason: '' }
 const NO_YTDLP: PreflightResult = { ok: false, reason: "yt-dlp binary not found: 'yt-dlp'" }
@@ -1239,5 +1243,91 @@ describe('runSetup — declining, and what a decline costs later', () => {
       probes,
     })
     expect(outcome.musicOk).toBe(false)
+  })
+})
+
+// The language is a settings knob, not a voice (spec 12 \u00a73.9): a listener who
+// asks the setup guide to "speak Chinese" was answered with timbres and a
+// promise no tool could keep, because the guide had no hand on the knob. The
+// change_settings tool the reply turn holds lives on the steer path only; the
+// guide gets the same SettingsStore.set through set_language.
+describe('set_language (spec 03-03 \u00a77 + spec 12 \u00a73.9)', () => {
+  const BASE: Settings = {
+    anchorsEnabled: true,
+    musicEnabled: true,
+    cadenceMode: 'every_n',
+    musicEveryN: 2,
+    gapSeconds: 2,
+    recentWindow: 12,
+    muted: false,
+    tuiPet: true,
+    rwtEnabled: true,
+  }
+  const store = (home: string) =>
+    new SettingsStore({ path: join(home, SETTINGS_FILE), initial: BASE, touched: {} })
+  const probes = { music: async () => OK, bun: async () => OK }
+
+  it('rides every guide conversation that has a store, voice tools or not', async () => {
+    const { host } = fakeHost(['y'])
+    const { guide, requests } = fakeGuide()
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsBun: false, wantsVoice: false, home }),
+      ledger: fakeLedger(),
+      // A music gap opens the conversation; the language tool is there anyway.
+      probes: { music: async () => NO_YTDLP, bun: async () => OK },
+      settings: store(home),
+    })
+    expect(requests[0]!.tools?.map((t) => t.name)).toEqual(['set_language'])
+  })
+
+  it('writes settings.json and the persona hears it; the empty string erases the key', async () => {
+    const { host } = fakeHost(['y'])
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    const settings = store(home)
+    const results: Record<string, unknown>[] = []
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        const tools = [...(req.tools ?? [])]
+        results.push(await callTool(tools, 'set_language', { language: 'Chinese' }))
+        // What the persona says at this moment is what the next brain call reads.
+        expect(withLanguage('p', settings.current().language)).toMatch(/Speak in Chinese\./)
+        expect(JSON.parse(readFileSync(join(home, SETTINGS_FILE), 'utf-8'))).toMatchObject({
+          language: 'Chinese',
+        })
+        results.push(await callTool(tools, 'set_language', { language: '' }))
+        return 'done'
+      },
+    }
+    await runSetup({
+      host,
+      guide,
+      targets: targets({ wantsMusic: false, wantsBun: false, home }),
+      probes,
+      settings,
+    })
+    expect(results[0]).toMatchObject({ ok: true, language: 'Chinese' })
+    expect(results[1]).toMatchObject({ ok: true })
+    expect(settings.current().language).toBeUndefined()
+    expect(existsSync(join(home, SETTINGS_FILE))).toBe(true)
+    expect(JSON.parse(readFileSync(join(home, SETTINGS_FILE), 'utf-8'))).not.toHaveProperty('language')
+  })
+
+  it('refuses what the store refuses, and says nothing changed', async () => {
+    const { host } = fakeHost(['y'])
+    const home = mkdtempSync(join(tmpdir(), 'murmur-setup-'))
+    const settings = store(home)
+    let result: Record<string, unknown> = {}
+    const guide: GuideCapable = {
+      runGuide: async (req) => {
+        result = await callTool([...(req.tools ?? [])], 'set_language', { language: 'x'.repeat(80) })
+        return 'done'
+      },
+    }
+    await runSetup({ host, guide, targets: targets({ wantsMusic: false, wantsBun: false, home }), probes, settings })
+    expect(result).toMatchObject({ ok: false })
+    expect(existsSync(join(home, SETTINGS_FILE))).toBe(false)
   })
 })

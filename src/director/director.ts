@@ -40,7 +40,7 @@ import type {
   RwtTopic,
 } from '../contracts.ts'
 import type { Host } from '../host/host.ts'
-import { COMMANDS, type ProgramState } from '../host/ipc.ts'
+import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
@@ -248,7 +248,9 @@ export type DirectorDeps = {
   settings: () => DirectorSettings
   // The mutable side of the same layer, handed to the reply turn's
   // change_settings tool (spec 12 §2.6). Absent = the tool is not offered.
-  settingsStore?: SteerSettingsActions
+  // Its event is what tells the Director a language change (§3.9) just made
+  // the buffered look-ahead the wrong language, whoever turned the knob.
+  settingsStore?: SteerSettingsActions & { onChange(listener: (next: Settings) => void): void }
   music?: MusicWiring
   pacing?: PacingWiring
   // The agentic reply turn (spec 11): preferred over brain.respond when
@@ -389,6 +391,16 @@ export class Director {
 
   constructor(deps: DirectorDeps) {
     this.deps = deps
+    // Every buffered beat was written in the language the persona spoke when
+    // it was generated. A language change (the setup guide, the /settings
+    // pane, the reply turn — the store does not care who) drops them, like a
+    // voice swap does; the refill reads the new persona.
+    let language = deps.settingsStore?.current().language
+    deps.settingsStore?.onChange((next) => {
+      if (next.language === language) return
+      language = next.language
+      this.invalidateTalkAhead()
+    })
   }
 
   // Orderly-stop entry for signal handlers (Ctrl-C): the loop notices after
@@ -864,7 +876,12 @@ export class Director {
       return clip === null ? null : { beat: primed.beat, clip }
     }
     this.deps.host.debug?.('talk.buffer cold; batching inline')
+    const epoch = this.talkEpoch
     const beats = await this.generateTalks(TALK_LOOKAHEAD)
+    // A discard landed while the batch was in flight (a user turn, a language
+    // change): every beat predates it. Start over — an in-flight refill is
+    // awaited above, never doubled.
+    if (epoch !== this.talkEpoch) return this.nextTalkClip()
     const first = beats.shift()
     if (first === undefined) return null
     this.prefetchMusic(priorLine(first.text))
@@ -908,11 +925,14 @@ export class Director {
     this.deps.host.debug?.(`talk.refill got=${beats.length} depth=${this.talkAhead.length}`)
   }
 
-  // The voice provider just changed under the delegate (spec 10 §3.4): every
-  // buffered clip was synthesized — and stored — by the OLD provider, whose
-  // close may remove its temp clips. Drop them; the refill re-synthesizes.
+  // The voice provider just changed under the delegate (spec 10 §3.4), or the
+  // language did (spec 12 §3.9): every buffered clip was synthesized by the
+  // OLD provider — whose close may remove its temp clips — or written in the
+  // old language. Drop them and refill NOW, under the clip still on air, so
+  // the change is not paid for as a cold pause at the next boundary.
   invalidateTalkAhead(): void {
     this.discardTalkAhead()
+    this.prefetchTalk()
   }
 
   // Drop the buffered look-ahead and orphan any in-flight refill (spec 04

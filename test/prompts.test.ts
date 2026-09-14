@@ -1024,3 +1024,26 @@ Likes a slow evening voice; running joke about the kettle.`
     expect(aboutSection('(About the listener)\nRuns at night.\n')).toBe('Runs at night.')
   })
 })
+
+// The guide once answered "speak Chinese" with a timbre menu and a promise the
+// voice would read Chinese on the next boot (a real dev log, 2026-09-13): the
+// prompt had no word separating the language from the voice, so the model
+// reached for the only knob it had. Both setup prompts now draw the line.
+describe('setup prompts — the language is not the voice (spec 12 \u00a73.9)', () => {
+  const base = { ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg', bunCmd: 'bun' }
+  const rule = (text: string) => {
+    expect(text).toContain('set_language')
+    expect(text).toMatch(/language.*not.*voice|voice.*not.*language/i)
+    // The promise that misled: a voice preset does not decide the language.
+    expect(text).toMatch(/never\s+promise/i)
+  }
+  it('is stated to a listener who opened setup on a healthy machine', () => {
+    rule(buildSetupPrompt({ gaps: [], ...base }))
+  })
+  it('is stated alongside the voice repair', () => {
+    rule(buildSetupPrompt({ gaps: [{ kind: 'voice', reason: 'no endpoint configured' }], ...base }))
+  })
+  it('is stated even when the only gap is music', () => {
+    rule(buildSetupPrompt({ gaps: [{ kind: 'music', reason: 'yt-dlp missing' }], ...base }))
+  })
+})

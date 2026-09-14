@@ -14,7 +14,8 @@
 // to fix itself by talking. runSetup is that offer — once per boot, actively,
 // covering every gap in one conversation.
 
-import type { CanUseTool } from '@anthropic-ai/claude-agent-sdk'
+import { type CanUseTool, tool } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 
 import {
   isSecretBearing,
@@ -23,8 +24,9 @@ import {
   SECRET_PATH,
   toolDetail,
 } from '../brain/brain.ts'
-import type { GuideCapable, GuideSession, LedgerKind } from '../contracts.ts'
+import type { GuideCapable, GuideSession, LedgerKind, SteerSettingsActions, TaskTool } from '../contracts.ts'
 import { ask, type Host } from '../host/host.ts'
+import { LANGUAGE_MAX } from '../host/ipc.ts'
 import { expandUser } from '../paths.ts'
 import { HostedVoice } from '../voice/hosted-voice.ts'
 import { buildSetupPrompt, GUIDE_PERSONA, VISIT_PERSONA } from '../prompts/setup.ts'
@@ -383,6 +385,57 @@ export type SetupRun = {
   explicit?: boolean
   // Fired by a typed /quit mid-conversation; reads decline through instantly.
   quit?: QuitLatch
+  // The live settings authority (spec 12 \u00a72.4): the guide's hand on the
+  // language knob (\u00a73.9), the same set() the reply turn's change_settings
+  // and the /settings pane reach. Absent = set_language is not offered.
+  settings?: SteerSettingsActions
+}
+
+// The language the radio speaks, from inside the setup conversation. A listener
+// who asked the guide to "speak Chinese" was offered timbres — the guide had
+// tools for the voice and none for the language, and the two are different
+// knobs. One field, the store's own validation, '' erases (spec 12 \u00a73.9).
+function setLanguageTool(settings: SteerSettingsActions): TaskTool {
+  return tool(
+    'set_language',
+    'Set the language murmur SPEAKS — a settings knob, separate from the voice ' +
+      '(timbre). Call it for any ask about the language ("speak Chinese"). ' +
+      'The change lands from the next line on the air; the voice stays as it is.',
+    {
+      language: z
+        .string()
+        .max(LANGUAGE_MAX)
+        .describe(
+          'the language to speak, as a name ("Chinese", "Japanese", "Traditional ' +
+            'Chinese"). Empty string returns it to the persona\'s own default.',
+        ),
+    },
+    async ({ language }) => {
+      if (!settings.set({ language })) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify({ ok: false, error: 'the radio refused that language name; nothing changed' }),
+            },
+          ],
+        }
+      }
+      const now = settings.current().language
+      return {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify({
+              ok: true,
+              language: now ?? 'the persona default',
+              note: 'takes effect from the next line on the air; the voice (timbre) is unchanged',
+            }),
+          },
+        ],
+      }
+    },
+  )
 }
 
 const PLAIN_ENGLISH: Record<GapKind, string> = {
@@ -624,7 +677,7 @@ async function runSetupFlow(
   // "the endpoint is missing" left that invitation with no way to be taken up.
   // They stay closure-scoped to one config path either way, so a session that
   // has nothing to fix simply never calls them.
-  const tools = targets.wantsVoice
+  const tools: TaskTool[] = targets.wantsVoice
     ? [
         writeVoiceConfigTool({
           home: targets.home,
@@ -684,6 +737,9 @@ async function runSetupFlow(
         }),
       ]
     : []
+  // The language rides every conversation that has a store: it is not a voice
+  // and not a gap, it is a knob the listener may turn from here.
+  if (run.settings !== undefined) tools.push(setLanguageTool(run.settings))
 
   // Whatever the session dies of — the SDK iterator throwing its interrupted
   // turn's error result (seen live on the Esc-Esc shape), a subprocess crash —
