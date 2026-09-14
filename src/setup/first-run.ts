@@ -114,21 +114,62 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
 
   host.info(FIRST_RUN_INTRO)
   const given: string[] = SEED_QUESTIONS.map(() => '')
-  // An index walk, not a for-of: '/back' steps to the previous question, which
-  // is re-asked with the earlier answer riding as a card note; an empty line
-  // there keeps that answer (the least surprising reading of Enter).
-  for (let i = 0; i < given.length; ) {
-    const question = SEED_QUESTIONS[i]!
-    const earlier = given[i]!
-    ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question')
-    const line = (await read()).trim()
-    if (line === BACK) {
+  // The whole first run is one step table walked by index (§3.4): the seed
+  // questions, then the consent cards that are actually available on this run.
+  // '/back' is a step back anywhere in it — every question is reachable again,
+  // and a card is never the point of no return.
+  const steps: Step[] = [
+    ...SEED_QUESTIONS.map((_, i): Step => ({ kind: 'seed', index: i })),
+    ...(deps.harness !== undefined ? [{ kind: 'bootstrap' } as Step] : []),
+    ...(deps.sourcesRecall !== undefined ? [{ kind: 'sources' } as Step] : []),
+  ]
+  let bootstrap: BootstrapDeps | null = null
+  let sourcesDone = false
+  let allSkipped = false
+  for (let i = 0; i < steps.length && !quit.requested; ) {
+    const step = steps[i]!
+    if (step.kind === 'seed') {
+      const question = SEED_QUESTIONS[step.index]!
+      const earlier = given[step.index]!
+      // The earlier answer rides as a card note, and an empty line there keeps
+      // it (the least surprising reading of Enter).
+      ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question')
+      const line = (await read()).trim()
+      if (line === BACK) {
+        if (i > 0) i--
+        continue
+      }
+      if (line !== '') given[step.index] = line
+      i++
+      // Nothing said at all ends the run here: no consent card is worth asking
+      // of a listener who answered nothing, and there is no persona to write.
+      if (steps[i]?.kind !== 'seed' && given.every((g) => g === '')) {
+        allSkipped = true
+        break
+      }
+      continue
+    }
+    const offer = step.kind === 'bootstrap' ? BOOTSTRAP_OFFER : SOURCES_OFFER
+    const answer = await askConsent(host, offer, read, quit)
+    if (answer === 'back') {
       if (i > 0) i--
       continue
     }
-    if (line !== '') given[i] = line
+    if (answer === 'quit') break
+    if (step.kind === 'bootstrap') {
+      // Re-answering REPLACES the earlier one: a yes taken back with /back
+      // leaves nothing to launch.
+      bootstrap = answer === 'yes' ? bootstrapDeps(deps) : null
+      if (answer === 'no') host.info('skipped — murmur will get to know you as it goes.')
+    } else if (answer === 'yes' && !sourcesDone) {
+      // The one step with a side effect the table cannot walk back: once the
+      // conversation has run, a later /back would re-mount an account.
+      sourcesDone = true
+      await runSourcesRecall(deps)
+    }
     i++
   }
+
   const answers: SeedAnswer[] = SEED_QUESTIONS.map((question, i) => ({ question, answer: given[i]! }))
 
   // Leaving is not answering (codex review): a /quit run keeps the bundled
@@ -136,18 +177,10 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // again from the top.
   if (quit.requested) return deps.fallbackSeedPath
 
-  if (answers.every((a) => a.answer === '')) {
+  if (allSkipped || answers.every((a) => a.answer === '')) {
     host.info('no answers — starting with the default voice; you can edit it later.')
     return useBundledSeed(deps)
   }
-
-  // Asked BEFORE the persona call: that call is the long silent wait, and a
-  // consent surfacing a minute later reads as a question after the end. The
-  // task itself launches only once the persona is written (below).
-  const bootstrap = await offerBootstrap(deps, read)
-  if (quit.requested) return deps.fallbackSeedPath
-  await offerSources(deps, read)
-  if (quit.requested) return deps.fallbackSeedPath
 
   let persona: string
   // Writing the persona is a model call the listener waits on with nothing
@@ -218,39 +251,49 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   return home
 }
 
-// The taste-sources offer (spec 14 §3.9): one consent card, default no, asked
-// once and never re-asked — persona.md is the only first-run marker here too.
-// A yes runs the /sources conversation itself, so a new listener mounts an
-// account in the same sitting instead of finding the command later; a no
-// writes nothing and says nothing more, the card already named the way back.
-async function offerSources(deps: FirstRunDeps, read: ReadLine): Promise<void> {
-  const recall = deps.sourcesRecall
-  if (recall === undefined) return
-  ask(deps.host, SOURCES_OFFER.join('\n'), 'consent')
-  if (!isYes(await read())) return
-  // Total, like everything else on the first run: a store that cannot be
-  // written costs the connection, never the persona or the broadcast.
+// One consent card's answer (§3.4). The legal inputs are the only inputs: an
+// unrecognized line re-asks the same card rather than counting as a no — a
+// listener who typed '/back' or a question must never have it read as consent
+// to nothing.
+type ConsentAnswer = 'yes' | 'no' | 'back' | 'quit'
+
+// A step in the first-run table. The seed questions carry their index; the
+// cards are present only when this run can actually offer them.
+type Step = { kind: 'seed'; index: number } | { kind: 'bootstrap' } | { kind: 'sources' }
+
+const NO_ANSWERS = new Set(['', 'n', 'no'])
+
+async function askConsent(host: Host, offer: readonly string[], read: ReadLine, quit: QuitLatch): Promise<ConsentAnswer> {
+  for (;;) {
+    ask(host, offer.join('\n'), 'consent')
+    const line = (await read()).trim()
+    if (quit.requested) return 'quit'
+    if (line === BACK) return 'back'
+    if (isYes(line)) return 'yes'
+    if (NO_ANSWERS.has(line.toLowerCase())) return 'no'
+    // The card already says how to answer ('y or Enter — one key decides');
+    // showing it again IS the correction.
+  }
+}
+
+// The taste-sources conversation (spec 14 §3.9): a yes runs /sources right
+// there, so a new listener mounts an account in the same sitting instead of
+// finding the command later. Total, like everything else on the first run: a
+// store that cannot be written costs the connection, never the persona or the
+// broadcast.
+async function runSourcesRecall(deps: FirstRunDeps): Promise<void> {
   try {
-    await recall()
+    await deps.sourcesRecall?.()
   } catch (err) {
     deps.host.info(`could not finish connecting (${String(err)}) — /sources to try again later.`)
   }
 }
 
-// The slice-B offer (spec 06 §3.4): explicit consent, default no, asked once
-// and never re-asked — the existence of persona.md is the only first-run
-// marker, so there is no "already offered" state to keep. Returns the task to
-// launch on a yes, null otherwise: asking and running are separate moments.
-async function offerBootstrap(deps: FirstRunDeps, read: ReadLine): Promise<BootstrapDeps | null> {
+// The slice-B task to launch on a yes (spec 06 §3.4): asking and running are
+// separate moments — the task itself starts only once the persona is written.
+function bootstrapDeps(deps: FirstRunDeps): BootstrapDeps | null {
   const { harness } = deps
-  if (harness === undefined) return null // no real brain: nothing to run the task on
-  // One multi-line ask: the question leads, the framing rides as card notes
-  // (ref B2); the plain host prints the same lines in the same order.
-  ask(deps.host, BOOTSTRAP_OFFER.join('\n'), 'consent')
-  if (!isYes(await read())) {
-    deps.host.info('skipped — murmur will get to know you as it goes.')
-    return null
-  }
+  if (harness === undefined) return null
   return {
     harness,
     memory: deps.memory,

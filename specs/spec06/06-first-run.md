@@ -312,7 +312,10 @@ default **no**:
   already uses for every beat; it runs once, in the background; skipping is fine
   and costs nothing but time (the profile then accrues through normal
   compaction).
-- Anything but an explicit yes = declined. Declining is **not** recorded and
+- `y`/`yes`, `n`/`no` and an empty line (= no) are the only answers, beside
+  `/back` and `/quit`. Anything else **re-asks the same card** — a line the
+  card's grammar does not know is never silently read as a decline.
+- Declining is **not** recorded and
   **never re-asked** — murmur does not nag. The re-entry for a later change of
   mind is an explicit CLI action, `murmur --bootstrap-profile` (mirroring
   `--setup-music`, spec 03-03), which runs the same task standalone.
@@ -325,6 +328,17 @@ the first run asks everything it will ever ask and then waits once. A yes
 runs the `/sources` conversation right there and returns here; a no writes
 nothing. It is shown only when the taste wiring exists (a real brain), and
 `/quit` on it ends the run exactly as `/quit` on the slice-B consent does.
+
+**The first run is one step table** (§3.1 step 3, extended): the seed questions
+followed by whichever consent cards this run can offer (slice B only with a
+harness, the sources card only with the taste wiring). `/back` steps back one
+place anywhere in it, not only among the questions — from the sources card to
+the slice-B card, from the slice-B card to the last seed question (re-asked with
+its earlier answer, Enter keeps it). `/back` on the first question does nothing.
+A consent answer taken back is **cancelled**: a slice-B yes followed by `/back`
+and a no launches no task. The one step that does not walk back is a sources
+yes, because the `/sources` conversation it ran has already mounted accounts;
+the card is not re-offered afterwards.
 
 **Execution** (accepted case):
 - The task is launched **in the background after the radio is on air** — the
