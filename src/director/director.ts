@@ -42,6 +42,7 @@ import type {
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
+import { chromePick } from '../music/sources/flow.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
 import { INSTALL_COMMAND } from '../support/update.ts'
@@ -87,15 +88,28 @@ export function openerFor(platform: NodeJS.Platform, url: string): { command: st
 // The taste sources read Chrome's cookie store, so a sign-in page must open
 // in Chrome specifically: sent to the machine's default browser, a listener
 // would sign in somewhere murmur never looks.
-export function chromeOpenerFor(platform: NodeJS.Platform, url: string): { command: string; args: string[] } {
-  if (platform === 'darwin') return { command: 'open', args: ['-a', 'Google Chrome', url] }
+// A pinned profile rides along: murmur reads that profile's cookie store, so
+// the sign-in has to happen in it. Chrome creates the profile directory when
+// it opens a URL in one, so a profile that does not exist yet is no obstacle.
+export function chromeOpenerFor(platform: NodeJS.Platform, url: string, profile?: string): { command: string; args: string[] } {
+  const pinned = profile === undefined ? [] : [`--profile-directory=${profile}`]
+  // `-n` on the pinned path is load-bearing: `open -a ... --args` hands its
+  // flags to Chrome only when Chrome is not already running, so without it a
+  // listener with Chrome open lands in whatever profile is in front of them.
+  // A second instance relays the whole command line — profile included — to
+  // the running one through Chrome's singleton, so the flag survives.
+  if (platform === 'darwin') {
+    return profile === undefined
+      ? { command: 'open', args: ['-a', 'Google Chrome', url] }
+      : { command: 'open', args: ['-na', 'Google Chrome', '--args', ...pinned, url] }
+  }
   // Quoted for the same reason as `openerFor`: cmd re-parses its own line.
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', 'chrome', `"${url}"`] }
-  return { command: 'google-chrome', args: [url] }
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', 'chrome', ...pinned, `"${url}"`] }
+  return { command: 'google-chrome', args: [...pinned, url] }
 }
 
 export function openInChrome(url: string): void {
-  spawnDetached(chromeOpenerFor(process.platform, url))
+  spawnDetached(chromeOpenerFor(process.platform, url, chromePick().profile))
 }
 
 export function openInBrowser(url: string): void {

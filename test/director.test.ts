@@ -147,6 +147,17 @@ describe('Director — /bug and /feature-request', () => {
     expect(chromeOpenerFor('win32', url)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `"${url}"`] })
   })
 
+  // $MURMUR_CHROME_PROFILE pins the profile murmur reads, so the sign-in page
+  // has to open in that same profile — Chrome creates the directory when it
+  // does, which is why a never-opened profile is no longer an obstacle.
+  it('opens the sign-in page in the pinned Chrome profile, per platform', () => {
+    const url = 'https://music.163.com/'
+    const p = 'Murmur Fresh'
+    expect(chromeOpenerFor('darwin', url, p)).toEqual({ command: 'open', args: ['-na', 'Google Chrome', '--args', `--profile-directory=${p}`, url] })
+    expect(chromeOpenerFor('linux', url, p)).toEqual({ command: 'google-chrome', args: [`--profile-directory=${p}`, url] })
+    expect(chromeOpenerFor('win32', url, p)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `--profile-directory=${p}`, `"${url}"`] })
+  })
+
   it('picks the desktop opener per platform, never spawn\'s deprecated shell form', () => {
     // DEP0190 (codex review): args + `shell: true` warns on Node 24 and the
     // warning would land on the TUI's own terminal.
