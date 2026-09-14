@@ -26,6 +26,20 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'info', text: 'stopped — the setup guide is waiting for you', tone: 'flow' },
   { v: 1, type: 'ask', text: 'what should I call you?', kind: 'question' },
   { v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' },
+  // A question with rows to tick (spec 10 §3.2-D, the /sources list): the
+  // answer is still a `line` — the ticked keys, space-joined.
+  {
+    v: 1,
+    type: 'ask',
+    text: 'which accounts should I read?\n>> 1) [x] NetEase - 312 liked',
+    kind: 'question',
+    options: [
+      { key: 'netease', label: 'NetEase', note: '312 liked', checked: true },
+      { key: 'spotify', label: 'Spotify' },
+      { key: 'refresh', label: 'refresh', note: 're-read every connected account now' },
+    ],
+    multi: true,
+  },
   { v: 1, type: 'askDrop' },
   { v: 1, type: 'mode', who: 'guide' },
   { v: 1, type: 'mode', who: 'report' },

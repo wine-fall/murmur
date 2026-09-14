@@ -53,7 +53,6 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#153** (bug, eng) First-run onboarding keeps asking after /quit and never says the answers were dropped.
 - **#163** (enhancement, eng) The director never interjects a talk beat over a ducked song — the engine seam is already there.
 - **#164** (watch, bug) Music picks failing and running long in one real session — dead probes, source health suspected.
-- **#231** (bug, eng) The /sources menu card hides a failed mount's feedback at 80x24 — spec 14 §3.1, spec 10 §3.3.
 
 ## Pinned — do not relitigate
 

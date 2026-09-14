@@ -18,6 +18,10 @@ import {
   outbound,
   PAGE_OVERLAP,
   pageStep,
+  pickAnswer,
+  pickMove,
+  pickStart,
+  pickToggle,
   visibleLogRows,
 } from '../tui/src/dock.ts'
 
@@ -207,6 +211,19 @@ describe('cardRows / cardTopRow', () => {
     expect(cardRows(menu, 200, 'consent')).toBe(12)
   })
 
+  it('a list card stands on its rows, not the text\'s >> lines, and has no answer field', () => {
+    const text = 'which accounts should I read?\n>> 1) [x] NetEase - 312 liked\n>> 2) [ ] Spotify - not connected'
+    const options = [
+      { key: 'netease', label: 'NetEase', note: '312 liked', checked: true },
+      { key: 'spotify', label: 'Spotify', note: 'not connected' },
+    ]
+    // 1 lead row + 2 list rows + action row (2) + chrome (4) + margin (1); no
+    // divider (no facts), no field — the list IS the answer.
+    expect(cardRows(text, 200, 'question', options)).toBe(10)
+    // A result row above the list brings the divider back.
+    expect(cardRows(`which accounts should I read?\nok NetEase - signed in\n${text.split('\n').slice(1).join('\n')}`, 200, 'question', options)).toBe(12)
+  })
+
   it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
     expect(cardTopRow(CONSENT, 200, 50, 'consent')).toBe(50 - 1 - cardRows(CONSENT, 200, 'consent'))
     expect(cardTopRow(CONSENT, 200, 8, 'consent')).toBe(1)
@@ -247,5 +264,39 @@ describe('visibleLogRows (an overlay hides rows without taking them)', () => {
     // page floor exists to rule out.
     expect(visibleLogRows(4, 20, 4)).toBe(1)
     expect(visibleLogRows(4, 20, 1)).toBe(1)
+  })
+})
+
+describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
+  const options = [
+    { key: 'netease', label: 'NetEase', checked: true },
+    { key: 'spotify', label: 'Spotify' },
+    { key: 'refresh', label: 'refresh' },
+  ]
+
+  it('starts on the first row with the pre-ticked keys ticked', () => {
+    expect(pickStart(options)).toEqual({ at: 0, checked: ['netease'] })
+  })
+
+  it('moves within the rows and never past either end', () => {
+    const start = pickStart(options)
+    expect(pickMove(start, -1, options.length).at).toBe(0)
+    expect(pickMove(start, 1, options.length).at).toBe(1)
+    expect(pickMove(pickMove(start, 1, options.length), 5, options.length).at).toBe(2)
+  })
+
+  it('toggles the row under the cursor in a multi list; a single list keeps one', () => {
+    const start = pickStart(options)
+    expect(pickToggle(start, options, true).checked).toEqual([])
+    const second = pickToggle(pickMove(start, 1, options.length), options, true)
+    expect(second.checked).toEqual(['netease', 'spotify'])
+    expect(pickToggle(pickMove(start, 1, options.length), options, false).checked).toEqual(['spotify'])
+  })
+
+  it('answers with the ticked keys in row order, space-joined; nothing ticked is the empty line', () => {
+    const start = pickStart(options)
+    const both = pickToggle(pickMove(start, 2, options.length), options, true)
+    expect(pickAnswer(both, options)).toBe('netease refresh')
+    expect(pickAnswer(pickToggle(start, options, true), options)).toBe('')
   })
 })

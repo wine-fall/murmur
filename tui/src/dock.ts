@@ -3,7 +3,7 @@
 // queue head in a centered card above the input. This module shapes the card's
 // text; app.tsx renders it (wrapping is <text>'s own — no hand-rolled folding).
 
-import { COMMANDS, type EngineMessage, type Invitation } from '../../src/host/ipc.ts'
+import { COMMANDS, type AskOption, type EngineMessage, type Invitation } from '../../src/host/ipc.ts'
 
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
@@ -11,8 +11,8 @@ export type AskKind = Ask['kind']
 // A menu is a question with structured rows — options to pick, or status
 // rows to read (/sources with everything mounted has only those). A seed
 // question is plain text. Read from the ask text alone: zero wire additions.
-export function isMenu(kind: AskKind, lines: readonly CardLine[]): boolean {
-  return kind === 'question' && lines.some((l) => l.role !== 'main' && l.role !== 'note')
+export function isMenu(kind: AskKind, lines: readonly CardLine[], options?: readonly AskOption[]): boolean {
+  return kind === 'question' && (options !== undefined || lines.some((l) => l.role !== 'main' && l.role !== 'note'))
 }
 
 // The border title, padded so the frame breathes around it. A seed question
@@ -20,9 +20,9 @@ export function isMenu(kind: AskKind, lines: readonly CardLine[]): boolean {
 // step in a run, so it carries none; a consent names its skippability; a
 // card carrying the checklist is the pre-broadcast check (ref B3), whatever
 // kind delivered it.
-export function cardTitle(kind: AskKind, count: number, text: string): string {
+export function cardTitle(kind: AskKind, count: number, text: string, options?: readonly AskOption[]): string {
   const lines = cardLines(text)
-  if (isMenu(kind, lines)) return ' murmur is asking '
+  if (isMenu(kind, lines, options)) return ' murmur is asking '
   if (lines.some((l) => l.role === 'ready' || l.role === 'gap')) return ' pre-broadcast check '
   return kind === 'consent'
     ? ' murmur needs a yes · optional '
@@ -66,10 +66,12 @@ export function cardLines(text: string): CardLine[] {
 // width and chrome math replayed as a number. The raster layer needs it: a
 // kitty image sits ABOVE text cells, so while the card is up the sky's images
 // may keep the stage (dimmed) only where the card cannot reach.
-export function cardRows(text: string, cols: number, kind: AskKind): number {
+export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[]): number {
   const width = Math.min(Math.floor(cols * 0.55), cols - 4)
   const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
-  const lines = cardLines(text)
+  // A list card draws its rows from `options`; the text's own '>> ' rows are
+  // the same rows for a client without a list surface, so they are skipped.
+  const lines = cardLines(text).filter((line) => options === undefined || line.role !== 'option')
   const facts = lines.some((line) => line.role === 'ready' || line.role === 'gap')
   let rows = 0
   for (const line of lines) {
@@ -77,12 +79,14 @@ export function cardRows(text: string, cols: number, kind: AskKind): number {
       line.role === 'ready' || line.role === 'gap' ? 4 : line.role === 'option' ? 3 : 0
     rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
   }
+  for (const option of options ?? []) rows += Math.max(1, Math.ceil(listRow(option).length / inner))
   if (facts) rows += 1 // the divider above the options
   // A consent checklist's choices are its own option rows; every other card
   // keeps the renderer's action row (a question's Enter hint stays even
   // above status rows — the /sources menu).
   if (!(facts && kind === 'consent')) rows += 2 // the action row (its top margin + the line)
-  rows += 2 // the in-card answer field (its top margin + the input)
+  // The list IS the answer: no field under it.
+  if (options === undefined) rows += 2 // the in-card answer field (its top margin + the input)
   rows += 4 // border (2) + vertical padding (2)
   rows += 1 // the gap row between the floating card and the bottom rule
   return rows
@@ -91,8 +95,39 @@ export function cardRows(text: string, cols: number, kind: AskKind): number {
 // The first terminal row the card can touch: the card floats anchored to the
 // window's bottom rule (the quiet line that keeps the frame closed), so its
 // top is the window height minus its own rows. Rasters end above this.
-export function cardTopRow(text: string, cols: number, height: number, kind: AskKind): number {
-  return Math.max(1, height - 1 - cardRows(text, cols, kind))
+export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[]): number {
+  return Math.max(1, height - 1 - cardRows(text, cols, kind, options))
+}
+
+// One list row as the renderer lays it out: the cursor slot, the tick box,
+// the label, the note.
+export function listRow(option: AskOption): string {
+  return `  [${option.checked === true ? 'x' : ' '}] ${option.label}${option.note === undefined ? '' : `  ${option.note}`}`
+}
+
+// The list card's cursor and ticks (spec 10 §3.2-B, rows to tick): up/down move,
+// Space toggles the row under the cursor (a single-pick list keeps one),
+// Enter answers with the ticked keys in row order — the `line` the flow
+// reads. Pure, so app.tsx only has to hold the state and draw it.
+export type Pick = { at: number; checked: readonly string[] }
+
+export function pickStart(options: readonly AskOption[]): Pick {
+  return { at: 0, checked: options.filter((o) => o.checked === true).map((o) => o.key) }
+}
+
+export function pickMove(pick: Pick, delta: number, count: number): Pick {
+  return { ...pick, at: Math.max(0, Math.min(count - 1, pick.at + delta)) }
+}
+
+export function pickToggle(pick: Pick, options: readonly AskOption[], multi: boolean): Pick {
+  const key = options[pick.at]?.key
+  if (key === undefined) return pick
+  if (!multi) return { ...pick, checked: pick.checked.includes(key) ? [] : [key] }
+  return { ...pick, checked: pick.checked.includes(key) ? pick.checked.filter((k) => k !== key) : [...pick.checked, key] }
+}
+
+export function pickAnswer(pick: Pick, options: readonly AskOption[]): string {
+  return options.filter((o) => pick.checked.includes(o.key)).map((o) => o.key).join(' ')
 }
 
 // What a submitted line becomes on the wire. While a question is docked,

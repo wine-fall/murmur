@@ -154,6 +154,15 @@ const v = z.literal(ENVELOPE)
 
 // --- engine -> tui --------------------------------------------------------- //
 
+export const AskOptionSchema = z.object({
+  key: z.string(),
+  label: z.string(),
+  note: z.string().optional(),
+  checked: z.boolean().optional(),
+})
+
+export type AskOption = z.infer<typeof AskOptionSchema>
+
 export const EngineMessageSchema = z.discriminatedUnion('type', [
   z.object({
     v,
@@ -187,7 +196,18 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // and the first-run seeds, marked so the front-end can dock them instead of
   // guessing which info line wants an answer. Additive — an older client drops
   // it and keeps the info-line adjacency it already relies on.
-  z.object({ v, type: z.literal('ask'), text: z.string(), kind: z.enum(['question', 'consent']) }),
+  // `options` turns the question into rows to tick (spec 10 §3.2-D, the
+  // /sources list): the answer is still a `line` — the ticked keys in row
+  // order, space-joined, '' for none. The text keeps its own '>> ' rows, so a
+  // client without a list surface still reads the same question. Additive.
+  z.object({
+    v,
+    type: z.literal('ask'),
+    text: z.string(),
+    kind: z.enum(['question', 'consent']),
+    options: z.array(AskOptionSchema).optional(),
+    multi: z.boolean().optional(),
+  }),
   // Every pending ask just died with its flow (the listener's Esc stopped it):
   // the client drops its cards. Additive, like `ask`.
   z.object({ v, type: z.literal('askDrop') }),

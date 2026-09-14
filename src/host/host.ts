@@ -13,7 +13,7 @@ import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import { packageVersion } from '../config.ts'
-import type { Invitation, ProgramState } from './ipc.ts'
+import type { AskOption, Invitation, ProgramState } from './ipc.ts'
 
 export interface Host {
   start(): void
@@ -33,7 +33,7 @@ export interface Host {
   // consents, the first-run seeds, the free-reply prompt. A front-end with a
   // question surface pins it beside the input; absent, callers fall back to
   // info (the plain host's recency-adjacency). Route through ask() below.
-  ask?(text: string, kind: AskKind): void
+  ask?(text: string, kind: AskKind, choices?: AskChoices): void
   // The listener's way out of a running flow without leaving (spec 03-03 §7 +
   // spec 10 §3.4): Esc in the TUI. A flow that can be stopped registers its
   // handler for its own duration (null to unregister); a host without the
@@ -87,6 +87,12 @@ export interface Host {
 // one line either way.
 export type AskKind = 'question' | 'consent'
 
+// Rows to tick under a question (spec 10 §3.2-D): the /sources list. The
+// text carries the same rows numbered ('>> 1) [x] NetEase - ...'), so a host
+// without a list surface shows the text alone and the listener answers with
+// numbers or names.
+export type AskChoices = { options: readonly AskOption[]; multi?: boolean }
+
 // Who the keyboard is talking to. 'guide' while the setup guide holds the
 // floor, 'report' while the listener is writing up a bug or a wish, 'radio'
 // otherwise.
@@ -101,9 +107,9 @@ export type InfoTone = 'flow'
 
 // Every question the engine asks goes through here: hosts with a question
 // surface get the marked ask, bare ones get the same text as info.
-export function ask(host: Host, text: string, kind: AskKind): void {
-  if (host.ask !== undefined) host.ask(text, kind)
-  else host.info(text)
+export function ask(host: Host, text: string, kind: AskKind, choices?: AskChoices): void {
+  if (host.ask !== undefined) host.ask(text, kind, choices)
+  else host.info(choices === undefined ? text : `${text}\nnumbers or names, space-separated · Enter keeps it as it is`)
 }
 
 // Mirror a program line into the dev log (`make logs` tails it in a second

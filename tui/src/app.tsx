@@ -24,8 +24,13 @@ import {
   isCommand,
   outbound,
   pageStep,
+  pickAnswer,
+  pickMove,
+  pickStart,
+  pickToggle,
   visibleLogRows,
   type Ask,
+  type Pick,
 } from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
 import {
@@ -318,7 +323,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // the next typed line answers (lineReader consumes in ask order; a
   // single-slot dock could show B while the answer lands on A, codex review).
   // Questions carry a client-side ordinal for the card title's light counter.
-  const [asks, setAsks] = useState<(Ask & { no?: number })[]>([])
+  // A question with rows to tick carries its cursor and ticks (`pick`): the
+  // list is the answer field, so its state lives with the question it answers.
+  const [asks, setAsks] = useState<(Ask & { no?: number; pick?: Pick })[]>([])
+  const asksRef = useRef(asks)
+  asksRef.current = asks
   const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
   // The composer a floor gets in place of the input line (§3.4): a real
@@ -405,7 +414,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           append('info', message.text)
           setAsks((queue) => [
             ...queue,
-            message.kind === 'question' ? { ...message, no: ++questionNo.current } : message,
+            {
+              ...message,
+              ...(message.kind === 'question' && { no: ++questionNo.current }),
+              ...(message.options !== undefined && { pick: pickStart(message.options) }),
+            },
           ])
           break
         case 'mode':
@@ -500,6 +513,21 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       // silently skip forward while standing still.
       heldAway.current = box.scrollTop + height < box.scrollHeight - 1
       return
+    }
+    // A list card owns the keys while it is up (§3.2-B, rows to tick): the
+    // arrows move, Space ticks, Enter answers with the ticked keys — there
+    // is no input to submit through. Esc falls through to the interrupt.
+    const head = asksRef.current[0]
+    if (!pane.current.open && head?.options !== undefined && head.pick !== undefined) {
+      const { options, pick } = head
+      const repick = (next: Pick): void => setAsks((queue) => [{ ...queue[0]!, pick: next }, ...queue.slice(1)])
+      if (key.name === 'up') return repick(pickMove(pick, -1, options.length))
+      if (key.name === 'down') return repick(pickMove(pick, 1, options.length))
+      if (key.name === 'space') return repick(pickToggle(pick, options, head.multi === true))
+      if (key.name === 'return') {
+        setAsks((queue) => queue.slice(1))
+        return wire.line(pickAnswer(pick, options))
+      }
     }
     // The command menu takes the arrows while it is up (the single-line input
     // has no use for them); Enter stays with the input's own submit, which
@@ -625,7 +653,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // the input row) must be clear of rasters too.
   const cardTop =
     asks.length > 0
-      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind)
+      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options)
       : menuOpen
         ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
         : null
@@ -1186,17 +1214,21 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           const head = asks[0]!
           const consent = head.kind === 'consent'
           const frame = consent ? PERIWINKLE : WARM
-          const lines = cardLines(head.text)
+          // A list card draws its rows from the wire's options; the text's
+          // own '>> ' rows are the same rows for a client without a list.
+          const list = head.options
+          const lines = cardLines(head.text).filter((l) => list === undefined || l.role !== 'option')
           const facts = lines.some((l) => l.role === 'ready' || l.role === 'gap')
           const width = Math.min(Math.floor(cols * 0.55), cols - 4)
           // The divider stands between the facts and the choices: above the
-          // first option row when the card carries its own, else above the
-          // closing invite (legacy checklist shape).
+          // first option row when the card carries its own, above the list
+          // when it has one, else above the closing invite (legacy checklist
+          // shape).
           const options = lines.some((l) => l.role === 'option')
-          const divideAt = options ? lines.findIndex((l) => l.role === 'option') : lines.length - 1
+          const divideAt = list !== undefined ? -1 : options ? lines.findIndex((l) => l.role === 'option') : lines.length - 1
           return (
             <box
-              title={cardTitle(head.kind, head.no ?? 0, head.text)}
+              title={cardTitle(head.kind, head.no ?? 0, head.text, list)}
               style={{
                 border: true,
                 borderStyle: 'rounded',
@@ -1238,6 +1270,21 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   )}
                 </box>
               ))}
+              {list !== undefined && head.pick !== undefined && (
+                <box style={{ flexDirection: 'column' }}>
+                  {facts && <text style={{ fg: hush(INK.dim) }}>{'─'.repeat(Math.max(width - 6, 1))}</text>}
+                  {list.map((option, at) => {
+                    const on = head.pick!.checked.includes(option.key)
+                    const here = at === head.pick!.at
+                    return (
+                      <text key={option.key} style={{ bg: here ? CHIP : CARD }}>
+                        <span fg={here ? EMBER : on ? INK.text : CARD_INK.option}>{`${here ? '>' : ' '} [${on ? 'x' : ' '}] ${option.label}`}</span>
+                        {option.note !== undefined && <span fg={here ? INK.text : INK.notice}>{`  ${option.note}`}</span>}
+                      </text>
+                    )
+                  })}
+                </box>
+              )}
               {consent ? (
                 facts ? null : (
                   <box style={{ marginTop: 1 }}>
@@ -1253,7 +1300,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 // A menu's empty line is its exit (the /sources flow reads
                 // '' as done), a seed's is a skip — say the one that is true.
                 <box style={{ marginTop: 1 }}>
-                  <text style={{ fg: QUIET }}>{isMenu(head.kind, lines) ? 'Enter - done' : 'Enter skips'}</text>
+                  <text style={{ fg: QUIET }}>
+                    {list !== undefined ? '↑↓ move · space ticks · enter applies' : isMenu(head.kind, lines) ? 'Enter - done' : 'Enter skips'}
+                  </text>
                 </box>
               )}
               {/* The answer is typed INTO the card (user decision, 2026-08-11):
@@ -1263,6 +1312,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   the resting one below: while a flow is asking, the card IS
                   where the listener types, so its ink and its invitation are
                   the only ones they ever see. */}
+              {/* A list card has no field: the ticks are the answer. */}
+              {list === undefined && (
               <box style={{ flexDirection: 'row', marginTop: 1 }}>
                 <text style={{ fg: floor?.ink ?? PERIWINKLE }}>{'> '}</text>
                 <input
@@ -1286,6 +1337,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                   onSubmit={submit as InputProps['onSubmit']}
                 />
               </box>
+              )}
             </box>
           )
         })()}

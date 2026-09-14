@@ -422,14 +422,48 @@ amended 2026-08-19): the Director parks its loop, music plays on, the
 conversation runs through `Host.ask` / `info`, and the loop resumes.
 
 The conversation is **deterministic** — a small state machine, unit-tested
-with a scripted host:
+with a scripted host. *Revised 2026-09-14*: the menu is a **list to tick**,
+not a line to type. One `ask` (10 §2.3) carries the rows as `options`
+(`multi: true`) and the same rows numbered in its text, so a front-end
+without a list surface reads the same card:
 
 ```
-/sources
-  · mounted: NetEase (Chen X, 312 liked · refreshed 2h ago) · Spotify (expired ← renew)
-  · available: YouTube · Bilibili · Soda Music
-  what would you like to do? [mount <name> | refresh | unmount <name> | done]
+which accounts should I read? Enter with nothing changed leaves
+ok NetEase — signed in as Chen X · 312 liked          ← last submit's results
+>> 1) [ ] YouTube - not connected
+>> 2) [ ] Bilibili - not connected
+>> 3) [x] NetEase - 312 liked · read just now
+>> 4) [ ] Spotify - expired — tick to sign in again
+>> 5) [ ] Soda Music - not connected
+>> 6) [ ] refresh - re-read every connected account now   ← only once something is mounted
 ```
+
+- **Ticked = mounted and signed in.** An expired login rests *unticked*
+  with its note; ticking it is the sign-in again. Nothing connected → no
+  refresh row.
+- **The answer is a `line`**: the ticked keys in row order, space-joined
+  (`netease refresh`), `''` for nothing ticked. The TUI's list produces it
+  (10 §3.3); the plain host's listener types numbers or names
+  (`3`, `netease`, `NetEase`, `soda`), and its bare Enter keeps things as
+  they are — it has no ticks to submit, so `''` cannot mean "none". One
+  word the flow cannot place fails the whole line ("I didn't catch
+  "<word>" — numbers or names from the list") and nothing is applied.
+- **Submit = a diff against what stands.** Unticked-and-mounted →
+  unmount; ticked-and-not (or expired) → the mount flow below, in row
+  order; `refresh` → re-read now. Order: unmounts, refresh, then mounts
+  last, since a mount may wait on a sign-in and an Esc there ends the
+  submit (rows already done stay done). **Nothing changed + Enter = done.**
+  Esc on the menu leaves without touching anything; so does a front-end
+  going away (the reader's EOF `''`) — neither is an empty selection.
+- **Every result lands IN the next card** as a ready/gap row, in the mount
+  flow's own words — `ok NetEase — signed in as Chen X · 312 liked`,
+  `-- NetEase — <the obstacle line>`, `-- Spotify — stopped — nothing was
+  written` — as well as in the log through `info`. The TUI floats the card
+  over the log (10 §3.3), so a result printed *under* it was the failure
+  mode this replaces: the card closed and reopened and the listener saw
+  nothing happen (#231).
+- The three mount flows below are unchanged: their own asks (the sign-in
+  Enter, the Spotify wait, the Soda code) pop as before.
 
 **Mount, cookie sources (YouTube / Bilibili / NetEase)**: nothing is asked.
 *Revised 2026-09-10*: the browser question is gone. murmur reads **Chrome**,

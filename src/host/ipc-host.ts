@@ -17,7 +17,7 @@ import { createServer, type Server, type Socket } from 'node:net'
 import { dirname } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { devLogMirror, LineQueue, QUIT, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
+import { devLogMirror, LineQueue, QUIT, type AskChoices, type AskKind, type FloorMode, type Host, type InfoTone } from './host.ts'
 import {
   COMMANDS,
   decodeTuiMessage,
@@ -362,8 +362,14 @@ export class IpcHost implements Host {
   // live in their own queue — a typed line answers the oldest (mirroring
   // lineReader's serialized order), detach clears them all (every reader
   // declined at EOF) — and an attach is handed only what is still pending.
-  ask(text: string, kind: AskKind): void {
-    const message = { v: 1, type: 'ask', text, kind } as const
+  ask(text: string, kind: AskKind, choices?: AskChoices): void {
+    const message = {
+      v: 1,
+      type: 'ask',
+      text,
+      kind,
+      ...(choices !== undefined && { options: [...choices.options], ...(choices.multi !== undefined && { multi: choices.multi }) }),
+    } as const
     this.pendingAsks.push(message)
     if (this.client !== null) this.write(this.client, message)
     this.mirror('host', text)
