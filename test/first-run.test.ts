@@ -510,6 +510,54 @@ describe('the slice B offer comes before the persona call (spec 06 §3.4)', () =
     expect(harness.calls).toBe(0)
   })
 
+  // codex review: with the consent already given, a /quit typed during the
+  // persona wait sits in the queue with nobody reading it. Before, the consent
+  // read consumed it; now the launch must not outlive the listener's leaving.
+  it('a /quit typed during the persona wait stops the bootstrap and fires the latch', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const harness = new FakeHarness()
+    const brain = new FakeSeeder()
+    const quit = quitLatch()
+    brain.seedPersona = async (answers, language) => {
+      host.type('/quit')
+      return FakeSeeder.prototype.seedPersona.call(brain, answers, language)
+    }
+    const path = await runFirstRun(deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed, quit }))
+    expect(path).toBe(home)
+    expect(quit.requested).toBe(true)
+    expect(harness.calls).toBe(0)
+    expect(host.takeLine()).toBeUndefined()
+  })
+
+  it('a latch fired during the persona wait also stops the bootstrap', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const harness = new FakeHarness()
+    const brain = new FakeSeeder()
+    const quit = quitLatch()
+    brain.seedPersona = async (answers, language) => {
+      quit.fire()
+      return FakeSeeder.prototype.seedPersona.call(brain, answers, language)
+    }
+    await runFirstRun(deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed, quit }))
+    expect(harness.calls).toBe(0)
+  })
+
+  it('a line other than /quit typed during the wait is left for the radio', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const harness = new FakeHarness()
+    const brain = new FakeSeeder()
+    brain.seedPersona = async (answers, language) => {
+      host.type('hello there')
+      return FakeSeeder.prototype.seedPersona.call(brain, answers, language)
+    }
+    await runFirstRun(deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed }))
+    expect(harness.calls).toBe(1)
+    expect(host.takeLine()).toBe('hello there')
+  })
+
   it('the sources line is still the last thing said', async () => {
     const { memoryDir, seed } = workspace()
     const host = scriptedHost([...answered(), 'n'])

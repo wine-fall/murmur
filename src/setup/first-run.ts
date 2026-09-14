@@ -16,7 +16,7 @@ import { join } from 'node:path'
 
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from '../contracts.ts'
-import { isYes, lineReader, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
+import { isYes, lineReader, QUIT, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from '../host/host.ts'
 import { SOURCES_ONBOARDING_LINE } from '../music/sources/flow.ts'
 import { claudeCodeRoot } from '../paths.ts'
@@ -171,7 +171,16 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   host.info(`here is who you will be listening to: ${persona.split('\n')[0] ?? ''}`)
   if (trimmed) host.info('(it came back long, so the tail was trimmed — worth a read.)')
   host.info(`it lives at ${home} — edit it whenever you like; murmur never rewrites it.`)
-  if (bootstrap !== null) {
+  // A /quit typed during the wait is still queued — nobody was reading — and
+  // the listener is leaving: honor it here rather than launch a task they
+  // will not stay for. One macrotask beat separates "a line is queued" from
+  // "nothing typed"; any other line stays queued for the radio.
+  const queued = await Promise.race([host.peekLine(), new Promise<undefined>((r) => setTimeout(r, 0))])
+  if (queued?.trim() === QUIT) {
+    host.takeLine()
+    quit.fire()
+  }
+  if (bootstrap !== null && !quit.requested) {
     host.info('reading in the background; the program starts now.')
     // Unawaited on purpose: the bootstrap must never delay the first beat, and
     // runProfileBootstrap is total, so there is no rejection to escape here.

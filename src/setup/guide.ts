@@ -125,7 +125,7 @@ export function quitLatch(): QuitLatch {
   return latch
 }
 
-const QUIT = '/quit'
+export const QUIT = '/quit'
 
 // The Esc event (spec 10 §3.4): a PULSE, not a latch. Each fire answers the
 // read that was waiting with '' and re-arms; a fire with nobody waiting is
