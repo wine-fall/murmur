@@ -84,7 +84,7 @@ function ago(iso: string | undefined, now: Date): string {
   return `read ${Math.round(s / 86_400)}d ago`
 }
 
-// The counts the status line shows: what the snapshot holds, by kind.
+// The counts a mounted source's menu row shows: what the snapshot holds, by kind.
 function counts(store: SourcesStore, id: SourceId): string {
   const snapshot = store.readSnapshot(id)
   if (snapshot === null) return 'nothing read yet'
@@ -100,17 +100,27 @@ function counts(store: SourcesStore, id: SourceId): string {
   return parts.length === 0 ? `${snapshot.items.length} items` : parts.join(', ')
 }
 
-function statusLine(store: SourcesStore, now: Date): string {
+// What the listener types for a source — one of the NAMES keys.
+const typed = (id: SourceId): string => (id === 'qishui' ? 'soda' : id)
+
+// The menu card, status included. The TUI floats a question card OVER the
+// log (spec 10 §3.3), so a status printed as info sits exactly where the
+// card then hides it — and a menu that says "mount <name>" with the names
+// covered cannot be used. Everything the answer needs is in the ask text,
+// in the card's own row grammar (cardLines): each mountable source is an
+// option row, each mounted one a ready row, an expired one a gap row. A
+// host without a card surface gets the same text as info (ask()).
+function menuText(store: SourcesStore, now: Date): string {
   const file = store.read()
   const mounted = store.mounted()
-  const available = SOURCE_IDS.filter((id) => !mounted.includes(id)).map((id) => SOURCE_NAMES[id])
-  if (mounted.length === 0) return `nothing mounted yet · available: ${available.join(', ')}`
   const rows = mounted.map((id) => {
     const entry = file[id]!
-    if (entry.status === 'expired') return `${SOURCE_NAMES[id]} (expired — mount it again to renew)`
-    return `${SOURCE_NAMES[id]} (${counts(store, id)} · ${ago(entry.lastRefresh, now)})`
+    return entry.status === 'expired'
+      ? `-- ${SOURCE_NAMES[id]} - expired; mount ${typed(id)} again to renew`
+      : `ok ${SOURCE_NAMES[id]} - ${counts(store, id)} · ${ago(entry.lastRefresh, now)}`
   })
-  return `mounted: ${rows.join(' · ')}${available.length === 0 ? '' : ` · available: ${available.join(', ')}`}`
+  const options = SOURCE_IDS.filter((id) => !mounted.includes(id)).map((id) => `>> mount ${typed(id)} - ${SOURCE_NAMES[id]}`)
+  return [MENU, ...rows, ...options].join('\n')
 }
 
 // The one browser murmur reads — and the one it opens for signing in, so
@@ -167,8 +177,7 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
   host.start()
   try {
     while (!quit.requested) {
-      host.info(statusLine(store, now()))
-      ask(host, MENU, 'question')
+      ask(host, menuText(store, now()), 'question')
       cancelled = false
       const line = (await read()).trim().toLowerCase()
       if (line === '' || line === 'done' || quit.requested) return
@@ -179,7 +188,7 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
         continue
       }
       if ((verb === 'mount' || verb === 'unmount') && target === undefined) {
-        host.info(`name one of ${SOURCE_IDS.map((id) => (id === 'qishui' ? 'soda' : id)).join(', ')}.`)
+        host.info(`name one of ${SOURCE_IDS.map(typed).join(', ')}.`)
         continue
       }
       if (verb === 'unmount' && target !== undefined) {

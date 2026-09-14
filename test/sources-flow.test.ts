@@ -102,8 +102,19 @@ describe('runSources (spec 14 §3.1)', () => {
   it('opens with the status, offers the menu, and done leaves', async () => {
     const { host, deps, store } = build(['done'])
     await runSources(deps)
-    expect(host.infos[0]).toBe('nothing mounted yet · available: YouTube, Bilibili, NetEase, Spotify, Soda Music')
-    expect(host.asks[0]!.text).toMatch(/^what would you like to do\?/)
+    // The status lives IN the card text: the TUI floats the card over the
+    // log, so a status printed as info sat exactly where the card hid it
+    // (user screenshot: 'available: You' cut off, no name left to type).
+    expect(host.infos).toEqual([])
+    const menu = host.asks[0]!.text.split('\n')
+    expect(menu[0]).toBe('what would you like to do? mount <name> | refresh | unmount <name> | done')
+    expect(menu.slice(1)).toEqual([
+      '>> mount youtube - YouTube',
+      '>> mount bilibili - Bilibili',
+      '>> mount netease - NetEase',
+      '>> mount spotify - Spotify',
+      '>> mount soda - Soda Music',
+    ])
     expect(host.asks[0]!.kind).toBe('question')
     expect(store.busy).toBe(false)
   })
@@ -120,7 +131,11 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok' })
     expect(store.readSnapshot('youtube')?.items).toHaveLength(2)
     expect(host.debugs).toContain('sources.mount youtube')
-    expect(host.infos.some((l) => l.startsWith('mounted: YouTube (1 liked, 1 playlist · read just now)'))).toBe(true)
+    // Back at the menu: the mounted one is a status row, the rest stay options.
+    const menu = host.asks.at(-1)!.text.split('\n')
+    expect(menu).toContain('ok YouTube - 1 liked, 1 playlist · read just now')
+    expect(menu.some((l) => l === '>> mount youtube - YouTube')).toBe(false)
+    expect(menu).toContain('>> mount netease - NetEase')
   })
 
   it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
@@ -357,12 +372,25 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read()).toEqual({})
   })
 
+  it('with everything mounted the menu is all status rows — no option left, still the menu', async () => {
+    const { host, deps, store } = build(['done'])
+    store.mount('youtube', { browser: 'chrome' })
+    store.mount('bilibili', { browser: 'chrome', mid: '7' })
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
+    store.mount('spotify', { clientId: 'c', refreshToken: 'r', accessToken: 'a', expiresAt: 'x' })
+    store.mount('qishui', { sessionCookie: 's', deviceId: 'd', installId: 'i' })
+    await runSources(deps)
+    const menu = host.asks[0]!.text.split('\n')
+    expect(menu.filter((l) => l.startsWith('ok '))).toHaveLength(5)
+    expect(menu.some((l) => l.startsWith('>> '))).toBe(false)
+  })
+
   it('lists an expired mount as one to renew', async () => {
     const { host, deps, store } = build(['done'])
     store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     store.setStatus('netease', 'expired')
     await runSources(deps)
-    expect(host.infos[0]).toMatch(/mounted: NetEase \(expired — mount it again to renew\)/)
+    expect(host.asks[0]!.text.split('\n')).toContain('-- NetEase - expired; mount netease again to renew')
   })
 
   it('a line it does not understand asks again; /quit leaves through the latch', async () => {
