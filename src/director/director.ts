@@ -876,7 +876,12 @@ export class Director {
       return clip === null ? null : { beat: primed.beat, clip }
     }
     this.deps.host.debug?.('talk.buffer cold; batching inline')
+    const epoch = this.talkEpoch
     const beats = await this.generateTalks(TALK_LOOKAHEAD)
+    // A discard landed while the batch was in flight (a user turn, a language
+    // change): every beat predates it. Start over — an in-flight refill is
+    // awaited above, never doubled.
+    if (epoch !== this.talkEpoch) return this.nextTalkClip()
     const first = beats.shift()
     if (first === undefined) return null
     this.prefetchMusic(priorLine(first.text))
@@ -920,11 +925,14 @@ export class Director {
     this.deps.host.debug?.(`talk.refill got=${beats.length} depth=${this.talkAhead.length}`)
   }
 
-  // The voice provider just changed under the delegate (spec 10 §3.4): every
-  // buffered clip was synthesized — and stored — by the OLD provider, whose
-  // close may remove its temp clips. Drop them; the refill re-synthesizes.
+  // The voice provider just changed under the delegate (spec 10 §3.4), or the
+  // language did (spec 12 §3.9): every buffered clip was synthesized by the
+  // OLD provider — whose close may remove its temp clips — or written in the
+  // old language. Drop them and refill NOW, under the clip still on air, so
+  // the change is not paid for as a cold pause at the next boundary.
   invalidateTalkAhead(): void {
     this.discardTalkAhead()
+    this.prefetchTalk()
   }
 
   // Drop the buffered look-ahead and orphan any in-flight refill (spec 04

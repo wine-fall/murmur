@@ -897,8 +897,8 @@ describe('Director — the language override (spec 12 \u00a73.9)', () => {
 // (the setup guide, the /settings pane, the reply turn), the store's own
 // event drops the buffer so the very next segment is in the new language.
 describe('Director — a language change invalidates the talk look-ahead (spec 12 \u00a73.9)', () => {
-  it('the next segment is regenerated under the new persona, never a buffered beat', async () => {
-    const store = new SettingsStore({
+  const languageStore = () =>
+    new SettingsStore({
       path: join(mkdtempSync(join(tmpdir(), 'murmur-dir-')), 'settings.json'),
       initial: {
         anchorsEnabled: true,
@@ -913,6 +913,9 @@ describe('Director — a language change invalidates the talk look-ahead (spec 1
       },
       touched: {},
     })
+
+  it('the next segment is regenerated under the new persona, never a buffered beat', async () => {
+    const store = languageStore()
     const { brain, player, host, director } = setup({
       settings: () => store.current(),
       settingsStore: store,
@@ -925,12 +928,34 @@ describe('Director — a language change invalidates the talk look-ahead (spec 1
     await until(() => player.played.length === 1, 'clip on air')
     await until(() => brain.nextTalksCalls >= 2, 'refill fired')
     store.set({ language: 'Japanese' })
+    // The regeneration overlaps the clip still on air (codex review): waiting
+    // for the boundary would turn every language change into a cold pause.
+    await until(() => brain.nextTalksCalls >= 3, 'regen fired while a airs')
+    expect(brain.talkContexts[2]!.persona).toMatch(/Speak in Japanese\./)
     player.finish()
     await until(() => host.radio.length === 2, 'next segment')
     expect(host.radio[1]).toBe('fresh')
     expect(host.radio).not.toContain('stale-b')
-    expect(brain.talkContexts.at(-1)!.persona).toMatch(/Speak in Japanese\./)
     player.finish()
     await run
+  })
+
+  it('a change that lands while the cold batch is in flight discards that batch too', async () => {
+    // Clearing the buffer cannot reach a batch nextTalkClip already awaits
+    // (codex review): without an epoch check the old-language beats would air
+    // AND refill the buffer, right after the tool promised the next line.
+    const store = languageStore()
+    const { brain, host, director } = setup({
+      settings: () => store.current(),
+      settingsStore: store,
+    })
+    brain.nextTalksDelayMs = 60
+    brain.batches = [['old-a', 'old-b'], ['fresh-a', 'fresh-b']]
+    const run = director.run(1)
+    await until(() => brain.nextTalksCalls === 1, 'cold batch in flight')
+    store.set({ language: 'Japanese' })
+    await run
+    expect(host.radio).toEqual(['fresh-a'])
+    expect(brain.talkContexts.at(-1)!.persona).toMatch(/Speak in Japanese\./)
   })
 })
