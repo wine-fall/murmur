@@ -219,7 +219,7 @@ Engine → TUI:
 | `userLine` | `{ text }` | `onUserLine` echo |
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
 | `info` | `{ text, tone? }` | host info lines — context, notices, and everything that is not a question (§3.2-B). `tone: 'flow'` marks a state-transition line (a stopped flow, the going-off ack): the client renders it in marked warm ink with a `■` marker so it cannot drown in tool output; the plain host prints it like any other line. Additive |
-| `ask` | `{ text, kind: 'question' \| 'consent' }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
+| `ask` | `{ text, kind: 'question' \| 'consent', options?: [{ key, label, note?, checked? }], multi?: boolean }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. With `options` (2026-09-14, the /sources list — spec 14 §3.1) the card is rows to tick and the answer `line` is the ticked keys in row order, space-joined (`''` for none); the text still carries the same rows numbered (`>> 1) [x] NetEase - …`) so a client that ignores `options` reads the same card. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
 | `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |
 | `busy` | `{ on: boolean }` | the floor-holder is working rather than waiting on the keyboard (§3.4): the client shows a live sign for as long as it is true. Additive (2026-09-01) — no protocol bump. Stateful and **not replayed**, unlike `mode`, and with no `hello` field either: a sign means "right now", so a backlog handed to a later attach would open it under a sign for a turn that has already ended, with nothing coming to clear it. A turn that began with no client attached simply has no sign |
@@ -388,7 +388,15 @@ room dims, it never rearranges — and the answer field moves INTO the card
 (user decision, 2026-08-11): the same single input, permanent focus intact,
 renders as the card's last row while a question is open, and the bottom row
 keeps only its quiet rule. The card is where you read AND where you answer.
-Kind picks the frame: warm/ember for a question (with a client-side `#n`
+**A list card** (an `ask` with `options`, 2026-09-14) draws the rows from the
+wire — `> [x] NetEase  312 liked · read just now`, the cursor row on the
+`CHIP` — in place of the text's own `>> ` rows, and the list replaces the
+answer field: ↑/↓ move, Space ticks (a `multi` list toggles the row, a
+single one keeps one), Enter answers with the ticked keys in row order
+(`pickStart` / `pickMove` / `pickToggle` / `pickAnswer` in `dock.ts`, pure),
+Esc stays the interrupt. Result rows from the previous submit (`ok ` / `-- `)
+sit above the divider, so a mount's outcome is read in the card, never under
+it. Kind picks the frame: warm/ember for a question (with a client-side `#n`
 counter in the title), periwinkle for a consent (` · optional` in the title)
 — the listener's color, because the decision is theirs; a consent card
 closes with a two-option row whose default (`> N - not now (Enter)`) sits on
@@ -699,6 +707,7 @@ where it lands):
 | anchor moments (good-morning …) | spec 07 §3.4 | ordinary segments; no special UI |
 | program text + user echo | `segment` / `userLine` | program log |
 | host notices (preflight, memory, guide) | `info` | program log (+ Q&A adjacency, B above) |
+| a question, with or without rows to tick | `ask` (`options` / `multi`) | spotlight card (§3.3); with rows, the list replaces the answer field |
 | identity (persona / brain / voice) | `hello` | status region, replaces the boxed banner |
 
 ### 3.3 Layout (design-level)

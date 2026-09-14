@@ -197,6 +197,24 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(c.received.at(-1)).toEqual({ v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' })
   })
 
+  it('carries the rows to tick with the question, and replays them with it', async () => {
+    // The /sources list (spec 10 §3.2-D): the rows ride on the ask, so a
+    // late attach gets the same list — not a text-only card.
+    const options = [{ key: 'netease', label: 'NetEase', note: 'not connected', checked: false }]
+    host.ask('which accounts should I read?\n>> 1) [ ] NetEase - not connected', 'question', { options, multi: true })
+    const c = await client()
+    c.attach()
+    await c.settle()
+    expect(c.received.at(-1)).toEqual({
+      v: 1,
+      type: 'ask',
+      text: 'which accounts should I read?\n>> 1) [ ] NetEase - not connected',
+      kind: 'question',
+      options,
+      multi: true,
+    })
+  })
+
   it('replays concurrently-pending asks in the order they were asked', async () => {
     // Two SDK permission requests can be in flight at once; lineReader answers
     // them in ask order, so the client must queue them in the same order

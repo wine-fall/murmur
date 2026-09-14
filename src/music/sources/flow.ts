@@ -5,8 +5,9 @@
 // parking: the loop waits inside it while the music plays on. It is the
 // single writer of sources.json for its whole duration (store.busy).
 
-import type { Host } from '../../host/host.ts'
+import type { Host, InfoTone } from '../../host/host.ts'
 import { ask } from '../../host/host.ts'
+import type { AskOption } from '../../host/ipc.ts'
 import { escPulse, lineReader, type QuitLatch } from '../../setup/guide.ts'
 import { AUTH_LINES, type SourceAuthWatch } from './auth.ts'
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
@@ -68,7 +69,8 @@ export type SourcesFlowDeps = {
 const COOKIE_SOURCES = ['youtube', 'bilibili', 'netease'] as const
 type CookieSource = (typeof COOKIE_SOURCES)[number]
 
-const NAMES: Record<string, SourceId> = {
+// What a plain-host listener may type for a row, besides its number.
+const NAMES: Record<string, MenuKey> = {
   youtube: 'youtube',
   yt: 'youtube',
   bilibili: 'bilibili',
@@ -77,9 +79,14 @@ const NAMES: Record<string, SourceId> = {
   spotify: 'spotify',
   soda: 'qishui',
   qishui: 'qishui',
+  refresh: 'refresh',
 }
 
-const MENU = 'what would you like to do? mount <name> | refresh | unmount <name> | done'
+type MenuKey = SourceId | 'refresh'
+type MenuRow = AskOption & { key: MenuKey; note: string; checked: boolean }
+
+const QUESTION = 'which accounts should I read? Enter with nothing changed leaves'
+const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false }
 
 function ago(iso: string | undefined, now: Date): string {
   if (iso === undefined) return 'never read'
@@ -107,26 +114,82 @@ function counts(store: SourcesStore, id: SourceId): string {
 }
 
 // What the listener types for a source — one of the NAMES keys.
-const typed = (id: SourceId): string => (id === 'qishui' ? 'soda' : id)
-
-// The menu card, status included. The TUI floats a question card OVER the
-// log (spec 10 §3.3), so a status printed as info sits exactly where the
-// card then hides it — and a menu that says "mount <name>" with the names
-// covered cannot be used. Everything the answer needs is in the ask text,
-// in the card's own row grammar (cardLines): each mountable source is an
-// option row, each mounted one a ready row, an expired one a gap row. A
-// host without a card surface gets the same text as info (ask()).
-function menuText(store: SourcesStore, now: Date): string {
+// The menu is a list to tick (spec 14 §3.1): one row per source, ticked
+// when it is mounted (an expired login included — unticking it is how it
+// is forgotten without signing in), its note the state; a refresh row once
+// anything is mounted.
+function menuRows(store: SourcesStore, now: Date): MenuRow[] {
   const file = store.read()
-  const mounted = store.mounted()
-  const rows = mounted.map((id) => {
-    const entry = file[id]!
-    return entry.status === 'expired'
-      ? `-- ${SOURCE_NAMES[id]} - expired; mount ${typed(id)} again to renew`
-      : `ok ${SOURCE_NAMES[id]} - ${counts(store, id)} · ${ago(entry.lastRefresh, now)}`
+  const rows: MenuRow[] = SOURCE_IDS.map((id) => {
+    const entry = file[id]
+    const label = SOURCE_NAMES[id]
+    if (entry === undefined) return { key: id, label, note: 'not connected', checked: false }
+    if (entry.status === 'expired') return { key: id, label, note: 'expired — untick to forget it, tick refresh to sign in again', checked: true }
+    return { key: id, label, note: `${counts(store, id)} · ${ago(entry.lastRefresh, now)}`, checked: true }
   })
-  const options = SOURCE_IDS.filter((id) => !mounted.includes(id)).map((id) => `>> mount ${typed(id)} - ${SOURCE_NAMES[id]}`)
-  return [MENU, ...rows, ...options].join('\n')
+  return store.mounted().length > 0 ? [...rows, REFRESH_ROW] : rows
+}
+
+// The card text: the question, the previous submit's results as ready/gap
+// rows — IN the card, never as info lines the floating card then covers
+// (#231) — and the rows numbered, so a host without a list surface reads
+// the same menu and answers with numbers or names.
+function menuText(rows: readonly MenuRow[], results: readonly string[]): string {
+  const numbered = rows.map((row, i) => `>> ${i + 1}) [${row.checked ? 'x' : ' '}] ${row.label} - ${row.note}`)
+  return [QUESTION, ...mergeRows(results), ...numbered].join('\n')
+}
+
+// Rows that end the same way share one: three cookie sources behind one
+// Full Disk Access obstacle are one gap row naming all three, not three
+// copies of a long line — which is what pushed the card off an 80x24 screen.
+function mergeRows(rows: readonly string[]): string[] {
+  const byTail = new Map<string, { marker: string; names: string[] }>()
+  for (const row of rows) {
+    const match = /^(ok|--) (.+?) — (.+)$/s.exec(row)
+    if (match === null) {
+      byTail.set(row, { marker: '', names: [] })
+      continue
+    }
+    const [, marker, name, tail] = match as unknown as [string, string, string, string]
+    const key = `${marker} — ${tail}`
+    const seen = byTail.get(key)
+    if (seen === undefined) byTail.set(key, { marker, names: [name] })
+    else seen.names.push(name)
+  }
+  return [...byTail.entries()].map(([key, { marker, names }]) => (names.length === 0 ? key : `${marker} ${names.join(', ')} — ${key.slice(marker.length + 3)}`))
+}
+
+// A typed answer as the set of keys it names: the list's own keys (the TUI),
+// or numbers / names on the plain host. One word it cannot place fails the
+// whole line — half a selection applied would be worse than none.
+function parsePick(line: string, rows: readonly MenuRow[]): Set<MenuKey> | string {
+  const picked = new Set<MenuKey>()
+  for (const word of line.split(/\s+/).filter((w) => w !== '')) {
+    const byNumber = /^\d+$/.test(word) ? rows[Number(word) - 1]?.key : undefined
+    const byLabel = rows.find((row) => row.label.toLowerCase() === word)?.key
+    const key = byNumber ?? NAMES[word] ?? byLabel
+    if (key === undefined || !rows.some((row) => row.key === key)) return `I didn't catch "${word}" — numbers or names from the list`
+    picked.add(key)
+  }
+  return picked
+}
+
+// Every info line a sub-flow prints, kept as well as shown: the mount flows
+// say what happened through `info`, and the menu card that follows needs
+// those words as its result row. The flows themselves stay as they are.
+function recording(host: Host, notes: string[]): Host {
+  return new Proxy(host, {
+    get(target, prop, receiver) {
+      if (prop === 'info') {
+        return (message: string, tone?: InfoTone) => {
+          notes.push(message)
+          target.info(message, tone)
+        }
+      }
+      const value: unknown = Reflect.get(target, prop, receiver)
+      return typeof value === 'function' ? value.bind(target) : value
+    },
+  })
 }
 
 // The one browser murmur reads — and the one it opens for signing in, so
@@ -182,40 +245,71 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
     esc.fire()
   })
   const read = lineReader(host, quit, esc)
+  // A front-end that goes away answers the read with '' like Esc does; on a
+  // list that would read as "nothing ticked" and unmount everything.
+  let gone = false
+  void host.eof?.().then(() => (gone = true))
   store.busy = true
   host.start()
   try {
+    let results: string[] = []
     while (!quit.requested) {
-      ask(host, menuText(store, now()), 'question')
+      const rows = menuRows(store, now())
+      ask(host, menuText(rows, results), 'question', { options: rows, multi: true })
+      results = []
       cancelled = false
       const line = (await read()).trim().toLowerCase()
-      if (line === '' || line === 'done' || quit.requested) return
-      const [verb, ...rest] = line.split(/\s+/)
-      const target = NAMES[rest.join(' ')]
-      if (verb === 'refresh') {
-        await refresh(deps)
+      if (cancelled || gone || quit.requested) return
+      // The plain host has no ticks to submit: its Enter keeps things as
+      // they are. On a list, '' is the empty selection.
+      if (line === '' && host.ask === undefined) return
+      const picked = parsePick(line, rows)
+      if (typeof picked === 'string') {
+        host.info(picked)
+        results.push(`-- ${picked}`)
         continue
       }
-      if ((verb === 'mount' || verb === 'unmount') && target === undefined) {
-        host.info(`name one of ${SOURCE_IDS.map(typed).join(', ')}.`)
-        continue
+      // The diff against what stands: unticked-and-mounted goes, ticked-and-
+      // not is signed in, refresh re-reads (an expired login is signed in
+      // again first — a re-read cannot renew it). Nothing changed = done.
+      const file = store.read()
+      const toUnmount = store.mounted().filter((id) => !picked.has(id))
+      const doRefresh = picked.has('refresh')
+      const toRenew = doRefresh ? store.mounted().filter((id) => file[id]?.status === 'expired' && picked.has(id)) : []
+      const toMount = SOURCE_IDS.filter((id) => picked.has(id) && file[id] === undefined)
+      if (toUnmount.length === 0 && toMount.length === 0 && !doRefresh) return
+      for (const id of toUnmount) results.push(unmount(deps, id))
+      // Sign-ins may wait on the listener, and an Esc there ends the submit
+      // — the rows already done stay done, the rest are not started.
+      const stopped = (): boolean => cancelled || quit.requested
+      for (const id of toRenew) {
+        if (stopped()) break
+        results.push(await mountOne(deps, read, id, platform, () => cancelled))
       }
-      if (verb === 'unmount' && target !== undefined) {
-        unmount(deps, target)
-        continue
+      if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
+      for (const id of toMount) {
+        if (stopped()) break
+        results.push(await mountOne(deps, read, id, platform, () => cancelled))
       }
-      if (verb === 'mount' && target !== undefined) {
-        if (target === 'spotify') await mountSpotifyFlow(deps, () => cancelled)
-        else if (target === 'qishui') await mountQishuiFlow(deps, () => cancelled)
-        else await mountCookieFlow(deps, read, target, platform, () => cancelled)
-        continue
-      }
-      host.info("I didn't catch that — mount <name>, refresh, unmount <name>, or done.")
     }
   } finally {
     store.busy = false
     host.onInterrupt?.(null)
   }
+}
+
+// One mount, as a result row for the next card: 'ok <name> — signed in as
+// <who> - <counts>' or '-- <name> - <the flow's own last word>'.
+async function mountOne(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, platform: NodeJS.Platform, cancelled: () => boolean): Promise<string> {
+  const notes: string[] = []
+  const recorded = { ...deps, host: recording(deps.host, notes) }
+  if (id === 'spotify') await mountSpotifyFlow(recorded, cancelled)
+  else if (id === 'qishui') await mountQishuiFlow(recorded, cancelled)
+  else await mountCookieFlow(recorded, read, id, platform, cancelled)
+  const name = SOURCE_NAMES[id]
+  const who = notes.find((line) => line.startsWith('signed in as '))
+  if (who !== undefined) return `ok ${name} — ${who} · ${counts(deps.store, id)}`
+  return `-- ${name} — ${cancelled() ? 'stopped — nothing was written' : (notes.at(-1) ?? 'not connected')}`
 }
 
 // Verify, first snapshot, write, say (spec 14 §3.1). The snapshot runs in
@@ -359,30 +453,29 @@ async function mountQishuiFlow(deps: SourcesFlowDeps, cancelled: () => boolean):
   await finishMount(deps, 'qishui', result.who, result.entry)
 }
 
-async function refresh(deps: SourcesFlowDeps): Promise<void> {
+// Re-read every mounted source; each outcome is said, and returned as the
+// next card's result row.
+async function refresh(deps: SourcesFlowDeps): Promise<string[]> {
   const { host } = deps
   const ids = deps.store.mounted()
-  if (ids.length === 0) {
-    host.info('nothing mounted to refresh.')
-    return
-  }
   host.info(`refreshing ${ids.length} source${ids.length === 1 ? '' : 's'}...`)
+  const rows: string[] = []
   for (const outcome of await deps.refresher.refreshAll()) {
-    host.info(outcome.ok ? `${SOURCE_NAMES[outcome.id]}: ${outcome.count} items` : `${SOURCE_NAMES[outcome.id]}: could not read it (${outcome.error})`)
+    const said = outcome.ok ? `${outcome.count} items` : `could not read it (${outcome.error})`
+    host.info(`${SOURCE_NAMES[outcome.id]}: ${said}`)
+    rows.push(`${outcome.ok ? 'ok' : '--'} ${SOURCE_NAMES[outcome.id]} — ${said}`)
   }
+  return rows
 }
 
-function unmount(deps: SourcesFlowDeps, id: SourceId): void {
+function unmount(deps: SourcesFlowDeps, id: SourceId): string {
   const { host, store } = deps
-  if (!store.mounted().includes(id)) {
-    host.info(`${SOURCE_NAMES[id]} is not mounted.`)
-    return
-  }
   store.unmount(id)
   host.debug?.(`sources.unmount ${id}`)
-  host.info(
+  const said =
     id === 'spotify'
       ? 'Spotify unmounted; its tokens are dropped here (there is no remote revoke without a secret — remove the app under your Spotify account settings if you want it gone there too).'
-      : `${SOURCE_NAMES[id]} unmounted; its snapshot is gone.`,
-  )
+      : `${SOURCE_NAMES[id]} unmounted; its snapshot is gone.`
+  host.info(said)
+  return `ok ${SOURCE_NAMES[id]} — ${said.slice(SOURCE_NAMES[id].length + 1)}`
 }

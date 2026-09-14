@@ -26,7 +26,7 @@ import type {
   Turn,
 } from '../src/contracts.ts'
 import type { DirectorSettings } from '../src/director/director.ts'
-import type { AskKind, FloorMode, Host } from '../src/host/host.ts'
+import type { AskChoices, AskKind, FloorMode, Host } from '../src/host/host.ts'
 import type { Invitation, ProgramState } from '../src/host/ipc.ts'
 import { LineQueue } from '../src/host/host.ts'
 
@@ -305,7 +305,7 @@ export class FakeHost implements Host {
   radio: string[] = []
   user: string[] = []
   infos: string[] = []
-  asks: { text: string; kind: AskKind }[] = []
+  asks: { text: string; kind: AskKind; choices?: AskChoices }[] = []
   debugs: string[] = []
   states: ProgramState[] = []
   banners: { personaFirstLine: string; brain: string; voice: string }[] = []
@@ -357,8 +357,8 @@ export class FakeHost implements Host {
     this.infos.push(message)
   }
 
-  ask(text: string, kind: AskKind): void {
-    this.asks.push({ text, kind })
+  ask(text: string, kind: AskKind, choices?: AskChoices): void {
+    this.asks.push({ text, kind, ...(choices !== undefined && { choices }) })
   }
 
   debug(message: string): void {

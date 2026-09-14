@@ -7,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion } from '../src/config.ts'
 import { COMMANDS } from '../src/host/ipc.ts'
-import { ask, CliHost, LineQueue, type AskKind, type Host } from '../src/host/host.ts'
+import { ask, CliHost, LineQueue, type AskChoices, type AskKind, type Host } from '../src/host/host.ts'
 
 describe('LineQueue', () => {
   it('peek does not consume; take does', async () => {
@@ -97,6 +97,19 @@ describe('ask', () => {
     const host = bareHost()
     ask(host, 'what should I call you?', 'question')
     expect(host.infos).toEqual(['what should I call you?'])
+  })
+
+  it('hands the rows to tick to a host that can show them, and only the text to one that cannot', () => {
+    const choices = { options: [{ key: 'netease', label: 'NetEase', checked: true }], multi: true }
+    const asks: { text: string; kind: AskKind; choices?: AskChoices }[] = []
+    const host = bareHost()
+    host.ask = (text, kind, c) => void asks.push({ text, kind, ...(c !== undefined && { choices: c }) })
+    ask(host, 'which?\n>> 1) [x] NetEase', 'question', choices)
+    expect(asks).toEqual([{ text: 'which?\n>> 1) [x] NetEase', kind: 'question', choices }])
+    const plain = bareHost()
+    ask(plain, 'which?\n>> 1) [x] NetEase', 'question', choices)
+    // The numbered rows live in the text; the plain host adds only how to answer them.
+    expect(plain.infos).toEqual(['which?\n>> 1) [x] NetEase\nnumbers or names, space-separated · Enter keeps it as it is'])
   })
 })
 
