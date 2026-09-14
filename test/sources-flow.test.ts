@@ -241,12 +241,37 @@ describe('runSources (spec 14 §3.1)', () => {
     }
   })
 
-  // A profile named by MURMUR_CHROME_PROFILE that Chrome has never opened:
-  // Chrome is here, so "install it" is the wrong advice; name the profile and
-  // the knob that picked it.
-  it('names the missing profile and the env knob when Chrome is here but the profile is not', async () => {
-    const { host, deps, store } = build(['netease', ''], {
+  // A profile named by MURMUR_CHROME_PROFILE that Chrome has never opened is
+  // the same thing to a listener as not being signed in: Chrome makes the
+  // profile when it opens the sign-in page in it, so it is the sign-in path.
+  it('a profile Chrome has never opened takes the sign-in path, not an obstacle', async () => {
+    const opened: string[] = []
+    const dropped: number[] = []
+    let attempt = 0
+    const { host, deps, store } = build(['netease', '', 'netease'], {
       platform: 'darwin',
+      openUrl: (url) => opened.push(url),
+      onCookieDrop: () => dropped.push(1),
+      mounts: {
+        netease: async () => {
+          if (attempt++ === 0) throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
+          return { ok: true, who: 'Zach G', entry: { browser: 'chrome', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(opened).toEqual(['https://music.163.com/'])
+    expect(host.asks.some((a) => /press enter/i.test(a.text))).toBe(true)
+    expect(dropped).toHaveLength(1)
+    expect(host.infos.some((l) => /no profile named/.test(l))).toBe(false)
+    expect(host.infos).toContain('signed in as Zach G')
+    expect(store.read().netease).toMatchObject({ browser: 'chrome', status: 'ok' })
+  })
+
+  it('a profile still absent after the wait ends in the plain no-login word', async () => {
+    const { host, deps, store } = build(['netease', '', ''], {
+      platform: 'darwin',
+      openUrl: () => {},
       mounts: {
         netease: async () => {
           throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
@@ -254,10 +279,8 @@ describe('runSources (spec 14 §3.1)', () => {
       },
     })
     await runSources(deps)
-    const line = host.infos.find((l) => /no profile named/.test(l))
-    expect(line).toContain('"Murmur Fresh"')
-    expect(line).toContain('MURMUR_CHROME_PROFILE')
-    expect(host.infos.some((l) => /install|sign in there/.test(l))).toBe(false)
+    expect(host.infos).toContain('still no NetEase login in Chrome — /sources when you have signed in.')
+    expect(host.infos.some((l) => /no profile named/.test(l))).toBe(false)
     expect(store.read()).toEqual({})
   })
 

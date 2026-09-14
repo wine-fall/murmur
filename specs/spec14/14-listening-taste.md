@@ -489,15 +489,18 @@ halves, so the listener cannot sign in somewhere murmur will not look.
    signed in". On Enter, drop the cached export — it answers from before they
    signed in — and read once more. Still nothing → "still no <site> login in
    Chrome — /sources when you have signed in". Never a dead end that sends
-   them back through the whole conversation.
+   them back through the whole conversation. The page opens in the profile
+   `$MURMUR_CHROME_PROFILE` names, the one murmur then reads — signing in
+   anywhere else would be invisible to it (macOS `open -na "Google Chrome"
+   --args --profile-directory=<p>`: without `-n`, `open` drops the flags
+   whenever Chrome is already running). **A
+   profile Chrome has never opened arrives here too**, not as an obstacle:
+   to a listener it is the same thing as not being signed in, and Chrome
+   creates the profile directory when it opens the page in it.
 4. **The store could not be read at all** is a different answer, and says
-   which: Chrome not installed, a `MURMUR_CHROME_PROFILE` profile Chrome has
-   never opened (its user-data root is there, the profile directory is not —
-   yt-dlp words this exactly as an absent browser, so the path it quotes is
-   checked on disk; the answer names the profile and the knob), the terminal
-   not allowed to read its cookie store (macOS: Full Disk Access), no yt-dlp,
-   or unreadable for a reason not modelled — a locked database, a Windows
-   DPAPI decrypt failure — which is
+   which: Chrome not installed, the terminal not allowed to read its cookie
+   store (macOS: Full Disk Access), no yt-dlp, or unreadable for a reason not
+   modelled — a locked database, a Windows DPAPI decrypt failure — which is
    quoted rather than guessed at. These used to arrive as an empty jar and be
    reported as "you are not signed in": advice that cannot work, and that
    loops a Safari user forever. yt-dlp names the failure in its stderr;

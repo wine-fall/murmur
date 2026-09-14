@@ -207,7 +207,7 @@ const CHROME = 'chrome' as const
 // the many who have only one profile.
 export const CHROME_PROFILE_ENV = 'MURMUR_CHROME_PROFILE'
 
-function chromePick(env: NodeJS.ProcessEnv = process.env): BrowserPick {
+export function chromePick(env: NodeJS.ProcessEnv = process.env): BrowserPick {
   const profile = env[CHROME_PROFILE_ENV]?.trim()
   return { browser: CHROME, ...(profile !== undefined && profile !== '' && { profile }) }
 }
@@ -223,12 +223,9 @@ const SIGN_IN_URL: Record<CookieSource, string> = {
 // used to arrive as "sign in there", which is advice that cannot work: no
 // one can sign in to a browser they do not have, and signing in again never
 // grants a terminal Full Disk Access.
-function obstacleLine(reason: CookieFailure, detail: string, platform: NodeJS.Platform, profile?: string): string {
+function obstacleLine(reason: CookieFailure, detail: string, platform: NodeJS.Platform): string {
   if (reason === 'no-ytdlp') return 'I need yt-dlp to read a browser login, and I cannot find it — `brew install yt-dlp`, then /sources again.'
   if (reason === 'no-browser') return 'I could not find Chrome on this machine — the taste sources read your Chrome login, so they need it installed.'
-  if (reason === 'no-profile') {
-    return `Chrome is here, but it has no profile named "${profile ?? ''}" — open Chrome once with that profile, or unset ${CHROME_PROFILE_ENV} to read the default one.`
-  }
   if (reason === 'unreadable') return `I could not read Chrome's cookie store, and yt-dlp did not say why in a way I know: ${detail}`
   return platform === 'darwin'
     ? 'Chrome is here, but I am not allowed to read its cookie store — give this terminal Full Disk Access (System Settings → Privacy & Security), then /sources again.'
@@ -360,8 +357,12 @@ async function mountCookieFlow(
       return await deps.mounts[id](pick)
     } catch (err) {
       if (err instanceof BrowserCookieError) {
-        host.info(obstacleLine(err.reason, err.detail, platform, err.profile))
         host.debug?.(`sources.cookies ${id} ${err.reason}: ${err.detail}`)
+        // A profile Chrome has never opened is, to a listener, the same thing
+        // as not being signed in — and opening the sign-in page in it is what
+        // creates it. So it takes the no-login path rather than an obstacle.
+        if (err.reason === 'no-profile') return { ok: false, reason: 'login-required' }
+        host.info(obstacleLine(err.reason, err.detail, platform))
         return null
       }
       host.info(`could not reach ${site} (${err instanceof Error ? err.message : String(err)}) — try /sources again in a moment.`)
