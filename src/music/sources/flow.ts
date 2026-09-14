@@ -139,13 +139,16 @@ function menuText(rows: readonly MenuRow[], results: readonly string[]): string 
   return [QUESTION, ...mergeRows(results), ...numbered].join('\n')
 }
 
+// Every row leads with what happened — connected / could not connect /
+// disconnected / refreshed — so a card that reopens with three gap rows reads
+// as the result it is, not as the same menu again (user report, 2026-09-14).
 // Rows that end the same way share one: three cookie sources behind one
 // Full Disk Access obstacle are one gap row naming all three, not three
 // copies of a long line — which is what pushed the card off an 80x24 screen.
 function mergeRows(rows: readonly string[]): string[] {
   const byTail = new Map<string, { marker: string; names: string[] }>()
   for (const row of rows) {
-    const match = /^(ok|--) (.+?) — (.+)$/s.exec(row)
+    const match = /^((?:ok|--) (?:connected|could not connect|disconnected|refreshed|could not refresh)) (.+?) — (.+)$/s.exec(row)
     if (match === null) {
       byTail.set(row, { marker: '', names: [] })
       continue
@@ -298,8 +301,9 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
   }
 }
 
-// One mount, as a result row for the next card: 'ok <name> — signed in as
-// <who> - <counts>' or '-- <name> - <the flow's own last word>'.
+// One mount, as a result row for the next card: 'ok connected <name> — signed
+// in as <who> - <counts>' or '-- could not connect <name> - <the flow's own
+// last word>'.
 async function mountOne(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, platform: NodeJS.Platform, cancelled: () => boolean): Promise<string> {
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
@@ -308,8 +312,8 @@ async function mountOne(deps: SourcesFlowDeps, read: () => Promise<string>, id: 
   else await mountCookieFlow(recorded, read, id, platform, cancelled)
   const name = SOURCE_NAMES[id]
   const who = notes.find((line) => line.startsWith('signed in as '))
-  if (who !== undefined) return `ok ${name} — ${who} · ${counts(deps.store, id)}`
-  return `-- ${name} — ${cancelled() ? 'stopped — nothing was written' : (notes.at(-1) ?? 'not connected')}`
+  if (who !== undefined) return `ok connected ${name} — ${who} · ${counts(deps.store, id)}`
+  return `-- could not connect ${name} — ${cancelled() ? 'stopped — nothing was written' : (notes.at(-1) ?? 'not connected')}`
 }
 
 // Verify, first snapshot, write, say (spec 14 §3.1). The snapshot runs in
@@ -463,7 +467,7 @@ async function refresh(deps: SourcesFlowDeps): Promise<string[]> {
   for (const outcome of await deps.refresher.refreshAll()) {
     const said = outcome.ok ? `${outcome.count} items` : `could not read it (${outcome.error})`
     host.info(`${SOURCE_NAMES[outcome.id]}: ${said}`)
-    rows.push(`${outcome.ok ? 'ok' : '--'} ${SOURCE_NAMES[outcome.id]} — ${said}`)
+    rows.push(`${outcome.ok ? 'ok refreshed' : '-- could not refresh'} ${SOURCE_NAMES[outcome.id]} — ${said}`)
   }
   return rows
 }
@@ -472,10 +476,10 @@ function unmount(deps: SourcesFlowDeps, id: SourceId): string {
   const { host, store } = deps
   store.unmount(id)
   host.debug?.(`sources.unmount ${id}`)
-  const said =
+  const gone =
     id === 'spotify'
-      ? 'Spotify unmounted; its tokens are dropped here (there is no remote revoke without a secret — remove the app under your Spotify account settings if you want it gone there too).'
-      : `${SOURCE_NAMES[id]} unmounted; its snapshot is gone.`
-  host.info(said)
-  return `ok ${SOURCE_NAMES[id]} — ${said.slice(SOURCE_NAMES[id].length + 1)}`
+      ? 'its tokens are dropped here (there is no remote revoke without a secret — remove the app under your Spotify account settings if you want it gone there too).'
+      : 'its snapshot is gone.'
+  host.info(`${SOURCE_NAMES[id]} unmounted; ${gone}`)
+  return `ok disconnected ${SOURCE_NAMES[id]} — ${gone}`
 }

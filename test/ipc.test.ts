@@ -26,6 +26,9 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   { v: 1, type: 'info', text: 'stopped — the setup guide is waiting for you', tone: 'flow' },
   { v: 1, type: 'ask', text: 'what should I call you?', kind: 'question' },
   { v: 1, type: 'ask', text: 'allow? [y/N]', kind: 'consent' },
+  // `back` says /back is live for this step (spec 06 §3.4): the card shows it.
+  { v: 1, type: 'ask', text: 'what do you want from the radio?', kind: 'question', back: true },
+  { v: 1, type: 'ask', text: 'may I read your history? [y/N]', kind: 'consent', back: true },
   // A question with rows to tick (spec 10 §3.2-D, the /sources list): the
   // answer is still a `line` — the ticked keys, space-joined.
   {

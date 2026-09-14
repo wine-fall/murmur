@@ -200,6 +200,9 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // /sources list): the answer is still a `line` — the ticked keys in row
   // order, space-joined, '' for none. The text keeps its own '>> ' rows, so a
   // client without a list surface still reads the same question. Additive.
+  // `back` says a typed '/back' re-asks the previous step (spec 06 §3.4):
+  // the card names it in its action row, so the way back is read where the
+  // question is, not only in the intro that scrolled off. Additive.
   z.object({
     v,
     type: z.literal('ask'),
@@ -207,6 +210,7 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     kind: z.enum(['question', 'consent']),
     options: z.array(AskOptionSchema).optional(),
     multi: z.boolean().optional(),
+    back: z.boolean().optional(),
   }),
   // Every pending ask just died with its flow (the listener's Esc stopped it):
   // the client drops its cards. Additive, like `ask`.

@@ -111,6 +111,17 @@ describe('ask', () => {
     // The numbered rows live in the text; the plain host adds only how to answer them.
     expect(plain.infos).toEqual(['which?\n>> 1) [x] NetEase\nnumbers or names, space-separated · Enter keeps it as it is'])
   })
+
+  it('says /back is there on a plain host — it has no action row to show it in', () => {
+    const plain = bareHost()
+    ask(plain, 'what do you want from the radio?', 'question', { back: true })
+    expect(plain.infos).toEqual(['what do you want from the radio?\n(/back returns to the previous question)'])
+    const asks: (AskChoices | undefined)[] = []
+    const host = bareHost()
+    host.ask = (_text, _kind, c) => void asks.push(c)
+    ask(host, 'what do you want from the radio?', 'question', { back: true })
+    expect(asks).toEqual([{ back: true }])
+  })
 })
 
 describe('CliHost', () => {
