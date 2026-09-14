@@ -29,6 +29,34 @@ export function cardTitle(kind: AskKind, count: number, text: string, options?: 
     : ` murmur is asking · #${String(count)} `
 }
 
+// The way back, named on the card when the engine says the step has one
+// (spec 06 §3.4): the intro line that mentions /back has scrolled off by the
+// second question, so the action row is where it is read.
+export const BACK_HINT = '/back - previous question'
+
+// The action row's text, as the renderer lays it out: what closes the card
+// under the question — a consent's two options, a list's keys, a menu's or a
+// seed's Enter — plus the /back hint when the step has one.
+// A consent's two options as the renderer lays them out, spacing included:
+// the default sits on a raised CHIP, which is padded on both sides. Measured
+// from the same string it is drawn from, or a boundary width wraps the row
+// the math thought fit (codex review).
+export const CONSENT_ACTIONS = ['y - go ahead', '   ', ' > N - not now ', ' (Enter)'] as const
+
+export function actionRow(kind: AskKind, lines: readonly CardLine[], options?: readonly AskOption[], back = false): string {
+  if (kind === 'consent') return `${CONSENT_ACTIONS.join('')}${back ? `   ${BACK_HINT}` : ''}`
+  if (options !== undefined) return '↑↓ move · space ticks · enter applies'
+  if (isMenu(kind, lines)) return 'Enter - done'
+  return `Enter skips${back ? ` · ${BACK_HINT}` : ''}`
+}
+
+// The hint shares the action row when the row fits the card's inner width,
+// and takes the row beneath when it would wrap mid-phrase: an 80-column
+// card holds 38, which is the consent row alone.
+export function backInline(kind: AskKind, lines: readonly CardLine[], options: readonly AskOption[] | undefined, inner: number): boolean {
+  return actionRow(kind, lines, options, true).length <= inner
+}
+
 export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' | 'option' }
 
 // Card hierarchy from the ask text alone (zero wire additions): the first
@@ -66,7 +94,7 @@ export function cardLines(text: string): CardLine[] {
 // width and chrome math replayed as a number. The raster layer needs it: a
 // kitty image sits ABOVE text cells, so while the card is up the sky's images
 // may keep the stage (dimmed) only where the card cannot reach.
-export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[]): number {
+export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false): number {
   const width = Math.min(Math.floor(cols * 0.55), cols - 4)
   const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
   // A list card draws its rows from `options`; the text's own '>> ' rows are
@@ -84,7 +112,12 @@ export function cardRows(text: string, cols: number, kind: AskKind, options?: re
   // A consent checklist's choices are its own option rows; every other card
   // keeps the renderer's action row (a question's Enter hint stays even
   // above status rows — the /sources menu).
-  if (!(facts && kind === 'consent')) rows += 2 // the action row (its top margin + the line)
+  // The action row: its top margin + the line, + the /back hint's own row
+  // when it does not share the line.
+  if (!(facts && kind === 'consent')) {
+    const inline = back && backInline(kind, lines, options, inner)
+    rows += 1 + Math.ceil(actionRow(kind, lines, options, inline).length / inner) + (back && !inline ? 1 : 0)
+  }
   // The list IS the answer: no field under it.
   if (options === undefined) rows += 2 // the in-card answer field (its top margin + the input)
   rows += 4 // border (2) + vertical padding (2)
@@ -95,8 +128,8 @@ export function cardRows(text: string, cols: number, kind: AskKind, options?: re
 // The first terminal row the card can touch: the card floats anchored to the
 // window's bottom rule (the quiet line that keeps the frame closed), so its
 // top is the window height minus its own rows. Rasters end above this.
-export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[]): number {
-  return Math.max(1, height - 1 - cardRows(text, cols, kind, options))
+export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[], back = false): number {
+  return Math.max(1, height - 1 - cardRows(text, cols, kind, options, back))
 }
 
 // One list row as the renderer lays it out: the cursor slot, the tick box,

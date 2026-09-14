@@ -429,7 +429,7 @@ without a list surface reads the same card:
 
 ```
 which accounts should I read? Enter with nothing changed leaves
-ok NetEase — signed in as Chen X · 312 liked          ← last submit's results
+ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's results
 >> 1) [ ] YouTube - not connected
 >> 2) [ ] Bilibili - not connected
 >> 3) [x] NetEase - 312 liked · read just now
@@ -459,11 +459,16 @@ ok NetEase — signed in as Chen X · 312 liked          ← last submit's resul
   changed + Enter = done.**
   Esc on the menu leaves without touching anything; so does a front-end
   going away (the reader's EOF `''`) — neither is an empty selection.
-- **Every result lands IN the next card** as a ready/gap row, in the mount
-  flow's own words — `ok NetEase — signed in as Chen X · 312 liked`,
-  `-- NetEase — <the obstacle line>`, `-- Spotify — stopped — nothing was
-  written` — as well as in the log through `info`. Rows that end the same
-  way share one (`-- YouTube, Bilibili, NetEase — Chrome is here, but …`):
+- **Every result lands IN the next card** as a ready/gap row that leads
+  with what happened — `connected` / `could not connect` / `disconnected` /
+  `refreshed` / `could not refresh` — then the mount flow's own words:
+  `ok connected NetEase — signed in as Chen X · 312 liked`, `-- could not
+  connect NetEase — <the obstacle line>`, `-- could not connect Spotify —
+  stopped — nothing was written`, `ok disconnected Spotify — its tokens are
+  dropped here …`, `ok refreshed NetEase — 312 items` — as well as in the log
+  through `info`. The verb is what tells a reopened card apart from the same
+  menu again (user report, 2026-09-14). Rows that end the same way share one
+  (`-- could not connect YouTube, Bilibili, NetEase — Chrome is here, but …`):
   three cookie sources behind one obstacle must still fit an 80x24 card
   (verified: 22 rows). The TUI floats the card
   over the log (10 §3.3), so a result printed *under* it was the failure

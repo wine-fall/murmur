@@ -19,7 +19,7 @@ import { join } from 'node:path'
 import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from '../contracts.ts'
 import { isYes, lineReader, QUIT, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
-import { ask, type Host } from '../host/host.ts'
+import { ask, type AskChoices, type Host } from '../host/host.ts'
 import { SOURCES_OFFER } from '../music/sources/flow.ts'
 import { claudeCodeRoot } from '../paths.ts'
 import { renderPersona } from '../brain/persona.ts'
@@ -133,7 +133,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
       const earlier = given[step.index]!
       // The earlier answer rides as a card note, and an empty line there keeps
       // it (the least surprising reading of Enter).
-      ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question')
+      ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question', back(i))
       const line = (await read()).trim()
       if (line === BACK) {
         if (i > 0) i--
@@ -150,7 +150,7 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
       continue
     }
     const offer = step.kind === 'bootstrap' ? BOOTSTRAP_OFFER : SOURCES_OFFER
-    const answer = await askConsent(host, offer, read, quit)
+    const answer = await askConsent(host, offer, read, quit, back(i))
     if (answer === 'back') {
       if (i > 0) i--
       continue
@@ -263,9 +263,13 @@ type Step = { kind: 'seed'; index: number } | { kind: 'bootstrap' } | { kind: 's
 
 const NO_ANSWERS = new Set(['', 'n', 'no'])
 
-async function askConsent(host: Host, offer: readonly string[], read: ReadLine, quit: QuitLatch): Promise<ConsentAnswer> {
+// The card says /back is live on every step that has one behind it: the
+// first question has nowhere to go, so it says nothing.
+const back = (step: number): AskChoices | undefined => (step > 0 ? { back: true } : undefined)
+
+async function askConsent(host: Host, offer: readonly string[], read: ReadLine, quit: QuitLatch, choices?: AskChoices): Promise<ConsentAnswer> {
   for (;;) {
-    ask(host, offer.join('\n'), 'consent')
+    ask(host, offer.join('\n'), 'consent', choices)
     const line = (await read()).trim()
     if (quit.requested) return 'quit'
     if (line === BACK) return 'back'

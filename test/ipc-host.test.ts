@@ -246,6 +246,19 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.some((m) => m.type === 'ask')).toBe(false)
   })
 
+  it('carries the /back hint to the client, and to a later attach while the ask is pending', async () => {
+    const first = await client()
+    first.attach()
+    await first.settle()
+    host.ask('what do you want from the radio?', 'question', { back: true })
+    await first.settle()
+    expect(first.received.find((m) => m.type === 'ask')).toMatchObject({ back: true })
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.received.find((m) => m.type === 'ask')).toMatchObject({ back: true })
+  })
+
   it('clears pending asks when the front-end dies — its readers all declined at EOF', async () => {
     const first = await client()
     first.attach()

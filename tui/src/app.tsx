@@ -14,6 +14,9 @@ import type { InputRenderable, ScrollBoxRenderable, TextareaRenderable } from '@
 import type { EngineMessage, Invitation, ProgramState, SettingsSnapshot } from '../../src/host/ipc.ts'
 import { Bars, render } from './bars.ts'
 import {
+  BACK_HINT,
+  backInline,
+  CONSENT_ACTIONS,
   cardLines,
   cardTitle,
   cardTopRow,
@@ -659,7 +662,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // the input row) must be clear of rasters too.
   const cardTop =
     asks.length > 0
-      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options)
+      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true)
       : menuOpen
         ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
         : null
@@ -1226,6 +1229,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           const lines = cardLines(head.text).filter((l) => list === undefined || l.role !== 'option')
           const facts = lines.some((l) => l.role === 'ready' || l.role === 'gap')
           const width = Math.min(Math.floor(cols * 0.55), cols - 4)
+          // The /back hint rides the action row where it fits, else the row
+          // beneath — never wrapped mid-phrase.
+          const backOnRow = head.back === true && backInline(head.kind, lines, list, Math.max(width - 6, 1))
+          const backBelow = head.back === true && !backOnRow
+          const backRow = backBelow && <text><span fg={INK.notice}>{BACK_HINT}</span></text>
           // The divider stands between the facts and the choices: above the
           // first option row when the card carries its own, above the list
           // when it has one, else above the closing invite (legacy checklist
@@ -1293,22 +1301,26 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               )}
               {consent ? (
                 facts ? null : (
-                  <box style={{ marginTop: 1 }}>
+                  <box style={{ marginTop: 1, flexDirection: 'column' }}>
                     <text>
-                      <span fg={INK.notice}>{'y - go ahead'}</span>
-                      <span fg={INK.notice}>{'   '}</span>
-                      <span fg={INK.text} bg={CHIP}>{' > N - not now '}</span>
-                      <span fg={INK.notice}>{' (Enter)'}</span>
+                      <span fg={INK.notice}>{CONSENT_ACTIONS[0]}</span>
+                      <span fg={INK.notice}>{CONSENT_ACTIONS[1]}</span>
+                      <span fg={INK.text} bg={CHIP}>{CONSENT_ACTIONS[2]}</span>
+                      <span fg={INK.notice}>{CONSENT_ACTIONS[3]}</span>
+                      {backOnRow && <span fg={INK.notice}>{`   ${BACK_HINT}`}</span>}
                     </text>
+                    {backRow}
                   </box>
                 )
               ) : (
                 // A menu's empty line is its exit (the /sources flow reads
                 // '' as done), a seed's is a skip — say the one that is true.
-                <box style={{ marginTop: 1 }}>
+                <box style={{ marginTop: 1, flexDirection: 'column' }}>
                   <text style={{ fg: QUIET }}>
                     {list !== undefined ? '↑↓ move · space ticks · enter applies' : isMenu(head.kind, lines) ? 'Enter - done' : 'Enter skips'}
+                    {list === undefined && backOnRow && <span fg={INK.notice}>{` · ${BACK_HINT}`}</span>}
                   </text>
+                  {backRow}
                 </box>
               )}
               {/* The answer is typed INTO the card (user decision, 2026-08-11):

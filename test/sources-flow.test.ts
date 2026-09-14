@@ -148,11 +148,11 @@ describe('runSources (spec 14 §3.1)', () => {
     // info line the card then covers — #231), the mounted one is ticked
     // with its counts, and the refresh row appears.
     const menu = host.asks.at(-1)!.text.split('\n')
-    expect(menu[1]).toBe('ok YouTube — signed in as Zach G · 1 liked, 1 playlist')
+    expect(menu[1]).toBe('ok connected YouTube — signed in as Zach G · 1 liked, 1 playlist')
     expect(menu).toContain('>> 1) [x] YouTube - 1 liked, 1 playlist · read just now')
     expect(menu).toContain('>> 3) [ ] NetEase - not connected')
     expect(menu).toContain('>> 6) [ ] refresh - re-read every connected account now')
-    const options = host.asks.at(-1)!.choices!.options
+    const options = host.asks.at(-1)!.choices!.options!
     expect(options[0]).toEqual({ key: 'youtube', label: 'YouTube', note: '1 liked, 1 playlist · read just now', checked: true })
     expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false })
   })
@@ -236,7 +236,7 @@ describe('runSources (spec 14 §3.1)', () => {
       expect(store.read()).toEqual({})
       // The obstacle is a gap row in the next card, in obstacleLine's words.
       const row = host.asks.at(-1)!.text.split('\n')[1]!
-      expect(row.startsWith('-- NetEase — ')).toBe(true)
+      expect(row.startsWith('-- could not connect NetEase — ')).toBe(true)
       expect(matcher.test(row)).toBe(true)
     }
   })
@@ -420,10 +420,10 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read()).toEqual({})
     // Each result is a row in the card that follows it.
     const afterRefresh = host.asks[1]!.text.split('\n')
-    expect(afterRefresh.slice(1, 3)).toEqual(['ok NetEase — 2 items', '-- Spotify — could not read it (down)'])
+    expect(afterRefresh.slice(1, 3)).toEqual(['ok refreshed NetEase — 2 items', '-- could not refresh Spotify — could not read it (down)'])
     const afterUnmount = host.asks[2]!.text.split('\n')
-    expect(afterUnmount[1]).toBe('ok NetEase — unmounted; its snapshot is gone.')
-    expect(afterUnmount[2]!.startsWith('ok Spotify — unmounted;')).toBe(true)
+    expect(afterUnmount[1]).toBe('ok disconnected NetEase — its snapshot is gone.')
+    expect(afterUnmount[2]!.startsWith('ok disconnected Spotify — its tokens are dropped here')).toBe(true)
     expect(host.asks).toHaveLength(3)
   })
 
@@ -437,7 +437,7 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(deps)
     const menu = host.asks[0]!.text.split('\n')
     expect(menu.filter((l) => l.startsWith('>> ') && l.includes('[x]'))).toHaveLength(5)
-    expect(host.asks[0]!.choices!.options.map((o) => o.checked)).toEqual([true, true, true, true, true, false])
+    expect(host.asks[0]!.choices!.options!.map((o) => o.checked)).toEqual([true, true, true, true, true, false])
     // The unchanged submit leaves: one card, nothing done.
     expect(host.asks).toHaveLength(1)
     expect(host.infos).toEqual([])
@@ -467,7 +467,7 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(renew.deps)
     expect(renew.mounted).toEqual(['netease:chrome'])
     expect(renew.store.read().netease?.status).toBe('ok')
-    expect(renew.host.asks[1]!.text.split('\n')[1]).toBe('ok NetEase — signed in as Chen X · 1 liked, 1 playlist')
+    expect(renew.host.asks[1]!.text.split('\n')[1]).toBe('ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist')
   })
 
   it('a line it does not understand asks again with the miss in the card; /quit leaves through the latch', async () => {
@@ -503,8 +503,8 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.mounted()).toEqual(['netease', 'spotify'])
     const rows = host.asks[1]!.text.split('\n')
     expect(rows.slice(1, 3)).toEqual([
-      'ok NetEase — signed in as Chen X · 1 liked, 1 playlist',
-      'ok Spotify — signed in as Listener · 1 liked, 1 playlist',
+      'ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist',
+      'ok connected Spotify — signed in as Listener · 1 liked, 1 playlist',
     ])
     expect(host.asks).toHaveLength(2)
   })
@@ -516,18 +516,18 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(deps)
     expect(mounted).toEqual([])
     expect(store.mounted()).toEqual(['spotify'])
-    expect(host.asks[1]!.text.split('\n')[1]).toBe('ok NetEase — unmounted; its snapshot is gone.')
+    expect(host.asks[1]!.text.split('\n')[1]).toBe('ok disconnected NetEase — its snapshot is gone.')
   })
 
   it('a mount that fails leaves its reason as a gap row, and a stopped one says so', async () => {
     const failing = build(['spotify', ''], {}, 'timeout')
     await runSources(failing.deps)
-    expect(failing.host.asks[1]!.text.split('\n')[1]).toBe("-- Spotify — didn't hear back from Spotify — /sources to try again.")
+    expect(failing.host.asks[1]!.text.split('\n')[1]).toBe("-- could not connect Spotify — didn't hear back from Spotify — /sources to try again.")
     // Esc mid-mount stops the rest of the submit: Soda was still to come.
     const stopped = build(['spotify soda', ''], {}, 'esc')
     await runSources(stopped.deps)
     expect(stopped.mounted).toEqual([`spotify:${BUNDLED_CLIENT_ID}`])
-    expect(stopped.host.asks[1]!.text.split('\n')[1]).toBe('-- Spotify — stopped — nothing was written')
+    expect(stopped.host.asks[1]!.text.split('\n')[1]).toBe('-- could not connect Spotify — stopped — nothing was written')
   })
 
   it('Esc during a refresh ends the submit before the mounts that were still to come (codex review)', async () => {
@@ -562,7 +562,7 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(deps)
     const rows = host.asks[1]!.text.split('\n').filter((l) => l.startsWith('-- '))
     expect(rows).toHaveLength(1)
-    expect(rows[0]!.startsWith('-- YouTube, Bilibili, NetEase — Chrome is here, but I am not allowed')).toBe(true)
+    expect(rows[0]!.startsWith('-- could not connect YouTube, Bilibili, NetEase — Chrome is here, but I am not allowed')).toBe(true)
     expect(store.read()).toEqual({})
   })
 

@@ -101,9 +101,12 @@ describe('onboarding (criterion 2)', () => {
     expect(readFileSync(home, 'utf-8')).not.toBe(SEED_TEXT)
     // Seeds are marked questions (spec 10 §3.2-B): the TUI docks them, the
     // plain host prints them — FakeHost has the surface, so they land there.
-    for (const q of SEED_QUESTIONS) {
-      expect(host.asks).toContainEqual({ text: q, kind: 'question' })
-    }
+    // The first question has nowhere to go back to; every later step says
+    // /back is live (spec 06 §3.4) — on the card, where it is read, not only
+    // in the intro.
+    expect(host.asks[0]).toEqual({ text: SEED_QUESTIONS[0], kind: 'question' })
+    expect(host.asks[1]).toEqual({ text: SEED_QUESTIONS[1], kind: 'question', choices: { back: true } })
+    expect(host.asks[2]).toEqual({ text: SEED_QUESTIONS[2], kind: 'question', choices: { back: true } })
     expect(brain.calls[0]!.map((a) => a.answer)).toEqual([
       'call me Zach',
       'company while I work',
@@ -279,6 +282,8 @@ describe('slice B consent gate (criterion 6)', () => {
     expect(lines[0]).toContain('[y/N]')
     expect(consent?.text).toContain('stay on this machine')
     expect(host.infos.join('\n')).not.toContain('Claude Code history')
+    // A consent card is never the first step: /back is live on it.
+    expect(consent?.choices).toEqual({ back: true })
   })
 })
 
@@ -472,6 +477,7 @@ describe('the sources offer (spec 14 §3.9)', () => {
     const { memoryDir, seed } = workspace()
     const host = scriptedHost([...answered(), 'n'])
     await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }))
+    expect(host.asks.filter((a) => a.kind === 'consent').map((a) => a.choices)).toEqual([{ back: true }])
     const card = sourcesCard(host)
     const lines = card?.text.split('\n') ?? []
     expect(lines).toHaveLength(3)

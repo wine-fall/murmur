@@ -91,7 +91,7 @@ export type AskKind = 'question' | 'consent'
 // text carries the same rows numbered ('>> 1) [x] NetEase - ...'), so a host
 // without a list surface shows the text alone and the listener answers with
 // numbers or names.
-export type AskChoices = { options: readonly AskOption[]; multi?: boolean }
+export type AskChoices = { options?: readonly AskOption[]; multi?: boolean; back?: boolean }
 
 // Who the keyboard is talking to. 'guide' while the setup guide holds the
 // floor, 'report' while the listener is writing up a bug or a wish, 'radio'
@@ -109,7 +109,13 @@ export type InfoTone = 'flow'
 // surface get the marked ask, bare ones get the same text as info.
 export function ask(host: Host, text: string, kind: AskKind, choices?: AskChoices): void {
   if (host.ask !== undefined) host.ask(text, kind, choices)
-  else host.info(choices === undefined ? text : `${text}\nnumbers or names, space-separated · Enter keeps it as it is`)
+  else {
+    const hints = [
+      ...(choices?.options !== undefined ? ['numbers or names, space-separated · Enter keeps it as it is'] : []),
+      ...(choices?.back === true ? ['(/back returns to the previous question)'] : []),
+    ]
+    host.info([text, ...hints].join('\n'))
+  }
 }
 
 // Mirror a program line into the dev log (`make logs` tails it in a second

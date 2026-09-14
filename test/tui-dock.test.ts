@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest'
 import { COMMANDS } from '../src/host/ipc.ts'
 import {
   cardLines,
+  actionRow,
+  backInline,
   cardRows,
   cardTitle,
   cardTopRow,
@@ -193,6 +195,29 @@ describe('cardRows / cardTopRow', () => {
   it('wrapped lines take their real height, so a long command still clears the card', () => {
     const long = `setup assistant wants to run [Bash]: ${'x'.repeat(300)}\nallow? [y/N]`
     expect(cardRows(long, 120, 'consent')).toBeGreaterThan(cardRows(CONSENT, 120, 'consent'))
+  })
+
+  it('the /back hint shares the action row where it fits, and takes the row beneath where it would wrap', () => {
+    // 'y - go ahead   > N - not now (Enter)   /back - previous question' is 66
+    // columns: one row on a wide card, its own row on a 120-column one
+    // (inner 60) and on an 80-column one (inner 38, the consent row alone).
+    // The row is 66 columns as the renderer draws it — the CHIP's own padding
+    // included, which the measurement used to miss by two (codex review).
+    expect(actionRow('consent', [], undefined, true)).toHaveLength(66)
+    expect(backInline('consent', [], undefined, 66)).toBe(true)
+    expect(backInline('consent', [], undefined, 65)).toBe(false)
+    expect(backInline('consent', [], undefined, 60)).toBe(false)
+    // A 128-column terminal's card is 64 inner columns: the hint takes its
+    // own row there, and cardRows counts it.
+    expect(cardRows(CONSENT, 128, 'consent', undefined, true)).toBe(cardRows(CONSENT, 128, 'consent') + 1)
+    expect(cardRows(CONSENT, 200, 'consent', undefined, true)).toBe(11)
+    expect(cardRows(CONSENT, 120, 'consent', undefined, true)).toBe(cardRows(CONSENT, 120, 'consent') + 1)
+    expect(cardRows(CONSENT, 80, 'consent', undefined, true)).toBe(cardRows(CONSENT, 80, 'consent') + 1)
+    // The seed row, 39 columns with the hint joined: one row at
+    // 120, its own row at 80.
+    const seed = 'what do you want from the radio?'
+    expect(cardRows(seed, 120, 'question', undefined, true)).toBe(cardRows(seed, 120, 'question'))
+    expect(cardRows(seed, 80, 'question', undefined, true)).toBe(cardRows(seed, 80, 'question') + 1)
   })
 
   it('a checklist card adds its divider row; option rows replace the action row', () => {
