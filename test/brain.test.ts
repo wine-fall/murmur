@@ -601,6 +601,20 @@ describe('generateText under an AbortSignal (spec 06 §3.4: the seed call is int
     expect(sdkSignal?.aborted).toBe(true)
   })
 
+  it('a signal already aborted never starts the query (codex review)', async () => {
+    let started = 0
+    const fakeQuery = () => {
+      started++
+      return (async function* () {
+        yield assistant('never')
+      })()
+    }
+    const abort = new AbortController()
+    abort.abort(new Error('already gone'))
+    await expect(generateText(fakeQuery as never, 'sys', 'prompt', 'model-x', abort.signal)).rejects.toThrow('already gone')
+    expect(started).toBe(0)
+  })
+
   it('without a signal, the joined text comes back as before', async () => {
     const fakeQuery = () =>
       (async function* () {

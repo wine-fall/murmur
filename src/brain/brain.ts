@@ -434,6 +434,10 @@ export async function generateText(
   model: string,
   signal?: AbortSignal,
 ): Promise<string> {
+  const aborted = () => (signal?.reason instanceof Error ? signal.reason : new Error('generation aborted'))
+  // A signal already cut before the call: no listener would ever fire, so
+  // refuse here rather than start a subprocess nobody is waiting for.
+  if (signal?.aborted) throw aborted()
   const abortController = new AbortController()
   signal?.addEventListener('abort', () => abortController.abort(signal.reason), { once: true })
   const parts: string[] = []
@@ -443,7 +447,7 @@ export async function generateText(
       if (block.type === 'text' && block.text) parts.push(block.text)
     }
   }
-  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('generation aborted')
+  if (signal?.aborted) throw aborted()
   const text = parts.join('').trim()
   if (!text) throw new Error('ClaudeBrain produced no text (check Claude Code login / network)')
   return text
