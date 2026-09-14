@@ -350,6 +350,25 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     expect(second.received.filter((m) => m.type === 'busy')).toEqual([])
   })
 
+  it('fires the quit hook the moment /quit arrives, with no read open (spec 06 §3.4)', async () => {
+    // A /quit typed during a long model call used to lie in the queue until
+    // some read consumed it — the listener saw a hang they could not leave.
+    let fired = 0
+    host.onQuit(() => void fired++)
+    const c = await client()
+    c.attach()
+    c.line('/quit')
+    await c.settle()
+    expect(fired).toBe(1)
+    // The line itself still queues: the reader that finally takes it stays
+    // the second guard, and a chat line is never mistaken for the command.
+    c.line('  /quit  ')
+    c.line('/quit please')
+    await c.settle()
+    expect(fired).toBe(2)
+    expect(host.takeLine()).toBe('/quit')
+  })
+
   it('feeds a submitted line into the same queue the CLI host uses', async () => {
     const c = await client()
     c.attach()

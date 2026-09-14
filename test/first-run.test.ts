@@ -2,12 +2,12 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { ProfileBootstrap } from '../src/setup/cc-tools.ts'
 import type { Brain, SeedAnswer, Task } from '../src/contracts.ts'
 import { quitLatch } from '../src/setup/guide.ts'
-import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap } from '../src/setup/first-run.ts'
+import { isFirstRun, type ProfileWritable, runFirstRun, runProfileBootstrap, SEED_PERSONA_TIMEOUT_MS } from '../src/setup/first-run.ts'
 import { SOURCES_OFFER } from '../src/music/sources/flow.ts'
 import { PERSONA_CHAR_CAP, SEED_QUESTIONS } from '../src/prompts/persona.ts'
 import { callTool, FakeHarness, FakeHost } from './fakes.ts'
@@ -28,11 +28,17 @@ class FakeSeeder implements Pick<Brain, 'seedPersona'> {
   languages: string[] = []
   result = GENERATED
   fail = false
+  // The real seam under a stuck model call: never resolves on its own, and
+  // rejects only when the caller's signal aborts it.
+  hang = false
 
-  async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
+  async seedPersona(answers: readonly SeedAnswer[], language: string, signal?: AbortSignal): Promise<string> {
     this.calls.push(answers)
     this.languages.push(language)
     if (this.fail) throw new Error('brain down')
+    if (this.hang) {
+      return new Promise<string>((_, reject) => signal?.addEventListener('abort', () => reject(signal.reason), { once: true }))
+    }
     return this.result
   }
 }
@@ -279,6 +285,47 @@ describe('slice B consent gate (criterion 6)', () => {
 function everythingSaid(host: FakeHost): string {
   return [...host.infos, ...host.asks.map((a) => a.text)].join('\n')
 }
+
+describe('the persona call can be left or can time out (spec 06 §3.4)', () => {
+  const settle = async () => {
+    for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r))
+  }
+
+  it('a /quit fired while the call hangs returns the fallback at once, and writes no marker', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const brain = new FakeSeeder()
+    brain.hang = true
+    const quit = quitLatch()
+    const run = runFirstRun(deps({ host: scriptedHost(['a', 'b', 'c']), brain, memoryDir, fallbackSeedPath: seed, quit }))
+    await settle()
+    expect(brain.calls).toHaveLength(1)
+    const started = Date.now()
+    quit.fire()
+    const path = await run
+    expect(Date.now() - started).toBeLessThan(1000)
+    // Leaving is not answering: the next boot asks again from the top.
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+  })
+
+  it('a call that outlives the timeout degrades to the bundled seed, with a marker and a word', async () => {
+    vi.useFakeTimers()
+    try {
+      const { memoryDir, seed, home } = workspace()
+      const brain = new FakeSeeder()
+      brain.hang = true
+      const host = scriptedHost(['a', 'b', 'c'])
+      const run = runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+      await vi.advanceTimersByTimeAsync(SEED_PERSONA_TIMEOUT_MS)
+      const path = await run
+      expect(path).toBe(home)
+      expect(readFileSync(home, 'utf-8')).toContain(SEED_TEXT)
+      expect(host.infos.some((m) => m.includes('took too long'))).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
 
 describe('/quit during first-run (codex review: leaving is not answering)', () => {
   it('writes NO persona marker, so the next boot asks again', async () => {

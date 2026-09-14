@@ -113,6 +113,19 @@ describe('CliHost', () => {
     expect(host.takeLine()).toBeUndefined()
   })
 
+  it('fires the quit hook the moment /quit is typed, with no read open (spec 06 §3.4)', async () => {
+    const input = new PassThrough()
+    const host = new CliHost(input)
+    let fired = 0
+    host.onQuit(() => void fired++)
+    host.start()
+    input.write('hello\n/quit\n')
+    await new Promise((r) => setTimeout(r, 10))
+    expect(fired).toBe(1)
+    expect(host.takeLine()).toBe('hello')
+    expect(host.takeLine()).toBe('/quit')
+  })
+
   it('signals EOF once the input ends (the guide declines instead of blocking)', async () => {
     const input = new PassThrough()
     const host = new CliHost(input)

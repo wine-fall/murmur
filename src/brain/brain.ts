@@ -408,8 +408,8 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   // One tool-less fold of the onboarding answers into a persona, on the good
   // tier: it happens once per install and every later beat inherits it (spec
   // 06 §3.3).
-  async seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string> {
-    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language))
+  async seedPersona(answers: readonly SeedAnswer[], language: string, signal?: AbortSignal): Promise<string> {
+    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language), signal)
   }
 
   // The real-world fetch (spec 13 §2.2): the same bounded loop, with WebSearch
@@ -419,16 +419,32 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     return (await this.runTask(fetchTopicsTask(req, this.model))) ?? []
   }
 
-  private async generate(persona: string, prompt: string): Promise<string> {
-    const parts: string[] = []
-    for await (const message of query({ prompt, options: isolatedOptions(persona, this.model) })) {
-      if (message.type !== 'assistant') continue
-      for (const block of message.message.content) {
-        if (block.type === 'text' && block.text) parts.push(block.text)
-      }
-    }
-    const text = parts.join('').trim()
-    if (!text) throw new Error('ClaudeBrain produced no text (check Claude Code login / network)')
-    return text
+  private generate(persona: string, prompt: string, signal?: AbortSignal): Promise<string> {
+    return generateText(query, persona, prompt, this.model, signal)
   }
+}
+
+// One tool-less generation, factored over an injectable query like the guide
+// loop. `signal` aborts the SDK subprocess; the stream then simply ends, so
+// the abort is re-raised here rather than read as a short answer.
+export async function generateText(
+  queryFn: QueryFn,
+  persona: string,
+  prompt: string,
+  model: string,
+  signal?: AbortSignal,
+): Promise<string> {
+  const abortController = new AbortController()
+  signal?.addEventListener('abort', () => abortController.abort(signal.reason), { once: true })
+  const parts: string[] = []
+  for await (const message of queryFn({ prompt, options: { ...isolatedOptions(persona, model), abortController } })) {
+    if (message.type !== 'assistant') continue
+    for (const block of message.message.content) {
+      if (block.type === 'text' && block.text) parts.push(block.text)
+    }
+  }
+  if (signal?.aborted) throw signal.reason instanceof Error ? signal.reason : new Error('generation aborted')
+  const text = parts.join('').trim()
+  if (!text) throw new Error('ClaudeBrain produced no text (check Claude Code login / network)')
+  return text
 }

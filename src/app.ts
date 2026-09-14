@@ -681,6 +681,9 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // every pending Q&A read declines instantly, and the run shuts down instead
   // of going on the air.
   const quit = quitLatch()
+  // The side channel: the host fires the latch when /quit ARRIVES, so a
+  // listener stuck behind a long model call (no read open) still leaves.
+  host.onQuit?.(() => quit.fire())
   // Armed from here until the Director's handler takes over, so a plain-mode
   // Ctrl-C anywhere in the pre-broadcast stretch (first-run, the setup
   // conversation, the bed pull) is a civilized exit, not a bare death.

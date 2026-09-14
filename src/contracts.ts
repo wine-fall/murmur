@@ -444,8 +444,9 @@ export interface Brain {
   // standalone system prompt for the host, in the listener's own language
   // (spec 06 §2.2). `language` is the machine-detected default, used only where
   // the answers do not settle the question. Tool-less text generation, same
-  // posture as compactProfile.
-  seedPersona(answers: readonly SeedAnswer[], language: string): Promise<string>
+  // posture as compactProfile. `signal` cuts the call short (a /quit, a
+  // timeout): the promise then rejects instead of returning partial text.
+  seedPersona(answers: readonly SeedAnswer[], language: string, signal?: AbortSignal): Promise<string>
   // One bounded WebSearch run for real-world material (spec 13 §2.2), under a
   // neutral framing — a researcher, never the persona. [] on the stub, on an
   // exhausted turn budget, or when the model never made the terminal call.

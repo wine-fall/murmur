@@ -30,6 +30,10 @@ import { BOOTSTRAP_OFFER, BOOTSTRAP_PROFILE_INSTRUCTION, BOOTSTRAP_PROFILE_SYSTE
 const BOOTSTRAP_MAX_TURNS = 12
 // Typed on a seed question: step back to the previous one.
 const BACK = '/back'
+// The persona call is one tool-less generation on the good tier — normally
+// well under a minute. Past this the listener is staring at a busy sign with
+// nothing to do; the bundled seed is a better radio than a longer wait.
+export const SEED_PERSONA_TIMEOUT_MS = 60_000
 
 // The spec-05 store surface slice B needs (spec 06 §2.4). Impl-level and
 // deliberately NOT on the MemoryStore contract: the Director never writes the
@@ -148,14 +152,31 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   let persona: string
   // Writing the persona is a model call the listener waits on with nothing
   // else on screen — the one place in the first run where silence reads as a
-  // hang (spec 10 §3.4).
+  // hang (spec 10 §3.4). Two ways out of it: the latch (a /quit reaches it
+  // through the host's side channel, no read needed) and the timeout. Either
+  // aborts the subprocess; the race makes the exit prompt even if the abort
+  // takes its time to unwind.
+  const abort = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    abort.abort(new Error('the persona call timed out'))
+  }, SEED_PERSONA_TIMEOUT_MS)
+  const left = quit.seen.then(() => {
+    abort.abort(new Error('the listener left'))
+    throw new Error('the listener left')
+  })
   host.setBusy?.(true)
   try {
-    persona = (await deps.brain.seedPersona(answers, deps.language)).trim()
+    persona = (await Promise.race([deps.brain.seedPersona(answers, deps.language, abort.signal), left])).trim()
   } catch (err) {
-    host.info(`could not write a persona from those answers (${String(err)}); using the default voice.`)
+    // Leaving is not answering (above): no marker, the next boot asks again.
+    if (quit.requested) return deps.fallbackSeedPath
+    if (timedOut) host.info('writing the persona took too long; using the default voice — edit it whenever you like.')
+    else host.info(`could not write a persona from those answers (${String(err)}); using the default voice.`)
     return useBundledSeed(deps)
   } finally {
+    clearTimeout(timer)
     host.setBusy?.(false)
   }
   // Empty or a stray one-liner is a failed generation, not a persona (§3.3).
