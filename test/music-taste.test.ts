@@ -120,7 +120,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     provider.candidates = [{ ref: 'https://music.163.com/#/song?id=5', title: 'Song', uploader: 'Artist', durationS: 240, extra: {} }]
     const auth: SourceAuthError[] = []
     const picks: unknown[] = []
-    const tools = musicTools(provider, (pick) => picks.push(pick), undefined, undefined, {
+    const tools = musicTools(provider, (pick) => picks.push(pick), undefined, {
       catalogues: () => opts.mounted ?? [],
       onAuthFailure: (err) => auth.push(err),
       ...(opts.probeDurationS !== undefined && { probeDurationS: opts.probeDurationS }),

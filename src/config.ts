@@ -97,12 +97,6 @@ export const ConfigSchema = z.object({
   // The listener-owned taste half of the pick instruction (spec 03-01 §2.3),
   // under the one murmur home. Absent = the built-in policy.
   musicPolicyPath: z.string().default(() => musicPolicyPath()),
-  // The listening-data catalogue (spec 03-01 §2.3): a key, env-only like every
-  // other secret, and the host that answers. Empty key = no similar_music /
-  // top_tracks tools, and discovery degrades to search alone. Empty url = the
-  // adapter's own default host.
-  listeningApiKey: z.string().default(''),
-  listeningUrl: z.string().default(''),
   // Talk<->music scheduling mode (spec 03-02 §2.3).
   cadenceMode: z.enum(['every_n', 'random', 'brain']).default('every_n'),
   musicEveryN: z.coerce.number().int().positive().default(2),
@@ -353,8 +347,6 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     sourcesPath: sourcesConfigPath(env),
     tasteDir: tasteDir(env),
     ...rwtFromEnv(env),
-    listeningApiKey: env.MURMUR_LISTENING_API_KEY?.trim() ?? '',
-    listeningUrl: env.MURMUR_LISTENING_URL?.trim() ?? '',
     tuiSocket: tuiSocketPath(env),
     ...logSource(env),
     // Having an endpoint IS the reason to speak with it: a voice configured

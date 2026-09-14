@@ -222,25 +222,10 @@ describe('real-world topics config', () => {
 })
 
 // spec 03-01 §2.3: the pick policy is a file the listener owns, at the home
-// root; the listening-data key is a secret, so it only ever comes from env.
+// root.
 describe('music discovery config', () => {
   it('defaults musicPolicyPath under the (relocatable) home', () => {
     expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.musicPolicyPath).toBe('/tmp/mh/music-policy.md')
-  })
-
-  it('takes the listening key from env only, and treats a blank one as absent', () => {
-    expect(parseCli([], { ...NO_ENV, MURMUR_LISTENING_API_KEY: ' abc ' }).config.listeningApiKey).toBe('abc')
-    expect(parseCli([], { ...NO_ENV, MURMUR_LISTENING_API_KEY: '  ' }).config.listeningApiKey).toBe('')
-    expect(parseCli([], NO_ENV).config.listeningApiKey).toBe('')
-  })
-
-  // The catalogue is a knob too: the protocol is public, so which host answers
-  // is configuration, and an unset one means the shipped default.
-  it('lets the listening endpoint be pointed elsewhere', () => {
-    expect(parseCli([], { ...NO_ENV, MURMUR_LISTENING_URL: ' https://libre.fm/2.0/ ' }).config.listeningUrl).toBe(
-      'https://libre.fm/2.0/',
-    )
-    expect(parseCli([], NO_ENV).config.listeningUrl).toBe('')
   })
 })
 

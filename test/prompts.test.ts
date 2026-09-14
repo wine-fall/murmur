@@ -141,13 +141,14 @@ describe('music prompts', () => {
     expect(DEFAULT_MUSIC_POLICY).toContain('Do not choose out of memory')
   })
 
-  // The default policy is the shipped answer to the habit, so it must name
-  // every widening tool that exists -- a doc that drifts behind the tool list
-  // silently stops being the playbook it claims to be.
-  it('names each widening tool, at both the artist and the song level', () => {
-    expect(DEFAULT_MUSIC_POLICY).toContain('similar_music')
-    expect(DEFAULT_MUSIC_POLICY).toContain('top_tracks')
+  // The playbook directs the tools the task actually has. A step that tells
+  // the model to call something it is not offered spends a turn teaching it
+  // that the tool does not exist.
+  it('names only the tools the pick task is offered', () => {
     expect(DEFAULT_MUSIC_POLICY).toContain('search_music')
+    for (const gone of ['similar_music', 'top_tracks']) {
+      expect(DEFAULT_MUSIC_POLICY).not.toContain(gone)
+    }
   })
 
   // Found by smoke, locked here: compressed to a clause inside another step,

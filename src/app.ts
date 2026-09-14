@@ -43,7 +43,6 @@ import { prepareDevLog } from './support/dev-log.ts'
 import { CliHost, type Host } from './host/host.ts'
 import { HostedVoice } from './voice/hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './host/ipc-host.ts'
-import { HostedListening } from './music/listening-data.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory/memory.ts'
 import { sentinelRoot } from './paths.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
@@ -329,16 +328,6 @@ function buildMusic(
   // The listener's policy file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).
   if (seedMusicPolicy(config.musicPolicyPath)) host.debug?.(`music.policy seeded ${config.musicPolicyPath}`)
-  // Co-listening data widens the candidate pool past the model's own memory
-  // (spec 03-01 §2.3). No key configured = no tool, and discovery is exactly
-  // its pre-key self.
-  const listening =
-    config.listeningApiKey === ''
-      ? undefined
-      : new HostedListening({
-          apiKey: config.listeningApiKey,
-          ...(config.listeningUrl !== '' && { endpoint: config.listeningUrl }),
-        })
   const source = new MusicProgrammer({
     brain: harness,
     provider,
@@ -346,7 +335,6 @@ function buildMusic(
     probe: (s) => probeStream(s, config.ffmpegCmd),
     // The taste paragraph rides the instruction only while a digest exists.
     instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath), { taste: taste !== undefined && taste.reader.digest() !== '' }),
-    ...(listening !== undefined && { listening }),
     ...(taste !== undefined && {
       taste: {
         catalogues: taste.catalogues,
