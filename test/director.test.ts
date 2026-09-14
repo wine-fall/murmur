@@ -15,6 +15,7 @@ import {
   type DirectorDeps,
 } from '../src/director/director.ts'
 import { SCENES } from '../src/director/scene.ts'
+import { SettingsStore } from '../src/host/settings.ts'
 import { INSTALL_COMMAND } from '../src/support/update.ts'
 import { directorSettings, FakeBrain, FakeHost, FakePlayer, FakeVoice, until } from './fakes.ts'
 
@@ -886,6 +887,50 @@ describe('Director — the language override (spec 12 \u00a73.9)', () => {
     // Clearing is pinned where it lives: withLanguage(persona, undefined) in
     // prompts.test.ts and the store's erase in settings.test.ts. Re-proving it
     // here would only buy a race against the look-ahead.
+    await run
+  })
+})
+
+// A language change lands on the persona at the next brain call, but the
+// look-ahead buffer already holds beats generated (and synthesized) in the OLD
+// language — the same staleness a voice swap causes. Whoever moved the knob
+// (the setup guide, the /settings pane, the reply turn), the store's own
+// event drops the buffer so the very next segment is in the new language.
+describe('Director — a language change invalidates the talk look-ahead (spec 12 \u00a73.9)', () => {
+  it('the next segment is regenerated under the new persona, never a buffered beat', async () => {
+    const store = new SettingsStore({
+      path: join(mkdtempSync(join(tmpdir(), 'murmur-dir-')), 'settings.json'),
+      initial: {
+        anchorsEnabled: true,
+        musicEnabled: true,
+        cadenceMode: 'every_n',
+        musicEveryN: 2,
+        gapSeconds: 0,
+        recentWindow: 12,
+        muted: false,
+        tuiPet: true,
+        rwtEnabled: true,
+      },
+      touched: {},
+    })
+    const { brain, player, host, director } = setup({
+      settings: () => store.current(),
+      settingsStore: store,
+    })
+    // Batch 2 feeds the background refill fired after a airs; the language
+    // change must drop both the buffered stale-b and that refill.
+    brain.batches = [['a', 'stale-b'], ['bg'], ['fresh']]
+    player.auto = false
+    const run = director.run(2)
+    await until(() => player.played.length === 1, 'clip on air')
+    await until(() => brain.nextTalksCalls >= 2, 'refill fired')
+    store.set({ language: 'Japanese' })
+    player.finish()
+    await until(() => host.radio.length === 2, 'next segment')
+    expect(host.radio[1]).toBe('fresh')
+    expect(host.radio).not.toContain('stale-b')
+    expect(brain.talkContexts.at(-1)!.persona).toMatch(/Speak in Japanese\./)
+    player.finish()
     await run
   })
 })

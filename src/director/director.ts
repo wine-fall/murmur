@@ -40,7 +40,7 @@ import type {
   RwtTopic,
 } from '../contracts.ts'
 import type { Host } from '../host/host.ts'
-import { COMMANDS, type ProgramState } from '../host/ipc.ts'
+import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
@@ -248,7 +248,9 @@ export type DirectorDeps = {
   settings: () => DirectorSettings
   // The mutable side of the same layer, handed to the reply turn's
   // change_settings tool (spec 12 §2.6). Absent = the tool is not offered.
-  settingsStore?: SteerSettingsActions
+  // Its event is what tells the Director a language change (§3.9) just made
+  // the buffered look-ahead the wrong language, whoever turned the knob.
+  settingsStore?: SteerSettingsActions & { onChange(listener: (next: Settings) => void): void }
   music?: MusicWiring
   pacing?: PacingWiring
   // The agentic reply turn (spec 11): preferred over brain.respond when
@@ -389,6 +391,16 @@ export class Director {
 
   constructor(deps: DirectorDeps) {
     this.deps = deps
+    // Every buffered beat was written in the language the persona spoke when
+    // it was generated. A language change (the setup guide, the /settings
+    // pane, the reply turn — the store does not care who) drops them, like a
+    // voice swap does; the refill reads the new persona.
+    let language = deps.settingsStore?.current().language
+    deps.settingsStore?.onChange((next) => {
+      if (next.language === language) return
+      language = next.language
+      this.invalidateTalkAhead()
+    })
   }
 
   // Orderly-stop entry for signal handlers (Ctrl-C): the loop notices after
