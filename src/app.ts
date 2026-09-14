@@ -688,6 +688,25 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The default output language, read once from the machine (spec 06 §3.2).
   // Nothing re-reads it: from here the persona names the language it speaks.
   const language = detectLanguage()
+  // The listener's taste (spec 14), on a real run only. Built BEFORE the first
+  // run: its sources card (§3.9) runs the same /sources conversation the
+  // Director later parks on, so the one closure serves both.
+  const taste = buildTaste(config, host)
+  const sourcesRecall =
+    taste === undefined
+      ? undefined
+      : () =>
+          runSources({
+            host,
+            store: taste.store,
+            quit,
+            refresher: taste.refresher,
+            watch: taste.watch,
+            mounts: defaultMounts(taste.build),
+            build: (id, entry) => buildSource(id, entry, taste.build),
+            forgetCookies: () => taste.build.jars.drop(),
+            openUrl: openInChrome,
+          })
   let personaPath = resolvePersonaPath(config, persistent)
   if (memory instanceof PersistentMemoryStore && isFirstRun(config.memoryDir)) {
     personaPath = await runFirstRun({
@@ -701,6 +720,8 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       quit,
       // No harness (a stub run) = slice B is never offered.
       ...(claude !== null && { harness: claude }),
+      // No taste (a stub run) = the sources card is never shown.
+      ...(sourcesRecall !== undefined && { sourcesRecall }),
     })
   }
   const persona = loadPersona(personaPath, language)
@@ -784,8 +805,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     )
   }
 
-  // The listener's taste (spec 14), on a real run only.
-  const taste = buildTaste(config, host)
   const music =
     musicWiringWanted(config, claude !== null, setupMusicOk) && claude !== null
       ? buildMusic(config, settings, claude, engine, host, taste)
@@ -963,25 +982,15 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // The taste seams (spec 14): the digest for the pack, the mounts for the
     // invitations, the background refresh, and the /sources conversation on
     // the same floor parking /setup uses.
-    ...(taste !== undefined && {
-      taste: {
-        digest: () => taste.reader.digest(),
-        mounted: () => taste.store.mounted(),
-        maybeRefresh: () => void taste.refresher.maybeRefresh(),
-      },
-      sourcesRecall: () =>
-        runSources({
-          host,
-          store: taste.store,
-          quit,
-          refresher: taste.refresher,
-          watch: taste.watch,
-          mounts: defaultMounts(taste.build),
-          build: (id, entry) => buildSource(id, entry, taste.build),
-          forgetCookies: () => taste.build.jars.drop(),
-          openUrl: openInChrome,
-        }),
-    }),
+    ...(taste !== undefined &&
+      sourcesRecall !== undefined && {
+        taste: {
+          digest: () => taste.reader.digest(),
+          mounted: () => taste.store.mounted(),
+          maybeRefresh: () => void taste.refresher.maybeRefresh(),
+        },
+        sourcesRecall,
+      }),
     // The one production wiring of the desktop opener: the Director has no
     // default, so this is the only place a real browser can be launched from.
     openUrl: openInBrowser,

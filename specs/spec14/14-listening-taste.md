@@ -76,7 +76,7 @@ importance:
   a side-errand — `/sources`, `/bug`, `/feature-request` — replacing today's
   fixed placeholder carousel with a context-gated, fading set. **Login is
   never required**; an invitation is the only nudge there is.
-- **One onboarding line** (§3.9) telling a new listener the option exists.
+- **One onboarding card** (§3.9): a new listener is offered the connection once, and a yes runs `/sources` there and then.
 
 ### Out of scope (explicit non-goals)
 
@@ -95,9 +95,9 @@ importance:
   this is not the "taste file" #209 removed (that was a hand-edited rwt
   policy; this is derived data with its own refresh).
 - **Restructuring first-run (spec 06)** — its by-ear pass is open (#80).
-  Onboarding gains exactly **one closing line** (§3.9) and nothing else; it
-  never asks for a login. Mounting is always the listener's own act, later,
-  through `/sources`.
+  Onboarding gains exactly **one consent card** (§3.9) and nothing else; the
+  card never asks for a login itself. Mounting is always the listener's own
+  act — through `/sources`, whether entered from that card or later.
 - **A generic plugin/provider registry.** Five concrete adapters behind one
   interface. A sixth is a sixth adapter.
 
@@ -600,16 +600,30 @@ The form, for all three:
   being used. Nothing new in `settings.json`.
 - **Plain host**: banner gains the `/sources` row; nothing else changes.
 
-### 3.9 The onboarding line
+### 3.9 The onboarding card
 
-Spec 06 slice A ends with the persona written and the first beat about to
-air. Between those, exactly one `info` line, once, only on a real first run:
+Spec 06 slice A asks its seed questions, then the slice-B consent (06 §3.4),
+then — **right after that consent and before the persona call**, so every
+question is asked before the one long wait — exactly one `consent` ask,
+once, only on a real first run. `SOURCES_OFFER` in `flow.ts`, the same
+shape as `BOOTSTRAP_OFFER` (the question leads, two quiet notes ride as card
+lines):
 
-> `when you like, /sources connects your NetEase, Spotify or YouTube likes so
-> I pick better. Nothing is read until you do.`
+> `Connect the music you already keep? [y/N]`
+> `NetEase, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.`
+> `Nothing is read until you say yes; /sources any time later.`
 
-Not an ask, not a card, not repeated. A returning listener never sees it —
-the invitation (§3.8) carries it from then on.
+- **Yes** → `await` the `/sources` conversation (§3.1) itself, through the
+  `sourcesRecall` closure the Director also parks on; it returns to the
+  first run, which goes on to the persona call. Nothing about the
+  conversation changes for being entered from here.
+- **Anything else** (n, Enter, a stray line) → nothing is written, nothing
+  more is said; the invitation (§3.8) carries the option from then on.
+- **`/quit`** on the card behaves as on the slice-B consent: the run ends
+  with no persona marker, so the next boot asks again from the top.
+- **Shown only when the seam exists**: a stub run has no taste wiring and
+  never sees the card. A returning listener never sees it either —
+  `persona.md` stays the only first-run marker.
 
 ---
 
@@ -688,10 +702,13 @@ gone. The TUI receives one `invitations` message per change, never on a
 timer (scripted host counts messages). A snapshot test pins the three `why`
 strings ≤ 48 chars.
 
-### 5.11 Onboarding line (unit)
-A scripted first run prints the §3.9 line exactly once, after `persona.md`
-is written and before the first segment; a run with a pre-seeded persona
-prints it zero times.
+### 5.11 Onboarding card (unit)
+A scripted first run with a `sourcesRecall` seam shows the §3.9 card as one
+`consent` ask, after the slice-B consent and before `seedPersona`; a yes
+calls `sourcesRecall` exactly once, before `seedPersona`; n / Enter / a
+stray line call it zero times and write nothing; `/quit` on the card leaves
+with no persona marker and no persona call. A run without the seam, and a
+closed stdin, never show the card. No info line carries the offer.
 
 ### 5.12 By-ear (one issue, user-run)
 

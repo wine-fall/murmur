@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthWatch } from '../src/music/sources/auth.ts'
-import { runSources, SOURCES_ONBOARDING_LINE, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
+import { runSources, SOURCES_OFFER, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
@@ -416,7 +416,11 @@ describe('runSources (spec 14 §3.1)', () => {
     host.pressEsc() // nothing registered any more: noise
   })
 
-  it('the onboarding line names the option without asking for anything', () => {
-    expect(SOURCES_ONBOARDING_LINE).toBe('when you like, /sources connects your NetEase, Spotify or YouTube likes so I pick better. Nothing is read until you do.')
+  it('the onboarding card names every source and the way back, and asks nothing else', () => {
+    // One consent ask (spec 14 §3.9): the question, then two quiet notes.
+    expect(SOURCES_OFFER).toHaveLength(3)
+    expect(SOURCES_OFFER[0]).toMatch(/\? \[y\/N\]$/)
+    for (const name of ['NetEase', 'Spotify', 'YouTube', 'Bilibili', 'Soda']) expect(SOURCES_OFFER[1]).toContain(name)
+    expect(SOURCES_OFFER[2]).toContain('/sources')
   })
 })

@@ -9,7 +9,9 @@
 // Slice B (the optional Claude Code history -> profile bootstrap) is offered
 // here, before the persona call, and runs unawaited in the background once the
 // persona is written — the same posture spec 05 §3.6 uses for startup
-// catch-up compaction.
+// catch-up compaction. The taste sources (spec 14 §3.9) are offered right
+// after it, and a yes runs the /sources conversation before the persona
+// call: every question is asked before the one long wait.
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -18,7 +20,7 @@ import { ccTools, type ProfileBootstrap } from './cc-tools.ts'
 import type { Brain, Harness, SeedAnswer } from '../contracts.ts'
 import { isYes, lineReader, QUIT, type QuitLatch, quitLatch, type ReadLine } from './guide.ts'
 import { ask, type Host } from '../host/host.ts'
-import { SOURCES_ONBOARDING_LINE } from '../music/sources/flow.ts'
+import { SOURCES_OFFER } from '../music/sources/flow.ts'
 import { claudeCodeRoot } from '../paths.ts'
 import { renderPersona } from '../brain/persona.ts'
 import { PERSONA_CHAR_CAP, FIRST_RUN_INTRO, PERSONA_MIN_CHARS, SEED_QUESTIONS } from '../prompts/persona.ts'
@@ -53,6 +55,10 @@ export type FirstRunDeps = {
   // app shuts down instead of broadcasting.
   quit?: QuitLatch
   ccRoot?: string // slice B's data root; defaults to the resolver in paths.ts
+  // The /sources conversation (spec 14 §3.1), the same closure the Director
+  // parks on for the command; absent (a stub run, no taste) = the sources
+  // card is never shown.
+  sourcesRecall?: () => Promise<void>
 }
 
 export function isFirstRun(memoryDir: string): boolean {
@@ -136,6 +142,8 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // task itself launches only once the persona is written (below).
   const bootstrap = await offerBootstrap(deps, read)
   if (quit.requested) return deps.fallbackSeedPath
+  await offerSources(deps, read)
+  if (quit.requested) return deps.fallbackSeedPath
 
   let persona: string
   // Writing the persona is a model call the listener waits on with nothing
@@ -186,11 +194,20 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
     // runProfileBootstrap is total, so there is no rejection to escape here.
     void runProfileBootstrap(bootstrap)
   }
-  // The one line about the music accounts (spec 14 §3.9): said here, once,
-  // on a real first run — never an ask, never repeated; the invitation
-  // carries it from then on.
-  host.info(SOURCES_ONBOARDING_LINE)
   return home
+}
+
+// The taste-sources offer (spec 14 §3.9): one consent card, default no, asked
+// once and never re-asked — persona.md is the only first-run marker here too.
+// A yes runs the /sources conversation itself, so a new listener mounts an
+// account in the same sitting instead of finding the command later; a no
+// writes nothing and says nothing more, the card already named the way back.
+async function offerSources(deps: FirstRunDeps, read: ReadLine): Promise<void> {
+  const recall = deps.sourcesRecall
+  if (recall === undefined) return
+  ask(deps.host, SOURCES_OFFER.join('\n'), 'consent')
+  if (!isYes(await read())) return
+  await recall()
 }
 
 // The slice-B offer (spec 06 §3.4): explicit consent, default no, asked once

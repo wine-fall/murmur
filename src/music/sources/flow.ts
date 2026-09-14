@@ -20,10 +20,16 @@ import type { BrowserName, SourceEntry, SourcesStore } from './store.ts'
 import { SOURCE_IDS, SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
 import type { YouTubeEntry } from './youtube.ts'
 
-// The one onboarding line (spec 14 §3.9): said once on a real first run,
-// between the persona being written and the first beat.
-export const SOURCES_ONBOARDING_LINE =
-  'when you like, /sources connects your NetEase, Spotify or YouTube likes so I pick better. Nothing is read until you do.'
+// The onboarding card (spec 14 §3.9): one consent ask on a real first run,
+// after the slice-B offer and before the persona call — the same shape as
+// BOOTSTRAP_OFFER (the question leads, the framing rides as card notes). A
+// yes runs the /sources conversation right there; anything else is a no, and
+// the invitation (§3.8) carries the option from then on.
+export const SOURCES_OFFER = [
+  'Connect the music you already keep? [y/N]',
+  'NetEase, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.',
+  'Nothing is read until you say yes; /sources any time later.',
+] as const
 
 export type BrowserPick = { browser: BrowserName; profile?: string | undefined }
 
