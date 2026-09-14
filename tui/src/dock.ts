@@ -8,15 +8,21 @@ import { COMMANDS, type EngineMessage, type Invitation } from '../../src/host/ip
 export type Ask = Extract<EngineMessage, { type: 'ask' }>
 export type AskKind = Ask['kind']
 
+// A menu is a question with structured rows — options to pick, or status
+// rows to read (/sources with everything mounted has only those). A seed
+// question is plain text. Read from the ask text alone: zero wire additions.
+export function isMenu(kind: AskKind, lines: readonly CardLine[]): boolean {
+  return kind === 'question' && lines.some((l) => l.role !== 'main' && l.role !== 'note')
+}
+
 // The border title, padded so the frame breathes around it. A seed question
-// carries a light counter — a run of them reads as progress; a menu (a
-// question with option rows, like /sources) is not a step in a run, so it
-// carries none; a consent names its skippability; a card carrying the
-// checklist is the pre-broadcast check (ref B3), whatever kind delivered
-// it. All read from the ask text alone — zero wire additions.
+// carries a light counter — a run of them reads as progress; a menu is not a
+// step in a run, so it carries none; a consent names its skippability; a
+// card carrying the checklist is the pre-broadcast check (ref B3), whatever
+// kind delivered it.
 export function cardTitle(kind: AskKind, count: number, text: string): string {
   const lines = cardLines(text)
-  if (kind === 'question' && lines.some((l) => l.role === 'option')) return ' murmur is asking '
+  if (isMenu(kind, lines)) return ' murmur is asking '
   if (lines.some((l) => l.role === 'ready' || l.role === 'gap')) return ' pre-broadcast check '
   return kind === 'consent'
     ? ' murmur needs a yes · optional '

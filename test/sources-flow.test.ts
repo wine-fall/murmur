@@ -372,6 +372,19 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read()).toEqual({})
   })
 
+  it('with everything mounted the menu is all status rows — no option left, still the menu', async () => {
+    const { host, deps, store } = build(['done'])
+    store.mount('youtube', { browser: 'chrome' })
+    store.mount('bilibili', { browser: 'chrome', mid: '7' })
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
+    store.mount('spotify', { clientId: 'c', refreshToken: 'r', accessToken: 'a', expiresAt: 'x' })
+    store.mount('qishui', { sessionCookie: 's', deviceId: 'd', installId: 'i' })
+    await runSources(deps)
+    const menu = host.asks[0]!.text.split('\n')
+    expect(menu.filter((l) => l.startsWith('ok '))).toHaveLength(5)
+    expect(menu.some((l) => l.startsWith('>> '))).toBe(false)
+  })
+
   it('lists an expired mount as one to renew', async () => {
     const { host, deps, store } = build(['done'])
     store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })

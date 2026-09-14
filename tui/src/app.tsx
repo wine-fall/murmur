@@ -20,6 +20,7 @@ import {
   commandMatches,
   HINT_ROTATE_MS,
   inputHints,
+  isMenu,
   isCommand,
   outbound,
   pageStep,
@@ -1252,7 +1253,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 // A menu's empty line is its exit (the /sources flow reads
                 // '' as done), a seed's is a skip — say the one that is true.
                 <box style={{ marginTop: 1 }}>
-                  <text style={{ fg: QUIET }}>{options ? 'Enter - done' : 'Enter skips'}</text>
+                  <text style={{ fg: QUIET }}>{isMenu(head.kind, lines) ? 'Enter - done' : 'Enter skips'}</text>
                 </box>
               )}
               {/* The answer is typed INTO the card (user decision, 2026-08-11):

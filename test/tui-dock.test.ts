@@ -125,6 +125,10 @@ describe('cardTitle', () => {
     expect(cardTitle('question', 4, menu)).toBe(' murmur is asking ')
     const withMounted = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n>> mount netease - NetEase'
     expect(cardTitle('question', 4, withMounted)).toBe(' murmur is asking ')
+    // Everything mounted leaves no option row; the status rows still make it
+    // a menu, never the pre-broadcast check (codex review).
+    const allMounted = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n-- NetEase - expired'
+    expect(cardTitle('question', 4, allMounted)).toBe(' murmur is asking ')
   })
 })
 
