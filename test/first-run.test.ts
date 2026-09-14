@@ -237,15 +237,16 @@ describe('slice B consent gate (criterion 6)', () => {
     expect(harness.calls).toBe(1)
   })
 
-  for (const [name, reply] of [
-    ['declining', 'n'],
-    ['a stray line', 'maybe later'],
-    ['an empty line', ''],
+  for (const [name, replies] of [
+    ['declining', ['n']],
+    // A stray line re-asks the card instead of counting as a no (§3.4).
+    ['a stray line then a decline', ['maybe later', 'n']],
+    ['an empty line', ['']],
   ] as const) {
     it(`${name} runs no harness task at all`, async () => {
       const { memoryDir, seed } = workspace()
       const harness = new FakeHarness()
-      await runFirstRun(deps({ host: scriptedHost([...answered(), reply]), harness, memoryDir, fallbackSeedPath: seed }))
+      await runFirstRun(deps({ host: scriptedHost([...answered(), ...replies]), harness, memoryDir, fallbackSeedPath: seed }))
       expect(harness.calls).toBe(0)
     })
   }
@@ -479,16 +480,18 @@ describe('the sources offer (spec 14 §3.9)', () => {
     expect(host.infos.join('\n')).not.toContain('/sources')
   })
 
-  for (const [name, reply] of [
-    ['declining', 'n'],
-    ['a stray line', 'maybe later'],
-    ['an empty line', ''],
+  for (const [name, replies] of [
+    ['declining', ['n']],
+    // A stray line is never silently a no: the card comes back and the next
+    // line is what answers it (spec 06 §3.4).
+    ['a stray line then a decline', ['maybe later', 'n']],
+    ['an empty line', ['']],
   ] as const) {
     it(`${name} runs nothing and writes nothing`, async () => {
       const { memoryDir, seed, home } = workspace()
       const memory = new FakeProfileStore()
       let calls = 0
-      const host = scriptedHost([...answered(), reply])
+      const host = scriptedHost([...answered(), ...replies])
       await runFirstRun(deps({ host, memory, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void calls++ }))
       expect(calls).toBe(0)
       expect(memory.writes).toEqual([])
@@ -561,6 +564,62 @@ describe('the sources offer (spec 14 §3.9)', () => {
     expect(brain.calls).toHaveLength(0)
     expect(path).toBe(seed)
     expect(existsSync(home)).toBe(false)
+  })
+})
+
+describe('the first run is a step table — /back walks it (spec 06 §3.2/§3.4)', () => {
+  const answered = () => ['call me Zach', 'company', 'dry']
+  const cards = (host: FakeHost) => host.asks.filter((a) => a.kind === 'consent').map((a) => a.text)
+  const isSources = (text: string) => text === SOURCES_OFFER.join('\n')
+
+  it('/back on the sources card returns to the bootstrap card', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'n', '/back', 'n', 'n'])
+    await runFirstRun(
+      deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }),
+    )
+    // bootstrap, sources, bootstrap again, sources again.
+    expect(cards(host).map(isSources)).toEqual([false, true, false, true])
+  })
+
+  it('/back on the bootstrap card returns to the last seed question, the old answer riding along', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), '/back', 'warmer', 'n'])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed }))
+    const questions = host.asks.filter((a) => a.kind === 'question')
+    expect(questions).toHaveLength(4)
+    expect(questions[3]!.text).toContain(SEED_QUESTIONS[2]!)
+    expect(questions[3]!.text).toContain('dry')
+    expect(brain.calls[0]!.map((a) => a.answer)).toEqual(['call me Zach', 'company', 'warmer'])
+  })
+
+  it('a yes taken back with /back is cancelled: the bootstrap never runs', async () => {
+    const { memoryDir, seed } = workspace()
+    const harness = new FakeHarness()
+    const host = scriptedHost([...answered(), 'y', '/back', 'n', 'n'])
+    await runFirstRun(
+      deps({ host, harness, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }),
+    )
+    await new Promise((r) => setImmediate(r))
+    expect(harness.calls).toBe(0)
+  })
+
+  it('a consent card never reads a stray line as a no — it comes back', async () => {
+    const { memoryDir, seed } = workspace()
+    let calls = 0
+    const host = scriptedHost([...answered(), 'maybe', 'y'])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void calls++ }))
+    expect(cards(host)).toEqual([SOURCES_OFFER.join('\n'), SOURCES_OFFER.join('\n')])
+    expect(calls).toBe(1)
+  })
+
+  it('/back on the very first question does nothing', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['/back', ...answered()])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    expect(brain.calls[0]!.map((a) => a.answer)).toEqual(answered())
   })
 })
 
