@@ -415,3 +415,105 @@ describe('the sources onboarding line (spec 14 §3.9)', () => {
     expect(host.infos).not.toContain(SOURCES_ONBOARDING_LINE)
   })
 })
+
+describe('/back during the seed questions (spec 06 §3.2)', () => {
+  const questionAsks = (host: FakeHost) => host.asks.filter((a) => a.kind === 'question')
+
+  it('re-asks the previous question with the old answer as a note, and the new answer replaces it', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['call me Zach', 'mostly music', '/back', 'company while I work', 'dry'])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    const asks = questionAsks(host)
+    // Q1, Q2, Q3, back to Q2 (carrying the note), then Q3 again.
+    expect(asks.map((a) => a.text.split('\n')[0])).toEqual([
+      SEED_QUESTIONS[0],
+      SEED_QUESTIONS[1],
+      SEED_QUESTIONS[2],
+      SEED_QUESTIONS[1],
+      SEED_QUESTIONS[2],
+    ])
+    expect(asks[3]!.text).toContain('mostly music')
+    expect(brain.calls[0]!.map((a) => a.answer)).toEqual(['call me Zach', 'company while I work', 'dry'])
+  })
+
+  it('an empty line on the re-ask keeps the earlier answer', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['call me Zach', 'mostly music', '/back', '', 'dry'])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    expect(brain.calls[0]!.map((a) => a.answer)).toEqual(['call me Zach', 'mostly music', 'dry'])
+  })
+
+  it('on the first question /back does nothing but ask it again', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['/back', 'call me Zach', 'company', 'dry'])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    expect(questionAsks(host).map((a) => a.text)).toEqual([
+      SEED_QUESTIONS[0],
+      SEED_QUESTIONS[0],
+      SEED_QUESTIONS[1],
+      SEED_QUESTIONS[2],
+    ])
+    expect(brain.calls[0]!.map((a) => a.answer)).toEqual(['call me Zach', 'company', 'dry'])
+  })
+
+  it('the intro tells the listener /back exists', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['', '', ''])
+    await runFirstRun(deps({ host, memoryDir, fallbackSeedPath: seed }))
+    expect(host.infos[0]).toContain('/back')
+  })
+})
+
+describe('the slice B offer comes before the persona call (spec 06 §3.4)', () => {
+  const answered = () => ['call me Zach', 'company', 'dry']
+
+  // The persona call is the long silent wait; the consent must be on screen
+  // before it, not surface a minute later when the listener thinks it is over.
+  it('asks for consent before seedPersona runs', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'y'])
+    const harness = new FakeHarness()
+    const brain = new FakeSeeder()
+    let consentAskedBeforeSeed = false
+    brain.seedPersona = async (answers, language) => {
+      consentAskedBeforeSeed = host.asks.some((a) => a.kind === 'consent')
+      return FakeSeeder.prototype.seedPersona.call(brain, answers, language)
+    }
+    await runFirstRun(deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed }))
+    expect(consentAskedBeforeSeed).toBe(true)
+    expect(harness.calls).toBe(1)
+  })
+
+  it('the bootstrap still launches only once the persona is written: a failed seed runs none', async () => {
+    const { memoryDir, seed } = workspace()
+    const harness = new FakeHarness()
+    const brain = new FakeSeeder()
+    brain.fail = true
+    await runFirstRun(deps({ host: scriptedHost([...answered(), 'y']), brain, harness, memoryDir, fallbackSeedPath: seed }))
+    expect(harness.calls).toBe(0)
+  })
+
+  it('/quit at the consent prompt leaves without the persona call or a marker', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const brain = new FakeSeeder()
+    const harness = new FakeHarness()
+    const quit = quitLatch()
+    const path = await runFirstRun(
+      deps({ host: scriptedHost([...answered(), '/quit']), brain, harness, memoryDir, fallbackSeedPath: seed, quit }),
+    )
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+    expect(brain.calls).toHaveLength(0)
+    expect(harness.calls).toBe(0)
+  })
+
+  it('the sources line is still the last thing said', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost([...answered(), 'n'])
+    await runFirstRun(deps({ host, harness: new FakeHarness(), memoryDir, fallbackSeedPath: seed }))
+    expect(host.infos.at(-1)).toBe(SOURCES_ONBOARDING_LINE)
+  })
+})
