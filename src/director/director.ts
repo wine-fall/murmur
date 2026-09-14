@@ -93,6 +93,10 @@ export function openerFor(platform: NodeJS.Platform, url: string): { command: st
 // it opens a URL in one, so a profile that does not exist yet is no obstacle.
 export function chromeOpenerFor(platform: NodeJS.Platform, url: string, profile?: string): { command: string; args: string[] } {
   const pinned = profile === undefined ? [] : [`--profile-directory=${profile}`]
+  // cmd re-parses its own line, so a profile name is quoted for the same
+  // reason the URL is: `Work&Play` is a legal directory name and an unquoted
+  // `&` would end the command there (codex review).
+  const pinnedForCmd = profile === undefined ? [] : [`"--profile-directory=${profile}"`]
   // `-n` on the pinned path is load-bearing: `open -a ... --args` hands its
   // flags to Chrome only when Chrome is not already running, so without it a
   // listener with Chrome open lands in whatever profile is in front of them.
@@ -104,7 +108,7 @@ export function chromeOpenerFor(platform: NodeJS.Platform, url: string, profile?
       : { command: 'open', args: ['-na', 'Google Chrome', '--args', ...pinned, url] }
   }
   // Quoted for the same reason as `openerFor`: cmd re-parses its own line.
-  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', 'chrome', ...pinned, `"${url}"`] }
+  if (platform === 'win32') return { command: 'cmd', args: ['/c', 'start', '', 'chrome', ...pinnedForCmd, `"${url}"`] }
   return { command: 'google-chrome', args: [...pinned, url] }
 }
 

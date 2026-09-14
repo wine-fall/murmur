@@ -155,7 +155,10 @@ describe('Director — /bug and /feature-request', () => {
     const p = 'Murmur Fresh'
     expect(chromeOpenerFor('darwin', url, p)).toEqual({ command: 'open', args: ['-na', 'Google Chrome', '--args', `--profile-directory=${p}`, url] })
     expect(chromeOpenerFor('linux', url, p)).toEqual({ command: 'google-chrome', args: [`--profile-directory=${p}`, url] })
-    expect(chromeOpenerFor('win32', url, p)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `--profile-directory=${p}`, `"${url}"`] })
+    expect(chromeOpenerFor('win32', url, p)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `"--profile-directory=${p}"`, `"${url}"`] })
+    // `Work&Play` is a legal profile directory name, and cmd would read the
+    // `&` as the end of the command — the URL would land in a second one.
+    expect(chromeOpenerFor('win32', url, 'Work&Play').args).toContain('"--profile-directory=Work&Play"')
   })
 
   it('picks the desktop opener per platform, never spawn\'s deprecated shell form', () => {
