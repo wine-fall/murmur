@@ -445,9 +445,13 @@ halves, so the listener cannot sign in somewhere murmur will not look.
    Chrome — /sources when you have signed in". Never a dead end that sends
    them back through the whole conversation.
 4. **The store could not be read at all** is a different answer, and says
-   which: Chrome not installed, the terminal not allowed to read its cookie
-   store (macOS: Full Disk Access), no yt-dlp, or unreadable for a reason not
-   modelled — a locked database, a Windows DPAPI decrypt failure — which is
+   which: Chrome not installed, a `MURMUR_CHROME_PROFILE` profile Chrome has
+   never opened (its user-data root is there, the profile directory is not —
+   yt-dlp words this exactly as an absent browser, so the path it quotes is
+   checked on disk; the answer names the profile and the knob), the terminal
+   not allowed to read its cookie store (macOS: Full Disk Access), no yt-dlp,
+   or unreadable for a reason not modelled — a locked database, a Windows
+   DPAPI decrypt failure — which is
    quoted rather than guessed at. These used to arrive as an empty jar and be
    reported as "you are not signed in": advice that cannot work, and that
    loops a Safari user forever. yt-dlp names the failure in its stderr;

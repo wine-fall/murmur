@@ -215,6 +215,26 @@ describe('runSources (spec 14 §3.1)', () => {
     }
   })
 
+  // A profile named by MURMUR_CHROME_PROFILE that Chrome has never opened:
+  // Chrome is here, so "install it" is the wrong advice; name the profile and
+  // the knob that picked it.
+  it('names the missing profile and the env knob when Chrome is here but the profile is not', async () => {
+    const { host, deps, store } = build(['mount netease', 'done'], {
+      platform: 'darwin',
+      mounts: {
+        netease: async () => {
+          throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
+        },
+      },
+    })
+    await runSources(deps)
+    const line = host.infos.find((l) => /no profile named/.test(l))
+    expect(line).toContain('"Murmur Fresh"')
+    expect(line).toContain('MURMUR_CHROME_PROFILE')
+    expect(host.infos.some((l) => /install|sign in there/.test(l))).toBe(false)
+    expect(store.read()).toEqual({})
+  })
+
   // The bundled id is what an unconfigured machine mounts on — so the two
   // tests below own the variable outright rather than reading whatever the
   // developer running them has set.
