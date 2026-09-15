@@ -1,7 +1,7 @@
 // The spotlight card's pure logic (spec 10 §3.2-B as built): the title names
-// the kind of answer (with a light question counter), each card line carries a
-// role the renderer colors by, and outbound() decides what a submitted line
-// becomes. Rendering itself stays untested (spec 10 §3.9).
+// the kind of answer (and the engine step, when the ask has one), each card
+// line carries a role the renderer colors by, and outbound() decides what a
+// submitted line becomes. Rendering itself stays untested (spec 10 §3.9).
 
 import { describe, expect, it } from 'vitest'
 
@@ -133,24 +133,34 @@ describe('the input hints (spec 14 §3.8)', () => {
 })
 
 describe('cardTitle', () => {
-  it('names the kind, and counts the seed questions so a run of them reads as progress', () => {
-    expect(cardTitle('question', 3, 'what do you listen to on a slow morning?')).toBe(' murmur is asking · #3 ')
-    expect(cardTitle('consent', 5, 'run brew outdated? [y/N]')).toBe(' murmur needs a yes · optional ')
+  it('names the kind, and numbers a question the engine placed in a run', () => {
+    expect(cardTitle('question', { at: 2, of: 3 }, 'what do you listen to on a slow morning?')).toBe(
+      ' murmur is asking · 2/3 ',
+    )
+    expect(cardTitle('consent', { at: 1, of: 3 }, 'run brew outdated? [y/N]')).toBe(' murmur needs a yes · optional ')
+  })
+
+  it('a question with no place in a run carries no number', () => {
+    // The /sources sign-in wait and every one-off ask: a number there was
+    // meaningless, and a client-side counter invented one.
+    expect(cardTitle('question', undefined, 'press Enter when you have signed in')).toBe(' murmur is asking ')
   })
 
   it('a card carrying the checklist is the pre-broadcast check, whatever its kind', () => {
-    expect(cardTitle('consent', 1, 'summary.\nok brain - on\n-- voice - off\n>> y - fix')).toBe(' pre-broadcast check ')
+    expect(cardTitle('consent', undefined, 'summary.\nok brain - on\n-- voice - off\n>> y - fix')).toBe(
+      ' pre-broadcast check ',
+    )
   })
 
   it('a menu — a question with option rows — carries no counter: it is not a step in a run', () => {
     const menu = 'what would you like to do? mount <name> | done\n>> mount netease - NetEase'
-    expect(cardTitle('question', 4, menu)).toBe(' murmur is asking ')
+    expect(cardTitle('question', undefined, menu)).toBe(' murmur is asking ')
     const withMounted = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n>> mount netease - NetEase'
-    expect(cardTitle('question', 4, withMounted)).toBe(' murmur is asking ')
+    expect(cardTitle('question', undefined, withMounted)).toBe(' murmur is asking ')
     // Everything mounted leaves no option row; the status rows still make it
     // a menu, never the pre-broadcast check (codex review).
     const allMounted = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n-- NetEase - expired'
-    expect(cardTitle('question', 4, allMounted)).toBe(' murmur is asking ')
+    expect(cardTitle('question', undefined, allMounted)).toBe(' murmur is asking ')
   })
 })
 

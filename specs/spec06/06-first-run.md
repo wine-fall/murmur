@@ -346,6 +346,9 @@ harness, the sources card only with the taste wiring). `/back` steps back one
 place anywhere in it, not only among the questions — from the sources card to
 the slice-B card, from the slice-B card to the last seed question (re-asked with
 its earlier answer, Enter keeps it). `/back` on the first question does nothing.
+Each seed question carries its own place in the table on the wire (`step` on the
+`ask`, spec 10 §3.2-B), so a step walked back is re-asked as the step it IS —
+question 1 of 3 comes back numbered 1 of 3, never as one more question asked.
 A consent answer taken back is **cancelled**: a slice-B yes followed by `/back`
 and a no launches no task. The one step that does not walk back is a sources
 yes, because the `/sources` conversation it ran has already mounted accounts;

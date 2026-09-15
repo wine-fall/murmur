@@ -15,18 +15,18 @@ export function isMenu(kind: AskKind, lines: readonly CardLine[], options?: read
   return kind === 'question' && (options !== undefined || lines.some((l) => l.role !== 'main' && l.role !== 'note'))
 }
 
-// The border title, padded so the frame breathes around it. A seed question
-// carries a light counter — a run of them reads as progress; a menu is not a
-// step in a run, so it carries none; a consent names its skippability; a
-// card carrying the checklist is the pre-broadcast check (ref B3), whatever
-// kind delivered it.
-export function cardTitle(kind: AskKind, count: number, text: string, options?: readonly AskOption[]): string {
+// The border title, padded so the frame breathes around it. A question the
+// engine placed in a run carries that place — a run of them reads as
+// progress, and a step walked back reads as the step it is; an ask with no
+// place in a run carries no number; a consent names its skippability; a card
+// carrying the checklist is the pre-broadcast check (ref B3), whatever kind
+// delivered it.
+export function cardTitle(kind: AskKind, step: Ask['step'], text: string, options?: readonly AskOption[]): string {
   const lines = cardLines(text)
   if (isMenu(kind, lines, options)) return ' murmur is asking '
   if (lines.some((l) => l.role === 'ready' || l.role === 'gap')) return ' pre-broadcast check '
-  return kind === 'consent'
-    ? ' murmur needs a yes · optional '
-    : ` murmur is asking · #${String(count)} `
+  if (kind === 'consent') return ' murmur needs a yes · optional '
+  return step === undefined ? ' murmur is asking ' : ` murmur is asking · ${String(step.at)}/${String(step.of)} `
 }
 
 // The way back, named on the card when the engine says the step has one

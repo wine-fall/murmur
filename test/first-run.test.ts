@@ -104,9 +104,20 @@ describe('onboarding (criterion 2)', () => {
     // The first question has nowhere to go back to; every later step says
     // /back is live (spec 06 §3.4) — on the card, where it is read, not only
     // in the intro.
-    expect(host.asks[0]).toEqual({ text: SEED_QUESTIONS[0], kind: 'question' })
-    expect(host.asks[1]).toEqual({ text: SEED_QUESTIONS[1], kind: 'question', choices: { back: true } })
-    expect(host.asks[2]).toEqual({ text: SEED_QUESTIONS[2], kind: 'question', choices: { back: true } })
+    // Each seed also carries its place in the run (spec 10 §3.2-B): the number
+    // on the card is the engine's step, never a count of asks the client saw.
+    const of = SEED_QUESTIONS.length
+    expect(host.asks[0]).toEqual({ text: SEED_QUESTIONS[0], kind: 'question', choices: { step: { at: 1, of } } })
+    expect(host.asks[1]).toEqual({
+      text: SEED_QUESTIONS[1],
+      kind: 'question',
+      choices: { back: true, step: { at: 2, of } },
+    })
+    expect(host.asks[2]).toEqual({
+      text: SEED_QUESTIONS[2],
+      kind: 'question',
+      choices: { back: true, step: { at: 3, of } },
+    })
     expect(brain.calls[0]!.map((a) => a.answer)).toEqual([
       'call me Zach',
       'company while I work',
@@ -719,7 +730,26 @@ describe('/back during the seed questions (spec 06 §3.2)', () => {
       SEED_QUESTIONS[2],
     ])
     expect(asks[3]!.text).toContain('mostly music')
+    // A step walked back is the SAME step: its number goes down with it. A
+    // client-side count of asks received would have called this one #4.
+    expect(asks.map((a) => a.choices?.step)).toEqual([
+      { at: 1, of: 3 },
+      { at: 2, of: 3 },
+      { at: 3, of: 3 },
+      { at: 2, of: 3 },
+      { at: 3, of: 3 },
+    ])
     expect(brain.calls[0]!.map((a) => a.answer)).toEqual(['call me Zach', 'company while I work', 'dry'])
+  })
+
+  it('/back from the second question re-asks the first as step 1 of 3', async () => {
+    const { memoryDir, seed } = workspace()
+    const host = scriptedHost(['zach', '/back', '', 'company while I work', 'dry'])
+    const brain = new FakeSeeder()
+    await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    const asks = questionAsks(host)
+    expect(asks[2]!.text).toContain(SEED_QUESTIONS[0]!)
+    expect(asks[2]!.choices?.step).toEqual({ at: 1, of: 3 })
   })
 
   it('an empty line on the re-ask keeps the earlier answer', async () => {
