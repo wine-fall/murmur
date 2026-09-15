@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
 import type { MountResult } from './netease.ts'
-import { QR_POLL_MS, QR_TIMEOUT_MS } from './qr.ts'
+import { QR_POLL_MS, QR_TIMEOUT_MS, waitBetweenPolls } from './qr.ts'
 
 export { QR_POLL_MS, QR_TIMEOUT_MS }
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
@@ -310,8 +310,7 @@ export async function mountQishui(deps: QishuiDeps, opts: QishuiMountOptions): P
       return { ok: true, who: me.who, entry }
     }
     if (poll.status === 'expired') return { ok: false, reason: 'timeout' }
-    await sleep(QR_POLL_MS)
-    if (opts.cancelled?.() === true) return { ok: false, reason: 'cancelled' }
+    if (await waitBetweenPolls(sleep, opts.cancelled)) return { ok: false, reason: 'cancelled' }
   }
   return { ok: false, reason: 'timeout' }
 }

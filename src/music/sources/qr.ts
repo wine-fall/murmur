@@ -11,6 +11,10 @@
 // The QR poll cadence and patience (spec 14 §3.1).
 export const QR_POLL_MS = 2_000
 export const QR_TIMEOUT_MS = 3 * 60_000
+// How often the wait between polls looks at the stop flag. The cadence is
+// generous because a person is picking up a phone; a person who has just
+// pressed Esc or typed /quit is not, and must not be held for two seconds.
+export const QR_CANCEL_POLL_MS = 250
 
 // What one poll saw. 'scanned' means the phone has the code and the person
 // has not confirmed yet — it reads as waiting, and exists so a platform's
@@ -45,8 +49,7 @@ export async function scanToSignIn<T>(deps: ScanDeps<T>): Promise<ScanResult<T>>
     // ask for again — better than mounting an account with no credential.
     if (seen.status === 'confirmed' && seen.value !== undefined) return { ok: true, value: seen.value }
     if (seen.status === 'expired') return { ok: false, reason: 'timeout' }
-    await sleep(QR_POLL_MS)
-    if (deps.cancelled?.() === true) return { ok: false, reason: 'cancelled' }
+    if (await waitBetweenPolls(sleep, deps.cancelled)) return { ok: false, reason: 'cancelled' }
   }
   return { ok: false, reason: 'timeout' }
 }
@@ -61,4 +64,17 @@ export type QrMountOptions = {
   cancelled?: () => boolean
   now?: () => Date
   sleep?: (ms: number) => Promise<void>
+}
+
+// The wait between two polls, and the one place a stop is heard while a code
+// is on screen — no read is open there, so the flags the flow hands down are
+// the only way out. The cadence is slept in slices: an Esc, or a typed /quit
+// that fired the engine's latch, is acted on within a quarter second rather
+// than at the end of the current sleep. True means stop.
+export async function waitBetweenPolls(sleep: (ms: number) => Promise<void>, cancelled?: () => boolean): Promise<boolean> {
+  for (let slept = 0; slept < QR_POLL_MS; slept += QR_CANCEL_POLL_MS) {
+    if (cancelled?.() === true) return true
+    await sleep(Math.min(QR_CANCEL_POLL_MS, QR_POLL_MS - slept))
+  }
+  return cancelled?.() === true
 }

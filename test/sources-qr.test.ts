@@ -2,7 +2,8 @@
 // poll on a fixed cadence, stop on confirmation, expiry, patience or Esc.
 import { describe, expect, it } from 'vitest'
 
-import { QR_POLL_MS, QR_TIMEOUT_MS, scanToSignIn, type QrPoll } from '../src/music/sources/qr.ts'
+import { QR_CANCEL_POLL_MS, QR_POLL_MS, QR_TIMEOUT_MS, scanToSignIn, type QrPoll } from '../src/music/sources/qr.ts'
+import { quitLatch } from '../src/setup/guide.ts'
 
 function clock(start = 0): { now: () => Date; sleep: (ms: number) => Promise<void>; at: () => number } {
   let t = start
@@ -58,5 +59,27 @@ describe('scanToSignIn (spec 14 §2.8)', () => {
   it('a confirmation that carries nothing is not a sign-in', async () => {
     const { poll } = polls({ status: 'confirmed' })
     expect(await scanToSignIn({ show: () => {}, issue: async () => ({ url: 'u' }), poll, ...clock() })).toEqual({ ok: false, reason: 'timeout' })
+  })
+})
+
+describe('scanToSignIn and a typed /quit (spec 14 §3.1)', () => {
+  it('wakes out of the wait a quarter second after the latch, not at the end of the cadence', async () => {
+    // No read is open while a code is on screen, so the engine's latch — what
+    // a typed /quit and the TUI's Ctrl-C both fire — is the only way out.
+    const quit = quitLatch()
+    const c = clock()
+    const result = await scanToSignIn({
+      show: () => {},
+      issue: async () => ({ url: 'u' }),
+      poll: async () => ({ status: 'waiting' }),
+      now: c.now,
+      sleep: async (ms) => {
+        quit.fire()
+        await c.sleep(ms)
+      },
+      cancelled: () => quit.requested,
+    })
+    expect(result).toEqual({ ok: false, reason: 'cancelled' })
+    expect(c.at()).toBeLessThanOrEqual(QR_CANCEL_POLL_MS)
   })
 })
