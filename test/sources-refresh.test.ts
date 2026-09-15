@@ -233,11 +233,13 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
 // (spec 14 §3.1). Refresh reads the pin; it never re-guesses, because
 // re-guessing is what quietly moved a mount to another profile's login.
 describe('the Chrome profile a refresh reads', () => {
-  function withoutKnob<T>(fn: () => T): T {
+  // Awaited, not just called: restoring the knob before the refresh has
+  // finished would leave the read looking at the developer's own setting.
+  async function withoutKnob<T>(fn: () => Promise<T>): Promise<T> {
     const before = process.env[CHROME_PROFILE_ENV]
     delete process.env[CHROME_PROFILE_ENV]
     try {
-      return fn()
+      return await fn()
     } finally {
       if (before !== undefined) process.env[CHROME_PROFILE_ENV] = before
     }
@@ -248,7 +250,7 @@ describe('the Chrome profile a refresh reads', () => {
     store.mount('youtube', { browser: 'chrome' })
     expect(store.read().youtube?.profile).toBeUndefined()
     sources.set('youtube', new FakeSource('youtube'))
-    await withoutKnob(async () => refresher.refreshAll())
+    await withoutKnob(() => refresher.refreshAll())
     expect(store.read().youtube?.profile).toEqual(expect.any(String))
   })
 
@@ -256,7 +258,7 @@ describe('the Chrome profile a refresh reads', () => {
     const { store, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome', profile: 'Default' })
     sources.set('youtube', new FakeSource('youtube'))
-    await withoutKnob(async () => refresher.refreshAll())
+    await withoutKnob(() => refresher.refreshAll())
     expect(store.read().youtube?.profile).toBe('Default')
   })
 
@@ -266,7 +268,7 @@ describe('the Chrome profile a refresh reads', () => {
     const yt = new FakeSource('youtube')
     yt.fail = new Error('down')
     sources.set('youtube', yt)
-    await withoutKnob(async () => refresher.refreshAll())
+    await withoutKnob(() => refresher.refreshAll())
     expect(store.read().youtube?.profile).toBeUndefined()
   })
 

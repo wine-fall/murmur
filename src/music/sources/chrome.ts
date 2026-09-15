@@ -41,22 +41,37 @@ export type ChromeDeps = {
 export function localStatePath(platform: NodeJS.Platform, home: string, env: NodeJS.ProcessEnv): string {
   if (platform === 'darwin') return join(home, 'Library', 'Application Support', 'Google', 'Chrome', 'Local State')
   if (platform === 'win32') return join(env['LOCALAPPDATA'] ?? join(home, 'AppData', 'Local'), 'Google', 'Chrome', 'User Data', 'Local State')
-  return join(home, '.config', 'google-chrome', 'Local State')
+  // The same root yt-dlp resolves the cookie store under (`_config_home`), so
+  // a listener with XDG_CONFIG_HOME set is not read from two different Chromes.
+  return join(env['XDG_CONFIG_HOME'] ?? join(home, '.config'), 'google-chrome', 'Local State')
 }
+
+// `last_used` is read once per run and held. Two resolutions of the same
+// mount — the cookie read, and the write-back that pins what that read used —
+// must agree, and they would not if Chrome changed profiles in between. It
+// also keeps the file off the playback path, which resolves per track.
+let lastUsed: string | null = null
 
 export function chromeProfile(pinned?: string | undefined, deps: ChromeDeps = {}): string {
   const env = deps.env ?? process.env
   const named = env[CHROME_PROFILE_ENV]?.trim()
   if (named !== undefined && named !== '') return named
   if (pinned !== undefined && pinned.trim() !== '') return pinned
+  // Only the real read is held; an injected one belongs to its caller.
+  const live = deps.readFile === undefined
+  if (live && lastUsed !== null) return lastUsed
   const readFile = deps.readFile ?? ((path: string): string => readFileSync(path, 'utf-8'))
   try {
     const parsed = LocalState.safeParse(JSON.parse(readFile(localStatePath(deps.platform ?? process.platform, deps.home ?? expandUser('~'), env))))
     const last = parsed.success ? parsed.data.profile?.last_used : undefined
-    if (last !== undefined && last.trim() !== '') return last
+    if (last !== undefined && last.trim() !== '') {
+      if (live) lastUsed = last
+      return last
+    }
   } catch {
     // Absent, locked or not JSON: Default is the profile Chrome itself starts
     // with, and the cookie read that follows says what is wrong if anything is.
   }
+  if (live) lastUsed = DEFAULT_PROFILE
   return DEFAULT_PROFILE
 }

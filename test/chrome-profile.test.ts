@@ -54,6 +54,9 @@ describe('chromeProfile (spec 14 §3.1)', () => {
   it("knows where Chrome keeps Local State on each platform, and reads nothing else there", () => {
     expect(localStatePath('darwin', HOME, {})).toBe('/home/someone/Library/Application Support/Google/Chrome/Local State')
     expect(localStatePath('linux', HOME, {})).toBe('/home/someone/.config/google-chrome/Local State')
+    // yt-dlp resolves the cookie store under XDG_CONFIG_HOME too; reading
+    // Local State from elsewhere would name a profile of a different Chrome.
+    expect(localStatePath('linux', HOME, { XDG_CONFIG_HOME: '/xdg' })).toBe('/xdg/google-chrome/Local State')
     expect(localStatePath('win32', HOME, { LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' })).toContain('Google')
     expect(localStatePath('win32', HOME, { LOCALAPPDATA: 'C:\\Users\\me\\AppData\\Local' })).toContain('Local State')
     // No LOCALAPPDATA: the conventional place under the home directory.

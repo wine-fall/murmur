@@ -522,6 +522,11 @@ in all along (user report, 2026-09-15). Both halves name one profile now.
 
 *Resolving it*: `$MURMUR_CHROME_PROFILE` if set (explicit intent), else
 Chrome's own `profile.last_used` from its `Local State` file, else `Default`.
+`Local State` is found under the same root yt-dlp resolves the cookie store
+under (`$XDG_CONFIG_HOME` on Linux, `%LOCALAPPDATA%` on Windows), and
+`last_used` is read **once per run** and held: the read and the write-back
+that pins what that read used have to agree, and they would not if Chrome
+changed profiles in between — nor should playback open the file per track.
 Only that one key is read, and it is a directory name — `Local State` sits
 beside the cookie store murmur already reads, so it grants nothing new, and
 when it cannot be read there is no separate complaint: the cookie read that
