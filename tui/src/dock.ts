@@ -31,17 +31,23 @@ export function cardTitle(kind: AskKind, count: number, text: string, options?: 
 
 // The way back, named on the card when the engine says the step has one
 // (spec 06 §3.4): the intro line that mentions /back has scrolled off by the
-// second question, so the action row is where it is read.
-export const BACK_HINT = '/back - previous question'
+// second question, so the action row is where it is read. Split in two so the
+// renderer can light the command and leave its why quiet — read as one more
+// grey phrase, the offer was being missed.
+export const BACK_CMD = '/back'
+export const BACK_WHY = ' - previous question'
+export const BACK_HINT = `${BACK_CMD}${BACK_WHY}`
 
 // The action row's text, as the renderer lays it out: what closes the card
 // under the question — a consent's two options, a list's keys, a menu's or a
 // seed's Enter — plus the /back hint when the step has one.
-// A consent's two options as the renderer lays them out, spacing included:
-// the default sits on a raised CHIP, which is padded on both sides. Measured
-// from the same string it is drawn from, or a boundary width wraps the row
-// the math thought fit (codex review).
-export const CONSENT_ACTIONS = ['y - go ahead', '   ', ' > N - not now ', ' (Enter)'] as const
+// A consent's two options as the renderer lays them out, spacing included —
+// measured from the same string it is drawn from, or a boundary width wraps
+// the row the math thought fit (codex review). The two are PEERS: a default
+// drawn as the row you are on (a cursor on a raised chip) reads as a choice
+// already made, so which key Enter is stands in words instead. The odd
+// indices are the quiet halves; the even ones are the keys.
+export const CONSENT_ACTIONS = ['y', ' - go ahead   ·   ', 'Enter', ' - not now'] as const
 
 export function actionRow(kind: AskKind, lines: readonly CardLine[], options?: readonly AskOption[], back = false): string {
   if (kind === 'consent') return `${CONSENT_ACTIONS.join('')}${back ? `   ${BACK_HINT}` : ''}`

@@ -7,8 +7,12 @@ import { describe, expect, it } from 'vitest'
 
 import { COMMANDS } from '../src/host/ipc.ts'
 import {
+  BACK_CMD,
+  BACK_HINT,
+  BACK_WHY,
   cardLines,
   actionRow,
+  CONSENT_ACTIONS,
   backInline,
   cardRows,
   cardTitle,
@@ -197,19 +201,33 @@ describe('cardRows / cardTopRow', () => {
     expect(cardRows(long, 120, 'consent')).toBeGreaterThan(cardRows(CONSENT, 120, 'consent'))
   })
 
+  it('the consent row offers two peers — no cursor, no chip, nothing pre-chosen', () => {
+    // The reported misread (2026-09-15): the default drawn as '> N - not now'
+    // on a CHIP is the exact treatment the list card gives THE ROW YOU ARE ON,
+    // so the card looked answered before it was answered. The two keys read as
+    // equals now; which one Enter means is said in words, not in highlight.
+    const row = CONSENT_ACTIONS.join('')
+    expect(row).toBe('y - go ahead   ·   Enter - not now')
+    expect(row).not.toContain('>')
+    expect(actionRow('consent', [], undefined, false)).toBe(row)
+  })
+
+  it('the /back hint is a command plus its why, so the renderer can light the command alone', () => {
+    expect(BACK_CMD).toBe('/back')
+    expect(BACK_CMD + BACK_WHY).toBe(BACK_HINT)
+  })
+
   it('the /back hint shares the action row where it fits, and takes the row beneath where it would wrap', () => {
-    // 'y - go ahead   > N - not now (Enter)   /back - previous question' is 66
-    // columns: one row on a wide card, its own row on a 120-column one
-    // (inner 60) and on an 80-column one (inner 38, the consent row alone).
-    // The row is 66 columns as the renderer draws it — the CHIP's own padding
-    // included, which the measurement used to miss by two (codex review).
-    expect(actionRow('consent', [], undefined, true)).toHaveLength(66)
-    expect(backInline('consent', [], undefined, 66)).toBe(true)
-    expect(backInline('consent', [], undefined, 65)).toBe(false)
+    // The consent row joined with the hint is 62 columns: one row on a wide
+    // card, its own row on a 120-column one (inner 60) and on an 80-column
+    // one (inner 38, the consent row alone).
+    expect(actionRow('consent', [], undefined, true)).toHaveLength(62)
+    expect(backInline('consent', [], undefined, 62)).toBe(true)
+    expect(backInline('consent', [], undefined, 61)).toBe(false)
     expect(backInline('consent', [], undefined, 60)).toBe(false)
-    // A 128-column terminal's card is 64 inner columns: the hint takes its
-    // own row there, and cardRows counts it.
-    expect(cardRows(CONSENT, 128, 'consent', undefined, true)).toBe(cardRows(CONSENT, 128, 'consent') + 1)
+    // A 128-column terminal's card is 64 inner columns — the peer row fits
+    // there with the hint beside it, where the old chip row did not.
+    expect(cardRows(CONSENT, 128, 'consent', undefined, true)).toBe(cardRows(CONSENT, 128, 'consent'))
     expect(cardRows(CONSENT, 200, 'consent', undefined, true)).toBe(11)
     expect(cardRows(CONSENT, 120, 'consent', undefined, true)).toBe(cardRows(CONSENT, 120, 'consent') + 1)
     expect(cardRows(CONSENT, 80, 'consent', undefined, true)).toBe(cardRows(CONSENT, 80, 'consent') + 1)
