@@ -7,6 +7,7 @@
 
 import type { Host } from '../../host/host.ts'
 import { SourceAuthError, SourceAuthWatch } from './auth.ts'
+import { BrowserCookieError } from './cookies.ts'
 import type { SourcesStore } from './store.ts'
 import { SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
 
@@ -109,6 +110,10 @@ export class TasteRefresher {
       if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       store.writeSnapshot(snapshot)
       store.markRefreshed(id, this.now())
+      // The read worked, so the profile it used is the one this account lives
+      // in: pin it (spec 14 §3.1). A mount made before murmur named profiles
+      // gets its pin here; from then on nothing re-guesses.
+      store.pinChromeProfile(id)
       // A read that works clears an error left by an earlier failure, and
       // the once-per-session line re-arms.
       if (store.read()[id]?.status === 'error') {
@@ -120,6 +125,14 @@ export class TasteRefresher {
       return { id, ok: true, count: snapshot.items.length }
     } catch (err) {
       if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
+      // The pinned profile is gone — deleted or renamed. murmur does not
+      // quietly move the mount to another one: that is how it would change
+      // account behind the listener's back. It takes the same road as a lost
+      // login, so the /sources card says to connect it again (§3.1).
+      if (err instanceof BrowserCookieError && err.reason === 'no-profile') {
+        watch.note(new SourceAuthError(id, 'expired', `chrome profile ${err.profile ?? ''} is gone`))
+        return { id, ok: false, error: 'no-profile' }
+      }
       if (err instanceof SourceAuthError) {
         watch.note(err)
         return { id, ok: false, error: err.reason }

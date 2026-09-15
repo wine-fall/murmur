@@ -10,6 +10,7 @@ import { ask } from '../../host/host.ts'
 import type { AskOption } from '../../host/ipc.ts'
 import { escPulse, lineReader, type QuitLatch } from '../../setup/guide.ts'
 import { AUTH_LINES, type SourceAuthWatch } from './auth.ts'
+import { chromeProfile } from './chrome.ts'
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
@@ -61,7 +62,9 @@ export type SourcesFlowDeps = {
   forgetCookies?: () => void
   // Opens a URL in the browser murmur also reads (Chrome), so the listener
   // cannot sign in somewhere murmur will not look.
-  openUrl?: (url: string) => void
+  // The profile rides along: the page must open in the very profile this
+  // mount will read, so the two halves cannot name different ones.
+  openUrl?: (url: string, profile: string) => void
   platform?: NodeJS.Platform
   now?: () => Date
 }
@@ -201,15 +204,11 @@ function recording(host: Host, notes: string[]): Host {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
-// yt-dlp reads "the most recently accessed profile" when none is named, so a
-// listener with a second Chrome profile could find a mount reading the wrong
-// account. The removed question let them pin one; this does, without asking
-// the many who have only one profile.
-export const CHROME_PROFILE_ENV = 'MURMUR_CHROME_PROFILE'
-
-export function chromePick(env: NodeJS.ProcessEnv = process.env): BrowserPick {
-  const profile = env[CHROME_PROFILE_ENV]?.trim()
-  return { browser: CHROME, ...(profile !== undefined && profile !== '' && { profile }) }
+// The profile for a NEW mount: resolved once here (chrome.ts), then written
+// into the entry and pinned. Everything a mounted source does afterwards —
+// refresh, verify, playback — reads that pin instead of coming back here.
+export function chromePick(): { browser: typeof CHROME; profile: string } {
+  return { browser: CHROME, profile: chromeProfile() }
 }
 
 // Where each source is signed in, opened in Chrome when no login is found.
@@ -327,7 +326,8 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
   store.dropSnapshot(id)
   store.mount(id, entry as never, now())
   watch.reset(id)
-  host.debug?.(`sources.mount ${id}`)
+  const pinned = (entry as { profile?: string }).profile
+  host.debug?.(`sources.mount ${id}${pinned === undefined ? '' : ` profile=${pinned}`}`)
   const source = deps.build(id, store.read()[id] as SourceEntry[K])
   if (source === null) return
   try {
@@ -357,7 +357,7 @@ async function mountCookieFlow(
       return await deps.mounts[id](pick)
     } catch (err) {
       if (err instanceof BrowserCookieError) {
-        host.debug?.(`sources.cookies ${id} ${err.reason}: ${err.detail}`)
+        host.debug?.(`sources.cookies ${id} profile=${pick.profile} ${err.reason}: ${err.detail}`)
         // A profile Chrome has never opened is, to a listener, the same thing
         // as not being signed in — and opening the sign-in page in it is what
         // creates it. So it takes the no-login path rather than an obstacle.
@@ -375,7 +375,7 @@ async function mountCookieFlow(
     // Not a dead end: open the page they sign in on, in the browser that
     // will then be read, and wait — rather than sending them back through
     // the whole /sources conversation.
-    deps.openUrl?.(SIGN_IN_URL[id])
+    deps.openUrl?.(SIGN_IN_URL[id], pick.profile)
     host.info(`no ${site} login yet — opened ${site} in Chrome; sign in there.`)
     ask(host, 'press Enter when you have signed in (or Esc to stop).', 'question')
     await read()

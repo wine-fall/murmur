@@ -484,17 +484,18 @@ halves, so the listener cannot sign in somewhere murmur will not look.
 
 1. Read Chrome's cookie store for the site.
 2. **A login is there** → `verify()` → "signed in as <who>".
-3. **No login** → open the site's sign-in page with `chromeOpenerFor` (macOS
-   `open -a "Google Chrome"`), say so, and wait on "press Enter when you have
-   signed in". On Enter, drop the cached export — it answers from before they
-   signed in — and read once more. Still nothing → "still no <site> login in
-   Chrome — /sources when you have signed in". Never a dead end that sends
-   them back through the whole conversation. The page opens in the profile
-   `$MURMUR_CHROME_PROFILE` names, the one murmur then reads — signing in
-   anywhere else would be invisible to it (macOS `open -na "Google Chrome"
-   --args --profile-directory=<p>`: without `-n`, `open` drops the flags
-   whenever Chrome is already running). **A
-   profile Chrome has never opened arrives here too**, not as an obstacle:
+3. **No login** → open the site's sign-in page with `chromeOpenerFor`, say
+   so, and wait on "press Enter when you have signed in". On Enter, drop the
+   cached export — it answers from before they signed in — and read once more.
+   Still nothing → "still no <site> login in Chrome — /sources when you have
+   signed in". Never a dead end that sends them back through the whole
+   conversation. **The page always opens in the same profile this mount
+   reads** — the resolved name is passed to the opener by the mount flow, not
+   resolved a second time, so the two halves cannot disagree (macOS `open -na
+   "Google Chrome" --args --profile-directory=<p>`: without `-n`, `open` drops
+   the flags whenever Chrome is already running; there is no unnamed form of
+   the opener left). Signing in anywhere else would be invisible to murmur.
+   **A profile Chrome has never opened arrives here too**, not as an obstacle:
    to a listener it is the same thing as not being signed in, and Chrome
    creates the profile directory when it opens the page in it.
 4. **The store could not be read at all** is a different answer, and says
@@ -511,11 +512,39 @@ halves, so the listener cannot sign in somewhere murmur will not look.
 5. First `snapshot()` in the foreground with a progress line (counts, not
    titles); write `sources.json` + the snapshot; "done — I'll keep it fresh".
 
-`$MURMUR_CHROME_PROFILE` pins a Chrome profile. It matters because yt-dlp
-reads "the most recently accessed profile" when none is named, so a second
-profile can otherwise move a mount to another account between refreshes; the
-question used to let a listener pin one, and this keeps that without asking
-the many who have a single profile.
+**murmur always names the Chrome profile** — it never lets yt-dlp choose.
+Unnamed, yt-dlp searches the whole user-data directory and reads whichever
+profile's `Cookies` file was written last (`yt_dlp/cookies.py`); with three
+profiles open at once those timestamps are a coin toss, so a mount read an
+empty profile, reported "not signed in", and opened the sign-in page in a
+window the listener had never used — while their everyday profile was signed
+in all along (user report, 2026-09-15). Both halves name one profile now.
+
+*Resolving it*: `$MURMUR_CHROME_PROFILE` if set (explicit intent), else
+Chrome's own `profile.last_used` from its `Local State` file, else `Default`.
+Only that one key is read, and it is a directory name — `Local State` sits
+beside the cookie store murmur already reads, so it grants nothing new, and
+when it cannot be read there is no separate complaint: the cookie read that
+follows fails with yt-dlp's own words (not installed / not permitted). The
+name goes nowhere but `entry.profile` and the `profile=<name>` field on the
+`sources.mount` and `sources.cookies` log lines.
+
+*Pinning it*: a mount binds **one account on one site**, and that account
+lives in one profile — so the profile is resolved **once, at mount**, written
+into `entry.profile`, and every later read hands that pin back. Refresh and
+verify never re-guess; re-guessing per read is exactly the failure above,
+moving a mount to another account between refreshes. The table:
+
+| when | what happens |
+| --- | --- |
+| new mount | resolve (knob → `last_used` → `Default`), write it into the entry |
+| an older mount with no `profile` field | resolved by the same rule for the read; written back once the read works, pinned from then on |
+| `$MURMUR_CHROME_PROFILE` set | overrides the pin for the read, and is written back once that read works — so a knob naming a profile that does not work cannot overwrite a pin that does |
+| the read says `no-profile` (the profile was deleted or renamed) | the mount takes the same road as a lost login: `expired`, and the /sources list says to connect it again. Never a silent move to another profile |
+| the listener wants a different account | untick the row and tick it again — an unmount and a fresh mount, resolved anew |
+
+Updating a pin is never a background decision: only a failed read or the
+listener's own action changes it.
 
 The cost, accepted: a listener who uses only Firefox or Safari cannot mount
 these three. It buys the removal of every failure the question created — an

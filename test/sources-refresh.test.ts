@@ -8,6 +8,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError, SourceAuthWatch } from '../src/music/sources/auth.ts'
+import { CHROME_PROFILE_ENV } from '../src/music/sources/chrome.ts'
+import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
@@ -224,5 +226,59 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
     store.setStatus('bilibili', 'expired')
     expect((await refresher.refreshAll()).at(-1)).toEqual({ id: 'bilibili', ok: false, error: 'expired' })
     expect(bili.snapshots).toBe(1)
+  })
+})
+
+// A mount binds one account, and the account lives in one Chrome profile
+// (spec 14 §3.1). Refresh reads the pin; it never re-guesses, because
+// re-guessing is what quietly moved a mount to another profile's login.
+describe('the Chrome profile a refresh reads', () => {
+  function withoutKnob<T>(fn: () => T): T {
+    const before = process.env[CHROME_PROFILE_ENV]
+    delete process.env[CHROME_PROFILE_ENV]
+    try {
+      return fn()
+    } finally {
+      if (before !== undefined) process.env[CHROME_PROFILE_ENV] = before
+    }
+  }
+
+  it('pins a profile into a mount that carries none, once a read has worked', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome' })
+    expect(store.read().youtube?.profile).toBeUndefined()
+    sources.set('youtube', new FakeSource('youtube'))
+    await withoutKnob(async () => refresher.refreshAll())
+    expect(store.read().youtube?.profile).toEqual(expect.any(String))
+  })
+
+  it('keeps the pin a mount was made with', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome', profile: 'Default' })
+    sources.set('youtube', new FakeSource('youtube'))
+    await withoutKnob(async () => refresher.refreshAll())
+    expect(store.read().youtube?.profile).toBe('Default')
+  })
+
+  it('writes nothing back when the read failed', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome' })
+    const yt = new FakeSource('youtube')
+    yt.fail = new Error('down')
+    sources.set('youtube', yt)
+    await withoutKnob(async () => refresher.refreshAll())
+    expect(store.read().youtube?.profile).toBeUndefined()
+  })
+
+  it('takes the expired road when the pinned profile is gone — never another profile', async () => {
+    const { store, host, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome', profile: 'Murmur Fresh' })
+    const yt = new FakeSource('youtube')
+    yt.fail = new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database', 'Murmur Fresh')
+    sources.set('youtube', yt)
+    expect(await refresher.refreshAll()).toEqual([{ id: 'youtube', ok: false, error: 'no-profile' }])
+    expect(store.read().youtube?.status).toBe('expired')
+    expect(store.read().youtube?.profile).toBe('Murmur Fresh')
+    expect(host.infos.some((l) => /YouTube login has expired/.test(l))).toBe(true)
   })
 })

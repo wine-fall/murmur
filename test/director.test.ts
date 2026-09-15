@@ -139,18 +139,10 @@ describe('Director — /bug and /feature-request', () => {
 
   // The taste sources read Chrome's cookie store, so the sign-in page has to
   // open in Chrome — not in whatever the machine's default browser is. A
-  // listener sent to Safari would sign in where murmur never looks.
-  it('pins Chrome for the sign-in page, per platform', () => {
-    const url = 'https://music.163.com/'
-    expect(chromeOpenerFor('darwin', url)).toEqual({ command: 'open', args: ['-a', 'Google Chrome', url] })
-    expect(chromeOpenerFor('linux', url)).toEqual({ command: 'google-chrome', args: [url] })
-    expect(chromeOpenerFor('win32', url)).toEqual({ command: 'cmd', args: ['/c', 'start', '', 'chrome', `"${url}"`] })
-  })
-
-  // $MURMUR_CHROME_PROFILE pins the profile murmur reads, so the sign-in page
-  // has to open in that same profile — Chrome creates the directory when it
-  // does, which is why a never-opened profile is no longer an obstacle.
-  it('opens the sign-in page in the pinned Chrome profile, per platform', () => {
+  // listener sent to Safari would sign in where murmur never looks. And it is
+  // always one named profile: the unnamed form is gone, because Chrome would
+  // then open the page in whatever window was in front (spec 14 §3.1).
+  it('opens the sign-in page in the named Chrome profile, per platform', () => {
     const url = 'https://music.163.com/'
     const p = 'Murmur Fresh'
     expect(chromeOpenerFor('darwin', url, p)).toEqual({ command: 'open', args: ['-na', 'Google Chrome', '--args', `--profile-directory=${p}`, url] })
