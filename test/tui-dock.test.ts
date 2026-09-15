@@ -21,6 +21,7 @@ import {
   HINT_ROTATE_MS,
   inputHints,
   isCommand,
+  logScrollDelta,
   outbound,
   PAGE_OVERLAP,
   pageStep,
@@ -101,7 +102,7 @@ describe('the command list', () => {
 // commands are eventually seen without a line ever entering the transcript.
 describe('the input hints (spec 14 §3.8)', () => {
   it('rests on the talk-back invitation first, then the engine\'s current rows', () => {
-    expect(inputHints([])).toEqual(['type to talk back · / for commands · PgUp/PgDn scrolls'])
+    expect(inputHints([])).toEqual(['type to talk back · / for commands · scroll or PgUp/PgDn'])
     const hints = inputHints([
       { command: '/sources', why: 'your NetEase or Spotify likes make better picks' },
       { command: '/bug', why: "something broke? two lines and it's filed" },
@@ -109,7 +110,7 @@ describe('the input hints (spec 14 §3.8)', () => {
     // Command first: a narrow field clips the tail, and the command is the
     // half worth keeping (codex review).
     expect(hints).toEqual([
-      'type to talk back · / for commands · PgUp/PgDn scrolls',
+      'type to talk back · / for commands · scroll or PgUp/PgDn',
       '/sources · your NetEase or Spotify likes make better picks',
       "/bug · something broke? two lines and it's filed",
     ])
@@ -285,6 +286,24 @@ describe('pageStep (PageUp/PageDown through the program log)', () => {
     // The overlap must not eat the whole step: a key that does nothing reads
     // as a broken key, and the log floor is only six rows to begin with.
     for (const rows of [0, 1, 2, 3]) expect(pageStep(rows)).toBeGreaterThanOrEqual(1)
+  })
+})
+
+describe('logScrollDelta (the wheel and the page keys, spec 10 §3.4)', () => {
+  it('reads one wheel notch as one row: alternate-scroll delivers it as an arrow', () => {
+    expect(logScrollDelta('up', 30)).toBe(-1)
+    expect(logScrollDelta('down', 30)).toBe(1)
+  })
+
+  it('reads a page key as a screenful minus the overlap, in the same two directions', () => {
+    expect(logScrollDelta('pageup', 30)).toBe(-pageStep(30))
+    expect(logScrollDelta('pagedown', 30)).toBe(pageStep(30))
+  })
+
+  it('claims no other key — every one of them belongs to someone else', () => {
+    for (const key of ['left', 'right', 'return', 'escape', 'space', 'tab']) {
+      expect(logScrollDelta(key, 30)).toBeNull()
+    }
   })
 })
 

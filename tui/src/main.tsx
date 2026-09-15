@@ -38,6 +38,18 @@ const renderer = await createCliRenderer({
   }),
 })
 
+// Alternate-scroll mode (spec 10 §3.4): in the alternate screen with mouse
+// reporting off, the terminal turns a wheel notch into an Up/Down arrow press.
+// That is the whole wheel feature — the log reads the arrows like any other
+// key (app.tsx), no mouse tracking is armed, and the terminal's own text
+// selection stays exactly as the listener knows it. Written through the
+// renderer's writeOut: OpenTUI intercepts process.stdout, which would feed the
+// escape back into the frame as text.
+const rawOut = renderer as unknown as { writeOut(data: string): void }
+const ALT_SCROLL_ON = '\u001b[?1007h'
+const ALT_SCROLL_OFF = '\u001b[?1007l'
+rawOut.writeOut(ALT_SCROLL_ON)
+
 // The single exit path: hand the terminal back, then go. Idempotent, because
 // `bye` and the socket closing behind it both arrive.
 let leaving = false
@@ -46,6 +58,10 @@ function leave(code: number, reason?: string): never | void {
   leaving = true
   try {
     renderer.destroy()
+    // Disarm AFTER the restore, and on the real stdout: writeOut queues into
+    // the render thread, which is gone by the time a quit gets here, and the
+    // stdout interception that made writeOut necessary went with it.
+    process.stdout.write(ALT_SCROLL_OFF)
   } catch {
     // A half-set-up renderer must not turn a quit into a crash.
   }
