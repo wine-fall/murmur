@@ -7,9 +7,10 @@
 > carries `model` (the good tier, §3.3) and an optional `ccRoot` (injectable
 > data root, defaulting to `paths.claudeCodeRoot()`); `ProfileWritable` lives in
 > `src/setup/first-run.ts` beside its consumer, the way `CompactionStore` lives in
-> `compaction.ts`; slice B is offered only when onboarding actually got an
-> answer, so a run that skipped every question is not asked a fourth question,
-> and its task launches only once a persona was written.
+> `compaction.ts`; slice B is skipped only when the host is gone, so a
+> non-interactive run (EOF) is not asked a fourth question, while a live
+> listener who answered nothing still sees the cards; its task launches once
+> the run reaches the air, on the bundled-seed path too.
 > The by-feel constants (`PERSONA_CHAR_CAP`, `MAX_SESSIONS`, `MAX_READ_CHARS`,
 > `BOOTSTRAP_MAX_TURNS`) remain tunable (§6).
 > **Owed**: criterion 12's first-run pass in a real terminal (user-run), and the
@@ -329,6 +330,16 @@ runs the `/sources` conversation right there and returns here; a no writes
 nothing. It is shown only when the taste wiring exists (a real brain), and
 `/quit` on it ends the run exactly as `/quit` on the slice-B consent does.
 
+**A run with no answers still gets the cards.** The only early exit is a
+**non-interactive run (EOF)**: reads resolve `''` because the host is gone, so
+there is nobody to ask a consent card of and no persona to write, and the run
+falls straight to the bundled seed. Three empty lines typed by a *live*
+listener are three declined questions, not a gone host — the code cannot tell
+them apart from the line alone, so it reads `host.eof()` (the `gone` flag
+`runSources` uses, spec 14) and walks that listener on to the cards, which is
+where `/sources` matters most. The persona stays the bundled seed either way,
+and a `y` to slice B still launches the bootstrap.
+
 **The first run is one step table** (§3.1 step 3, extended): the seed questions
 followed by whichever consent cards this run can offer (slice B only with a
 harness, the sources card only with the taste wiring). `/back` steps back one
@@ -426,7 +437,9 @@ Unit (fakes / `tmp_path`, model-free) unless noted.
    file (not the bundled seed).
 3. **Skip / non-interactive**: all-empty answers, and a closed stdin (EOF),
    both produce the **bundled seed** at the persona home with no Brain call, and
-   the radio still boots.
+   the radio still boots. Only a **non-interactive run (EOF)** ends early: a
+   live run with three empty answers is still asked both consent cards, and a
+   `y` there still launches the bootstrap on the bundled-seed path.
 4. **Failure degrades**: a throwing `seedPersona`, an empty result, and a write
    failure each fall back to the bundled seed with one info line and no crash.
 5. **Persona is never rewritten afterwards**: a run whose persona home exists
