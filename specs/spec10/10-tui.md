@@ -399,14 +399,16 @@ sit above the divider, so a mount's outcome is read in the card, never under
 it. Kind picks the frame: warm/ember for a question (with a client-side `#n`
 counter in the title), periwinkle for a consent (` · optional` in the title)
 — the listener's color, because the decision is theirs; a consent card
-closes with a two-option row whose default (`> N - not now (Enter)`) sits on
-a raised `CHIP` — and when the ask carries `back`, the row ends with
-`/back - previous question` in notice ink (a seed question's `Enter skips`
+closes with a two-option row of PEERS (`y - go ahead   ·   Enter - not now`,
+keys lit, their words quiet, neither on a raised ground — a chip under the
+default read as a choice already made, 2026-09-15) — and when the ask carries
+`back`, the row ends with `/back - previous question`, the command in ember
+and its why in notice ink (a seed question's `Enter skips`
 gets the same tail after a `·`), taking the row beneath instead whenever the
 joined row would not fit the card's inner width (`backInline` in `dock.ts`,
 replayed by `cardRows`), so the way back is read on the card, never wrapped
 mid-phrase, and not only in the intro that has scrolled off — while a checklist card titles itself ` pre-broadcast
-check ` and swaps the chip for the quiet two-exit row (fix now / start the
+check ` and swaps that row for the quiet two-exit one (fix now / start the
 radio). The opening line splits at its first `? ` — lead sentence bright,
 detail quiet (design ref B1) — and the CC-bootstrap offer ships as one
 multi-line consent ask (question first, the why-lines as card notes, ref

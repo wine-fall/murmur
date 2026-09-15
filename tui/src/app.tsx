@@ -14,8 +14,9 @@ import type { InputRenderable, ScrollBoxRenderable, TextareaRenderable } from '@
 import type { EngineMessage, Invitation, ProgramState, SettingsSnapshot } from '../../src/host/ipc.ts'
 import { Bars, render } from './bars.ts'
 import {
-  BACK_HINT,
+  BACK_CMD,
   backInline,
+  BACK_WHY,
   CONSENT_ACTIONS,
   cardLines,
   cardTitle,
@@ -1233,7 +1234,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // beneath — never wrapped mid-phrase.
           const backOnRow = head.back === true && backInline(head.kind, lines, list, Math.max(width - 6, 1))
           const backBelow = head.back === true && !backOnRow
-          const backRow = backBelow && <text><span fg={INK.notice}>{BACK_HINT}</span></text>
+          // The command takes the ember and its why stays quiet: the way back
+          // read as one more grey phrase and was being missed (by-ear).
+          const backHint = (lead: string) => (
+            <>
+              {lead !== '' && <span fg={INK.notice}>{lead}</span>}
+              <span fg={EMBER}>{BACK_CMD}</span>
+              <span fg={INK.notice}>{BACK_WHY}</span>
+            </>
+          )
+          const backRow = backBelow && <text>{backHint('')}</text>
           // The divider stands between the facts and the choices: above the
           // first option row when the card carries its own, above the list
           // when it has one, else above the closing invite (legacy checklist
@@ -1303,11 +1313,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 facts ? null : (
                   <box style={{ marginTop: 1, flexDirection: 'column' }}>
                     <text>
-                      <span fg={INK.notice}>{CONSENT_ACTIONS[0]}</span>
+                      {/* Two peers: the keys carry the light, their words
+                          stay quiet, and neither sits on a raised ground —
+                          a chip here read as a choice already made. */}
+                      <span fg={INK.text}>{CONSENT_ACTIONS[0]}</span>
                       <span fg={INK.notice}>{CONSENT_ACTIONS[1]}</span>
-                      <span fg={INK.text} bg={CHIP}>{CONSENT_ACTIONS[2]}</span>
+                      <span fg={INK.text}>{CONSENT_ACTIONS[2]}</span>
                       <span fg={INK.notice}>{CONSENT_ACTIONS[3]}</span>
-                      {backOnRow && <span fg={INK.notice}>{`   ${BACK_HINT}`}</span>}
+                      {backOnRow && backHint('   ')}
                     </text>
                     {backRow}
                   </box>
@@ -1318,7 +1331,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 <box style={{ marginTop: 1, flexDirection: 'column' }}>
                   <text style={{ fg: QUIET }}>
                     {list !== undefined ? '↑↓ move · space ticks · enter applies' : isMenu(head.kind, lines) ? 'Enter - done' : 'Enter skips'}
-                    {list === undefined && backOnRow && <span fg={INK.notice}>{` · ${BACK_HINT}`}</span>}
+                    {list === undefined && backOnRow && backHint(' · ')}
                   </text>
                   {backRow}
                 </box>
