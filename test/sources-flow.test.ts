@@ -474,6 +474,49 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos).not.toContain('signed in as Chen X')
   })
 
+  it('a typed /quit while a scan is waiting stops it and writes nothing', async () => {
+    const quit = quitLatch()
+    let seenByTheScan: boolean | undefined
+    const { host, deps, store } = build(['netease', ''], {
+      quit,
+      mounts: {
+        // The engine fires the latch as the /quit arrives — no read is open
+        // during a scan, so the flag the scan polls is the only way out.
+        netease: async (show, cancelled) => {
+          show('https://music.163.com/login?codekey=k')
+          quit.fire()
+          seenByTheScan = cancelled()
+          return cancelled() ? { ok: false, reason: 'cancelled' } : { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'c', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(seenByTheScan).toBe(true)
+    expect(host.infos).toContain('cancelled — nothing was written.')
+    expect(store.read()).toEqual({})
+  })
+
+  it('a typed /quit while Spotify consent is pending stops the wait and writes nothing', async () => {
+    const quit = quitLatch()
+    let seenByTheWait: boolean | undefined
+    const { deps, store } = build(['spotify', ''], {
+      quit,
+      mounts: {
+        spotify: async (clientId, hooks) => {
+          hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
+          quit.fire()
+          seenByTheWait = hooks.cancelled()
+          return seenByTheWait
+            ? { ok: false, reason: 'cancelled' }
+            : { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(seenByTheWait).toBe(true)
+    expect(store.read()).toEqual({})
+  })
+
   it('refuses a NetEase or Bilibili mount on a host that cannot show a line off the record', async () => {
     for (const id of ['netease', 'bilibili'] as const) {
       const { host, deps, store, mounted } = build([id, ''])

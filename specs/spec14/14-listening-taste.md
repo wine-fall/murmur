@@ -533,7 +533,10 @@ the failure this text exists to prevent.
 1. Ask the platform for a key and draw the code, **through `showPrivate`
    only**: it is an authorization artifact and must not reach the log (§3.6).
    A host with no such surface says so and mounts nothing.
-2. Poll every two seconds for up to three minutes; Esc stops it.
+2. Poll every two seconds for up to three minutes; Esc stops it, and so does
+   a typed `/quit` (the TUI's Ctrl-C) — no read is open while a code is on
+   screen, so the wait is slept in `QR_CANCEL_POLL_MS` slices and both flags
+   are seen within a quarter second, not at the end of the cadence.
 3. **Confirmed** → keep the cookie the platform hands back, read who it signs
    in as, first `snapshot()`, write, "done — I'll keep it fresh".
 4. **The code expired, or three minutes passed** → "the code timed out —
