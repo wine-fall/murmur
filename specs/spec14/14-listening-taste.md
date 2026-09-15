@@ -520,8 +520,9 @@ empty profile, reported "not signed in", and opened the sign-in page in a
 window the listener had never used — while their everyday profile was signed
 in all along (user report, 2026-09-15). Both halves name one profile now.
 
-*Resolving it*: `$MURMUR_CHROME_PROFILE` if set (explicit intent), else
-Chrome's own `profile.last_used` from its `Local State` file, else `Default`.
+*Resolving it*: the profile pinned in the entry, else
+`$MURMUR_CHROME_PROFILE` if set, else Chrome's own `profile.last_used` from
+its `Local State` file, else `Default`.
 `Local State` is found under the same root yt-dlp resolves the cookie store
 under (`$XDG_CONFIG_HOME` on Linux, `%LOCALAPPDATA%` on Windows), and
 `last_used` is read **once per run** and held: the read and the write-back
@@ -544,7 +545,8 @@ moving a mount to another account between refreshes. The table:
 | --- | --- |
 | new mount | resolve (knob → `last_used` → `Default`), write it into the entry |
 | an older mount with no `profile` field | resolved by the same rule for the read; written back once the read works, pinned from then on |
-| `$MURMUR_CHROME_PROFILE` set | overrides the pin for the read, and is written back once that read works — so a knob naming a profile that does not work cannot overwrite a pin that does |
+| `$MURMUR_CHROME_PROFILE` set | decides for a mount with no pin. It never moves a pinned one: the entry also holds that account's own identifiers (a Bilibili `mid`, a NetEase `userId`), and reading another profile's cookies against them would fold two accounts into one snapshot |
+| the knob names a profile other than the pin | neither is read — the mount takes the same road as a lost login (`expired`, "connect it again"). Ticking the row again is a fresh mount, and that one resolves by the knob |
 | the read says `no-profile` (the profile was deleted or renamed) | the mount takes the same road as a lost login: `expired`, and the /sources list says to connect it again. Never a silent move to another profile |
 | the listener wants a different account | untick the row and tick it again — an unmount and a fresh mount, resolved anew |
 

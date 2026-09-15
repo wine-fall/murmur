@@ -272,6 +272,26 @@ describe('the Chrome profile a refresh reads', () => {
     expect(store.read().youtube?.profile).toBeUndefined()
   })
 
+  it('takes the expired road when the knob names a profile other than the pin — never a snapshot mixing two accounts', async () => {
+    const { store, host, sources, refresher } = build()
+    store.mount('bilibili', { browser: 'chrome', profile: 'Default', mid: '42' })
+    const bili = new FakeSource('bilibili')
+    sources.set('bilibili', bili)
+    const before = process.env[CHROME_PROFILE_ENV]
+    process.env[CHROME_PROFILE_ENV] = 'Work'
+    try {
+      expect(await refresher.refreshAll()).toEqual([{ id: 'bilibili', ok: false, error: 'profile-changed' }])
+    } finally {
+      if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
+      else process.env[CHROME_PROFILE_ENV] = before
+    }
+    // Nothing was read with the other profile's cookies, and the pin stands.
+    expect(bili.snapshots).toBe(0)
+    expect(store.read().bilibili?.profile).toBe('Default')
+    expect(store.read().bilibili?.status).toBe('expired')
+    expect(host.infos.some((l) => /Bilibili login has expired/.test(l))).toBe(true)
+  })
+
   it('takes the expired road when the pinned profile is gone — never another profile', async () => {
     const { store, host, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome', profile: 'Murmur Fresh' })

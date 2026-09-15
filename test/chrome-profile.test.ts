@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { CHROME_PROFILE_ENV, chromeProfile, localStatePath } from '../src/music/sources/chrome.ts'
+import { CHROME_PROFILE_ENV, chromeProfile, knobDisagrees, localStatePath } from '../src/music/sources/chrome.ts'
 import { browserArgs, cookieArgs, SourcesStore } from '../src/music/sources/store.ts'
 
 const HOME = '/home/someone'
@@ -36,11 +36,20 @@ describe('chromeProfile (spec 14 §3.1)', () => {
     expect(chromeProfile('Default', deps())).toBe('Default')
   })
 
-  it('lets the environment knob override even a pinned profile: naming one is explicit intent', () => {
-    expect(chromeProfile('Default', deps({ env: { [CHROME_PROFILE_ENV]: 'Work' } }))).toBe('Work')
+  it('lets the environment knob decide for a mount that has no pin yet', () => {
     expect(chromeProfile(undefined, deps({ env: { [CHROME_PROFILE_ENV]: '  Work  ' } }))).toBe('Work')
     // An empty knob is not an answer.
     expect(chromeProfile(undefined, deps({ env: { [CHROME_PROFILE_ENV]: '  ' } }))).toBe('Profile 3')
+  })
+
+  it('never lets the knob move a pinned mount: the entry holds that account\'s own ids, and a mixed snapshot is worse than none', () => {
+    expect(chromeProfile('Default', deps({ env: { [CHROME_PROFILE_ENV]: 'Work' } }))).toBe('Default')
+    expect(knobDisagrees('Default', { [CHROME_PROFILE_ENV]: 'Work' })).toBe(true)
+    // Agreeing, unset, empty, or nothing pinned yet: no disagreement.
+    expect(knobDisagrees('Work', { [CHROME_PROFILE_ENV]: 'Work' })).toBe(false)
+    expect(knobDisagrees('Default', {})).toBe(false)
+    expect(knobDisagrees('Default', { [CHROME_PROFILE_ENV]: '  ' })).toBe(false)
+    expect(knobDisagrees(undefined, { [CHROME_PROFILE_ENV]: 'Work' })).toBe(false)
   })
 
   it('falls back to Default when Local State is missing, unreadable, not JSON, or has no last_used', () => {
@@ -108,10 +117,10 @@ describe('pinning the profile in the entry (spec 14 §3.1)', () => {
     expect(s.read().youtube?.profile).toBe('Default')
   })
 
-  it('writes the knob back over a stale pin: the knob is what the read just used', () => {
+  it('a fresh mount takes the knob: ticking the row again is how a listener changes profile', () => {
     const s = store()
-    s.mount('youtube', { browser: 'chrome', profile: 'Default' })
-    s.pinChromeProfile('youtube', () => 'Work')
+    s.mount('youtube', { browser: 'chrome', profile: 'Work' })
+    s.pinChromeProfile('youtube', (pinned) => pinned ?? 'Default')
     expect(s.read().youtube?.profile).toBe('Work')
   })
 

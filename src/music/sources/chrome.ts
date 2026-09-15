@@ -9,8 +9,13 @@
 // a coin toss — and murmur then opened the sign-in page in whatever window
 // happened to be in front. Both halves name the profile now.
 //
-// The order: MURMUR_CHROME_PROFILE (explicit intent) → the profile pinned in
-// the entry → Chrome's own `profile.last_used` → 'Default'.
+// The order: the profile pinned in the entry → MURMUR_CHROME_PROFILE →
+// Chrome's own `profile.last_used` → 'Default'. The pin comes first because
+// the entry also holds the account's own identifiers (a Bilibili `mid`, a
+// NetEase `userId`): reading another profile's cookies against them would mix
+// two accounts into one snapshot. So the knob only decides for a mount that
+// has no pin yet, and a knob that disagrees with one sends that mount down
+// the reconnect road (`knobDisagrees`) rather than quietly changing account.
 //
 // Local State is read for that one key, which is a directory name. It sits
 // beside the cookie store murmur already reads, so reading it grants nothing
@@ -54,9 +59,9 @@ let lastUsed: string | null = null
 
 export function chromeProfile(pinned?: string | undefined, deps: ChromeDeps = {}): string {
   const env = deps.env ?? process.env
+  if (pinned !== undefined && pinned.trim() !== '') return pinned
   const named = env[CHROME_PROFILE_ENV]?.trim()
   if (named !== undefined && named !== '') return named
-  if (pinned !== undefined && pinned.trim() !== '') return pinned
   // Only the real read is held; an injected one belongs to its caller.
   const live = deps.readFile === undefined
   if (live && lastUsed !== null) return lastUsed
@@ -74,4 +79,13 @@ export function chromeProfile(pinned?: string | undefined, deps: ChromeDeps = {}
   }
   if (live) lastUsed = DEFAULT_PROFILE
   return DEFAULT_PROFILE
+}
+
+// The knob names one profile and the mount is pinned to another. murmur reads
+// neither mixture: the mount takes the same road as a lost login, and ticking
+// it again is a fresh mount, resolved by the knob (spec 14 §3.1).
+export function knobDisagrees(pinned: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
+  const named = env[CHROME_PROFILE_ENV]?.trim()
+  if (named === undefined || named === '') return false
+  return pinned !== undefined && pinned.trim() !== '' && named !== pinned
 }
