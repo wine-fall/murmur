@@ -22,12 +22,13 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  heldAwayFromTail,
   HINT_ROTATE_MS,
   inputHints,
   isMenu,
   isCommand,
   outbound,
-  pageStep,
+  logScrollDelta,
   pickAnswer,
   pickMove,
   pickStart,
@@ -500,23 +501,26 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   useKeyboard((key) => {
     if (key.ctrl && key.name === 'c') return wire.line('/quit')
     // Reading back through the program log (§3.4). The input line owns focus
-    // permanently, so the scrollbox never receives a key of its own — these
-    // two are handed to it by hand. They come FIRST: a page key means the
-    // same thing whatever else is up, and neither the command menu nor the
-    // pane has any use for them. The pane is the one exception, because it
-    // has reclaimed the rows the log was in.
-    if (!pane.current.open && (key.name === 'pageup' || key.name === 'pagedown')) {
+    // permanently, so the scrollbox never receives a key of its own — the
+    // scrolling keys are handed to it by hand. Returns false when there is no
+    // box to scroll or the key is not one of them.
+    const scrollLog = (): boolean => {
       const box = log.current
-      if (box === null) return
+      if (box === null) return false
       const { y, height } = box.viewport
-      const step = pageStep(visibleLogRows(y, height, cardTopRef.current))
-      box.scrollBy(key.name === 'pageup' ? -step : step)
-      // Held away from the end, the log stops trimming its head: dropping the
-      // oldest entry shifts everything under it up by that entry's height,
-      // and a numeric scroll position cannot see it happen — the reader would
-      // silently skip forward while standing still.
-      heldAway.current = box.scrollTop + height < box.scrollHeight - 1
-      return
+      const delta = logScrollDelta(key.name, visibleLogRows(y, height, cardTopRef.current))
+      if (delta === null) return false
+      box.scrollBy(delta)
+      heldAway.current = heldAwayFromTail(box.scrollTop, height, box.scrollHeight)
+      return true
+    }
+    // The page keys come FIRST: they mean the same thing whatever else is up,
+    // and neither the command menu nor the cards have any use for them. The
+    // pane is the one exception, because it has reclaimed the rows the log
+    // was in. The arrows are read far below instead — they are the wheel, and
+    // everything that steers with them outranks it.
+    if (!pane.current.open && (key.name === 'pageup' || key.name === 'pagedown')) {
+      if (scrollLog()) return
     }
     // A list card owns the keys while it is up (§3.2-B, rows to tick): the
     // arrows move, Space ticks, Enter answers with the ticked keys — there
@@ -550,6 +554,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         composer.current?.gotoBufferEnd()
         return retype(menu.current.selected)
       }
+    }
+    // Nothing on screen claimed the arrows, so the wheel gets them: with
+    // mouse reporting off, alternate-scroll mode (armed in main.tsx) delivers
+    // a notch as an arrow, and the log creeps a row. A floor's composer is the
+    // last claimant, and only while there is something to walk through: a
+    // draft taller than one row has an up and a down of its own, an empty or
+    // single-row one does not — so under a floor the wheel reads the log back
+    // exactly like the radio's, which is the whole point of the feature.
+    const draftRows = composer.current?.editorView.getTotalVirtualLineCount() ?? 1
+    if (!pane.current.open && draftRows <= 1 && (key.name === 'up' || key.name === 'down')) {
+      if (scrollLog()) return
     }
     const { open, at, snap, edit } = pane.current
     if (open && edit !== null) {

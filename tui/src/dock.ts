@@ -194,7 +194,7 @@ export function commandMatches(typed: string): readonly Command[] {
 // the client only ever rotates what it was given. Command first, why after:
 // a narrow field clips the tail, and the command is the half worth keeping.
 export function inputHints(rows: readonly Invitation[]): string[] {
-  return ['type to talk back · / for commands · PgUp/PgDn scrolls', ...rows.map((row) => `${row.command} · ${row.why}`)]
+  return ['type to talk back · / for commands · scroll or PgUp/PgDn', ...rows.map((row) => `${row.command} · ${row.why}`)]
 }
 
 // A lap slow enough to read as furniture rather than a blinking sign.
@@ -215,6 +215,28 @@ export const PAGE_OVERLAP = 2
 // step, and a key that moves nothing reads as a key that is broken.
 export function pageStep(viewportRows: number): number {
   return Math.max(1, viewportRows - PAGE_OVERLAP)
+}
+
+// Whether the reader has scrolled the log away from its tail. Held away, the
+// log stops trimming its head: dropping the oldest entry shifts everything
+// under it up by that entry's height, and a numeric scroll position cannot see
+// it happen — the reader would silently skip forward while standing still. ONE
+// row off the tail already counts, since that is a single wheel notch.
+export function heldAwayFromTail(scrollTop: number, height: number, scrollHeight: number): boolean {
+  return scrollTop + height < scrollHeight
+}
+
+// The same gesture at two grains (§3.4): a page key jumps a screenful, the
+// wheel creeps a row. With mouse reporting never armed, the terminal's
+// alternate-scroll mode hands a wheel notch over as an Up/Down arrow, so the
+// arrows scroll the log whenever no card, menu or pane has claimed them.
+// Null for every other key — they all belong to someone else.
+export function logScrollDelta(key: string, viewportRows: number): number | null {
+  if (key === 'up') return -1
+  if (key === 'down') return 1
+  if (key === 'pageup') return -pageStep(viewportRows)
+  if (key === 'pagedown') return pageStep(viewportRows)
+  return null
 }
 
 // How many of the log's rows the listener can actually READ. An overlay — a

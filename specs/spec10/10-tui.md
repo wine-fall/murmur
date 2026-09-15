@@ -897,7 +897,16 @@ contract (no framework until a second agent exists):
   the log's rows. `ScrollBoxRenderable` already suspends its own sticky-bottom
   under a manual scroll and re-engages at the end, so nothing yanks the
   listener back mid-read — and **submitting a line returns to the bottom**,
-  because speaking is a decision to be where the answer will land.
+  because speaking is a decision to be where the answer will land. The
+  **wheel** joins them without arming anything: alternate-scroll mode
+  (`DECSET ?1007`, saved and armed on start, restored on the way out so the
+  listener's own terminal setting survives the run) makes the
+  terminal send a notch as an Up/Down arrow, and the arrows scroll the log a
+  row at a time whenever nothing else on screen claims them — a list card, the
+  command menu and the settings pane all outrank the log, and so does a floor's
+  composer, but only while its draft is taller than one row and therefore has
+  an up and a down of its own. Under a floor with nothing typed, the wheel
+  reads the log back exactly as it does on the radio.
 - **The busy sign (2026-09-01, user report).** A guide turn is a real model
   call — seconds, sometimes a WebFetch — and until it returns the frame does
   not move. That is the same silence the quit teardown was fixed for above,
