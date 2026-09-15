@@ -249,3 +249,62 @@ export function visibleLogRows(top: number, height: number, overlayTop: number |
   if (overlayTop === null) return height
   return Math.max(1, Math.min(height, overlayTop - top))
 }
+
+// --- the notice card (spec 10 §3.2-E) -------------------------------------- //
+//
+// A card the listener READS while something waits on it — a sign-in code. It
+// takes no answer, so the resting input stays where it is and the card floats
+// above it (where the command menu floats), and its body is drawn VERBATIM: a
+// QR is 21 to 25 rows of half-blocks, 49 columns wide, and one wrapped row
+// makes it unscannable. That is also why the geometry below is exact rather
+// than estimated — nothing here folds.
+
+export type Notice = Extract<EngineMessage, { type: 'notice' }>
+
+// The escape hatch, lit like the /back hint: the key, then its quiet why.
+export const NOTICE_CANCEL_KEY = 'esc'
+export const NOTICE_CANCEL_WHY = ' - cancel'
+export const NOTICE_CANCEL = `${NOTICE_CANCEL_KEY}${NOTICE_CANCEL_WHY}`
+
+// The footer as the renderer lays it out: the flow's own words, and whether
+// they end on the cancel the renderer lights.
+export function noticeFooter(footer: string): { lead: string; cancel: boolean } {
+  return footer.endsWith(NOTICE_CANCEL)
+    ? { lead: footer.slice(0, -NOTICE_CANCEL.length), cancel: true }
+    : { lead: footer, cancel: false }
+}
+
+// The card's width: its content's, not a share of the terminal. A question
+// card wraps to 55% and reads fine; a code cannot wrap, so the card is cut to
+// it — bounded by the terminal. `lines` is the title and the body together:
+// the border spends the same room on the title it does on a body row.
+export function noticeWidth(lines: readonly string[], cols: number): number {
+  const need = Math.max(0, ...lines.map((line) => line.length)) + 6 // border (2) + padding (4)
+  return Math.min(need, cols - 4)
+}
+
+// How many terminal rows the card stands on, for the body actually drawn.
+export function noticeRows(body: readonly string[], footer?: string): number {
+  return body.length + (footer === undefined ? 0 : 2) + 4 // the footer's top margin; border (2) + padding (2)
+}
+
+// How far short the terminal is of the whole card, counting the gap row and
+// the input it floats above. Zero = it fits.
+export function noticeShortfall(notice: Notice, height: number, inputRows: number): number {
+  return Math.max(0, noticeRows(notice.body, notice.footer) + 1 + inputRows - height)
+}
+
+// What the card draws. A code drawn half is worse than no code: the listener
+// scans it, nothing happens, and nothing on screen says why — so a terminal
+// that cannot hold the whole body is told the number instead.
+export function noticeBody(notice: Notice, height: number, inputRows: number): string[] {
+  const short = noticeShortfall(notice, height, inputRows)
+  if (short === 0) return [...notice.body]
+  return [`this terminal is ${short} row${short === 1 ? '' : 's'} short for the code`]
+}
+
+// The first terminal row the card can touch — the rasters end above it and
+// the log pages by what is left, exactly as they do under a question.
+export function noticeTopRow(notice: Notice, height: number, inputRows: number): number {
+  return Math.max(1, height - 1 - inputRows - noticeRows(noticeBody(notice, height, inputRows), notice.footer))
+}

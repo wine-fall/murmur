@@ -72,11 +72,16 @@ export interface Host {
   // state may rotate. Sent whenever the set changes. Optional: the plain host
   // has no idle surface but its banner, which prints the boot-time rows once.
   invitations?(rows: readonly Invitation[]): void
-  // A line the listener must see and the diagnostics must never keep (spec
-  // 14 §3.6): the Soda login QR encodes an authorization URL, and `info`
-  // mirrors into the log a /bug report attaches. A host without this seam is
-  // told so rather than shown the code — the flow refuses that mount.
-  showPrivate?: ((text: string) => void) | undefined
+  // A card the listener READS while something waits on it (spec 10 §3.2-E):
+  // a sign-in code. It takes no answer, so it is not an `ask`; and the
+  // diagnostics must never keep it (spec 14 §3.6) — a QR encodes an
+  // authorization URL, and `info` mirrors into the log a /bug report
+  // attaches. `body` lines are shown VERBATIM (a QR is 49 columns wide and
+  // wrapping it makes it unscannable); `footer` is the progress plus the way
+  // out. Calling it again REPLACES what is up, and an empty `body` closes it.
+  // A host without this seam is told so rather than shown the code — the flow
+  // refuses that mount.
+  notice?: ((title: string, body: readonly string[], footer?: string) => void) | undefined
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void
@@ -239,9 +244,11 @@ export class CliHost implements Host {
     for (const row of rows) console.log(`·  ${row.command} · ${row.why}`)
   }
 
-  // Printed, never mirrored (see the seam's comment on Host).
-  showPrivate(text: string): void {
-    console.log(text)
+  // Printed, never mirrored (see the seam's comment on Host). The plain host
+  // has no card to replace or close: an empty body simply says nothing.
+  notice(title: string, body: readonly string[], footer?: string): void {
+    if (body.length === 0) return
+    for (const line of [title, ...body, ...(footer === undefined ? [] : [footer])]) console.log(line)
   }
 
   onRadioSegment(text: string): void {

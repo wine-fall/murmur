@@ -402,10 +402,10 @@ describe('runSources (spec 14 §3.1)', () => {
     const { host, deps, store, mounted } = build(['soda', 'soda'])
     await runSources(deps)
     expect(mounted).toEqual(['qishui'])
-    // The QR encodes an authorization URL, so it goes to the screen only —
-    // host.info mirrors into the diagnostics a /bug report attaches (§3.6).
-    const qr = host.privates.find((l) => l.includes('█'))!
-    expect(qr.split('\n').length).toBeGreaterThan(10)
+    // The QR encodes an authorization URL, so it goes to the notice card only
+    // — host.info mirrors into the diagnostics a /bug report attaches (§3.6).
+    const qr = host.notices.find((n) => n.body.some((row) => row.includes('█')))!
+    expect(qr.body.length).toBeGreaterThan(10)
     expect(host.infos.join('\n')).not.toContain('█')
     expect(host.infos.some((l) => /Douyin/.test(l))).toBe(true)
     expect(store.read().qishui).toMatchObject({ sessionCookie: 's', status: 'ok' })
@@ -417,7 +417,7 @@ describe('runSources (spec 14 §3.1)', () => {
     const { host, deps, store, mounted } = build(['netease', 'netease'])
     await runSources(deps)
     expect(mounted).toEqual(['netease:qr'])
-    expect(host.privates.find((l) => l.includes('█'))!.split('\n').length).toBeGreaterThan(10)
+    expect(host.notices.find((n) => n.body.some((row) => row.includes('█')))!.body.length).toBeGreaterThan(10)
     expect(host.infos.join('\n')).not.toContain('█')
     expect(host.infos.some((l) => /open the NetEase Cloud Music app/.test(l))).toBe(true)
     expect(host.infos.some((l) => /Chrome/.test(l))).toBe(false)
@@ -520,7 +520,7 @@ describe('runSources (spec 14 §3.1)', () => {
   it('refuses a NetEase or Bilibili mount on a host that cannot show a line off the record', async () => {
     for (const id of ['netease', 'bilibili'] as const) {
       const { host, deps, store, mounted } = build([id, ''])
-      host.showPrivate = undefined
+      host.notice = undefined
       await runSources(deps)
       expect(mounted).toEqual([])
       expect(host.infos.some((l) => /cannot show the code here/.test(l))).toBe(true)
@@ -530,11 +530,63 @@ describe('runSources (spec 14 §3.1)', () => {
 
   it('refuses the Soda mount on a host that cannot show a line off the record', async () => {
     const { host, deps, store, mounted } = build(['soda', ''])
-    host.showPrivate = undefined
+    host.notice = undefined
     await runSources(deps)
     expect(mounted).toEqual([])
     expect(host.infos.some((l) => /cannot show the code here/.test(l))).toBe(true)
     expect(store.read()).toEqual({})
+  })
+
+  // The bug this card exists for (2026-09-15, screenshot-verified): drawn as
+  // an `info` line the 25-row Bilibili code landed in a program log with ~8
+  // rows under the portrait, so the listener came back from their phone to
+  // half a code with the instruction scrolled off above it.
+  it('draws the scan code in a notice card — progress in the title, the way out in the footer', async () => {
+    const { host, deps } = build(['netease bilibili', 'netease bilibili'], {
+      mounts: {
+        bilibili: async (show) => {
+          show('https://account.bilibili.com/h5/scan?qrcode_key=k')
+          return { ok: true, who: 'Bili Listener', entry: { auth: 'qr', cookie: 'c', mid: '1' } }
+        },
+      },
+    })
+    await runSources(deps)
+    const drawn = host.notices.filter((n) => n.body.length > 0)
+    expect(drawn.map((n) => n.title)).toEqual([
+      '1/2 Bilibili — scan with the Bilibili app',
+      '2/2 NetEase — scan with the NetEase Cloud Music app',
+    ])
+    for (const card of drawn) {
+      expect(card.footer).toBe('waiting for the scan · esc - cancel')
+      // Verbatim half-block rows, wide enough to scan — never wrapped.
+      expect(card.body.length).toBeGreaterThan(10)
+      expect(card.body.every((row) => /^[█▀▄ ]+$/.test(row))).toBe(true)
+    }
+    // Each card is closed when its mount ends, so no dead code is left up.
+    expect(host.notices.filter((n) => n.body.length === 0)).toHaveLength(2)
+    // And the code itself reached neither the program log nor the diagnostics.
+    expect([...host.infos, ...host.debugs, ...host.asks.map((a) => a.text)].join('\n')).not.toContain('█')
+  })
+
+  it('a single mount carries no counter, and a scanned code says to confirm on the phone', async () => {
+    const { host, deps } = build(['netease', 'netease'], {
+      mounts: {
+        netease: async (show, _cancelled, onStatus) => {
+          show('https://music.163.com/login?codekey=k')
+          onStatus('scanned')
+          return { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'c', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    const drawn = host.notices.filter((n) => n.body.length > 0)
+    expect(drawn.map((n) => n.title)).toEqual([
+      'NetEase — scan with the NetEase Cloud Music app',
+      'NetEase — scan with the NetEase Cloud Music app',
+    ])
+    expect(drawn.map((n) => n.footer)).toEqual(['waiting for the scan · esc - cancel', 'scanned — confirm on your phone'])
+    // The body is redrawn unchanged: only the footer moved.
+    expect(drawn[1]!.body).toEqual(drawn[0]!.body)
   })
 
   it('Esc during the QR wait cancels and writes nothing', async () => {

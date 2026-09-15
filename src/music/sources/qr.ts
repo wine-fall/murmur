@@ -27,6 +27,11 @@ export type ScanDeps<T> = {
   show: (url: string) => void
   issue: () => Promise<{ url: string }>
   poll: () => Promise<QrPoll<T>>
+  // What the wait is waiting on, reported when it CHANGES (spec 10 §3.2-E):
+  // the caller's notice card says 'scanned — confirm on your phone' instead
+  // of still asking for a scan that has already happened. Per change, not
+  // per poll — three minutes is ninety polls.
+  onStatus?: (status: QrStatus) => void
   now?: () => Date
   sleep?: (ms: number) => Promise<void>
   timeoutMs?: number
@@ -41,9 +46,14 @@ export async function scanToSignIn<T>(deps: ScanDeps<T>): Promise<ScanResult<T>>
   const code = await deps.issue()
   deps.show(code.url)
   const deadline = now().getTime() + (deps.timeoutMs ?? QR_TIMEOUT_MS)
+  let said: QrStatus | null = null
   while (now().getTime() < deadline) {
     if (deps.cancelled?.() === true) return { ok: false, reason: 'cancelled' }
     const seen = await deps.poll()
+    if (seen.status !== said) {
+      said = seen.status
+      deps.onStatus?.(seen.status)
+    }
     // A confirmation the platform sent without the cookie is not a sign-in:
     // waiting it out ends as a timeout, which is a code the listener can
     // ask for again — better than mounting an account with no credential.
@@ -60,6 +70,7 @@ export type QrMountResult<T> = { ok: true; who: string; entry: T } | { ok: false
 
 export type QrMountOptions = {
   show: (url: string) => void
+  onStatus?: (status: QrStatus) => void
   timeoutMs?: number
   cancelled?: () => boolean
   now?: () => Date

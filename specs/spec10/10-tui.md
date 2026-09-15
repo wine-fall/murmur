@@ -220,6 +220,7 @@ Engine → TUI:
 | `state` | `ProgramState` + `microcopy?` | `onState`; drives status region + pet. `microcopy` is the DJ's line for the strip, picked engine-side from `prompts.ts` (§3.7.4) — beside the state, not inside it: it is what the program SAYS it is doing |
 | `info` | `{ text, tone? }` | host info lines — context, notices, and everything that is not a question (§3.2-B). `tone: 'flow'` marks a state-transition line (a stopped flow, the going-off ack): the client renders it in marked warm ink with a `■` marker so it cannot drown in tool output; the plain host prints it like any other line. Additive |
 | `ask` | `{ text, kind: 'question' \| 'consent', options?: [{ key, label, note?, checked? }], multi?: boolean, back?: boolean }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. `back: true` says a typed `/back` re-asks the previous step (spec 06 §3.4 — every first-run step but the first): the card names it in its action row, the plain host appends `(/back returns to the previous question)`; a list card never carries it. With `options` (2026-09-14, the /sources list — spec 14 §3.1) the card is rows to tick and the answer `line` is the ticked keys in row order, space-joined (`''` for none); the text still carries the same rows numbered (`>> 1) [x] NetEase - …`) so a client that ignores `options` reads the same card. Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
+| `notice` | `{ title, body: string[], footer? }` | a card the listener READS while a flow waits on it (§3.2-E): a sign-in QR. Additive (2026-09-15), replacing `Host.showPrivate`'s `info`-shaped delivery. Stateful — sending it again REPLACES what is up, an empty `body` closes it — and like `showPrivate` before it, straight to the live client only: **never mirrored into the dev log and never in the replay backlog**, because the code it carries expires in minutes. `body` lines are drawn VERBATIM: a wrapped QR cannot be scanned |
 | `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |
 | `busy` | `{ on: boolean }` | the floor-holder is working rather than waiting on the keyboard (§3.4): the client shows a live sign for as long as it is true. Additive (2026-09-01) — no protocol bump. Stateful and **not replayed**, unlike `mode`, and with no `hello` field either: a sign means "right now", so a backlog handed to a later attach would open it under a sign for a turn that has already ended, with nothing coming to clear it. A turn that began with no client attached simply has no sign |
@@ -426,6 +427,44 @@ that render them double-width, so decorative symbols stay in the log
 Deliberately deferred, additive when wanted: an `ask` hint field for
 placeholder examples and per-flow option copy, and step metadata for a real
 `n/total` — the counter and the generic option row cost zero wire changes.
+
+**E. The notice card — read, not answered (2026-09-15).** A sign-in QR is
+neither a question nor a program line, and it was shipped as the latter: the
+scan flows drew the code through `Host.showPrivate`, which the client painted
+into the program log. In the wide sky composition that log has about eight
+rows under the portrait and the wordmark, while a NetEase code is 21 rows and
+a Bilibili one 25 to 27 — so sticky scroll showed its bottom rows and pushed
+the instruction off the top, and a listener back from Chrome found half a code
+and nothing saying what it was (user report, screenshot-verified).
+
+`showPrivate` is retired for the seam it should have been: **`Host.notice(title,
+body, footer?)`** and the additive `notice` message (§2.3). It keeps
+`showPrivate`'s privacy rule exactly — straight to the live client, never
+mirrored into the dev log, never in the replay backlog, because a login code
+expires in minutes and a later attach must not be handed a dead one — and adds
+the card. It is **stateful, not queued**: sending it again REPLACES what is up
+(that is how the footer follows the scan), and an **empty `body` closes** it.
+It takes no answer, so it is not an `ask`: the resting input stays where it is
+and the card floats above it, where the command menu floats, and **Esc is
+nobody's here** — it falls through to the engine's interrupt, which stops the
+flow waiting behind the card (§3.4, nothing new).
+
+The card is the question card's furniture with one rule of its own: the **body
+is drawn VERBATIM**. A QR is 49 to 53 columns of half-blocks and one wrapped
+row makes it unscannable, so nothing folds, the card is cut to its content
+rather than to 55% of the terminal (`noticeWidth`), and its geometry is exact
+rather than estimated (`noticeRows` — body + footer + frame; `noticeTopRow`
+feeds the same raster/paging budget `cardTopRow` does, so kitty images end
+above it and PgUp does not step past covered rows). The title carries the
+progress and the app to reach for (`2/3 Bilibili — scan with the Bilibili
+app`); the footer carries what is being waited on and the way out, the key lit
+like the `/back` hint and its why quiet (`waiting for the scan · esc - cancel`,
+then `scanned — confirm on your phone` once the platform says the phone has
+the code). **A terminal too short for the whole body is told the number** —
+`this terminal is N rows short for the code` — and never shown half a code:
+half a code is scanned, does nothing, and says nothing about why
+(`noticeShortfall` / `noticeBody` in `tui/src/dock.ts`). The plain host has no
+card, so it prints the title, the body and the footer, and mirrors none of it.
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
 mid-broadcast recall), `/bug` and `/feature-request` (the feedback channel

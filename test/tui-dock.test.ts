@@ -18,6 +18,13 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  NOTICE_CANCEL,
+  noticeBody,
+  noticeFooter,
+  noticeRows,
+  noticeShortfall,
+  noticeTopRow,
+  noticeWidth,
   HINT_ROTATE_MS,
   inputHints,
   heldAwayFromTail,
@@ -378,5 +385,49 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
     const both = pickToggle(pickMove(start, 2, options.length), options, true)
     expect(pickAnswer(both, options)).toBe('netease refresh')
     expect(pickAnswer(pickToggle(start, options, true), options)).toBe('')
+  })
+})
+
+// The notice card (spec 10 §3.2-E): a sign-in code, read and not answered.
+// Its geometry is exact rather than estimated — the body never wraps.
+describe('the notice card', () => {
+  const QR = Array.from({ length: 25 }, () => '█'.repeat(49))
+  const notice = { v: 1 as const, type: 'notice' as const, title: '2/3 Bilibili — scan with the Bilibili app', body: QR, footer: `waiting for the scan · ${NOTICE_CANCEL}` }
+
+  it('stands on its body, its footer and its frame — nothing wrapped', () => {
+    // 25 body rows + the footer and its top margin + border (2) + padding (2).
+    expect(noticeRows(QR, notice.footer)).toBe(31)
+    expect(noticeRows(QR)).toBe(29)
+  })
+
+  it('is cut to its content, so a 49-column code stays scannable and whole', () => {
+    // The code's own width plus the border (2) and the padding (4) — the same
+    // card on a wide terminal, because a wider one would only add dead space.
+    expect(noticeWidth(QR, 80)).toBe(55)
+    expect(noticeWidth(QR, 120)).toBe(55)
+    // The title is measured with the body: the border spends the same room on it.
+    expect(noticeWidth([`${notice.title} and then some more`, ...QR], 120)).toBe(66)
+    // And never wider than the terminal it is drawn in.
+    expect(noticeWidth(QR, 40)).toBe(36)
+  })
+
+  it('floats above the resting input, which a notice never takes', () => {
+    // height 40, a one-row input: the gap row, the input, then the card.
+    expect(noticeTopRow(notice, 40, 1)).toBe(40 - 1 - 1 - 31)
+    expect(noticeTopRow(notice, 10, 1)).toBe(1)
+  })
+
+  it('says how far short a small terminal is instead of drawing half a code', () => {
+    expect(noticeShortfall(notice, 40, 1)).toBe(0)
+    // 31 rows + the gap row + the input = 33; a 24-row terminal is 9 short.
+    expect(noticeShortfall(notice, 24, 1)).toBe(9)
+    expect(noticeBody(notice, 40, 1)).toEqual(QR)
+    expect(noticeBody(notice, 24, 1)).toEqual(['this terminal is 9 rows short for the code'])
+    expect(noticeBody(notice, 32, 1)).toEqual(['this terminal is 1 row short for the code'])
+  })
+
+  it('lights the way out like the /back hint: the key, then its quiet why', () => {
+    expect(noticeFooter(`waiting for the scan · ${NOTICE_CANCEL}`)).toEqual({ lead: 'waiting for the scan · ', cancel: true })
+    expect(noticeFooter('scanned — confirm on your phone')).toEqual({ lead: 'scanned — confirm on your phone', cancel: false })
   })
 })

@@ -312,10 +312,12 @@ export class FakeHost implements Host {
   modes: FloorMode[] = []
   // Every invitation set the engine sent (spec 14 §2.7), in order.
   invited: Invitation[][] = []
-  // Lines shown but never mirrored into the diagnostics (spec 14 §3.6).
-  // A field, not a method, so a test can model a host without the seam.
-  privates: string[] = []
-  showPrivate: ((text: string) => void) | undefined = (text) => void this.privates.push(text)
+  // Every notice card the engine put up, in order (spec 10 §3.2-E) — shown
+  // and never mirrored into the diagnostics (spec 14 §3.6). A field, not a
+  // method, so a test can model a host without the seam.
+  notices: { title: string; body: readonly string[]; footer?: string | undefined }[] = []
+  notice: ((title: string, body: readonly string[], footer?: string) => void) | undefined = (title, body, footer) =>
+    void this.notices.push({ title, body, footer })
   // Assign in a test to model a front-end with a settings pane (spec 12 §3.6);
   // left undefined, the host is the plain one and the Director degrades to info.
   showSettings?: () => void

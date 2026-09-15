@@ -44,6 +44,16 @@ const ENGINE_MESSAGES: EngineMessage[] = [
     multi: true,
   },
   { v: 1, type: 'askDrop' },
+  // A notice (spec 10 §3.2-E): shown, answered by nobody. Sending it again
+  // replaces what is up; an empty body closes it.
+  {
+    v: 1,
+    type: 'notice',
+    title: '2/3 Bilibili — scan with the Bilibili app',
+    body: ['█▀▀▀▀▀█', '█ ███ █'],
+    footer: 'waiting for the scan · esc - cancel',
+  },
+  { v: 1, type: 'notice', title: '2/3 Bilibili — scan with the Bilibili app', body: [] },
   { v: 1, type: 'mode', who: 'guide' },
   { v: 1, type: 'mode', who: 'report' },
   { v: 1, type: 'mode', who: 'radio' },
@@ -153,6 +163,8 @@ describe('the wire protocol (spec 10 §2.3)', () => {
     // A known type with a payload that does not validate is dropped, not coerced.
     expect(decodeEngineMessage(JSON.stringify({ v: 1, type: 'segment' }))).toBeNull()
     expect(decodeTuiMessage(JSON.stringify({ v: 1, type: 'line', text: 7 }))).toBeNull()
+    expect(decodeEngineMessage(JSON.stringify({ v: 1, type: 'notice', title: 'x' }))).toBeNull()
+    expect(decodeEngineMessage(JSON.stringify({ v: 1, type: 'notice', title: 'x', body: 'y' }))).toBeNull()
   })
 
   it('rejects a foreign envelope version', () => {

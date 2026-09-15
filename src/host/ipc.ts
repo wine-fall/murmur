@@ -215,6 +215,20 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // Every pending ask just died with its flow (the listener's Esc stopped it):
   // the client drops its cards. Additive, like `ask`.
   z.object({ v, type: z.literal('askDrop') }),
+  // A card the listener READS (spec 10 §3.2-E): a sign-in code, shown while
+  // something waits on it. It takes no answer, so it is not queued with the
+  // asks and never replayed on attach — what it carries (a login QR) expires
+  // in minutes, and a later attach must not be handed a dead code. Not
+  // mirrored into the dev log either, for the same reason `info` was the
+  // wrong seam for it (spec 14 §3.6). Stateful: sending it again REPLACES
+  // what is up (the footer tracking the scan), and an empty `body` closes it.
+  z.object({
+    v,
+    type: z.literal('notice'),
+    title: z.string(),
+    body: z.array(z.string()),
+    footer: z.string().optional(),
+  }),
   // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
   // the client paints the switch — strip, identity line, input. Stateful, not
   // replayed: the host resends the current mode on every attach.

@@ -27,6 +27,12 @@ import {
   inputHints,
   isMenu,
   isCommand,
+  NOTICE_CANCEL_KEY,
+  NOTICE_CANCEL_WHY,
+  noticeBody,
+  noticeFooter,
+  noticeTopRow,
+  noticeWidth,
   outbound,
   logScrollDelta,
   pickAnswer,
@@ -35,6 +41,7 @@ import {
   pickToggle,
   visibleLogRows,
   type Ask,
+  type Notice,
   type Pick,
 } from './dock.ts'
 import { circleOf, Constellation, penFor, sceneSplit, WIDE_MIN, type Run } from './constellation.ts'
@@ -331,6 +338,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // A question with rows to tick carries its cursor and ticks (`pick`): the
   // list is the answer field, so its state lives with the question it answers.
   const [asks, setAsks] = useState<(Ask & { no?: number; pick?: Pick })[]>([])
+  // The notice card (§3.2-E), at most one: a sign-in code the listener reads
+  // while the flow behind it waits. Not a queue and not replayed on attach.
+  const [notice, setNotice] = useState<Notice | null>(null)
   const asksRef = useRef(asks)
   asksRef.current = asks
   const questionNo = useRef(0)
@@ -434,6 +444,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           break
         case 'busy':
           setBusy(message.on)
+          break
+        case 'notice':
+          // Read, never answered (spec 10 §3.2-E), and never logged: the code
+          // it carries expires in minutes and the log outlives it. A second
+          // notice REPLACES the one up; an empty body closes it.
+          setNotice(message.body.length === 0 ? null : message)
           break
         case 'askDrop':
           // The flow behind the cards was stopped (Esc): every pending
@@ -679,9 +695,11 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const cardTop =
     asks.length > 0
       ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true)
-      : menuOpen
-        ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
-        : null
+      : notice !== null
+        ? noticeTopRow(notice, dims.height, rows)
+        : menuOpen
+          ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
+          : null
   const cardTopRef = useRef(cardTop)
   cardTopRef.current = cardTop
   // In the sky composition the strip is one centred line over a full-width
@@ -1231,6 +1249,57 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 </text>
               ))}
               <text style={{ fg: QUIET }}>{' tab completes · enter runs · esc hides'}</text>
+            </box>
+          )
+        })()}
+      {/* The notice card (§3.2-E): a sign-in code, read and not answered, so
+          the resting input stays and the card floats above it where the
+          command menu floats. The body is drawn VERBATIM — a wrapped QR
+          cannot be scanned — and a terminal too short for the whole code is
+          told the number instead of shown half of it. Esc is nobody's here:
+          it falls through to the engine's interrupt, which stops the flow
+          waiting behind the card. */}
+      {asks.length === 0 &&
+        notice !== null &&
+        (() => {
+          const body = noticeBody(notice, dims.height, rows)
+          const width = noticeWidth([notice.title, ...body], cols)
+          const foot = notice.footer === undefined ? null : noticeFooter(notice.footer)
+          return (
+            <box
+              title={` ${notice.title} `}
+              style={{
+                border: true,
+                borderStyle: 'rounded',
+                borderColor: WARM,
+                titleColor: EMBER,
+                flexDirection: 'column',
+                position: 'absolute',
+                left: gutter + Math.floor((cols - width) / 2),
+                bottom: 1 + rows,
+                zIndex: 100,
+                width,
+                paddingLeft: 2,
+                paddingRight: 2,
+                paddingTop: 1,
+                paddingBottom: 1,
+                backgroundColor: CARD,
+              }}
+            >
+              {body.map((line, at) => (
+                <text key={at} style={{ fg: INK.text }}>
+                  {line}
+                </text>
+              ))}
+              {foot !== null && (
+                <box style={{ marginTop: 1 }}>
+                  <text>
+                    <span fg={INK.notice}>{foot.lead}</span>
+                    {foot.cancel && <span fg={EMBER}>{NOTICE_CANCEL_KEY}</span>}
+                    {foot.cancel && <span fg={INK.notice}>{NOTICE_CANCEL_WHY}</span>}
+                  </text>
+                </box>
+              )}
             </box>
           )
         })()}

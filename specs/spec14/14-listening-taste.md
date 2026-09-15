@@ -530,9 +530,16 @@ line names the app the listener must reach for — *the NetEase Cloud Music
 app*, *the Bilibili app* — because a code with the wrong app pointed at it is
 the failure this text exists to prevent.
 
-1. Ask the platform for a key and draw the code, **through `showPrivate`
-   only**: it is an authorization artifact and must not reach the log (§3.6).
-   A host with no such surface says so and mounts nothing.
+1. Ask the platform for a key and draw the code **in a notice card** —
+   `Host.notice`, spec 10 §3.2-E — and there only: it is an authorization
+   artifact and must not reach the log (§3.6), and it is 21 to 27 rows tall,
+   which the program log scrolls out from under a listener who has gone to
+   fetch their phone. The card's title names the position and the app
+   (`2/3 Bilibili — scan with the Bilibili app`), its footer the wait and the
+   way out (`waiting for the scan · esc - cancel`, becoming
+   `scanned — confirm on your phone` when the poll says the phone has the
+   code); it is closed however the mount ends, so no dead code is left up. A
+   host with no such surface says so and mounts nothing.
 2. Poll every two seconds for up to three minutes; Esc stops it, and so does
    a typed `/quit` (the TUI's Ctrl-C) — no read is open while a code is on
    screen, so the wait is slept in `QR_CANCEL_POLL_MS` slices and both flags
@@ -718,8 +725,9 @@ not name: the pick's `music.search` line logs the query's **size**, never its
 words (a taste-led search quotes a kept title, and yt-dlp echoes the whole
 search spec in its errors, so that is trimmed too); and the Soda login QR —
 an authorization URL — goes to a host surface that is shown and never
-mirrored (`Host.showPrivate`), since `info` is what the diagnostics keep. A
-front-end without that surface is told so rather than handed the code.
+mirrored (`Host.notice`, the notice card of spec 10 §3.2-E; `Host.showPrivate`
+until 2026-09-15), since `info` is what the diagnostics keep. A front-end
+without that surface is told so rather than handed the code.
 
 ### 3.7 Failure modes, listener-facing text (exact)
 

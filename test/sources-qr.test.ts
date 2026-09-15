@@ -56,6 +56,17 @@ describe('scanToSignIn (spec 14 §2.8)', () => {
     expect(mid).toEqual({ ok: false, reason: 'cancelled' })
   })
 
+  // The card's footer follows the scan (spec 10 §3.2-E): 'scanned' means the
+  // phone has the code and the person has not confirmed yet, which is a
+  // different wait and reads as one. Reported on CHANGE, so a three-minute
+  // wait does not redraw the code ninety times.
+  it('reports each status change once, so the card can say what is being waited on', async () => {
+    const seen: string[] = []
+    const { poll } = polls({ status: 'waiting' }, { status: 'waiting' }, { status: 'scanned' }, { status: 'scanned' }, { status: 'confirmed', value: 'c' })
+    await scanToSignIn({ show: () => {}, issue: async () => ({ url: 'u' }), poll, onStatus: (s) => seen.push(s), ...clock() })
+    expect(seen).toEqual(['waiting', 'scanned', 'confirmed'])
+  })
+
   it('a confirmation that carries nothing is not a sign-in', async () => {
     const { poll } = polls({ status: 'confirmed' })
     expect(await scanToSignIn({ show: () => {}, issue: async () => ({ url: 'u' }), poll, ...clock() })).toEqual({ ok: false, reason: 'timeout' })
