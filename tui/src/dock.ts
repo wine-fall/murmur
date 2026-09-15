@@ -217,6 +217,15 @@ export function pageStep(viewportRows: number): number {
   return Math.max(1, viewportRows - PAGE_OVERLAP)
 }
 
+// Whether the reader has scrolled the log away from its tail. Held away, the
+// log stops trimming its head: dropping the oldest entry shifts everything
+// under it up by that entry's height, and a numeric scroll position cannot see
+// it happen — the reader would silently skip forward while standing still. ONE
+// row off the tail already counts, since that is a single wheel notch.
+export function heldAwayFromTail(scrollTop: number, height: number, scrollHeight: number): boolean {
+  return scrollTop + height < scrollHeight
+}
+
 // The same gesture at two grains (§3.4): a page key jumps a screenful, the
 // wheel creeps a row. With mouse reporting never armed, the terminal's
 // alternate-scroll mode hands a wheel notch over as an Up/Down arrow, so the

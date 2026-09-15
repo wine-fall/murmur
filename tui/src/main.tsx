@@ -46,8 +46,12 @@ const renderer = await createCliRenderer({
 // renderer's writeOut: OpenTUI intercepts process.stdout, which would feed the
 // escape back into the frame as text.
 const rawOut = renderer as unknown as { writeOut(data: string): void }
-const ALT_SCROLL_ON = '\u001b[?1007h'
-const ALT_SCROLL_OFF = '\u001b[?1007l'
+// Saved and restored rather than switched off: alternate-scroll is the
+// listener's own terminal setting, and a plain `?1007l` on the way out would
+// leave it disabled for whatever they run next. XTSAVE/XTRESTORE needs no
+// reply to read, and a terminal that ignores the pair just keeps the mode on.
+const ALT_SCROLL_ON = '\u001b[?1007s\u001b[?1007h'
+const ALT_SCROLL_OFF = '\u001b[?1007r'
 rawOut.writeOut(ALT_SCROLL_ON)
 
 // The single exit path: hand the terminal back, then go. Idempotent, because

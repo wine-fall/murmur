@@ -22,6 +22,7 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  heldAwayFromTail,
   HINT_ROTATE_MS,
   inputHints,
   isMenu,
@@ -510,11 +511,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       const delta = logScrollDelta(key.name, visibleLogRows(y, height, cardTopRef.current))
       if (delta === null) return false
       box.scrollBy(delta)
-      // Held away from the end, the log stops trimming its head: dropping the
-      // oldest entry shifts everything under it up by that entry's height,
-      // and a numeric scroll position cannot see it happen — the reader would
-      // silently skip forward while standing still.
-      heldAway.current = box.scrollTop + height < box.scrollHeight - 1
+      heldAway.current = heldAwayFromTail(box.scrollTop, height, box.scrollHeight)
       return true
     }
     // The page keys come FIRST: they mean the same thing whatever else is up,

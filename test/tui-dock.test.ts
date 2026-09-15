@@ -20,6 +20,7 @@ import {
   commandMatches,
   HINT_ROTATE_MS,
   inputHints,
+  heldAwayFromTail,
   isCommand,
   logScrollDelta,
   outbound,
@@ -304,6 +305,23 @@ describe('logScrollDelta (the wheel and the page keys, spec 10 §3.4)', () => {
     for (const key of ['left', 'right', 'return', 'escape', 'space', 'tab']) {
       expect(logScrollDelta(key, 30)).toBeNull()
     }
+  })
+})
+
+describe('heldAwayFromTail (a manual scroll stops the log trimming its head)', () => {
+  it('is false at the tail, where the log is free to drop its oldest entry', () => {
+    expect(heldAwayFromTail(80, 20, 100)).toBe(false)
+  })
+
+  it('is true one row off the tail — one wheel notch is already reading back', () => {
+    // The off-by-one that let a full log trim under a single-notch scroll:
+    // the head went, everything under it shifted up, and the reader skipped
+    // forward while standing still.
+    expect(heldAwayFromTail(79, 20, 100)).toBe(true)
+  })
+
+  it('is false when the content is shorter than the viewport', () => {
+    expect(heldAwayFromTail(0, 20, 6)).toBe(false)
   })
 })
 

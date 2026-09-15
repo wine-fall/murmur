@@ -899,7 +899,8 @@ contract (no framework until a second agent exists):
   listener back mid-read — and **submitting a line returns to the bottom**,
   because speaking is a decision to be where the answer will land. The
   **wheel** joins them without arming anything: alternate-scroll mode
-  (`DECSET ?1007`, armed on start and disarmed on the way out) makes the
+  (`DECSET ?1007`, saved and armed on start, restored on the way out so the
+  listener's own terminal setting survives the run) makes the
   terminal send a notch as an Up/Down arrow, and the arrows scroll the log a
   row at a time whenever nothing else on screen claims them — a list card, the
   command menu, the settings pane and a floor's composer all outrank the log.
