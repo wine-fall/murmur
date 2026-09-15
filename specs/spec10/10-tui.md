@@ -461,10 +461,14 @@ app`); the footer carries what is being waited on and the way out, the key lit
 like the `/back` hint and its why quiet (`waiting for the scan · esc - cancel`,
 then `scanned — confirm on your phone` once the platform says the phone has
 the code). **A terminal too short for the whole body is told the number** —
-`this terminal is N rows short for the code` — and never shown half a code:
-half a code is scanned, does nothing, and says nothing about why
-(`noticeShortfall` / `noticeBody` in `tui/src/dock.ts`). The plain host has no
-card, so it prints the title, the body and the footer, and mirrors none of it.
+`this terminal is N rows short for the code`, or `N columns`, or both — and
+never shown a code it cannot hold: a code cut off, or folded to fit, is
+scanned, does nothing, and says nothing about why (`noticeShortfall` /
+`noticeBody` in `tui/src/dock.ts`). The command menu **yields** to the card
+(`menuIsOpen`): the card covers it whole, and a menu the listener cannot see
+would go on taking Esc — the one way out of the wait, which the footer is at
+that moment naming. The plain host has no card, so it prints the title, the
+body and the footer, and mirrors none of it.
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
 mid-broadcast recall), `/bug` and `/feature-request` (the feedback channel

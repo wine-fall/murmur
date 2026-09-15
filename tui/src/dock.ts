@@ -288,23 +288,43 @@ export function noticeRows(body: readonly string[], footer?: string): number {
   return body.length + (footer === undefined ? 0 : 2) + 4 // the footer's top margin; border (2) + padding (2)
 }
 
-// How far short the terminal is of the whole card, counting the gap row and
-// the input it floats above. Zero = it fits.
-export function noticeShortfall(notice: Notice, height: number, inputRows: number): number {
-  return Math.max(0, noticeRows(notice.body, notice.footer) + 1 + inputRows - height)
+// How far short the terminal is of the whole card — rows counting the gap row
+// and the input it floats above, columns counting the border and the padding.
+// Both zero = it fits. Columns matter as much as rows: a folded code is as
+// unscannable as a cut one, and does not even look broken (codex review).
+export function noticeShortfall(notice: Notice, cols: number, height: number, inputRows: number): { rows: number; cols: number } {
+  const wide = Math.max(0, ...notice.body.map((line) => line.length)) + 6
+  return {
+    rows: Math.max(0, noticeRows(notice.body, notice.footer) + 1 + inputRows - height),
+    cols: Math.max(0, wide - (cols - 4)),
+  }
 }
 
-// What the card draws. A code drawn half is worse than no code: the listener
-// scans it, nothing happens, and nothing on screen says why — so a terminal
-// that cannot hold the whole body is told the number instead.
-export function noticeBody(notice: Notice, height: number, inputRows: number): string[] {
-  const short = noticeShortfall(notice, height, inputRows)
-  if (short === 0) return [...notice.body]
-  return [`this terminal is ${short} row${short === 1 ? '' : 's'} short for the code`]
+// What the card draws. A code shown half, or folded, is worse than no code:
+// the listener scans it, nothing happens, and nothing on screen says why — so
+// a terminal that cannot hold the whole body is told the numbers instead.
+// (That sentence is prose and may itself wrap on a very narrow terminal, which
+// costs the geometry below a row; a terminal that small has bigger problems.)
+export function noticeBody(notice: Notice, cols: number, height: number, inputRows: number): string[] {
+  const short = noticeShortfall(notice, cols, height, inputRows)
+  if (short.rows === 0 && short.cols === 0) return [...notice.body]
+  const missing = [
+    ...(short.rows > 0 ? [`${short.rows} row${short.rows === 1 ? '' : 's'}`] : []),
+    ...(short.cols > 0 ? [`${short.cols} column${short.cols === 1 ? '' : 's'}`] : []),
+  ]
+  return [`this terminal is ${missing.join(' and ')} short for the code`]
 }
 
 // The first terminal row the card can touch — the rasters end above it and
 // the log pages by what is left, exactly as they do under a question.
-export function noticeTopRow(notice: Notice, height: number, inputRows: number): number {
-  return Math.max(1, height - 1 - inputRows - noticeRows(noticeBody(notice, height, inputRows), notice.footer))
+export function noticeTopRow(notice: Notice, cols: number, height: number, inputRows: number): number {
+  return Math.max(1, height - 1 - inputRows - noticeRows(noticeBody(notice, cols, height, inputRows), notice.footer))
+}
+
+// Whether the command menu is up. It is furniture UNDER the notice card, which
+// covers it whole: a menu the listener cannot see must not go on taking Esc,
+// which is the only way out of a sign-in wait — with 'esc - cancel' printed on
+// the card saying so (codex review).
+export function menuIsOpen(matches: number, over: { hidden: boolean; pane: boolean; asks: number; notice: boolean }): boolean {
+  return matches > 0 && !over.hidden && !over.pane && over.asks === 0 && !over.notice
 }

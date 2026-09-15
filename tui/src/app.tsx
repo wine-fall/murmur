@@ -27,6 +27,7 @@ import {
   inputHints,
   isMenu,
   isCommand,
+  menuIsOpen,
   NOTICE_CANCEL_KEY,
   NOTICE_CANCEL_WHY,
   noticeBody,
@@ -376,7 +377,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     setDraftLines(area.editorView.getTotalVirtualLineCount())
   }
   const matches = commandMatches(typed)
-  const menuOpen = matches.length > 0 && !menuHidden && !paneOpen && asks.length === 0
+  const menuOpen = menuIsOpen(matches.length, { hidden: menuHidden, pane: paneOpen, asks: asks.length, notice: notice !== null })
   const menuSel = Math.min(menuAt, Math.max(0, matches.length - 1))
   // Mirrored for the keyboard handler and submit, like the pane's ref.
   const menu = useRef({ open: false, at: 0, count: 0, selected: '' })
@@ -696,7 +697,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     asks.length > 0
       ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true)
       : notice !== null
-        ? noticeTopRow(notice, dims.height, rows)
+        ? noticeTopRow(notice, cols, dims.height, rows)
         : menuOpen
           ? Math.max(1, dims.height - 1 - rows - (matches.length + 3))
           : null
@@ -1262,7 +1263,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       {asks.length === 0 &&
         notice !== null &&
         (() => {
-          const body = noticeBody(notice, dims.height, rows)
+          const body = noticeBody(notice, cols, dims.height, rows)
           const width = noticeWidth([notice.title, ...body], cols)
           const foot = notice.footer === undefined ? null : noticeFooter(notice.footer)
           return (

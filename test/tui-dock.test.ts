@@ -18,6 +18,7 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  menuIsOpen,
   NOTICE_CANCEL,
   noticeBody,
   noticeFooter,
@@ -413,21 +414,52 @@ describe('the notice card', () => {
 
   it('floats above the resting input, which a notice never takes', () => {
     // height 40, a one-row input: the gap row, the input, then the card.
-    expect(noticeTopRow(notice, 40, 1)).toBe(40 - 1 - 1 - 31)
-    expect(noticeTopRow(notice, 10, 1)).toBe(1)
+    expect(noticeTopRow(notice, 120, 40, 1)).toBe(40 - 1 - 1 - 31)
+    expect(noticeTopRow(notice, 120, 10, 1)).toBe(1)
   })
 
   it('says how far short a small terminal is instead of drawing half a code', () => {
-    expect(noticeShortfall(notice, 40, 1)).toBe(0)
+    expect(noticeShortfall(notice, 120, 40, 1)).toEqual({ rows: 0, cols: 0 })
     // 31 rows + the gap row + the input = 33; a 24-row terminal is 9 short.
-    expect(noticeShortfall(notice, 24, 1)).toBe(9)
-    expect(noticeBody(notice, 40, 1)).toEqual(QR)
-    expect(noticeBody(notice, 24, 1)).toEqual(['this terminal is 9 rows short for the code'])
-    expect(noticeBody(notice, 32, 1)).toEqual(['this terminal is 1 row short for the code'])
+    expect(noticeShortfall(notice, 120, 24, 1)).toEqual({ rows: 9, cols: 0 })
+    expect(noticeBody(notice, 120, 40, 1)).toEqual(QR)
+    expect(noticeBody(notice, 120, 24, 1)).toEqual(['this terminal is 9 rows short for the code'])
+    expect(noticeBody(notice, 120, 32, 1)).toEqual(['this terminal is 1 row short for the code'])
+  })
+
+  // A terminal too NARROW folds the code instead of cutting it off, which is
+  // the same unscannable nothing and does not even look broken: the card was
+  // drawn full, with a wrapped code in it (codex review).
+  it('counts the columns too — a folded code is as unscannable as a cut one', () => {
+    // 49 columns + border (2) + padding (4) = 55, and the card may use cols-4.
+    expect(noticeShortfall(notice, 59, 40, 1)).toEqual({ rows: 0, cols: 0 })
+    expect(noticeShortfall(notice, 55, 40, 1)).toEqual({ rows: 0, cols: 4 })
+    expect(noticeBody(notice, 55, 40, 1)).toEqual(['this terminal is 4 columns short for the code'])
+    expect(noticeBody(notice, 55, 24, 1)).toEqual(['this terminal is 9 rows and 4 columns short for the code'])
   })
 
   it('lights the way out like the /back hint: the key, then its quiet why', () => {
     expect(noticeFooter(`waiting for the scan · ${NOTICE_CANCEL}`)).toEqual({ lead: 'waiting for the scan · ', cancel: true })
     expect(noticeFooter('scanned — confirm on your phone')).toEqual({ lead: 'scanned — confirm on your phone', cancel: false })
+  })
+})
+
+// The command menu is furniture under the notice card (spec 10 §3.2-E).
+describe('menuIsOpen', () => {
+  const up = { hidden: false, pane: false, asks: 0, notice: false }
+
+  it('opens on a partial command and closes for everything that outranks it', () => {
+    expect(menuIsOpen(3, up)).toBe(true)
+    expect(menuIsOpen(0, up)).toBe(false)
+    expect(menuIsOpen(3, { ...up, hidden: true })).toBe(false)
+    expect(menuIsOpen(3, { ...up, pane: true })).toBe(false)
+    expect(menuIsOpen(3, { ...up, asks: 1 })).toBe(false)
+  })
+
+  // A notice covers the menu completely. Left open underneath, it went on
+  // eating Esc — and under a sign-in code Esc is the only way out of the
+  // wait, with 'esc - cancel' printed on screen saying so (codex review).
+  it('yields to a notice card, so Esc reaches the flow waiting behind it', () => {
+    expect(menuIsOpen(3, { ...up, notice: true })).toBe(false)
   })
 })
