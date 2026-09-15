@@ -56,6 +56,9 @@ describe('NetEase scan sign-in (spec 14 §2.8)', () => {
     // An answer murmur does not model waits rather than guessing; the scan
     // loop's own deadline is what ends it.
     expect(await poll(4242)).toEqual({ status: 'waiting' })
+    // Confirmed with no cookie is not a sign-in: it keeps waiting rather
+    // than mounting an account there is no credential for (codex review).
+    expect(await poll(803)).toEqual({ status: 'waiting' })
   })
 
   it('mounts on a confirmed scan: the cookie is the entry, and no browser is named anywhere in it', async () => {
@@ -121,6 +124,7 @@ describe('Bilibili scan sign-in (spec 14 §2.8)', () => {
       value: 'SESSDATA=<redacted>; bili_jct=<redacted-jct>; DedeUserID=42',
     })
     expect(await poll(99999)).toEqual({ status: 'waiting' })
+    expect(await poll(0)).toEqual({ status: 'waiting' })
   })
 
   it('mounts on a confirmed scan, keeping the cookie and the account it names', async () => {
@@ -155,11 +159,15 @@ describe('the cookie a scan hands back (spec 14 §2.5/§2.8)', () => {
   it('writes the stored header as a jar yt-dlp can load, and the lease deletes it', () => {
     const rows = jarRowsFromHeader('SESSDATA=<redacted>; bili_jct=<redacted-jct>', 'bilibili.com')
     expect(rows).toHaveLength(2)
-    expect(rows[0]!.line.split('\t')).toEqual(['.bilibili.com', 'TRUE', '/', 'TRUE', '2000000000', 'SESSDATA', '<redacted>'])
+    // Not secure-only: yt-dlp's NetEase extractor reads its eapi endpoints
+    // over plain http, and a secure row would never be sent there — the
+    // signed-in listener's track would resolve anonymously (codex review).
+    expect(rows[0]!.line.split('\t')).toEqual(['.bilibili.com', 'TRUE', '/', 'FALSE', '2000000000', 'SESSDATA', '<redacted>'])
+    expect(jarRowsFromHeader('MUSIC_U=x', 'music.163.com')[0]!.line.split('\t')[3]).toBe('FALSE')
     const lease = writeJar(rows)
     const text = readFileSync(lease.path, 'utf-8')
     expect(text.startsWith('# Netscape HTTP Cookie File\n')).toBe(true)
-    expect(text).toContain('.bilibili.com\tTRUE\t/\tTRUE\t2000000000\tbili_jct\t<redacted-jct>')
+    expect(text).toContain('.bilibili.com\tTRUE\t/\tFALSE\t2000000000\tbili_jct\t<redacted-jct>')
     expect(lease.args).toEqual(['--cookies', lease.path])
     lease.release()
     expect(existsSync(lease.path)).toBe(false)

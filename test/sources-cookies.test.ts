@@ -234,7 +234,7 @@ describe('the cookie seam for a scanned mount', () => {
     const lease = await cookieLeaser({ jars, store })('bilibili')
     expect(lease).not.toBeNull()
     const text = readFileSync(lease!.path, 'utf-8')
-    expect(text).toContain('.bilibili.com\tTRUE\t/\tTRUE\t2000000000\tSESSDATA\t<redacted>')
+    expect(text).toContain('.bilibili.com\tTRUE\t/\tFALSE\t2000000000\tSESSDATA\t<redacted>')
     expect(text).toContain('bili_jct\t<redacted-jct>')
     expect(runs).toEqual([])
     lease!.release()

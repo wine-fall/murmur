@@ -148,7 +148,13 @@ export class BilibiliClient {
     if (!response.ok) throw new Error(`bilibili qrcode/poll: HTTP ${response.status}`)
     const parsed = QrPollSchema.parse(await response.json())
     const code = parsed.data?.code
-    if (code === 0) return { status: 'confirmed', value: setCookieHeader(response) }
+    if (code === 0) {
+      // A confirmation that carried no Set-Cookie is not a sign-in: it reads
+      // as still waiting, so the loop asks again rather than mounting an
+      // account there is no credential for (codex review).
+      const cookie = setCookieHeader(response)
+      return cookie === '' ? { status: 'waiting' } : { status: 'confirmed', value: cookie }
+    }
     if (code === 86090) return { status: 'scanned' }
     if (code === 86038) return { status: 'expired' }
     return { status: 'waiting' }

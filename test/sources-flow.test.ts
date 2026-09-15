@@ -457,6 +457,23 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.read()).toEqual({})
   })
 
+  it('Esc while the scan is confirming writes nothing, even though the sign-in itself succeeded', async () => {
+    const { host, deps, store } = build(['netease', ''], {
+      mounts: {
+        // The platform confirms, but the listener pressed Esc while the poll
+        // and the account read were in flight (codex review).
+        netease: async (show) => {
+          show('https://music.163.com/login?codekey=k')
+          host.pressEsc()
+          return { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'MUSIC_U=<redacted>', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(store.read()).toEqual({})
+    expect(host.infos).not.toContain('signed in as Chen X')
+  })
+
   it('refuses a NetEase or Bilibili mount on a host that cannot show a line off the record', async () => {
     for (const id of ['netease', 'bilibili'] as const) {
       const { host, deps, store, mounted } = build([id, ''])

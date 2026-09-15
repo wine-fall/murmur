@@ -187,7 +187,13 @@ export class NeteaseClient {
     const response = await this.send(this.url('/login/qrcode/client/login', { key, type: 1 }), { method: 'GET', headers: this.headers('') })
     if (!response.ok) throw new Error(`netease qrcode/client/login: HTTP ${response.status}`)
     const { code } = QrPollSchema.parse(await response.json())
-    if (code === 803) return { status: 'confirmed', value: setCookieHeader(response) }
+    if (code === 803) {
+      // A confirmation that carried no Set-Cookie is not a sign-in: it reads
+      // as still waiting, so the loop asks again rather than mounting an
+      // account there is no credential for (codex review).
+      const cookie = setCookieHeader(response)
+      return cookie === '' ? { status: 'waiting' } : { status: 'confirmed', value: cookie }
+    }
     if (code === 802) return { status: 'scanned' }
     if (code === 800) return { status: 'expired' }
     return { status: 'waiting' }

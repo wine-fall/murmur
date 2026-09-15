@@ -175,6 +175,12 @@ export function jarRowsFromHeader(header: string, site: string): CookieRow[] {
   // Far enough out that yt-dlp never reads a row as already expired; the
   // platform's own expiry is what actually ends the session (§2.6).
   const expiry = 2_000_000_000
+  // Not secure-only. yt-dlp's NetEase extractor reads its eapi endpoints over
+  // plain http (`_API_BASE = 'http://music.163.com/api/'`, 2026.08.19), and a
+  // row marked secure would simply not be sent there — a signed-in listener's
+  // VIP track would resolve anonymously with nothing to say why (codex
+  // review). The jar is a throwaway file handed to yt-dlp for one call to the
+  // platform the cookie came from, so the flag buys nothing here anyway.
   const rows: CookieRow[] = []
   for (const part of header.split(';')) {
     const pair = part.trim()
@@ -182,7 +188,7 @@ export function jarRowsFromHeader(header: string, site: string): CookieRow[] {
     if (eq <= 0) continue
     const name = pair.slice(0, eq)
     const value = pair.slice(eq + 1)
-    rows.push({ domain, name, value, line: [domain, 'TRUE', '/', 'TRUE', String(expiry), name, value].join('\t') })
+    rows.push({ domain, name, value, line: [domain, 'TRUE', '/', 'FALSE', String(expiry), name, value].join('\t') })
   }
   return rows
 }

@@ -472,6 +472,10 @@ async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () =>
     )
     return
   }
+  // Esc pressed while the confirming poll or the account read was in flight:
+  // the scan succeeded, but the listener asked to stop, and "cancelled —
+  // nothing was written" has to mean it (codex review).
+  if (cancelled() || deps.quit.requested) return
   if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
   else if (id === 'bilibili') await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
   else await finishMount(deps, 'qishui', result.who, result.entry as QishuiEntry)
