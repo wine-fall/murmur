@@ -16,7 +16,7 @@ import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
 import type { QishuiEntry, QishuiMountResult } from './qishui.ts'
 import { qrHalfBlocks } from './qishui.ts'
-import type { QrMountResult } from './qr.ts'
+import type { QrMountResult, QrStatus } from './qr.ts'
 import type { TasteRefresher } from './refresh.ts'
 import { redirectUri, SPOTIFY_CALLBACK_PORT, spotifyClientId, type SpotifyMountResult } from './spotify.ts'
 import type { BrowserName, SourceEntry, SourcesStore } from './store.ts'
@@ -42,11 +42,16 @@ export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: str
 // tested with fakes and the real ones are wired once (build.ts).
 export type SourceMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
-  bilibili(show: (url: string) => void, cancelled: () => boolean): Promise<QrMountResult<BilibiliEntry>>
-  netease(show: (url: string) => void, cancelled: () => boolean): Promise<QrMountResult<NeteaseEntry>>
+  bilibili(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<BilibiliEntry>>
+  netease(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<NeteaseEntry>>
   spotify(clientId: string, hooks: SpotifyHooks): Promise<SpotifyMountResult>
-  qishui(show: (url: string) => void, cancelled: () => boolean): Promise<QishuiMountResult>
+  qishui(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QishuiMountResult>
 }
+
+// Where the code's URL goes (the flow draws it), and what the wait is
+// waiting on — the two halves of the notice card the scan puts up.
+type QrShow = (url: string) => void
+type QrOnStatus = (status: QrStatus) => void
 
 export type SourcesFlowDeps = {
   host: Host
@@ -226,11 +231,27 @@ const SIGN_IN_URL: Record<CookieSource, string> = {
 // reaches for the right phone app.
 const QR_LINES: Record<QrSource, string> = {
   netease:
-    "NetEase signs in with a scan: open the NetEase Cloud Music app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
-  bilibili: "Bilibili signs in with a scan: open the Bilibili app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
+    "NetEase signs in with a scan: open the NetEase Cloud Music app, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
+  bilibili: "Bilibili signs in with a scan: open the Bilibili app, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
   qishui:
-    "Soda Music signs in with a Douyin scan: open the Douyin app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
+    "Soda Music signs in with a Douyin scan: open the Douyin app, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
 }
+
+// Which app the card's title names — a code with the wrong app pointed at it
+// is the failure this text exists to prevent.
+const QR_APPS: Record<QrSource, string> = {
+  netease: 'the NetEase Cloud Music app',
+  bilibili: 'the Bilibili app',
+  qishui: 'Douyin',
+}
+
+// The notice card's footer: what is being waited on, then the way out.
+const QR_WAITING = 'waiting for the scan · esc - cancel'
+const QR_SCANNED = 'scanned — confirm on your phone'
+
+// Where one sign-in sits in the rows being mounted this submit, so a listener
+// three codes deep knows there are two more coming. `of` 1 carries no counter.
+type Step = { at: number; of: number }
 
 // What to say when the cookie store cannot be read at all. Each of these
 // used to arrive as "sign in there", which is advice that cannot work: no
@@ -297,14 +318,18 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       // ends the submit: the rows already done stay done, the rest are not
       // started, and the sign-in in flight is told to stop.
       const stopped = (): boolean => cancelled || quit.requested
+      // The sign-ins this submit will run, counted up front: the card's title
+      // carries the position, and a refresh in between does not change it.
+      const of = toRenew.length + toMount.length
+      let at = 0
       for (const id of toRenew) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }))
       }
       if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
       for (const id of toMount) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }))
       }
     }
   } finally {
@@ -316,12 +341,19 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
 // One mount, as a result row for the next card: 'ok connected <name> — signed
 // in as <who> - <counts>' or '-- could not connect <name> - <the flow's own
 // last word>'.
-async function mountOne(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, platform: NodeJS.Platform, cancelled: () => boolean): Promise<string> {
+async function mountOne(
+  deps: SourcesFlowDeps,
+  read: () => Promise<string>,
+  id: SourceId,
+  platform: NodeJS.Platform,
+  cancelled: () => boolean,
+  step: Step,
+): Promise<string> {
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
   if (id === 'spotify') await mountSpotifyFlow(recorded, cancelled)
   else if (id === 'youtube') await mountCookieFlow(recorded, read, id, platform, cancelled)
-  else await mountQrFlow(recorded, id, cancelled)
+  else await mountQrFlow(recorded, id, cancelled, step)
   const name = SOURCE_NAMES[id]
   const who = notes.find((line) => line.startsWith('signed in as '))
   if (who !== undefined) return `ok connected ${name} — ${who} · ${counts(deps.store, id)}`
@@ -445,24 +477,42 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean)
 // the code, wait three minutes, Esc stops it. No browser is involved, so
 // none of the browser obstacles — an uninstalled Chrome, a locked cookie
 // store, a terminal without Full Disk Access — can reach this path.
-async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () => boolean): Promise<void> {
+async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () => boolean, step: Step): Promise<void> {
   const { host } = deps
   const name = SOURCE_NAMES[id]
-  // The QR is an authorization artifact: it goes to the screen only, never
-  // through `info` (which the diagnostics keep — §3.6). A host without that
-  // surface cannot be handed the code at all.
-  const show = host.showPrivate?.bind(host)
-  if (show === undefined) {
+  // The QR is an authorization artifact, and it is 21 to 25 rows tall: it
+  // goes to the notice CARD only (spec 10 §3.2-E) — never through `info`,
+  // which the diagnostics keep (§3.6) and which the program log scrolls, so
+  // a listener back from their phone found half a code and no instruction
+  // above it. A host without that surface cannot be handed the code at all.
+  const notice = host.notice?.bind(host)
+  if (notice === undefined) {
     host.info(`I cannot show the code here — run murmur in a terminal front-end to mount ${name}.`)
     return
   }
   host.info(QR_LINES[id])
+  const title = `${step.of > 1 ? `${step.at}/${step.of} ` : ''}${name} — scan with ${QR_APPS[id]}`
+  // Kept so the status change can redraw the same code under a new footer.
+  let code: readonly string[] = []
   let result: QrMountResult<NeteaseEntry> | QrMountResult<BilibiliEntry> | QishuiMountResult
   try {
-    result = await deps.mounts[id]((url) => show(qrHalfBlocks(url).join('\n')), cancelled)
+    result = await deps.mounts[id](
+      (url) => {
+        code = qrHalfBlocks(url)
+        notice(title, code, QR_WAITING)
+      },
+      cancelled,
+      (status) => {
+        if (status === 'scanned') notice(title, code, QR_SCANNED)
+      },
+    )
   } catch (err) {
     host.info(`could not reach ${name} (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)
     return
+  } finally {
+    // However it ended, the code is dead: an expired one left on screen is
+    // an invitation to keep scanning it.
+    notice(title, [])
   }
   if (!result.ok) {
     host.info(

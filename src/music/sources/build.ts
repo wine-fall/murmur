@@ -142,10 +142,10 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
 export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
   return {
     youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
-    bilibili: (show, cancelled) => mountBilibiliQr({}, { show, cancelled }),
-    netease: (show, cancelled) => mountNeteaseQr({}, { show, cancelled }),
+    bilibili: (show, cancelled, onStatus) => mountBilibiliQr({}, { show, cancelled, onStatus }),
+    netease: (show, cancelled, onStatus) => mountNeteaseQr({}, { show, cancelled, onStatus }),
     spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),
-    qishui: (show, cancelled) => mountQishui({}, { show, cancelled }),
+    qishui: (show, cancelled, onStatus) => mountQishui({}, { show, cancelled, onStatus }),
   }
 }
 

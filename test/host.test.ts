@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -185,6 +186,30 @@ describe('CliHost', () => {
   it('writes no dev log when the knob is unset', () => {
     const host = new CliHost(new PassThrough())
     host.info('quiet') // must not throw or create files
+  })
+
+  // spec 10 §3.2-E: the plain host has no card, so a notice is its title and
+  // its body lines, printed — and kept out of the dev log like the code it is.
+  it('prints a notice as title + body, and mirrors none of it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'murmur-host-'))
+    const devLog = join(dir, 'dev.log')
+    const host = new CliHost(new PassThrough(), { devLog })
+    const lines: string[] = []
+    const log = vi.spyOn(console, 'log').mockImplementation((line: string) => void lines.push(line))
+    try {
+      host.notice('1/1 NetEase — scan with the NetEase Cloud Music app', ['█▀█', '█ █'], 'waiting for the scan · esc - cancel')
+      host.notice('1/1 NetEase — scan with the NetEase Cloud Music app', [])
+    } finally {
+      log.mockRestore()
+    }
+    expect(lines).toEqual([
+      '1/1 NetEase — scan with the NetEase Cloud Music app',
+      '█▀█',
+      '█ █',
+      'waiting for the scan · esc - cancel',
+    ])
+    expect(existsSync(devLog)).toBe(false)
+    await rm(dir, { recursive: true, force: true })
   })
 
   it('names its own version in the banner (the bug form asks for it)', () => {

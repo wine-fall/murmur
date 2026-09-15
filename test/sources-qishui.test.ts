@@ -173,6 +173,30 @@ describe('mountQishui (the QR conversation, polled)', () => {
     expect(waits.reduce((a, b) => a + b, 0)).toBe(2 * QR_POLL_MS)
   })
 
+  // Soda has its own poll loop rather than scanToSignIn's, and the card's
+  // footer has to follow the scan here too (spec 10 §3.2-E): Douyin's own
+  // words ('new' / 'scanned' / 'confirmed') come back as the shared ones,
+  // reported on CHANGE — three minutes is ninety polls.
+  it('reports the scanned state once, in the words the card speaks', async () => {
+    let polls = 0
+    const { fetch } = fakeFetch({
+      '/passport/web/get_qrcode/': QR,
+      '/passport/web/check_qrconnect/': () =>
+        ++polls < 4
+          ? { body: { data: { status: polls === 1 ? 'new' : 'scanned' } } }
+          : { body: { data: { status: 'confirmed' } }, headers: { 'set-cookie': 'sessionid=<redacted-s>; Path=/' } },
+      '/luna/pc/me': ME,
+    })
+    const seen: string[] = []
+    const result = await mountQishui(
+      { fetch, sleep: async () => {}, random: () => '1111111111111111' },
+      { show: () => {}, onStatus: (status) => void seen.push(status), timeoutMs: 60_000 },
+    )
+    expect(result).toMatchObject({ ok: true, who: 'Soda Listener' })
+    // Two 'scanned' polls, one report.
+    expect(seen).toEqual(['waiting', 'scanned', 'confirmed'])
+  })
+
   it('gives up at the timeout with the typed outcome, and stops on cancel', async () => {
     const { fetch } = fakeFetch({ '/passport/web/get_qrcode/': QR, '/passport/web/check_qrconnect/': { body: { data: { status: 'new' } } } })
     let clock = 0

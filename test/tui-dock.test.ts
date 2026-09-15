@@ -18,6 +18,14 @@ import {
   cardTitle,
   cardTopRow,
   commandMatches,
+  menuIsOpen,
+  NOTICE_CANCEL,
+  noticeBody,
+  noticeFooter,
+  noticeRows,
+  noticeShortfall,
+  noticeTopRow,
+  noticeWidth,
   HINT_ROTATE_MS,
   inputHints,
   heldAwayFromTail,
@@ -31,6 +39,8 @@ import {
   pickStart,
   pickToggle,
   visibleLogRows,
+  Z_MENU,
+  Z_NOTICE,
 } from '../tui/src/dock.ts'
 
 describe('outbound', () => {
@@ -378,5 +388,83 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
     const both = pickToggle(pickMove(start, 2, options.length), options, true)
     expect(pickAnswer(both, options)).toBe('netease refresh')
     expect(pickAnswer(pickToggle(start, options, true), options)).toBe('')
+  })
+})
+
+// The notice card (spec 10 §3.2-E): a sign-in code, read and not answered.
+// Its geometry is exact rather than estimated — the body never wraps.
+describe('the notice card', () => {
+  const QR = Array.from({ length: 25 }, () => '█'.repeat(49))
+  const notice = { v: 1 as const, type: 'notice' as const, title: '2/3 Bilibili — scan with the Bilibili app', body: QR, footer: `waiting for the scan · ${NOTICE_CANCEL}` }
+
+  it('stands on its body, its footer and its frame — nothing wrapped', () => {
+    // 25 body rows + the footer and its top margin + border (2) + padding (2).
+    expect(noticeRows(QR, notice.footer)).toBe(31)
+    expect(noticeRows(QR)).toBe(29)
+  })
+
+  it('is cut to its content, so a 49-column code stays scannable and whole', () => {
+    // The code's own width plus the border (2) and the padding (4) — the same
+    // card on a wide terminal, because a wider one would only add dead space.
+    expect(noticeWidth(QR, 80)).toBe(55)
+    expect(noticeWidth(QR, 120)).toBe(55)
+    // The title is measured with the body: the border spends the same room on it.
+    expect(noticeWidth([`${notice.title} and then some more`, ...QR], 120)).toBe(66)
+    // And never wider than the terminal it is drawn in.
+    expect(noticeWidth(QR, 40)).toBe(36)
+  })
+
+  it('floats above the resting input, which a notice never takes', () => {
+    // height 40, a one-row input: the gap row, the input, then the card.
+    expect(noticeTopRow(notice, 120, 40, 1)).toBe(40 - 1 - 1 - 31)
+    expect(noticeTopRow(notice, 120, 10, 1)).toBe(1)
+  })
+
+  it('says how far short a small terminal is instead of drawing half a code', () => {
+    expect(noticeShortfall(notice, 120, 40, 1)).toEqual({ rows: 0, cols: 0 })
+    // 31 rows + the gap row + the input = 33; a 24-row terminal is 9 short.
+    expect(noticeShortfall(notice, 120, 24, 1)).toEqual({ rows: 9, cols: 0 })
+    expect(noticeBody(notice, 120, 40, 1)).toEqual(QR)
+    expect(noticeBody(notice, 120, 24, 1)).toEqual(['this terminal is 9 rows short for the code'])
+    expect(noticeBody(notice, 120, 32, 1)).toEqual(['this terminal is 1 row short for the code'])
+  })
+
+  // A terminal too NARROW folds the code instead of cutting it off, which is
+  // the same unscannable nothing and does not even look broken: the card was
+  // drawn full, with a wrapped code in it (codex review).
+  it('counts the columns too — a folded code is as unscannable as a cut one', () => {
+    // 49 columns + border (2) + padding (4) = 55, and the card may use cols-4.
+    expect(noticeShortfall(notice, 59, 40, 1)).toEqual({ rows: 0, cols: 0 })
+    expect(noticeShortfall(notice, 55, 40, 1)).toEqual({ rows: 0, cols: 4 })
+    expect(noticeBody(notice, 55, 40, 1)).toEqual(['this terminal is 4 columns short for the code'])
+    expect(noticeBody(notice, 55, 24, 1)).toEqual(['this terminal is 9 rows and 4 columns short for the code'])
+  })
+
+  it('lights the way out like the /back hint: the key, then its quiet why', () => {
+    expect(noticeFooter(`waiting for the scan · ${NOTICE_CANCEL}`)).toEqual({ lead: 'waiting for the scan · ', cancel: true })
+    expect(noticeFooter('scanned — confirm on your phone')).toEqual({ lead: 'scanned — confirm on your phone', cancel: false })
+  })
+})
+
+describe('menuIsOpen', () => {
+  const up = { hidden: false, pane: false, asks: 0 }
+
+  it('opens on a partial command and closes for everything that outranks it', () => {
+    expect(menuIsOpen(3, up)).toBe(true)
+    expect(menuIsOpen(0, up)).toBe(false)
+    expect(menuIsOpen(3, { ...up, hidden: true })).toBe(false)
+    expect(menuIsOpen(3, { ...up, pane: true })).toBe(false)
+    expect(menuIsOpen(3, { ...up, asks: 1 })).toBe(false)
+  })
+})
+
+// The key router's precedence is list card > command menu > notice / log, and
+// the z-order has to say the same thing: the menu answers Esc while it is up,
+// so it must be the surface the listener can see. A menu left invisible under
+// a notice card went on eating Esc while the card printed 'esc - cancel'
+// (codex review).
+describe('the float z-order (spec 10 §3.2)', () => {
+  it('puts the command menu over a notice card, because it is the one taking Esc', () => {
+    expect(Z_MENU).toBeGreaterThan(Z_NOTICE)
   })
 })

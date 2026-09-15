@@ -129,6 +129,51 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     }
   })
 
+  it('a notice reaches the live client only — never the dev log, never a later attach (spec 10 §3.2-E)', async () => {
+    // What it carries is a sign-in code that expires in minutes: mirroring it
+    // would keep it in a file a /bug report attaches, and replaying it would
+    // hand a fresh attach a dead code.
+    const devLog = join(dir, 'notice.log')
+    const logged = new IpcHost({
+      socketPath: join(dir, 'notice.sock'),
+      identity: { brain: 'stub', voice: 'stub' },
+      devLog,
+    })
+    await logged.listen()
+    try {
+      const watching = await FakeClient.open(join(dir, 'notice.sock'))
+      clients.push(watching)
+      watching.attach()
+      await watching.settle()
+      logged.notice('1/1 NetEase — scan with the NetEase Cloud Music app', ['█▀█', '█ █'], 'waiting for the scan · esc - cancel')
+      await watching.settle()
+      expect(watching.received.filter((m) => m.type === 'notice')).toEqual([
+        {
+          v: 1,
+          type: 'notice',
+          title: '1/1 NetEase — scan with the NetEase Cloud Music app',
+          body: ['█▀█', '█ █'],
+          footer: 'waiting for the scan · esc - cancel',
+        },
+      ])
+      const { readFileSync } = await import('node:fs')
+      expect(existsSync(devLog) ? readFileSync(devLog, 'utf8') : '').not.toContain('█')
+      // A second notice REPLACES the first: the footer tracks the scan.
+      logged.notice('1/1 NetEase — scan with the NetEase Cloud Music app', ['█▀█', '█ █'], 'scanned — confirm on your phone')
+      await watching.settle()
+      expect(watching.received.filter((m) => m.type === 'notice')).toHaveLength(2)
+      watching.close()
+      await watching.settle()
+      const later = await FakeClient.open(join(dir, 'notice.sock'))
+      clients.push(later)
+      later.attach()
+      await later.settle()
+      expect(later.types()).not.toContain('notice')
+    } finally {
+      await logged.close()
+    }
+  })
+
   async function client(): Promise<FakeClient> {
     const c = await FakeClient.open(socketPath)
     clients.push(c)

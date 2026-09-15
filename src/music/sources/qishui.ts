@@ -13,7 +13,7 @@ import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
 import type { MountResult } from './netease.ts'
-import { QR_POLL_MS, QR_TIMEOUT_MS, waitBetweenPolls } from './qr.ts'
+import { QR_POLL_MS, QR_TIMEOUT_MS, waitBetweenPolls, type QrStatus } from './qr.ts'
 
 export { QR_POLL_MS, QR_TIMEOUT_MS }
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
@@ -284,8 +284,20 @@ export class QishuiClient {
 export type QishuiMountOptions = {
   // Where the QR's URL is shown (the flow renders it as half-blocks).
   show: (url: string) => void
+  // What the wait is waiting on, reported when it CHANGES — the same hook
+  // scanToSignIn offers, so the notice card's footer follows a Douyin scan
+  // exactly as it follows the other two (spec 10 §3.2-E).
+  onStatus?: (status: QrStatus) => void
   timeoutMs?: number
   cancelled?: () => boolean
+}
+
+// Douyin's own vocabulary in the words the card speaks. 'new' is a code
+// nobody has picked up yet, and so is anything else it may answer: the card
+// says the same thing either way, and an unknown word must not read as
+// progress.
+function qrStatusOf(status: string): QrStatus {
+  return status === 'scanned' || status === 'confirmed' || status === 'expired' ? status : 'waiting'
 }
 
 export type QishuiMountResult = MountResult<QishuiEntry> | { ok: false; reason: 'timeout' | 'cancelled' }
@@ -299,9 +311,15 @@ export async function mountQishui(deps: QishuiDeps, opts: QishuiMountOptions): P
   const qr = await client.issueQr()
   opts.show(qr.url)
   const deadline = now().getTime() + (opts.timeoutMs ?? QR_TIMEOUT_MS)
+  let said: QrStatus | null = null
   while (now().getTime() < deadline) {
     if (opts.cancelled?.() === true) return { ok: false, reason: 'cancelled' }
     const poll = await client.pollQr(qr.token, qr.cookie)
+    const seen = qrStatusOf(poll.status)
+    if (seen !== said) {
+      said = seen
+      opts.onStatus?.(seen)
+    }
     if (poll.status === 'confirmed' && poll.sessionId !== undefined) {
       const random = deps.random ?? randomDigits
       const entry: QishuiEntry = { sessionCookie: poll.sessionId, deviceId: random(), installId: random() }
