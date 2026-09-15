@@ -203,6 +203,10 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
   // `back` says a typed '/back' re-asks the previous step (spec 06 §3.4):
   // the card names it in its action row, so the way back is read where the
   // question is, not only in the intro that scrolled off. Additive.
+  // `step` is the question's place in a numbered run (1-based), which only
+  // the engine knows: the card titles itself '2/3'. A step walked back with
+  // '/back' is re-asked with the SAME number, and an ask that is not part of
+  // a run carries none rather than an invented one. Additive.
   z.object({
     v,
     type: z.literal('ask'),
@@ -211,6 +215,7 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     options: z.array(AskOptionSchema).optional(),
     multi: z.boolean().optional(),
     back: z.boolean().optional(),
+    step: z.object({ at: z.number().int().positive(), of: z.number().int().positive() }).optional(),
   }),
   // Every pending ask just died with its flow (the listener's Esc stopped it):
   // the client drops its cards. Additive, like `ask`.

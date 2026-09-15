@@ -96,7 +96,15 @@ export type AskKind = 'question' | 'consent'
 // text carries the same rows numbered ('>> 1) [x] NetEase - ...'), so a host
 // without a list surface shows the text alone and the listener answers with
 // numbers or names.
-export type AskChoices = { options?: readonly AskOption[]; multi?: boolean; back?: boolean }
+// `step` is the question's place in a numbered run (1-based), known only to
+// the engine that walks the steps: the TUI titles the card '2/3', and an ask
+// outside a run carries none.
+export type AskChoices = {
+  options?: readonly AskOption[]
+  multi?: boolean
+  back?: boolean
+  step?: { at: number; of: number }
+}
 
 // Who the keyboard is talking to. 'guide' while the setup guide holds the
 // floor, 'report' while the listener is writing up a bug or a wish, 'radio'
@@ -116,6 +124,7 @@ export function ask(host: Host, text: string, kind: AskKind, choices?: AskChoice
   if (host.ask !== undefined) host.ask(text, kind, choices)
   else {
     const hints = [
+      ...(choices?.step !== undefined ? [`(question ${String(choices.step.at)} of ${String(choices.step.of)})`] : []),
       ...(choices?.options !== undefined ? ['numbers or names, space-separated · Enter keeps it as it is'] : []),
       ...(choices?.back === true ? ['(/back returns to the previous question)'] : []),
     ]

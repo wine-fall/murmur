@@ -29,6 +29,10 @@ const ENGINE_MESSAGES: EngineMessage[] = [
   // `back` says /back is live for this step (spec 06 §3.4): the card shows it.
   { v: 1, type: 'ask', text: 'what do you want from the radio?', kind: 'question', back: true },
   { v: 1, type: 'ask', text: 'may I read your history? [y/N]', kind: 'consent', back: true },
+  // `step` is the engine's own place in a numbered run (spec 10 §3.2-B): the
+  // card titles itself `2/3`. 1-based, and a re-asked step carries its own
+  // number again.
+  { v: 1, type: 'ask', text: 'what should I call you?', kind: 'question', step: { at: 1, of: 3 } },
   // A question with rows to tick (spec 10 §3.2-D, the /sources list): the
   // answer is still a `line` — the ticked keys, space-joined.
   {
@@ -165,6 +169,13 @@ describe('the wire protocol (spec 10 §2.3)', () => {
     expect(decodeTuiMessage(JSON.stringify({ v: 1, type: 'line', text: 7 }))).toBeNull()
     expect(decodeEngineMessage(JSON.stringify({ v: 1, type: 'notice', title: 'x' }))).toBeNull()
     expect(decodeEngineMessage(JSON.stringify({ v: 1, type: 'notice', title: 'x', body: 'y' }))).toBeNull()
+  })
+
+  it('rejects an ask step that is not a 1-based place in a run', () => {
+    const ask = { v: 1, type: 'ask', text: 'who is listening?', kind: 'question' }
+    expect(decodeEngineMessage(JSON.stringify({ ...ask, step: { at: 0, of: 3 } }))).toBeNull()
+    expect(decodeEngineMessage(JSON.stringify({ ...ask, step: { at: 1.5, of: 3 } }))).toBeNull()
+    expect(decodeEngineMessage(JSON.stringify({ ...ask, step: { at: 1 } }))).toBeNull()
   })
 
   it('rejects a foreign envelope version', () => {

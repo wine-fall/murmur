@@ -378,6 +378,7 @@ export class IpcHost implements Host {
       ...(choices?.options !== undefined && { options: [...choices.options] }),
       ...(choices?.multi !== undefined && { multi: choices.multi }),
       ...(choices?.back === true && { back: true }),
+      ...(choices?.step !== undefined && { step: choices.step }),
     } as const
     this.pendingAsks.push(message)
     if (this.client !== null) this.write(this.client, message)

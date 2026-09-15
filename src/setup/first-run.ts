@@ -136,7 +136,10 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
       const earlier = given[step.index]!
       // The earlier answer rides as a card note, and an empty line there keeps
       // it (the least surprising reading of Enter).
-      ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question', back(i))
+      // The number rides on the ask (spec 10 §3.2-B): a step re-asked by
+      // '/back' comes back as ITS own place in the run, not the next one.
+      const choices = { ...back(i), step: { at: step.index + 1, of: SEED_QUESTIONS.length } }
+      ask(host, earlier === '' ? question : `${question}\n(you said: ${earlier} — Enter keeps it)`, 'question', choices)
       const line = (await read()).trim()
       if (line === BACK) {
         if (i > 0) i--

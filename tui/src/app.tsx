@@ -337,16 +337,14 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // they do not scroll away with the log. The card shows the head — the one
   // the next typed line answers (lineReader consumes in ask order; a
   // single-slot dock could show B while the answer lands on A, codex review).
-  // Questions carry a client-side ordinal for the card title's light counter.
   // A question with rows to tick carries its cursor and ticks (`pick`): the
   // list is the answer field, so its state lives with the question it answers.
-  const [asks, setAsks] = useState<(Ask & { no?: number; pick?: Pick })[]>([])
+  const [asks, setAsks] = useState<(Ask & { pick?: Pick })[]>([])
   // The notice card (§3.2-E), at most one: a sign-in code the listener reads
   // while the flow behind it waits. Not a queue and not replayed on attach.
   const [notice, setNotice] = useState<Notice | null>(null)
   const asksRef = useRef(asks)
   asksRef.current = asks
-  const questionNo = useRef(0)
   const input = useRef<InputRenderable>(null)
   // The composer a floor gets in place of the input line (§3.4): a real
   // multi-line field. A textarea reports that its content changed, not what
@@ -434,7 +432,6 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             ...queue,
             {
               ...message,
-              ...(message.kind === 'question' && { no: ++questionNo.current }),
               ...(message.options !== undefined && { pick: pickStart(message.options) }),
             },
           ])
@@ -1341,7 +1338,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           const divideAt = list !== undefined ? -1 : options ? lines.findIndex((l) => l.role === 'option') : lines.length - 1
           return (
             <box
-              title={cardTitle(head.kind, head.no ?? 0, head.text, list)}
+              title={cardTitle(head.kind, head.step, head.text, list)}
               style={{
                 border: true,
                 borderStyle: 'rounded',
