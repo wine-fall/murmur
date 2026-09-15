@@ -39,6 +39,8 @@ import {
   pickStart,
   pickToggle,
   visibleLogRows,
+  Z_MENU,
+  Z_NOTICE,
 } from '../tui/src/dock.ts'
 
 describe('outbound', () => {
@@ -444,9 +446,8 @@ describe('the notice card', () => {
   })
 })
 
-// The command menu is furniture under the notice card (spec 10 §3.2-E).
 describe('menuIsOpen', () => {
-  const up = { hidden: false, pane: false, asks: 0, notice: false }
+  const up = { hidden: false, pane: false, asks: 0 }
 
   it('opens on a partial command and closes for everything that outranks it', () => {
     expect(menuIsOpen(3, up)).toBe(true)
@@ -455,11 +456,15 @@ describe('menuIsOpen', () => {
     expect(menuIsOpen(3, { ...up, pane: true })).toBe(false)
     expect(menuIsOpen(3, { ...up, asks: 1 })).toBe(false)
   })
+})
 
-  // A notice covers the menu completely. Left open underneath, it went on
-  // eating Esc — and under a sign-in code Esc is the only way out of the
-  // wait, with 'esc - cancel' printed on screen saying so (codex review).
-  it('yields to a notice card, so Esc reaches the flow waiting behind it', () => {
-    expect(menuIsOpen(3, { ...up, notice: true })).toBe(false)
+// The key router's precedence is list card > command menu > notice / log, and
+// the z-order has to say the same thing: the menu answers Esc while it is up,
+// so it must be the surface the listener can see. A menu left invisible under
+// a notice card went on eating Esc while the card printed 'esc - cancel'
+// (codex review).
+describe('the float z-order (spec 10 §3.2)', () => {
+  it('puts the command menu over a notice card, because it is the one taking Esc', () => {
+    expect(Z_MENU).toBeGreaterThan(Z_NOTICE)
   })
 })

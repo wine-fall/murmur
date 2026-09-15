@@ -41,6 +41,8 @@ import {
   pickStart,
   pickToggle,
   visibleLogRows,
+  Z_MENU,
+  Z_NOTICE,
   type Ask,
   type Notice,
   type Pick,
@@ -377,7 +379,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     setDraftLines(area.editorView.getTotalVirtualLineCount())
   }
   const matches = commandMatches(typed)
-  const menuOpen = menuIsOpen(matches.length, { hidden: menuHidden, pane: paneOpen, asks: asks.length, notice: notice !== null })
+  const menuOpen = menuIsOpen(matches.length, { hidden: menuHidden, pane: paneOpen, asks: asks.length })
   const menuSel = Math.min(menuAt, Math.max(0, matches.length - 1))
   // Mirrored for the keyboard handler and submit, like the pane's ref.
   const menu = useRef({ open: false, at: 0, count: 0, selected: '' })
@@ -1235,7 +1237,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 left: gutter + 1,
                 // A gap row above the input row, however tall its composer is.
                 bottom: 1 + rows,
-                zIndex: 100,
+                // Over a notice card: the menu is what answers Esc while it
+                // is up, so it is what the listener must see (Z_MENU).
+                zIndex: Z_MENU,
                 paddingLeft: 1,
                 paddingRight: 1,
                 backgroundColor: CARD,
@@ -1278,7 +1282,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
                 position: 'absolute',
                 left: gutter + Math.floor((cols - width) / 2),
                 bottom: 1 + rows,
-                zIndex: 100,
+                zIndex: Z_NOTICE,
                 width,
                 paddingLeft: 2,
                 paddingRight: 2,

@@ -464,11 +464,14 @@ the code). **A terminal too short for the whole body is told the number** —
 `this terminal is N rows short for the code`, or `N columns`, or both — and
 never shown a code it cannot hold: a code cut off, or folded to fit, is
 scanned, does nothing, and says nothing about why (`noticeShortfall` /
-`noticeBody` in `tui/src/dock.ts`). The command menu **yields** to the card
-(`menuIsOpen`): the card covers it whole, and a menu the listener cannot see
-would go on taking Esc — the one way out of the wait, which the footer is at
-that moment naming. The plain host has no card, so it prints the title, the
-body and the footer, and mirrors none of it.
+`noticeBody` in `tui/src/dock.ts`). The key router's precedence is unchanged —
+**list card > command menu > notice / log** — and the **z-order says the same
+thing**, because what takes the keys must be what the listener can see: a
+command menu opened while a code is up draws OVER the card (`Z_MENU` /
+`Z_NOTICE` in `dock.ts`), answers Esc by putting itself away, and the next Esc
+reaches the flow. Left underneath, it went on eating Esc while the card's
+footer printed `esc - cancel` (codex review). The plain host has no card, so it
+prints the title, the body and the footer, and mirrors none of it.
 
 **C. Commands**: `/quit` (spec 01), `/done` (guide mode), `/setup` (§3.4
 mid-broadcast recall), `/bug` and `/feature-request` (the feedback channel

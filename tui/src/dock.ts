@@ -321,10 +321,20 @@ export function noticeTopRow(notice: Notice, cols: number, height: number, input
   return Math.max(1, height - 1 - inputRows - noticeRows(noticeBody(notice, cols, height, inputRows), notice.footer))
 }
 
-// Whether the command menu is up. It is furniture UNDER the notice card, which
-// covers it whole: a menu the listener cannot see must not go on taking Esc,
-// which is the only way out of a sign-in wait — with 'esc - cancel' printed on
-// the card saying so (codex review).
-export function menuIsOpen(matches: number, over: { hidden: boolean; pane: boolean; asks: number; notice: boolean }): boolean {
-  return matches > 0 && !over.hidden && !over.pane && over.asks === 0 && !over.notice
+// Whether the command menu is up: a partial command, not put away, with
+// nothing that outranks it in the way. A list card owns the arrows and Space
+// while it is up, and the settings pane owns the whole keyboard.
+export function menuIsOpen(matches: number, over: { hidden: boolean; pane: boolean; asks: number }): boolean {
+  return matches > 0 && !over.hidden && !over.pane && over.asks === 0
 }
+
+// The z-order of the floating surfaces, and the reason it is not arbitrary:
+// **what takes the keys is what is on top**. The key router's precedence is
+// list card > command menu > notice / log, so a menu opened while a sign-in
+// code is up draws OVER the card — it is the one answering Esc, and an
+// invisible surface that still eats Esc is the bug this ordering names (codex
+// review: the card covered the menu, Esc went to the menu, and the card's own
+// 'esc - cancel' told the listener otherwise). Esc there puts the menu away
+// and the next one reaches the flow, which is the precedence working.
+export const Z_NOTICE = 100
+export const Z_MENU = 110
