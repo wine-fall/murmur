@@ -54,11 +54,18 @@ function build(
   const mounted: string[] = []
   const mounts: SourceMounts = {
     youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
-    bilibili: async (b) => (mounted.push(`bilibili:${b.browser}`), { ok: false, reason: 'login-required' }),
-    netease: async (b) => (
-      mounted.push(`netease:${b.browser}`),
-      { ok: true, who: 'Chen X', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }), userId: '1', likedPlaylistId: '2' } }
-    ),
+    bilibili: async (show, cancelled) => {
+      show('https://account.bilibili.com/h5/scan?qrcode_key=k')
+      mounted.push('bilibili:qr')
+      if (cancelled()) return { ok: false, reason: 'cancelled' }
+      return { ok: false, reason: 'login-required' }
+    },
+    netease: async (show, cancelled) => {
+      show('https://music.163.com/login?codekey=k')
+      mounted.push('netease:qr')
+      if (cancelled()) return { ok: false, reason: 'cancelled' }
+      return { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'MUSIC_U=<redacted>', userId: '1', likedPlaylistId: '2' } }
+    },
     spotify: async (clientId, hooks) => {
       hooks.onRedirect('http://127.0.0.1:39917/callback')
       hooks.onUrl('https://accounts.spotify.com/authorize?client_id=x')
@@ -186,31 +193,31 @@ describe('runSources (spec 14 §3.1)', () => {
     // First read finds no login; after the listener signs in and presses
     // Enter, the second read finds one.
     let attempt = 0
-    const { host, deps, store } = build(['bilibili', '', 'bilibili'], {
+    const { host, deps, store } = build(['youtube', '', 'youtube'], {
       onCookieDrop: () => dropped.push(1),
       openUrl: (url) => opened.push(url),
       mounts: {
-        bilibili: async () => (attempt++ === 0 ? { ok: false, reason: 'login-required' } : { ok: true, who: 'Zach G', entry: { browser: 'chrome', mid: '42' } }),
+        youtube: async () => (attempt++ === 0 ? { ok: false, reason: 'login-required' } : { ok: true, who: 'Zach G', entry: { browser: 'chrome' } }),
       },
     })
     await runSources(deps)
-    expect(opened).toEqual(['https://passport.bilibili.com/login'])
-    expect(host.infos.some((l) => /opened Bilibili in Chrome/.test(l))).toBe(true)
+    expect(opened).toEqual(['https://accounts.google.com/ServiceLogin?service=youtube'])
+    expect(host.infos.some((l) => /opened YouTube in Chrome/.test(l))).toBe(true)
     expect(host.asks.some((a) => /press enter/i.test(a.text))).toBe(true)
     // The cached export is dropped, or the retry would answer from the read
     // taken before they signed in.
     expect(dropped).toHaveLength(1)
     expect(host.infos).toContain('signed in as Zach G')
-    expect(store.read().bilibili).toMatchObject({ browser: 'chrome', status: 'ok' })
+    expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok' })
   })
 
   it('still no login after the wait says so plainly and writes nothing', async () => {
-    const { host, deps, store } = build(['bilibili', '', ''], {
+    const { host, deps, store } = build(['youtube', '', ''], {
       openUrl: () => {},
-      mounts: { bilibili: async () => ({ ok: false, reason: 'login-required' }) },
+      mounts: { youtube: async () => ({ ok: false, reason: 'login-required' }) },
     })
     await runSources(deps)
-    expect(host.infos).toContain('still no Bilibili login in Chrome — /sources when you have signed in.')
+    expect(host.infos).toContain('still no YouTube login in Chrome — /sources when you have signed in.')
     expect(store.read()).toEqual({})
   })
 
@@ -224,10 +231,10 @@ describe('runSources (spec 14 §3.1)', () => {
       ['no-ytdlp', /yt-dlp/],
     ] as const
     for (const [reason, matcher] of cases) {
-      const { host, deps, store } = build(['netease', ''], {
+      const { host, deps, store } = build(['youtube', ''], {
         platform: 'darwin',
         mounts: {
-          netease: async () => {
+          youtube: async () => {
             throw new BrowserCookieError('chrome', reason, 'yt-dlp said so')
           },
         },
@@ -239,7 +246,7 @@ describe('runSources (spec 14 §3.1)', () => {
       expect(store.read()).toEqual({})
       // The obstacle is a gap row in the next card, in obstacleLine's words.
       const row = host.asks.at(-1)!.text.split('\n')[1]!
-      expect(row.startsWith('-- could not connect NetEase — ')).toBe(true)
+      expect(row.startsWith('-- could not connect YouTube — ')).toBe(true)
       expect(matcher.test(row)).toBe(true)
     }
   })
@@ -251,38 +258,38 @@ describe('runSources (spec 14 §3.1)', () => {
     const opened: string[] = []
     const dropped: number[] = []
     let attempt = 0
-    const { host, deps, store } = build(['netease', '', 'netease'], {
+    const { host, deps, store } = build(['youtube', '', 'youtube'], {
       platform: 'darwin',
       openUrl: (url) => opened.push(url),
       onCookieDrop: () => dropped.push(1),
       mounts: {
-        netease: async () => {
+        youtube: async () => {
           if (attempt++ === 0) throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
-          return { ok: true, who: 'Zach G', entry: { browser: 'chrome', userId: '1', likedPlaylistId: '2' } }
+          return { ok: true, who: 'Zach G', entry: { browser: 'chrome' } }
         },
       },
     })
     await runSources(deps)
-    expect(opened).toEqual(['https://music.163.com/'])
+    expect(opened).toEqual(['https://accounts.google.com/ServiceLogin?service=youtube'])
     expect(host.asks.some((a) => /press enter/i.test(a.text))).toBe(true)
     expect(dropped).toHaveLength(1)
     expect(host.infos.some((l) => /no profile named/.test(l))).toBe(false)
     expect(host.infos).toContain('signed in as Zach G')
-    expect(store.read().netease).toMatchObject({ browser: 'chrome', status: 'ok' })
+    expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok' })
   })
 
   it('a profile still absent after the wait ends in the plain no-login word', async () => {
-    const { host, deps, store } = build(['netease', '', ''], {
+    const { host, deps, store } = build(['youtube', '', ''], {
       platform: 'darwin',
       openUrl: () => {},
       mounts: {
-        netease: async () => {
+        youtube: async () => {
           throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
         },
       },
     })
     await runSources(deps)
-    expect(host.infos).toContain('still no NetEase login in Chrome — /sources when you have signed in.')
+    expect(host.infos).toContain('still no YouTube login in Chrome — /sources when you have signed in.')
     expect(host.infos.some((l) => /no profile named/.test(l))).toBe(false)
     expect(store.read()).toEqual({})
   })
@@ -307,16 +314,16 @@ describe('runSources (spec 14 §3.1)', () => {
     // the cancel latch — or an Esc would mount the account anyway.
     let attempts = 0
     let escape: () => void = () => {}
-    const built = build(['bilibili', '', ''], {
+    const built = build(['youtube', '', ''], {
       openUrl: () => {},
       mounts: {
-        bilibili: async () => {
+        youtube: async () => {
           attempts++
           if (attempts === 1) {
             escape()
             return { ok: false, reason: 'login-required' }
           }
-          return { ok: true, who: 'Zach G', entry: { browser: 'chrome', mid: '42' } }
+          return { ok: true, who: 'Zach G', entry: { browser: 'chrome' } }
         },
       },
     })
@@ -329,10 +336,10 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('an unreadable cookie store quotes yt-dlp rather than claiming Chrome is missing', async () => {
-    const { host, deps } = build(['netease', ''], {
+    const { host, deps } = build(['youtube', ''], {
       platform: 'win32',
       mounts: {
-        netease: async () => {
+        youtube: async () => {
           throw new BrowserCookieError('chrome', 'unreadable', 'ERROR: Failed to decrypt with DPAPI')
         },
       },
@@ -349,9 +356,9 @@ describe('runSources (spec 14 §3.1)', () => {
     const before = process.env[CHROME_PROFILE_ENV]
     process.env[CHROME_PROFILE_ENV] = 'Profile 2'
     try {
-      const { deps, store } = build(['netease', 'netease'])
+      const { deps, store } = build(['youtube', 'youtube'])
       await runSources(deps)
-      expect(store.read().netease).toMatchObject({ browser: 'chrome', profile: 'Profile 2' })
+      expect(store.read().youtube).toMatchObject({ browser: 'chrome', profile: 'Profile 2' })
     } finally {
       if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
       else process.env[CHROME_PROFILE_ENV] = before
@@ -402,6 +409,80 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos.join('\n')).not.toContain('█')
     expect(host.infos.some((l) => /Douyin/.test(l))).toBe(true)
     expect(store.read().qishui).toMatchObject({ sessionCookie: 's', status: 'ok' })
+  })
+
+  // NetEase and Bilibili mount by scanning, exactly as Soda does — no
+  // browser, so none of the browser obstacles can reach this path (#221).
+  it('mounts NetEase by scan: the code on the unlogged surface, the app named, no browser anywhere', async () => {
+    const { host, deps, store, mounted } = build(['netease', 'netease'])
+    await runSources(deps)
+    expect(mounted).toEqual(['netease:qr'])
+    expect(host.privates.find((l) => l.includes('█'))!.split('\n').length).toBeGreaterThan(10)
+    expect(host.infos.join('\n')).not.toContain('█')
+    expect(host.infos.some((l) => /open the NetEase Cloud Music app/.test(l))).toBe(true)
+    expect(host.infos.some((l) => /Chrome/.test(l))).toBe(false)
+    expect(host.infos).toContain('signed in as Chen X')
+    expect(store.read().netease).toMatchObject({ auth: 'qr', status: 'ok' })
+    // §3.6: the code's URL and the cookie are authorization artifacts, and
+    // the diagnostics a /bug report attaches must carry neither.
+    const log = [...host.debugs, ...host.infos].join('\n')
+    expect(log).not.toContain('codekey')
+    expect(log).not.toContain('MUSIC_U')
+    expect(host.debugs).toContain('sources.mount netease')
+  })
+
+  it('mounts Bilibili by scan, and a code nobody scans is a timeout with nothing written', async () => {
+    const { host, deps, store } = build(['bilibili', ''], {
+      mounts: { bilibili: async (show) => (show('https://account.bilibili.com/h5/scan?qrcode_key=k'), { ok: false, reason: 'timeout' }) },
+    })
+    await runSources(deps)
+    expect(host.infos.some((l) => /open the Bilibili app/.test(l))).toBe(true)
+    expect(host.infos).toContain('the code timed out — /sources to get a fresh one.')
+    expect(store.read()).toEqual({})
+    expect([...host.debugs, ...host.infos].join('\n')).not.toContain('qrcode_key')
+  })
+
+  it('Esc during a NetEase scan cancels and writes nothing', async () => {
+    const { host, deps, store } = build(['netease', ''], {
+      mounts: {
+        netease: async (show, cancelled) => {
+          show('https://music.163.com/login?codekey=k')
+          host.pressEsc()
+          return cancelled() ? { ok: false, reason: 'cancelled' } : { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'c', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(host.infos).toContain('cancelled — nothing was written.')
+    expect(store.read()).toEqual({})
+  })
+
+  it('Esc while the scan is confirming writes nothing, even though the sign-in itself succeeded', async () => {
+    const { host, deps, store } = build(['netease', ''], {
+      mounts: {
+        // The platform confirms, but the listener pressed Esc while the poll
+        // and the account read were in flight (codex review).
+        netease: async (show) => {
+          show('https://music.163.com/login?codekey=k')
+          host.pressEsc()
+          return { ok: true, who: 'Chen X', entry: { auth: 'qr', cookie: 'MUSIC_U=<redacted>', userId: '1', likedPlaylistId: '2' } }
+        },
+      },
+    })
+    await runSources(deps)
+    expect(store.read()).toEqual({})
+    expect(host.infos).not.toContain('signed in as Chen X')
+  })
+
+  it('refuses a NetEase or Bilibili mount on a host that cannot show a line off the record', async () => {
+    for (const id of ['netease', 'bilibili'] as const) {
+      const { host, deps, store, mounted } = build([id, ''])
+      host.showPrivate = undefined
+      await runSources(deps)
+      expect(mounted).toEqual([])
+      expect(host.infos.some((l) => /cannot show the code here/.test(l))).toBe(true)
+      expect(store.read()).toEqual({})
+    }
   })
 
   it('refuses the Soda mount on a host that cannot show a line off the record', async () => {
@@ -491,7 +572,7 @@ describe('runSources (spec 14 §3.1)', () => {
     renew.store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     renew.store.setStatus('netease', 'expired')
     await runSources(renew.deps)
-    expect(renew.mounted).toEqual(['netease:chrome'])
+    expect(renew.mounted).toEqual(['netease:qr'])
     expect(renew.store.read().netease?.status).toBe('ok')
     expect(renew.host.asks[1]!.text.split('\n')[1]).toBe('ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist')
   })
@@ -525,7 +606,7 @@ describe('runSources (spec 14 §3.1)', () => {
   it('a submit with two new ticks mounts them in row order, each result a row in the next card', async () => {
     const { host, deps, store, mounted } = build(['spotify netease', 'netease spotify'])
     await runSources(deps)
-    expect(mounted).toEqual(['netease:chrome', `spotify:${BUNDLED_CLIENT_ID}`])
+    expect(mounted).toEqual(['netease:qr', `spotify:${BUNDLED_CLIENT_ID}`])
     expect(store.mounted()).toEqual(['netease', 'spotify'])
     const rows = host.asks[1]!.text.split('\n')
     expect(rows.slice(1, 3)).toEqual([
@@ -570,25 +651,25 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.mounted()).toEqual(['youtube'])
   })
 
-  it('sources that fail for one reason share one row, so three obstacles fit an 80x24 card (codex review)', async () => {
+  it('sources that fail for one reason share one row, so three failures fit an 80x24 card (codex review)', async () => {
     const { host, deps, store } = build(['youtube bilibili netease', ''], {
       platform: 'darwin',
       mounts: {
         youtube: async () => {
           throw new BrowserCookieError('chrome', 'no-permission', '')
         },
-        bilibili: async () => {
-          throw new BrowserCookieError('chrome', 'no-permission', '')
-        },
-        netease: async () => {
-          throw new BrowserCookieError('chrome', 'no-permission', '')
-        },
+        bilibili: async (show) => (show('https://account.bilibili.com/h5/scan?qrcode_key=k'), { ok: false, reason: 'timeout' }),
+        netease: async (show) => (show('https://music.163.com/login?codekey=k'), { ok: false, reason: 'timeout' }),
       },
     })
     await runSources(deps)
     const rows = host.asks[1]!.text.split('\n').filter((l) => l.startsWith('-- '))
-    expect(rows).toHaveLength(1)
-    expect(rows[0]!.startsWith('-- could not connect YouTube, Bilibili, NetEase — Chrome is here, but I am not allowed')).toBe(true)
+    // Two kinds of failure, two rows: YouTube's browser obstacle, and the
+    // two codes that timed out — which share one row because they end the
+    // same way.
+    expect(rows).toHaveLength(2)
+    expect(rows[0]!.startsWith('-- could not connect YouTube — Chrome is here, but I am not allowed')).toBe(true)
+    expect(rows[1]).toBe('-- could not connect Bilibili, NetEase — the code timed out — /sources to get a fresh one.')
     expect(store.read()).toEqual({})
   })
 
@@ -610,7 +691,7 @@ describe('runSources (spec 14 §3.1)', () => {
       const { host, deps, store, mounted } = build([answer, ''])
       Object.defineProperty(host, 'ask', { value: undefined })
       await runSources(deps)
-      expect(mounted).toEqual(['netease:chrome'])
+      expect(mounted).toEqual(['netease:qr'])
       expect(store.mounted()).toEqual(['netease'])
       // Enter on the plain host keeps things as they are — there is no
       // selection to submit, so '' cannot mean "nothing ticked".

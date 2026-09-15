@@ -150,3 +150,45 @@ export async function exportCookieJar(
     rmSync(dir, { recursive: true, force: true })
   }
 }
+
+// Every cookie a response set, as the header a client sends back. A QR
+// sign-in's credential arrives exactly this way, and that header is the whole
+// of what murmur stores for the account (spec 14 §2.8) — no browser is
+// involved, so there is no store to unlock and nothing to decrypt.
+export function setCookieHeader(response: Pick<Response, 'headers'>): string {
+  const pairs = new Map<string, string>()
+  for (const raw of response.headers.getSetCookie()) {
+    const first = raw.split(';')[0]?.trim() ?? ''
+    const eq = first.indexOf('=')
+    if (eq <= 0) continue
+    pairs.set(first.slice(0, eq), first.slice(eq + 1))
+  }
+  return [...pairs].map(([name, value]) => `${name}=${value}`).join('; ')
+}
+
+// A stored Cookie header as jar rows for one site: yt-dlp wants a file, and a
+// QR mount holds the header rather than a browser to export (spec 14 §2.5).
+// The rows say "this site and its subdomains", which is what the platform's
+// own Set-Cookie said when it handed them over.
+export function jarRowsFromHeader(header: string, site: string): CookieRow[] {
+  const domain = `.${site}`
+  // Far enough out that yt-dlp never reads a row as already expired; the
+  // platform's own expiry is what actually ends the session (§2.6).
+  const expiry = 2_000_000_000
+  // Not secure-only. yt-dlp's NetEase extractor reads its eapi endpoints over
+  // plain http (`_API_BASE = 'http://music.163.com/api/'`, 2026.08.19), and a
+  // row marked secure would simply not be sent there — a signed-in listener's
+  // VIP track would resolve anonymously with nothing to say why (codex
+  // review). The jar is a throwaway file handed to yt-dlp for one call to the
+  // platform the cookie came from, so the flag buys nothing here anyway.
+  const rows: CookieRow[] = []
+  for (const part of header.split(';')) {
+    const pair = part.trim()
+    const eq = pair.indexOf('=')
+    if (eq <= 0) continue
+    const name = pair.slice(0, eq)
+    const value = pair.slice(eq + 1)
+    rows.push({ domain, name, value, line: [domain, 'TRUE', '/', 'FALSE', String(expiry), name, value].join('\t') })
+  }
+  return rows
+}

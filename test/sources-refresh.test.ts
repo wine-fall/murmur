@@ -214,7 +214,7 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
   it('refreshAll reports per-source outcomes for the foreground /sources refresh', async () => {
     const { store, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome' })
-    store.mount('bilibili', { browser: 'chrome', mid: '1' })
+    store.mount('bilibili', { auth: 'qr', cookie: 'SESSDATA=x', mid: '1' })
     sources.set('youtube', new FakeSource('youtube'))
     const bili = new FakeSource('bilibili')
     bili.fail = new Error('down')
@@ -274,22 +274,22 @@ describe('the Chrome profile a refresh reads', () => {
 
   it('takes the expired road when the knob names a profile other than the pin — never a snapshot mixing two accounts', async () => {
     const { store, host, sources, refresher } = build()
-    store.mount('bilibili', { browser: 'chrome', profile: 'Default', mid: '42' })
-    const bili = new FakeSource('bilibili')
-    sources.set('bilibili', bili)
+    store.mount('youtube', { browser: 'chrome', profile: 'Default' })
+    const yt = new FakeSource('youtube')
+    sources.set('youtube', yt)
     const before = process.env[CHROME_PROFILE_ENV]
     process.env[CHROME_PROFILE_ENV] = 'Work'
     try {
-      expect(await refresher.refreshAll()).toEqual([{ id: 'bilibili', ok: false, error: 'profile-changed' }])
+      expect(await refresher.refreshAll()).toEqual([{ id: 'youtube', ok: false, error: 'profile-changed' }])
     } finally {
       if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
       else process.env[CHROME_PROFILE_ENV] = before
     }
     // Nothing was read with the other profile's cookies, and the pin stands.
-    expect(bili.snapshots).toBe(0)
-    expect(store.read().bilibili?.profile).toBe('Default')
-    expect(store.read().bilibili?.status).toBe('expired')
-    expect(host.infos.some((l) => /Bilibili login has expired/.test(l))).toBe(true)
+    expect(yt.snapshots).toBe(0)
+    expect(store.read().youtube?.profile).toBe('Default')
+    expect(store.read().youtube?.status).toBe('expired')
+    expect(host.infos.some((l) => /YouTube login has expired/.test(l))).toBe(true)
   })
 
   it('takes the expired road when the pinned profile is gone — never another profile', async () => {

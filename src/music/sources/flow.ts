@@ -14,8 +14,9 @@ import { chromeProfile } from './chrome.ts'
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
-import type { QishuiMountResult } from './qishui.ts'
+import type { QishuiEntry, QishuiMountResult } from './qishui.ts'
 import { qrHalfBlocks } from './qishui.ts'
+import type { QrMountResult } from './qr.ts'
 import type { TasteRefresher } from './refresh.ts'
 import { redirectUri, SPOTIFY_CALLBACK_PORT, spotifyClientId, type SpotifyMountResult } from './spotify.ts'
 import type { BrowserName, SourceEntry, SourcesStore } from './store.ts'
@@ -41,8 +42,8 @@ export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: str
 // tested with fakes and the real ones are wired once (build.ts).
 export type SourceMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
-  bilibili(b: BrowserPick): Promise<MountResult<BilibiliEntry>>
-  netease(b: BrowserPick): Promise<MountResult<NeteaseEntry>>
+  bilibili(show: (url: string) => void, cancelled: () => boolean): Promise<QrMountResult<BilibiliEntry>>
+  netease(show: (url: string) => void, cancelled: () => boolean): Promise<QrMountResult<NeteaseEntry>>
   spotify(clientId: string, hooks: SpotifyHooks): Promise<SpotifyMountResult>
   qishui(show: (url: string) => void, cancelled: () => boolean): Promise<QishuiMountResult>
 }
@@ -69,8 +70,13 @@ export type SourcesFlowDeps = {
   now?: () => Date
 }
 
-const COOKIE_SOURCES = ['youtube', 'bilibili', 'netease'] as const
-type CookieSource = (typeof COOKIE_SOURCES)[number]
+// The one source still read out of a browser: Google has no sign-in murmur
+// can drive without a registered app (issue #221), so YouTube keeps the
+// Chrome cookie store while NetEase and Bilibili are scanned.
+type CookieSource = 'youtube'
+// The three that sign in by scanning a code with the platform's own app.
+const QR_SOURCES = ['netease', 'bilibili', 'qishui'] as const
+type QrSource = (typeof QR_SOURCES)[number]
 
 // What a plain-host listener may type for a row, besides its number.
 const NAMES: Record<string, MenuKey> = {
@@ -214,8 +220,16 @@ export function chromePick(): { browser: typeof CHROME; profile: string } {
 // Where each source is signed in, opened in Chrome when no login is found.
 const SIGN_IN_URL: Record<CookieSource, string> = {
   youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
-  bilibili: 'https://passport.bilibili.com/login',
-  netease: 'https://music.163.com/',
+}
+
+// Which app scans the code, said in the platform's own terms so the listener
+// reaches for the right phone app.
+const QR_LINES: Record<QrSource, string> = {
+  netease:
+    "NetEase signs in with a scan: open the NetEase Cloud Music app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
+  bilibili: "Bilibili signs in with a scan: open the Bilibili app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
+  qishui:
+    "Soda Music signs in with a Douyin scan: open the Douyin app, scan the code below, and confirm there. I'll wait up to three minutes (Esc cancels).",
 }
 
 // What to say when the cookie store cannot be read at all. Each of these
@@ -304,8 +318,8 @@ async function mountOne(deps: SourcesFlowDeps, read: () => Promise<string>, id: 
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
   if (id === 'spotify') await mountSpotifyFlow(recorded, cancelled)
-  else if (id === 'qishui') await mountQishuiFlow(recorded, cancelled)
-  else await mountCookieFlow(recorded, read, id, platform, cancelled)
+  else if (id === 'youtube') await mountCookieFlow(recorded, read, id, platform, cancelled)
+  else await mountQrFlow(recorded, id, cancelled)
   const name = SOURCE_NAMES[id]
   const who = notes.find((line) => line.startsWith('signed in as '))
   if (who !== undefined) return `ok connected ${name} — ${who} · ${counts(deps.store, id)}`
@@ -351,7 +365,7 @@ async function mountCookieFlow(
   const site = SOURCE_NAMES[id]
   const pick = chromePick()
   host.info(`checking ${site} in Chrome...`)
-  type CookieMount = MountResult<YouTubeEntry> | MountResult<BilibiliEntry> | MountResult<NeteaseEntry>
+  type CookieMount = MountResult<YouTubeEntry>
   const attempt = async (): Promise<CookieMount | null> => {
     try {
       return await deps.mounts[id](pick)
@@ -392,9 +406,7 @@ async function mountCookieFlow(
       return
     }
   }
-  if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
-  else if (id === 'bilibili') await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
-  else await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
+  await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
 }
 
 async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
@@ -427,22 +439,27 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean)
   await finishMount(deps, 'spotify', result.who, result.entry)
 }
 
-async function mountQishuiFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
+// The scan mount (spec 14 §3.1), the same conversation for all three: show
+// the code, wait three minutes, Esc stops it. No browser is involved, so
+// none of the browser obstacles — an uninstalled Chrome, a locked cookie
+// store, a terminal without Full Disk Access — can reach this path.
+async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () => boolean): Promise<void> {
   const { host } = deps
+  const name = SOURCE_NAMES[id]
   // The QR is an authorization artifact: it goes to the screen only, never
   // through `info` (which the diagnostics keep — §3.6). A host without that
   // surface cannot be handed the code at all.
   const show = host.showPrivate?.bind(host)
   if (show === undefined) {
-    host.info('I cannot show the code here — run murmur in a terminal front-end to mount Soda Music.')
+    host.info(`I cannot show the code here — run murmur in a terminal front-end to mount ${name}.`)
     return
   }
-  host.info('Soda Music signs in with a Douyin scan: open the Douyin app, scan the code below, and confirm there. I\'ll wait up to three minutes (Esc cancels).')
-  let result: QishuiMountResult
+  host.info(QR_LINES[id])
+  let result: QrMountResult<NeteaseEntry> | QrMountResult<BilibiliEntry> | QishuiMountResult
   try {
-    result = await deps.mounts.qishui((url) => show(qrHalfBlocks(url).join('\n')), cancelled)
+    result = await deps.mounts[id]((url) => show(qrHalfBlocks(url).join('\n')), cancelled)
   } catch (err) {
-    host.info(`could not reach Soda Music (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)
+    host.info(`could not reach ${name} (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)
     return
   }
   if (!result.ok) {
@@ -451,11 +468,17 @@ async function mountQishuiFlow(deps: SourcesFlowDeps, cancelled: () => boolean):
         ? 'the code timed out — /sources to get a fresh one.'
         : result.reason === 'cancelled'
           ? 'cancelled — nothing was written.'
-          : AUTH_LINES['login-required'](SOURCE_NAMES.qishui),
+          : AUTH_LINES['login-required'](name),
     )
     return
   }
-  await finishMount(deps, 'qishui', result.who, result.entry)
+  // Esc pressed while the confirming poll or the account read was in flight:
+  // the scan succeeded, but the listener asked to stop, and "cancelled —
+  // nothing was written" has to mean it (codex review).
+  if (cancelled() || deps.quit.requested) return
+  if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
+  else if (id === 'bilibili') await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
+  else await finishMount(deps, 'qishui', result.who, result.entry as QishuiEntry)
 }
 
 // Re-read every mounted source; each outcome is said, and returned as the

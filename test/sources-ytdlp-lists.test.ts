@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 
-import { BilibiliClient, BilibiliSource, mountBilibili, type BilibiliFetch } from '../src/music/sources/bilibili.ts'
+import { BilibiliClient, BilibiliSource, type BilibiliFetch } from '../src/music/sources/bilibili.ts'
 import { flatEntries } from '../src/music/sources/flat.ts'
 import { mountYouTube, YouTubeSource } from '../src/music/sources/youtube.ts'
 import type { YtDlpRunner } from '../src/music/music.ts'
@@ -139,13 +139,6 @@ describe('Bilibili (spec 14 §2.8)', () => {
     expect(calls[1]!.url).toContain('up_mid=4486056')
     const anon = new BilibiliClient({ cookie: async () => '', fetch: biliFetch({ '/x/web-interface/nav': { code: 0, data: { isLogin: false } } }).fetch })
     expect(await anon.nav()).toBeNull()
-  })
-
-  it('mounting stores the browser and the mid', async () => {
-    const { fetch } = biliFetch({ '/x/web-interface/nav': NAV })
-    expect(await mountBilibili({ browser: 'chrome' }, { cookie: async () => 'x', fetch })).toEqual({ ok: true, who: 'FAWineLL', entry: { browser: 'chrome', mid: '4486056' } })
-    const { fetch: out } = biliFetch({ '/x/web-interface/nav': { code: -101, message: 'not logged in' } })
-    expect(await mountBilibili({ browser: 'chrome' }, { cookie: async () => '', fetch: out })).toEqual({ ok: false, reason: 'login-required' })
   })
 
   it('snapshots the folder names, the favourites (newest first, dated), watch later and space audio', async () => {
