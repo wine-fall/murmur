@@ -10,6 +10,7 @@ import { dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
+import { chromeProfile } from './chrome.ts'
 import { SOURCE_IDS, type SourceId, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
 
 // yt-dlp's --cookies-from-browser vocabulary, minus whale.
@@ -168,6 +169,18 @@ export class SourcesStore {
     this.patch(id, { lastRefresh: now.toISOString() })
   }
 
+  // Pin the Chrome profile a read just used into the entry (spec 14 §3.1).
+  // Called after a read that worked, never before: a knob naming a profile
+  // that turns out to be wrong must not overwrite a pin that still works.
+  // A mount made before murmur named profiles has none and gets one here;
+  // one that already carries a pin keeps it, unless the knob names another.
+  pinChromeProfile(id: SourceId, resolve: ProfileResolver = chromeProfile): void {
+    const entry = this.read()[id]
+    if (entry === undefined || !('browser' in entry) || entry.browser !== 'chrome') return
+    const profile = resolve(entry.profile)
+    if (profile !== entry.profile) this.patch(id, { profile } as Partial<SourceEntry[SourceId]>)
+  }
+
   // Merge fields into a mounted entry; an undefined value deletes the field.
   patch<K extends SourceId>(id: K, fields: Partial<SourceEntry[K]>): void {
     this.update((file) => {
@@ -227,13 +240,21 @@ export function sourceOfRef(ref: string): CookieSource | null {
 // The yt-dlp flag for a ref whose host has a mounted cookie source; [] when
 // no mount applies, so a listener with no account sees today's arguments
 // byte for byte (spec 14 §5.1).
-export function cookieArgs(ref: string, file: SourcesFile): string[] {
+export function cookieArgs(ref: string, file: SourcesFile, resolve: ProfileResolver = chromeProfile): string[] {
   const source = sourceOfRef(ref)
   if (source === null) return []
-  return browserArgs(file[source])
+  return browserArgs(file[source], resolve)
 }
 
-export function browserArgs(entry: { browser: BrowserName; profile?: string | undefined } | undefined): string[] {
+// How the pinned profile becomes the one yt-dlp is told to read: see chrome.ts.
+export type ProfileResolver = (pinned?: string | undefined) => string
+
+// Chrome is never left unnamed (spec 14 §3.1). Bare `chrome` is what let
+// yt-dlp pick the newest Cookies file among every profile, so an entry that
+// carries no pin yet is resolved here rather than handed over unnamed. Every
+// other browser keeps exactly the argument it had.
+export function browserArgs(entry: { browser: BrowserName; profile?: string | undefined } | undefined, resolve: ProfileResolver = chromeProfile): string[] {
   if (entry === undefined) return []
-  return ['--cookies-from-browser', entry.profile === undefined ? entry.browser : `${entry.browser}:${entry.profile}`]
+  const profile = entry.browser === 'chrome' ? resolve(entry.profile) : entry.profile
+  return ['--cookies-from-browser', profile === undefined ? entry.browser : `${entry.browser}:${profile}`]
 }

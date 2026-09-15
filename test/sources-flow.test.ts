@@ -12,7 +12,7 @@ import { runSources, SOURCES_OFFER, type SourceMounts, type SourcesFlowDeps } fr
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
-import { CHROME_PROFILE_ENV } from '../src/music/sources/flow.ts'
+import { CHROME_PROFILE_ENV } from '../src/music/sources/chrome.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
@@ -138,12 +138,15 @@ describe('runSources (spec 14 §3.1)', () => {
     // The browser question is gone entirely — murmur reads the one browser
     // it also opens for signing in, so there is nothing to get wrong.
     expect(host.asks.some((a) => /which browser/i.test(a.text))).toBe(false)
-    expect(mounted).toEqual(['youtube:chrome:'])
+    // Chrome is read by a NAMED profile, whatever this machine's is: bare
+    // `chrome` let yt-dlp pick the newest Cookies file of any profile.
+    expect(mounted[0]).toMatch(/^youtube:chrome:.+$/)
     expect(host.infos).toContain('signed in as Zach G')
     expect(host.infos.some((l) => /^done — 2 items from YouTube; I'll keep it fresh\.$/.test(l))).toBe(true)
-    expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok' })
+    expect(store.read().youtube).toMatchObject({ browser: 'chrome', status: 'ok', profile: expect.any(String) })
     expect(store.readSnapshot('youtube')?.items).toHaveLength(2)
-    expect(host.debugs).toContain('sources.mount youtube')
+    // The profile is in the log, so a listener's report says which one it read.
+    expect(host.debugs.some((l) => /^sources\.mount youtube profile=.+$/.test(l))).toBe(true)
     // Back at the menu: the result is a status row IN the card (never an
     // info line the card then covers — #231), the mounted one is ticked
     // with its counts, and the refresh row appears.

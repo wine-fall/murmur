@@ -129,8 +129,12 @@ describe('SourcesStore', () => {
 describe('cookieArgs (spec 14 §2.5)', () => {
   const file = { netease: NETEASE, youtube: { browser: 'brave' as const, profile: 'Profile 1', mountedAt: 'x', status: 'ok' as const } }
 
+  // A Chrome entry is always read by a named profile (§3.1); the resolver is
+  // injected so the test does not depend on this machine's Chrome.
+  const resolve = (pinned?: string): string => pinned ?? 'Default'
+
   it('passes the browser for a mounted host, profile included', () => {
-    expect(cookieArgs('https://music.163.com/#/song?id=1', file)).toEqual(['--cookies-from-browser', 'chrome'])
+    expect(cookieArgs('https://music.163.com/#/song?id=1', file, resolve)).toEqual(['--cookies-from-browser', 'chrome:Default'])
     expect(cookieArgs('https://www.youtube.com/watch?v=x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
     expect(cookieArgs('https://youtu.be/x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
     expect(cookieArgs('https://music.youtube.com/watch?v=x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
