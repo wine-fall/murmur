@@ -8,11 +8,13 @@
 import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
-import type { MountResult } from './netease.ts'
+import { setCookieHeader } from './cookies.ts'
+import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const API = 'https://api.bilibili.com'
+const PASSPORT = 'https://passport.bilibili.com'
 const DEFAULT_TIMEOUT_MS = 15_000
 // The API's page size for a folder; pages are read until the bound or the end.
 const FOLDER_PAGE = 20
@@ -44,6 +46,10 @@ const ToViewSchema = z.object({ data: z.object({ list: z.array(z.unknown()).null
 const LaterSchema = z.object({ title: z.string(), owner: z.object({ name: z.string().optional() }).nullish(), bvid: z.string().optional(), add_at: z.number().optional() })
 const AudioPageSchema = z.object({ data: z.object({ pageCount: z.number().optional(), data: z.array(z.unknown()).nullish() }).nullish() })
 const AudioSchema = z.object({ id: z.number(), title: z.string(), author: z.string().optional() })
+const QrKeySchema = z.object({ code: z.number(), data: z.object({ url: z.string(), qrcode_key: z.string() }) })
+// The poll's own code lives INSIDE the envelope: the envelope is 0 for a
+// code still waiting to be scanned as much as for one just confirmed.
+const QrPollSchema = z.object({ code: z.number(), data: z.object({ code: z.number() }).nullish() })
 
 export type BilibiliFolder = { id: string; title: string; count: number }
 
@@ -121,25 +127,57 @@ export class BilibiliClient {
     return items.slice(0, bound)
   }
 
+  // The QR sign-in (spec 14 §2.8): a key and the URL to draw. Plaintext and
+  // unauthenticated — there is no cookie to carry yet.
+  async qrKey(): Promise<{ key: string; url: string }> {
+    const response = await this.send(`${PASSPORT}/x/passport-login/web/qrcode/generate`, { headers: this.headers('') })
+    if (!response.ok) throw new Error(`bilibili qrcode/generate: HTTP ${response.status}`)
+    const parsed = QrKeySchema.parse(await response.json())
+    if (parsed.code !== 0) throw new Error(`bilibili qrcode/generate: code ${parsed.code}`)
+    return { key: parsed.data.qrcode_key, url: parsed.data.url }
+  }
+
+  // 86101 waiting / 86090 the phone has it / 0 confirmed, and SESSDATA,
+  // bili_jct and DedeUserID come back as Set-Cookie / 86038 the code is
+  // spent (verified against the live endpoint, 2026-09-15). Anything else
+  // reads as waiting: the loop's own deadline bounds it.
+  async qrPoll(key: string): Promise<QrPoll<string>> {
+    const url = new URL(`${PASSPORT}/x/passport-login/web/qrcode/poll`)
+    url.searchParams.set('qrcode_key', key)
+    const response = await this.send(url.toString(), { headers: this.headers('') })
+    if (!response.ok) throw new Error(`bilibili qrcode/poll: HTTP ${response.status}`)
+    const parsed = QrPollSchema.parse(await response.json())
+    const code = parsed.data?.code
+    if (code === 0) return { status: 'confirmed', value: setCookieHeader(response) }
+    if (code === 86090) return { status: 'scanned' }
+    if (code === 86038) return { status: 'expired' }
+    return { status: 'waiting' }
+  }
+
+  private headers(cookie: string): Record<string, string> {
+    return {
+      ...(cookie !== '' && { Cookie: cookie }),
+      Referer: 'https://www.bilibili.com/',
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
+    }
+  }
+
+  // One round trip with a timeout and one retry on a network error.
+  private async send(url: string, init: RequestInit): Promise<Response> {
+    try {
+      return await this.once(url, init)
+    } catch {
+      return await this.once(url, init)
+    }
+  }
+
   // One GET with the cookie, a timeout and one retry on a network error. A
   // -101 (not logged in) is the typed login failure everywhere but the nav
   // read, whose anonymous answer is a plain "no account".
   private async get(path: string, query: Record<string, string>, opts: { anonymousOk?: boolean } = {}): Promise<unknown> {
     const url = new URL(`${API}${path}`)
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v)
-    const init: RequestInit = {
-      headers: {
-        Cookie: await this.deps.cookie(),
-        Referer: 'https://www.bilibili.com/',
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36',
-      },
-    }
-    let response: Response
-    try {
-      response = await this.once(url.toString(), init)
-    } catch {
-      response = await this.once(url.toString(), init)
-    }
+    const response = await this.send(url.toString(), { headers: { ...this.headers(''), Cookie: await this.deps.cookie() } })
     if (response.status === 429 || response.status === 412) throw new SourceAuthError('bilibili', 'rate-limited', `HTTP ${response.status} on ${path}`)
     if (!response.ok) throw new Error(`bilibili ${path}: HTTP ${response.status}`)
     const json: unknown = await response.json()
@@ -164,15 +202,30 @@ export class BilibiliClient {
   }
 }
 
-export type BilibiliEntry = { browser: BrowserName; profile?: string | undefined; mid: string }
+// How the account's cookie was obtained (spec 14 §2.8): scanned here, or
+// borrowed from a browser by a mount made before the scan existed.
+export type BilibiliAccess = { auth: 'qr'; cookie: string } | { auth?: 'browser' | undefined; browser: BrowserName; profile?: string | undefined }
+export type BilibiliEntry = BilibiliAccess & { mid: string }
 
-export async function mountBilibili(
-  browser: { browser: BrowserName; profile?: string | undefined },
-  deps: BilibiliClientDeps,
-): Promise<MountResult<BilibiliEntry>> {
-  const nav = await new BilibiliClient(deps).nav()
+// The scan mount (spec 14 §3.1): show the code, wait for the Bilibili app to
+// confirm it, keep the cookie the platform hands back. No browser is read.
+export async function mountBilibiliQr(deps: Omit<BilibiliClientDeps, 'cookie'>, opts: QrMountOptions): Promise<QrMountResult<BilibiliEntry>> {
+  const anonymous = new BilibiliClient({ ...deps, cookie: async () => '' })
+  let key = ''
+  const scan = await scanToSignIn<string>({
+    ...opts,
+    issue: async () => {
+      const issued = await anonymous.qrKey()
+      key = issued.key
+      return { url: issued.url }
+    },
+    poll: () => anonymous.qrPoll(key),
+  })
+  if (!scan.ok) return scan
+  const cookie = scan.value
+  const nav = await new BilibiliClient({ ...deps, cookie: async () => cookie }).nav()
   if (nav === null) return { ok: false, reason: 'login-required' }
-  return { ok: true, who: nav.who, entry: { browser: browser.browser, ...(browser.profile !== undefined && { profile: browser.profile }), mid: nav.mid } }
+  return { ok: true, who: nav.who, entry: { auth: 'qr', cookie, mid: nav.mid } }
 }
 
 export class BilibiliSource implements TasteSource {

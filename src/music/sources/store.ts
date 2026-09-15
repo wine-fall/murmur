@@ -21,11 +21,25 @@ export type SourceStatus = 'ok' | 'expired' | 'error'
 
 const Cookie = { browser: z.enum(BROWSERS), profile: z.string().optional() }
 
+// How a source's cookie was obtained (spec 14 §2.8). NetEase and Bilibili
+// sign in by scan and hold the cookie itself; a mount made before the scan
+// existed borrows a browser's, and carries no `auth` key at all — which is
+// what makes the older file readable without touching it. YouTube has no
+// scan to offer (issue #221) and is a browser mount only.
+const Scanned = { auth: z.literal('qr'), cookie: z.string() }
+const Borrowed = { auth: z.literal('browser').optional(), ...Cookie }
+// Scanned first: a borrowed entry has no `auth`, so it cannot be mistaken
+// for one, while a scanned entry has no `browser` to satisfy the other arm.
+const access = <T extends z.ZodRawShape>(fields: T) => z.union([z.object({ ...Scanned, ...fields }), z.object({ ...Borrowed, ...fields })])
+
+const NETEASE_FIELDS = { userId: z.string(), likedPlaylistId: z.string() }
+const BILIBILI_FIELDS = { mid: z.string() }
+
 // What the flow writes for each source; the store adds the bookkeeping.
 export const SourceInputSchemas = {
   youtube: z.object(Cookie),
-  bilibili: z.object({ ...Cookie, mid: z.string() }),
-  netease: z.object({ ...Cookie, userId: z.string(), likedPlaylistId: z.string() }),
+  bilibili: access(BILIBILI_FIELDS),
+  netease: access(NETEASE_FIELDS),
   spotify: z.object({ clientId: z.string(), refreshToken: z.string(), accessToken: z.string(), expiresAt: z.string() }),
   qishui: z.object({ sessionCookie: z.string(), deviceId: z.string(), installId: z.string() }),
 } as const
@@ -39,8 +53,8 @@ const Bookkeeping = {
 
 const SourcesFileSchema = z.object({
   youtube: SourceInputSchemas.youtube.extend(Bookkeeping).optional(),
-  bilibili: SourceInputSchemas.bilibili.extend(Bookkeeping).optional(),
-  netease: SourceInputSchemas.netease.extend(Bookkeeping).optional(),
+  bilibili: access({ ...BILIBILI_FIELDS, ...Bookkeeping }).optional(),
+  netease: access({ ...NETEASE_FIELDS, ...Bookkeeping }).optional(),
   spotify: SourceInputSchemas.spotify.extend(Bookkeeping).optional(),
   qishui: SourceInputSchemas.qishui.extend(Bookkeeping).optional(),
 })
@@ -240,12 +254,6 @@ export function sourceOfRef(ref: string): CookieSource | null {
 // The yt-dlp flag for a ref whose host has a mounted cookie source; [] when
 // no mount applies, so a listener with no account sees today's arguments
 // byte for byte (spec 14 §5.1).
-export function cookieArgs(ref: string, file: SourcesFile, resolve: ProfileResolver = chromeProfile): string[] {
-  const source = sourceOfRef(ref)
-  if (source === null) return []
-  return browserArgs(file[source], resolve)
-}
-
 // How the pinned profile becomes the one yt-dlp is told to read: see chrome.ts.
 export type ProfileResolver = (pinned?: string | undefined) => string
 

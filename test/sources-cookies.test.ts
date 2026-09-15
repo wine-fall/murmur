@@ -5,7 +5,11 @@ import { dirname } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { COOKIE_TTL_MS, CookieJars } from '../src/music/sources/build.ts'
+import { cookieLeaser, cookieOf, COOKIE_TTL_MS, CookieJars } from '../src/music/sources/build.ts'
+import { SourcesStore } from '../src/music/sources/store.ts'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { classifyCookieFailure, cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
 import type { YtDlpRunner } from '../src/music/music.ts'
 
@@ -196,5 +200,53 @@ describe('CookieJars', () => {
     jars.drop()
     await jars.header(pick, 'bilibili.com')()
     expect(exports).toBe(6)
+  })
+})
+
+// A scanned mount holds the cookie itself (spec 14 §2.8): nothing about it
+// touches a browser, so yt-dlp is never asked to open a cookie store — which
+// is the whole point of retiring the browser dependency (issue #221).
+describe('the cookie seam for a scanned mount', () => {
+  function seam(): { store: SourcesStore; jars: CookieJars; runs: string[][] } {
+    const runs: string[][] = []
+    const run: YtDlpRunner = async (args) => {
+      runs.push(args)
+      writeFileSync(args[args.indexOf('--cookies') + 1]!, JAR)
+      return ''
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-seam-'))
+    return { store: new SourcesStore({ path: join(dir, 'sources.json'), tasteDir: join(dir, 'taste') }), jars: new CookieJars(run), runs }
+  }
+
+  it('hands the stored cookie straight to the client and spawns no yt-dlp at all', async () => {
+    const { jars, runs } = seam()
+    const cookie = 'MUSIC_U=<redacted>; __csrf=<redacted-csrf>'
+    expect(await cookieOf(jars, { auth: 'qr', cookie }, 'music.163.com')()).toBe(cookie)
+    expect(runs).toEqual([])
+    // A browser mount still borrows one through yt-dlp, as it did.
+    expect(await cookieOf(jars, { browser: 'chrome', profile: 'Default' }, 'music.163.com')()).toContain('MUSIC_U=')
+    expect(runs).toHaveLength(1)
+  })
+
+  it('leases a jar written from the stored cookie for playback, and the lease deletes it', async () => {
+    const { store, jars, runs } = seam()
+    store.mount('bilibili', { auth: 'qr', cookie: 'SESSDATA=<redacted>; bili_jct=<redacted-jct>', mid: '42' })
+    const lease = await cookieLeaser({ jars, store })('bilibili')
+    expect(lease).not.toBeNull()
+    const text = readFileSync(lease!.path, 'utf-8')
+    expect(text).toContain('.bilibili.com\tTRUE\t/\tTRUE\t2000000000\tSESSDATA\t<redacted>')
+    expect(text).toContain('bili_jct\t<redacted-jct>')
+    expect(runs).toEqual([])
+    lease!.release()
+    expect(existsSync(lease!.path)).toBe(false)
+  })
+
+  it('a browser mount still goes through yt-dlp, unchanged', async () => {
+    const { store, jars, runs } = seam()
+    store.mount('youtube', { browser: 'chrome', profile: 'Default' })
+    const lease = await cookieLeaser({ jars, store })('youtube')
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toContain('--cookies-from-browser')
+    lease!.release()
   })
 })

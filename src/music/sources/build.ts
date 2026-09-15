@@ -5,10 +5,10 @@
 // that searches NetEase three times spawns yt-dlp once, not three times.
 
 import type { YtDlpRunner } from '../music.ts'
-import { BilibiliSource, mountBilibili } from './bilibili.ts'
-import { cookieHeader, exportCookieJar, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
+import { BilibiliSource, mountBilibiliQr } from './bilibili.ts'
+import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
-import { mountNetease, NeteaseClient, NeteaseSource } from './netease.ts'
+import { mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
 import { mountSpotify, SpotifySource } from './spotify.ts'
 import type { SourceEntry, SourcesStore } from './store.ts'
@@ -72,12 +72,28 @@ export class CookieJars {
   }
 }
 
+// How a mounted account's cookie is obtained (spec 14 §2.8): a scanned mount
+// holds the header itself, so nothing is read from a browser — no store to
+// unlock, nothing to decrypt, and no browser that has to be installed. A
+// mount made before the scan existed borrows one through yt-dlp as it did.
+type Access = { auth: 'qr'; cookie: string } | { auth?: 'browser' | undefined; browser: BrowserPick['browser']; profile?: string | undefined }
+
+export function cookieOf(jars: CookieJars, entry: Access, site: string): () => Promise<string> {
+  return entry.auth === 'qr' ? async () => entry.cookie : jars.header(entry, site)
+}
+
+// yt-dlp wants a file either way: a scanned cookie is written as a jar for
+// the one call and deleted with the lease.
+function leaseOf(jars: CookieJars, entry: Access, site: string): Promise<CookieLease> {
+  return entry.auth === 'qr' ? Promise.resolve(writeJar(jarRowsFromHeader(entry.cookie, site))) : jars.lease(entry, site)
+}
+
 // The provider's cookie seam (spec 14 §2.5, as built): a jar lease for a
 // mounted cookie source, null when that source is not mounted.
 export function cookieLeaser(deps: Pick<SourceBuildDeps, 'jars' | 'store'>): (source: CookieSite) => Promise<CookieLease | null> {
   return async (source) => {
     const entry = deps.store.read()[source]
-    return entry === undefined ? null : deps.jars.lease(entry, SITES[source])
+    return entry === undefined ? null : leaseOf(deps.jars, entry, SITES[source])
   }
 }
 
@@ -98,11 +114,11 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
     }
     case 'bilibili': {
       const e = entry as SourceEntry['bilibili']
-      return new BilibiliSource(e, { cookie: deps.jars.header(e, SITES.bilibili) })
+      return new BilibiliSource(e, { cookie: cookieOf(deps.jars, e, SITES.bilibili) })
     }
     case 'netease': {
       const e = entry as SourceEntry['netease']
-      return new NeteaseSource(e, { cookie: deps.jars.header(e, SITES.netease) })
+      return new NeteaseSource(e, { cookie: cookieOf(deps.jars, e, SITES.netease) })
     }
     case 'spotify': {
       const e = entry as SourceEntry['spotify']
@@ -126,8 +142,8 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
 export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
   return {
     youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
-    bilibili: (b) => mountBilibili(b, { cookie: deps.jars.header(b, SITES.bilibili) }),
-    netease: (b) => mountNetease(b, { cookie: deps.jars.header(b, SITES.netease) }),
+    bilibili: (show, cancelled) => mountBilibiliQr({}, { show, cancelled }),
+    netease: (show, cancelled) => mountNeteaseQr({}, { show, cancelled }),
     spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),
     qishui: (show, cancelled) => mountQishui({}, { show, cancelled }),
   }
@@ -141,7 +157,7 @@ export function neteaseSearch(deps: SourceBuildDeps): { search: NeteaseClient['s
     search: (query, limit) => {
       const entry = deps.store.read().netease
       if (entry === undefined) throw new Error('netease is not mounted')
-      return new NeteaseClient({ cookie: deps.jars.header(entry, SITES.netease) }).search(query, limit)
+      return new NeteaseClient({ cookie: cookieOf(deps.jars, entry, SITES.netease) }).search(query, limit)
     },
   }
 }

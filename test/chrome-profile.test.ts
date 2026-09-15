@@ -9,7 +9,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { CHROME_PROFILE_ENV, chromeProfile, knobDisagrees, localStatePath } from '../src/music/sources/chrome.ts'
-import { browserArgs, cookieArgs, SourcesStore } from '../src/music/sources/store.ts'
+import { browserArgs, SourcesStore } from '../src/music/sources/store.ts'
 
 const HOME = '/home/someone'
 const LAST_USED = JSON.stringify({ profile: { last_used: 'Profile 3', info_cache: {} }, os_crypt: {} })
@@ -90,10 +90,6 @@ describe('yt-dlp cookie arguments always name a Chrome profile (spec 14 §3.1)',
     expect(browserArgs(undefined, resolve)).toEqual([])
   })
 
-  it('carries through to playback', () => {
-    const file = { netease: { browser: 'chrome' as const, userId: '4', likedPlaylistId: '7', mountedAt: 'x', status: 'ok' as const } }
-    expect(cookieArgs('https://music.163.com/#/song?id=1', file, resolve)).toEqual(['--cookies-from-browser', 'chrome:Profile 3'])
-  })
 })
 
 function store(): SourcesStore {
@@ -104,10 +100,10 @@ function store(): SourcesStore {
 describe('pinning the profile in the entry (spec 14 §3.1)', () => {
   it('writes the resolved profile back into a mount made before murmur named profiles', () => {
     const s = store()
-    s.mount('netease', { browser: 'chrome', userId: '4', likedPlaylistId: '7' })
-    expect(s.read().netease?.profile).toBeUndefined()
-    s.pinChromeProfile('netease', (pinned) => pinned ?? 'Profile 3')
-    expect(s.read().netease?.profile).toBe('Profile 3')
+    s.mount('youtube', { browser: 'chrome' })
+    expect(s.read().youtube?.profile).toBeUndefined()
+    s.pinChromeProfile('youtube', (pinned) => pinned ?? 'Profile 3')
+    expect(s.read().youtube?.profile).toBe('Profile 3')
   })
 
   it('leaves a pin that is already there alone — refresh reads it, it never re-guesses', () => {
@@ -127,11 +123,12 @@ describe('pinning the profile in the entry (spec 14 §3.1)', () => {
   it('touches nothing for a non-Chrome mount or a source that has no browser at all', () => {
     const s = store()
     s.mount('youtube', { browser: 'firefox' })
-    s.mount('spotify', { clientId: 'c', refreshToken: 'r', accessToken: 'a', expiresAt: 'z' })
+    s.mount('netease', { auth: 'qr', cookie: 'MUSIC_U=x', userId: '4', likedPlaylistId: '7' })
     s.pinChromeProfile('youtube', () => 'Work')
-    s.pinChromeProfile('spotify', () => 'Work')
+    s.pinChromeProfile('netease', () => 'Work')
     expect(s.read().youtube?.profile).toBeUndefined()
-    expect(s.read().spotify).not.toHaveProperty('profile')
+    // A scanned mount has no browser to pin a profile in.
+    expect(s.read().netease).not.toHaveProperty('profile')
   })
 
   it('does nothing for a source that is not mounted', () => {

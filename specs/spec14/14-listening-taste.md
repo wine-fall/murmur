@@ -55,9 +55,9 @@ importance:
 
   | source | taste read | search | play | how the listener mounts it |
   |---|---|---|---|---|
-  | **YouTube / YouTube Music** | liked (`:ytfav`), history (`:ythistory`), subscriptions | yes (exists) | yes (exists) | names the browser they are signed in to |
-  | **Bilibili** | favourite folders, "watch later", space audio | yes (`bilisearch`) | yes | names the browser |
-  | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | names the browser |
+  | **YouTube / YouTube Music** | liked (`:ytfav`), history (`:ythistory`), subscriptions | yes (exists) | yes (exists) | signs in to Chrome — the one source with no scan to offer |
+  | **Bilibili** | favourite folders, "watch later", space audio | yes (`bilisearch`) | yes | scans a code with the Bilibili app |
+  | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
 
@@ -134,21 +134,37 @@ type BrowserName = 'chrome' | 'chromium' | 'brave' | 'edge' | 'firefox' | 'safar
 type SourceStatus = 'ok' | 'expired' | 'error'
 type Mounted<T> = T & { mountedAt: string /* ISO */; status: SourceStatus; lastRefresh?: string; lastError?: string }
 
+// How the cookie was obtained. A mount made before the scan existed carries
+// no `auth` key at all, which is what makes an older file readable untouched.
+type Access =
+  | { auth: 'qr'; cookie: string }
+  | { auth?: 'browser'; browser: BrowserName; profile?: string }
+
 type SourcesFile = {
   youtube?:  Mounted<{ browser: BrowserName; profile?: string }>   // `chrome:Profile 1` style
-  bilibili?: Mounted<{ browser: BrowserName; profile?: string; mid: string }>
-  netease?:  Mounted<{ browser: BrowserName; profile?: string; userId: string; likedPlaylistId: string }>
+  bilibili?: Mounted<Access & { mid: string }>
+  netease?:  Mounted<Access & { userId: string; likedPlaylistId: string }>
   spotify?:  Mounted<{ clientId: string; refreshToken: string; accessToken: string; expiresAt: string }>
   qishui?:   Mounted<{ sessionCookie: string; deviceId: string; installId: string }>
 }
 ```
 
-- **Secrets**: `spotify.*Token`, `qishui.sessionCookie`. The file joins the
+- **Secrets**: `spotify.*Token`, `qishui.sessionCookie`, and `netease`/
+  `bilibili` `cookie` on a scanned mount. The file joins the
   secret-bearing path list in the guide's `PreToolUse` guard and `cliPermission`
   (03-03 §3) — the setup guide may never read it. The dev log never prints a
   value from it (§3.6).
-- **Cookie sources store the browser name, never the cookie.** The cookie is
-  read by yt-dlp at call time (`--cookies-from-browser`). Nothing is copied.
+- **A browser mount stores the browser name, never the cookie**: yt-dlp reads
+  the store at call time (`--cookies-from-browser`), and nothing is copied.
+  **A scanned mount stores the cookie itself** — the platform handed it to
+  murmur directly and there is no browser to read it back out of. It lives
+  only in `sources.json`, under the same guard as the Soda session, and never
+  reaches the log (§3.6).
+- **`BrowserName` keeps its full list** even though YouTube is the only
+  source murmur still mounts through a browser, and only ever through Chrome
+  (§3.1): a listener's file may name any of the eight from a mount made
+  earlier, and narrowing the enum would make that whole file unparseable —
+  which is a lost mount, not a migration.
 - Single writer: the `/sources` flow. Atomic write (tmp + rename), like
   `settings.json` (12 §2.1); owner-only (0600) like `voice.json`, the
   snapshots too. A corrupt file is reported once per version of the file.
@@ -264,12 +280,20 @@ catalogue: z.enum(['youtube', 'bilibili', 'netease']).optional()
 ### 2.5 Cookie-aware resolve
 
 `YtDlpMusicProvider.resolve(ref)` (and `search` for Bilibili) consult the
-mounted sources: when `ref`'s host belongs to a mounted cookie source, the
-runner is invoked with `--cookies-from-browser <browser>[:<profile>]`.
-One helper, unit-tested:
+mounted sources: when `ref`'s host belongs to a mounted source, that mount's
+cookie is leased for the call and released after it. How the lease is
+obtained follows the mount (§2.1):
+
+- **browser mount** → yt-dlp exports the store
+  (`--cookies-from-browser <browser>[:<profile>]`, Chrome always by a named
+  profile — §3.1) into a jar the call loads;
+- **scanned mount** → the stored header is written as a Netscape jar for that
+  one call and deleted with the lease. No browser is opened, nothing is
+  decrypted, and the argument yt-dlp sees is the same `--cookies <file>` it
+  sees for a browser mount.
 
 ```ts
-function cookieArgs(ref: string, sources: SourcesFile): string[]   // [] when no mount applies
+function cookieLeaser(deps): (source) => Promise<CookieLease | null>   // null when no mount applies
 ```
 
 Hosts: `youtube.com`/`youtu.be`/`music.youtube.com` → youtube;
@@ -366,8 +390,16 @@ Small, single-purpose HTTP clients under `src/music/sources/`, each a file:
   (`n` = the §3.5 cap: one read returns the whole list titled *and* dated —
   `trackIds[].at` is when each was kept), and `/api/search/get` (type song),
   which answers anonymously and needs no cookie at all.
-  Cookie: read from the browser store **through
-  yt-dlp** — `yt-dlp --cookies-from-browser <b> --cookies <tmpfile> …` writes
+  **Sign-in (scan)**: `GET /api/login/qrcode/unikey?type=1` → `{code:200,
+  unikey}`; the code encodes `https://music.163.com/login?codekey=<unikey>`.
+  `GET /api/login/qrcode/client/login?key=<unikey>&type=1` polls, and its
+  whole answer is its own `code` — **801** waiting · **802** the phone has it
+  · **803** confirmed, the cookie arriving as `Set-Cookie` (`MUSIC_U` and
+  friends, collected into one header) · **800** the code is spent. Any other
+  code reads as waiting; the loop's deadline is what ends it. Verified
+  against the live endpoints 2026-09-15.
+  Cookie, for a mount made before the scan existed: read from the browser
+  store **through yt-dlp** — `yt-dlp --cookies-from-browser <b> --cookies <tmpfile> …` writes
   a Netscape jar the client reads and deletes after the call (no second
   cookie-store reader to maintain; the jar never persists). *As built (review
 round 2)*: the export is coalesced per browser per site — a cold YouTube
@@ -375,7 +407,15 @@ snapshot reads three lists at once and they share one browser-store unlock —
 and an export that found nothing for the site is never cached, so a listener
 who signs in and retries at once reaches the browser again rather than the
 empty answer from a minute ago.
-- **`bilibili.ts`** — `x/web-interface/nav` (who, `mid`) and
+- **`bilibili.ts`** — **sign-in (scan)**: `GET
+  passport.bilibili.com/x/passport-login/web/qrcode/generate` → `{code:0,
+  data:{url, qrcode_key}}`, and the platform's own `url` is what the code
+  encodes. `GET …/web/qrcode/poll?qrcode_key=<key>` polls; the envelope is
+  `0` throughout, so the answer is the code **inside** `data` — **86101**
+  waiting · **86090** the phone has it · **0** confirmed, with `SESSDATA`,
+  `bili_jct` and `DedeUserID` arriving as `Set-Cookie` · **86038** the code is
+  spent. Verified against the live endpoints 2026-09-15.
+  Then `x/web-interface/nav` (who, `mid`) and
   `x/v3/fav/folder/created/list-all` (folders); folder contents, watch-later
   and space audio read from the same web APIs yt-dlp's extractors call
   (*as built*: yt-dlp's flat output for these lists carries ids alone, and a
@@ -405,6 +445,13 @@ empty answer from a minute ago.
   ponytail rung 5). The daily mix answers a bare session with the app's
   "not for this caller" status; that read is then empty, never a failure.
   No decryption code exists anywhere in murmur.
+
+Both scan flows run the **same loop** (`qr.ts`): draw the code, poll every
+`QR_POLL_MS`, give up after `QR_TIMEOUT_MS`, Esc checked on both sides of the
+wait. A confirmation that arrives without a cookie is *not* a sign-in — it
+waits out the deadline, because a mount with no credential is worse than a
+fresh code. Soda Music keeps its own passport flow (§6) and shares the
+cadence.
 
 Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
@@ -468,19 +515,44 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   dropped here …`, `ok refreshed NetEase — 312 items` — as well as in the log
   through `info`. The verb is what tells a reopened card apart from the same
   menu again (user report, 2026-09-14). Rows that end the same way share one
-  (`-- could not connect YouTube, Bilibili, NetEase — Chrome is here, but …`):
-  three cookie sources behind one obstacle must still fit an 80x24 card
-  (verified: 22 rows). The TUI floats the card
+  (`-- could not connect Bilibili, NetEase — the code timed out — …`): three
+  failures behind one cause must still fit an 80x24 card (verified: 22 rows). The TUI floats the card
   over the log (10 §3.3), so a result printed *under* it was the failure
   mode this replaces: the card closed and reopened and the listener saw
   nothing happen (#231).
-- The three mount flows below are unchanged: their own asks (the sign-in
-  Enter, the Spotify wait, the Soda code) pop as before.
+- The mount flows below keep their own asks (the YouTube sign-in Enter, the
+  Spotify wait, the three scans) — they pop as before.
 
-**Mount, cookie sources (YouTube / Bilibili / NetEase)**: nothing is asked.
-*Revised 2026-09-10*: the browser question is gone. murmur reads **Chrome**,
-and opens the sign-in page in **Chrome specifically** — one browser for both
-halves, so the listener cannot sign in somewhere murmur will not look.
+**Mount, NetEase / Bilibili (scan)**: nothing is asked, and no browser is
+involved. murmur draws the platform's own code in the terminal and waits for
+the phone app to confirm it (§2.8). The steps are Soda Music's (§6), and the
+line names the app the listener must reach for — *the NetEase Cloud Music
+app*, *the Bilibili app* — because a code with the wrong app pointed at it is
+the failure this text exists to prevent.
+
+1. Ask the platform for a key and draw the code, **through `showPrivate`
+   only**: it is an authorization artifact and must not reach the log (§3.6).
+   A host with no such surface says so and mounts nothing.
+2. Poll every two seconds for up to three minutes; Esc stops it.
+3. **Confirmed** → keep the cookie the platform hands back, read who it signs
+   in as, first `snapshot()`, write, "done — I'll keep it fresh".
+4. **The code expired, or three minutes passed** → "the code timed out —
+   /sources to get a fresh one." **Esc** → "cancelled — nothing was written."
+   **A cookie that signs in to nobody** → the §3.7 expired line.
+
+This retires, for these two, every failure a browser mount can have: no
+browser to install, no cookie store to unlock, no Full Disk Access to grant,
+no "you must already be signed in somewhere", and no Arc — whose store
+yt-dlp cannot read at all (issue #221). A mount made the old way keeps
+working and is read exactly as before; unticking it is how it goes.
+
+**Mount, YouTube (browser)**: nothing is asked. Google has no sign-in murmur
+can drive without a registered app (issue #221 records why: the Data API
+needs one, the device-code flow needs a client id, and yt-dlp's borrowed TV
+client id is blocked), so YouTube keeps the browser cookie. murmur reads
+**Chrome**, and opens the sign-in page in **Chrome specifically** — one
+browser for both halves, so the listener cannot sign in somewhere murmur will
+not look.
 
 1. Read Chrome's cookie store for the site.
 2. **A login is there** → `verify()` → "signed in as <who>".
@@ -734,16 +806,23 @@ platforms the developer lacks — recorded as one by-ear issue). Stochastic →
 eval track (#98), out of this spec.
 
 ### 5.1 No account, no change (unit + real run)
-With no `sources.json`: `cookieArgs` returns `[]` for every ref; the pack has
+With no `sources.json`: the cookie leaser answers `null` for every ref; the pack has
 `taste: ''`; the music prompt renders no taste paragraph; `search_music`'s
 description lists only `youtube`; a real `--plain` run's pick and play are
 byte-identical in their yt-dlp arguments to today's (dev-log diff).
 
-### 5.2 Mount, cookie source (smoke, each of the three)
-`/sources` → mount → "signed in as <who>" matches the real account →
-snapshot written with `items.length > 0` → the digest names an artist the
-developer recognises as theirs. With no login in Chrome: the sign-in page
-opens **in Chrome**, and Enter after signing in completes the mount.
+### 5.2 Mount (smoke, each source)
+
+- **NetEase / Bilibili**: `/sources`, tick the row. A code is drawn on the
+  unlogged surface only; scanning it with that platform's app and confirming
+  mounts the account, names who, and writes the first snapshot. No browser is
+  opened and no cookie store is read — assert zero yt-dlp calls on the mount
+  path. The code's URL and the cookie appear in no log line.
+- **YouTube**: `/sources`, tick the row; signed in to Chrome → mounts and
+  names who. Not signed in → the sign-in page opens in the named Chrome
+  profile and the wait resumes on Enter (§3.1).
+- An older browser mount of NetEase or Bilibili keeps reading and refreshing
+  untouched; unticking it is how it goes.
 
 ### 5.3 Taste reaches the brain (unit + dev log)
 Fixture snapshots → `renderTasteDigest` golden output; a fake-brain pick
@@ -860,6 +939,9 @@ be *borrowed* at all; murmur is MIT (#206) and stays MIT.
 - **`guowenye/qishui-api`** (MIT): the Luna transport, QR issue/poll,
   `me_playlists`, `me_collection_mixed`, `daily_mix`. Its decryptor is not
   read for this spec.
+- **NetEase and Bilibili web QR sign-in**: both endpoint pairs are the
+  platforms' own, plaintext and unauthenticated; the status codes above were
+  read off the live endpoints rather than from any third-party client.
 - **`bjarneo/cliamp`** (no licence — mechanism only): the NetEase
   browser-name mount and session validation; the Spotify "register your own
   app" steps and the Development Mode notes; the YouTube Music

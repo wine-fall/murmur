@@ -12,11 +12,15 @@ import { z } from 'zod'
 
 import type { TrackCandidate } from '../../contracts.ts'
 import { SourceAuthError } from './auth.ts'
+import { setCookieHeader } from './cookies.ts'
+import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const API_BASE = 'https://music.163.com/api'
 const SONG_URL = 'https://music.163.com/#/song?id='
+// What the scanned code encodes: the platform's own sign-in page for a key.
+const QR_LOGIN_URL = 'https://music.163.com/login?codekey='
 const DEFAULT_TIMEOUT_MS = 15_000
 // These endpoints serve the web player, and answer an unbranded client with
 // empty results; a browser's own user agent is what they expect.
@@ -27,7 +31,8 @@ const LIKED_SPECIAL_TYPE = 5
 export type NeteaseFetch = (url: string, init?: RequestInit) => Promise<Response>
 
 export type NeteaseClientDeps = {
-  // The browser's cookie header for music.163.com, read at call time.
+  // The cookie header for music.163.com, read at call time: a QR mount's own,
+  // or the browser's. The QR calls themselves carry none.
   cookie: () => Promise<string>
   fetch?: NeteaseFetch
   timeoutMs?: number
@@ -68,6 +73,9 @@ const SongSchema = z.object({
   duration: z.number().optional(),
 })
 const SearchSchema = z.object({ result: z.object({ songs: z.array(z.unknown()).optional() }).nullish() })
+const QrKeySchema = z.object({ code: z.number(), unikey: z.string() })
+// The poll's whole answer is its code — there is no envelope under it.
+const QrPollSchema = z.object({ code: z.number() })
 
 export type NeteasePlaylist = { id: string; name: string; trackCount: number; liked: boolean; mine: boolean }
 
@@ -162,27 +170,63 @@ export class NeteaseClient {
     return candidates.slice(0, limit)
   }
 
-  // One round trip: a plain GET carrying the browser's cookie as it stands,
-  // a timeout, one retry on a network error and none on an auth answer; the
-  // login codes and a 429 become the typed failure.
-  private async call(path: string, query: Record<string, string | number>): Promise<unknown> {
+  // The QR sign-in (spec 14 §2.8): a key, drawn as the platform's own
+  // sign-in URL. Plaintext and unauthenticated — it carries no cookie,
+  // because there is not one yet.
+  async qrKey(): Promise<{ key: string; url: string }> {
+    const parsed = QrKeySchema.parse(await this.plain('/login/qrcode/unikey', { type: 1 }))
+    if (parsed.code !== 200) throw new Error(`netease qrcode/unikey: code ${parsed.code}`)
+    return { key: parsed.unikey, url: `${QR_LOGIN_URL}${parsed.unikey}` }
+  }
+
+  // 801 waiting / 802 the phone has it / 803 confirmed, and the cookie comes
+  // back as Set-Cookie / 800 the code is spent (verified against the live
+  // endpoint, 2026-09-15). Anything else reads as waiting: the loop's own
+  // deadline bounds it, and a fresh code is a better answer than a guess.
+  async qrPoll(key: string): Promise<QrPoll<string>> {
+    const response = await this.send(this.url('/login/qrcode/client/login', { key, type: 1 }), { method: 'GET', headers: this.headers('') })
+    if (!response.ok) throw new Error(`netease qrcode/client/login: HTTP ${response.status}`)
+    const { code } = QrPollSchema.parse(await response.json())
+    if (code === 803) return { status: 'confirmed', value: setCookieHeader(response) }
+    if (code === 802) return { status: 'scanned' }
+    if (code === 800) return { status: 'expired' }
+    return { status: 'waiting' }
+  }
+
+  private url(path: string, query: Record<string, string | number>): string {
     const url = new URL(`${API_BASE}${path}`)
     for (const [key, value] of Object.entries(query)) url.searchParams.set(key, String(value))
-    const cookie = await this.deps.cookie()
-    const init: RequestInit = {
-      method: 'GET',
-      headers: {
-        'User-Agent': USER_AGENT,
-        Referer: 'https://music.163.com/',
-        ...(cookie !== '' && { Cookie: cookie }),
-      },
-    }
-    let response: Response
+    return url.toString()
+  }
+
+  private headers(cookie: string): Record<string, string> {
+    return { 'User-Agent': USER_AGENT, Referer: 'https://music.163.com/', ...(cookie !== '' && { Cookie: cookie }) }
+  }
+
+  // A read whose own `code` is the answer, not an error: the QR endpoints
+  // speak entirely in codes, so `call`'s "anything but 200 is a failure"
+  // would turn "waiting for the scan" into a thrown error.
+  private async plain(path: string, query: Record<string, string | number>): Promise<unknown> {
+    const response = await this.send(this.url(path, query), { method: 'GET', headers: this.headers('') })
+    if (!response.ok) throw new Error(`netease ${path}: HTTP ${response.status}`)
+    return response.json()
+  }
+
+  // One round trip with a timeout and one retry on a network error.
+  private async send(url: string, init: RequestInit): Promise<Response> {
     try {
-      response = await this.once(url.toString(), init)
+      return await this.once(url, init)
     } catch {
-      response = await this.once(url.toString(), init)
+      return await this.once(url, init)
     }
+  }
+
+  // One round trip: a plain GET carrying the cookie as it stands, a timeout,
+  // one retry on a network error and none on an auth answer; the login codes
+  // and a 429 become the typed failure.
+  private async call(path: string, query: Record<string, string | number>): Promise<unknown> {
+    const cookie = await this.deps.cookie()
+    const response = await this.send(this.url(path, query), { method: 'GET', headers: this.headers(cookie) })
     if (response.status === 429) throw new SourceAuthError('netease', 'rate-limited', `HTTP 429 on ${path}`)
     if (!response.ok) throw new Error(`netease ${path}: HTTP ${response.status}`)
     const json: unknown = await response.json()
@@ -207,33 +251,43 @@ export class NeteaseClient {
   }
 }
 
-export type NeteaseEntry = { browser: BrowserName; profile?: string | undefined; userId: string; likedPlaylistId: string }
+// How the account's cookie was obtained (spec 14 §2.8): scanned here, or
+// borrowed from a browser by a mount made before the scan existed.
+export type NeteaseAccess = { auth: 'qr'; cookie: string } | { auth?: 'browser' | undefined; browser: BrowserName; profile?: string | undefined }
+export type NeteaseEntry = NeteaseAccess & { userId: string; likedPlaylistId: string }
 
 export type MountResult<T> = { ok: true; who: string; entry: T } | { ok: false; reason: 'login-required' }
 
-// The mount step (spec 14 §3.1): the account behind the named browser's
-// cookie, and its liked-songs playlist. No login = a plain "sign in there
-// first", never an exception.
-export async function mountNetease(
-  browser: { browser: BrowserName; profile?: string | undefined },
-  deps: NeteaseClientDeps,
-): Promise<MountResult<NeteaseEntry>> {
-  const client = new NeteaseClient(deps)
+// The account behind a cookie, and its liked-songs playlist.
+async function identify(client: NeteaseClient): Promise<{ who: string; userId: string; likedPlaylistId: string } | null> {
   const account = await client.account()
-  if (account === null) return { ok: false, reason: 'login-required' }
+  if (account === null) return null
   const playlists = await client.playlists(account.userId)
   const liked = playlists.find((p) => p.liked) ?? playlists.find((p) => p.mine) ?? playlists[0]
-  if (liked === undefined) return { ok: false, reason: 'login-required' }
-  return {
-    ok: true,
-    who: account.who,
-    entry: {
-      browser: browser.browser,
-      ...(browser.profile !== undefined && { profile: browser.profile }),
-      userId: account.userId,
-      likedPlaylistId: liked.id,
+  if (liked === undefined) return null
+  return { who: account.who, userId: account.userId, likedPlaylistId: liked.id }
+}
+
+// The scan mount (spec 14 §3.1): show the code, wait for the NetEase Cloud
+// Music app to confirm it, keep the cookie the platform hands back. No
+// browser is read, so nothing needs to be installed, unlocked or permitted.
+export async function mountNeteaseQr(deps: Omit<NeteaseClientDeps, 'cookie'>, opts: QrMountOptions): Promise<QrMountResult<NeteaseEntry>> {
+  const anonymous = new NeteaseClient({ ...deps, cookie: async () => '' })
+  let key = ''
+  const scan = await scanToSignIn<string>({
+    ...opts,
+    issue: async () => {
+      const issued = await anonymous.qrKey()
+      key = issued.key
+      return { url: issued.url }
     },
-  }
+    poll: () => anonymous.qrPoll(key),
+  })
+  if (!scan.ok) return scan
+  const cookie = scan.value
+  const who = await identify(new NeteaseClient({ ...deps, cookie: async () => cookie }))
+  if (who === null) return { ok: false, reason: 'login-required' }
+  return { ok: true, who: who.who, entry: { auth: 'qr', cookie, userId: who.userId, likedPlaylistId: who.likedPlaylistId } }
 }
 
 export class NeteaseSource implements TasteSource {

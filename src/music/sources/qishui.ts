@@ -13,14 +13,14 @@ import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
 import type { MountResult } from './netease.ts'
+import { QR_POLL_MS, QR_TIMEOUT_MS } from './qr.ts'
+
+export { QR_POLL_MS, QR_TIMEOUT_MS }
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const PC_HOST = 'https://api.qishui.com'
 const LUNA_HOST = 'https://beta-luna.douyin.com'
 const DEFAULT_TIMEOUT_MS = 15_000
-// The QR poll cadence and patience (spec 14 §3.1).
-export const QR_POLL_MS = 2_000
-export const QR_TIMEOUT_MS = 3 * 60_000
 
 // The passport SDK's fixed identity for the PC client (the reference's).
 const PASSPORT = {

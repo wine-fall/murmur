@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError } from '../src/music/sources/auth.ts'
-import { mountNetease, NeteaseClient, NeteaseSource, type NeteaseFetch } from '../src/music/sources/netease.ts'
+import { NeteaseClient, NeteaseSource, type NeteaseFetch } from '../src/music/sources/netease.ts'
 
 type Call = { url: string; body: string; headers: Record<string, string>; method: string }
 
@@ -125,7 +125,7 @@ describe('NeteaseClient', () => {
   })
 })
 
-describe('mountNetease + NeteaseSource', () => {
+describe('NeteaseSource', () => {
   const answers = {
     '/nuser/account/get': { code: 200, profile: { userId: 42, nickname: 'Chen X' } },
     '/user/playlist': {
@@ -140,14 +140,6 @@ describe('mountNetease + NeteaseSource', () => {
       playlist: { trackIds: [{ id: 1 }], tracks: [{ id: 1, name: 'Holocene', ar: [{ name: 'Bon Iver' }], dt: 344000 }] },
     },
   }
-
-  it('mounting finds the account and the liked playlist; a browser with no login says so', async () => {
-    const jar = { calls: 0, cookie: async () => (jar.calls++, COOKIE) }
-    const mounted = await mountNetease({ browser: 'chrome' }, { cookie: jar.cookie, fetch: fakeFetch(answers).fetch })
-    expect(mounted).toEqual({ ok: true, who: 'Chen X', entry: { browser: 'chrome', userId: '42', likedPlaylistId: '7' } })
-    const anon = await mountNetease({ browser: 'firefox', profile: 'p' }, { cookie: async () => '', fetch: fakeFetch({ '/nuser/account/get': { code: 200 } }).fetch })
-    expect(anon).toEqual({ ok: false, reason: 'login-required' })
-  })
 
   it('a snapshot on a cookie that no longer signs in is the typed failure, not an anonymous read', async () => {
     // The playlist endpoints serve a public list without a login; a refresh

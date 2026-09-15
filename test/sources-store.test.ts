@@ -7,7 +7,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { cookieArgs, readSourcesFile, sourceOfRef, SourcesStore } from '../src/music/sources/store.ts'
+import { readSourcesFile, sourceOfRef, SourcesStore } from '../src/music/sources/store.ts'
 import type { TasteSnapshot } from '../src/music/sources/taste.ts'
 
 function home(): { dir: string; path: string; taste: string } {
@@ -126,38 +126,50 @@ describe('SourcesStore', () => {
   })
 })
 
-describe('cookieArgs (spec 14 §2.5)', () => {
-  const file = { netease: NETEASE, youtube: { browser: 'brave' as const, profile: 'Profile 1', mountedAt: 'x', status: 'ok' as const } }
-
-  // A Chrome entry is always read by a named profile (§3.1); the resolver is
-  // injected so the test does not depend on this machine's Chrome.
-  const resolve = (pinned?: string): string => pinned ?? 'Default'
-
-  it('passes the browser for a mounted host, profile included', () => {
-    expect(cookieArgs('https://music.163.com/#/song?id=1', file, resolve)).toEqual(['--cookies-from-browser', 'chrome:Default'])
-    expect(cookieArgs('https://www.youtube.com/watch?v=x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
-    expect(cookieArgs('https://youtu.be/x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
-    expect(cookieArgs('https://music.youtube.com/watch?v=x', file)).toEqual(['--cookies-from-browser', 'brave:Profile 1'])
-  })
-
-  it('is empty with no mount for the host, for an unknown host, and for a non-URL ref', () => {
-    expect(cookieArgs('https://www.bilibili.com/video/BV1', file)).toEqual([])
-    expect(cookieArgs('https://example.com/x', file)).toEqual([])
-    expect(cookieArgs('BV1xx', file)).toEqual([])
-    expect(cookieArgs('https://www.youtube.com/watch?v=x', {})).toEqual([])
-  })
-
-  it('an expired mount still passes the cookie — yt-dlp is what says whether it works', () => {
-    expect(cookieArgs('https://www.youtube.com/watch?v=x', { youtube: { ...file.youtube, status: 'expired' } })).toEqual([
-      '--cookies-from-browser',
-      'brave:Profile 1',
-    ])
-  })
-
+describe('sourceOfRef (spec 14 §2.5)', () => {
   it('names the source a ref belongs to', () => {
     expect(sourceOfRef('https://b23.tv/abc')).toBe('bilibili')
     expect(sourceOfRef('https://163cn.tv/abc')).toBe('netease')
     expect(sourceOfRef('https://example.com')).toBeNull()
     expect(sourceOfRef('not a url')).toBeNull()
+  })
+})
+
+// How a source's cookie was obtained (spec 14 §2.8): NetEase and Bilibili
+// sign in by scan; a mount made before that carries a browser name and no
+// `auth` key, and must keep working untouched.
+describe('the access union', () => {
+  it('reads a scanned mount and a browser mount of the same source, and tells them apart', () => {
+    const { path } = home()
+    writeFileSync(
+      path,
+      JSON.stringify({
+        netease: { auth: 'qr', cookie: 'MUSIC_U=<redacted>', userId: '42', likedPlaylistId: '7', mountedAt: 'x', status: 'ok' },
+        bilibili: { browser: 'firefox', mid: '9', mountedAt: 'x', status: 'ok' },
+      }),
+    )
+    const file = readSourcesFile(path)
+    expect(file.netease).toMatchObject({ auth: 'qr', cookie: 'MUSIC_U=<redacted>' })
+    expect(file.netease).not.toHaveProperty('browser')
+    // The older shape survives byte for byte — including a browser murmur
+    // would not choose today, because the listener chose it back then.
+    expect(file.bilibili).toEqual({ browser: 'firefox', mid: '9', mountedAt: 'x', status: 'ok' })
+    expect(file.bilibili).not.toHaveProperty('auth')
+  })
+
+  it('refuses a half-written entry rather than mounting an account with no credential', () => {
+    const { path } = home()
+    const logs: string[] = []
+    writeFileSync(path, JSON.stringify({ netease: { auth: 'qr', userId: '42', likedPlaylistId: '7', mountedAt: 'x', status: 'ok' } }))
+    expect(readSourcesFile(path, (m) => logs.push(m))).toEqual({})
+    expect(logs).toHaveLength(1)
+  })
+
+  it('round-trips a scanned mount through the store', () => {
+    const { path, taste } = home()
+    const store = new SourcesStore({ path, tasteDir: taste })
+    store.mount('bilibili', { auth: 'qr', cookie: 'SESSDATA=<redacted>', mid: '42' })
+    expect(store.mounted()).toEqual(['bilibili'])
+    expect(store.read().bilibili).toMatchObject({ auth: 'qr', cookie: 'SESSDATA=<redacted>', mid: '42', status: 'ok' })
   })
 })
