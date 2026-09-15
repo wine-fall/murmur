@@ -10,7 +10,7 @@ import { ask } from '../../host/host.ts'
 import type { AskOption } from '../../host/ipc.ts'
 import { escPulse, lineReader, type QuitLatch } from '../../setup/guide.ts'
 import { AUTH_LINES, type SourceAuthWatch } from './auth.ts'
-import { chromeProfile } from './chrome.ts'
+import { type ChromeDeps, type ChromeProfileInfo, preselectProfile, profiles } from './chrome.ts'
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
@@ -36,12 +36,25 @@ export const SOURCES_OFFER = [
 
 export type BrowserPick = { browser: BrowserName; profile?: string | undefined }
 
-export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: string) => void; cancelled: () => boolean }
+// `openUrl` overrides the wiring's own opener so the consent page lands in
+// the Chrome profile the listener picked on the sign-in card. murmur never
+// reads a Spotify cookie — the profile decides which account is signed in on
+// the page it opens, nothing more.
+export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: string) => void; cancelled: () => boolean; openUrl?: (url: string) => void }
+
+// The three sources that can be read out of a browser's cookie store.
+// NetEase and Bilibili can also be scanned; YouTube cannot (issue #221), so
+// for it this is the only road.
+export type BrowserMounts = {
+  youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
+  netease(b: BrowserPick): Promise<MountResult<NeteaseEntry>>
+  bilibili(b: BrowserPick): Promise<MountResult<BilibiliEntry>>
+}
 
 // The platform adapters behind the conversation, injectable so the flow is
 // tested with fakes and the real ones are wired once (build.ts).
 export type SourceMounts = {
-  youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
+  browser: BrowserMounts
   bilibili(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<BilibiliEntry>>
   netease(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<NeteaseEntry>>
   spotify(clientId: string, hooks: SpotifyHooks): Promise<SpotifyMountResult>
@@ -71,17 +84,22 @@ export type SourcesFlowDeps = {
   // The profile rides along: the page must open in the very profile this
   // mount will read, so the two halves cannot name different ones.
   openUrl?: (url: string, profile: string) => void
+  // Where the Chrome profile list and the preselection are read from
+  // (chrome.ts); injected whole so a test can hand over a Local State file.
+  chrome?: ChromeDeps
   platform?: NodeJS.Platform
   now?: () => Date
 }
 
-// The one source still read out of a browser: Google has no sign-in murmur
-// can drive without a registered app (issue #221), so YouTube keeps the
-// Chrome cookie store while NetEase and Bilibili are scanned.
-type CookieSource = 'youtube'
+// The sources a browser's cookie store can mount.
+type CookieSource = keyof BrowserMounts
 // The three that sign in by scanning a code with the platform's own app.
 const QR_SOURCES = ['netease', 'bilibili', 'qishui'] as const
 type QrSource = (typeof QR_SOURCES)[number]
+// The two that can go either way, and so are the ones the card is a real
+// question for. Soda Music has no browser road at all (its entry is minted by
+// the scan itself), so it is never asked; YouTube has no scan.
+const BOTH_ROADS = ['netease', 'bilibili'] as const
 
 // What a plain-host listener may type for a row, besides its number.
 const NAMES: Record<string, MenuKey> = {
@@ -215,16 +233,100 @@ function recording(host: Host, notes: string[]): Host {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
-// The profile for a NEW mount: resolved once here (chrome.ts), then written
-// into the entry and pinned. Everything a mounted source does afterwards —
-// refresh, verify, playback — reads that pin instead of coming back here.
-export function chromePick(): { browser: typeof CHROME; profile: string } {
-  return { browser: CHROME, profile: chromeProfile() }
-}
-
 // Where each source is signed in, opened in Chrome when no login is found.
 const SIGN_IN_URL: Record<CookieSource, string> = {
   youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
+  netease: 'https://music.163.com/',
+  bilibili: 'https://passport.bilibili.com/login',
+}
+
+// --- the sign-in card (spec 14 §3.1) ------------------------------------- //
+
+// How this mount signs in. The card asks it once, before anything is read,
+// because both halves of the answer used to be guessed: which road (a scan,
+// or a browser) and — for a browser — WHICH Chrome profile. Guessing the
+// second one is what read a listener's work account when they meant their
+// personal one, with no step anywhere to say so (user report, 2026-09-15).
+export type SignIn = { kind: 'scan' } | { kind: 'chrome'; profile: string }
+
+// A row of the card, carrying the road it stands for.
+export type SignInRow = AskOption & { choice: SignIn }
+
+const SCAN_KEY = 'scan'
+const CHROME_KEY = 'chrome:'
+
+// The note under the question: the one fix for the failure the card itself
+// cannot prevent — the right profile picked, the wrong account signed in to
+// the SITE inside it. murmur cannot sign anyone out, so it says where to.
+export const SIGN_IN_NOTE = 'signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.'
+
+// Which app scans this source's code, in the platform's own terms — a code
+// with the wrong app pointed at it is what the row's wording prevents.
+const SCAN_ROWS: Record<QrSource, string> = {
+  netease: 'scan with the NetEase Cloud Music app',
+  bilibili: 'scan with the Bilibili app',
+  qishui: 'scan with the Douyin app',
+}
+
+// The rows: the scan first where there is one — it is the road that needs no
+// browser, no cookie store and no Full Disk Access — then one row per Chrome
+// profile, named as Chrome's own profile menu names them. The preselected
+// profile is always offered even when Chrome does not list it: the knob can
+// name a directory that was deleted, and that mount has a road of its own
+// (the no-login path, #240), which it cannot take if it cannot be picked.
+export function signInRows(id: SourceId, list: readonly ChromeProfileInfo[], preselect: string): SignInRow[] {
+  const rows: SignInRow[] = []
+  if ((BOTH_ROADS as readonly SourceId[]).includes(id)) rows.push({ key: SCAN_KEY, label: SCAN_ROWS[id as QrSource], choice: { kind: 'scan' }, checked: false })
+  const dirs = list.some((p) => p.dir === preselect) ? list : [...list, { dir: preselect, name: preselect }]
+  for (const profile of dirs) {
+    rows.push({
+      key: `${CHROME_KEY}${profile.dir}`,
+      label: `Chrome — ${profile.name}${profile.email === undefined ? '' : ` (${profile.email})`}`,
+      choice: { kind: 'chrome', profile: profile.dir },
+      checked: profile.dir === preselect,
+    })
+  }
+  return rows
+}
+
+// The card's text, for a front-end with no list surface: the question, the
+// note, and the same rows numbered — the shape every other menu here uses.
+export function signInText(id: SourceId, rows: readonly SignInRow[]): string {
+  return [
+    `How should I sign in to ${SOURCE_NAMES[id]}?`,
+    SIGN_IN_NOTE,
+    ...rows.map((row, i) => `>> ${i + 1}) [${row.checked === true ? 'x' : ' '}] ${row.label}`),
+  ].join('\n')
+}
+
+// One answer as the row it names: the row's own key (the TUI's list), its
+// number, or the profile's directory typed bare. Anything else is refused
+// rather than guessed — guessing here mounts the wrong account.
+function parseSignIn(line: string, rows: readonly SignInRow[]): SignInRow | string {
+  const word = line.trim()
+  if (word === '') return rows.find((row) => row.checked === true) ?? rows[0]!
+  const byNumber = /^\d+$/.test(word) ? rows[Number(word) - 1] : undefined
+  const byKey = rows.find((row) => row.key.toLowerCase() === word.toLowerCase())
+  const byDir = rows.find((row) => row.choice.kind === 'chrome' && row.choice.profile.toLowerCase() === word.toLowerCase())
+  return byNumber ?? byKey ?? byDir ?? `I didn't catch "${word}" — numbers or names from the list`
+}
+
+// Ask, and re-ask a line that names no row. Null = the listener stopped
+// (Esc, a front-end that left, or /quit): nothing is mounted and nothing is
+// written, exactly as an Esc on the menu behind it.
+async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, previous: string | undefined, cancelled: () => boolean): Promise<SignIn | null> {
+  const { host } = deps
+  const pinned = (deps.store.read()[id] as { profile?: string } | undefined)?.profile
+  const rows = signInRows(id, profiles(deps.chrome), preselectProfile(pinned, previous, deps.chrome))
+  // The row's own road stays here; the wire carries the option alone.
+  const options: AskOption[] = rows.map(({ choice: _choice, ...option }) => option)
+  for (;;) {
+    ask(host, signInText(id, rows), 'question', { options, multi: false })
+    const picked = parseSignIn(await read(), rows)
+    if (cancelled() || deps.quit.requested) return null
+    if (typeof picked !== 'string') return picked.choice
+    host.info(picked)
+  }
 }
 
 // Which app scans the code, said in the platform's own terms so the listener
@@ -252,6 +354,15 @@ const QR_SCANNED = 'scanned — confirm on your phone'
 // Where one sign-in sits in the rows being mounted this submit, so a listener
 // three codes deep knows there are two more coming. `of` 1 carries no counter.
 type Step = { at: number; of: number }
+
+// The Chrome profile this submit has already settled on, carried across its
+// mounts as the next card's preselection.
+type Chosen = { profile?: string }
+
+// A mount the listener stopped before it started, as the next card's row.
+function stoppedRow(id: SourceId): string {
+  return `-- could not connect ${SOURCE_NAMES[id]} — stopped — nothing was written`
+}
 
 // What to say when the cookie store cannot be read at all. Each of these
 // used to arrive as "sign in there", which is advice that cannot work: no
@@ -322,14 +433,18 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       // carries the position, and a refresh in between does not change it.
       const of = toRenew.length + toMount.length
       let at = 0
+      // What the last sign-in card chose, so the next one opens on it: a
+      // listener connecting three sources is connecting three accounts of one
+      // person, not answering the same question three times.
+      const chosen: Chosen = {}
       for (const id of toRenew) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
       }
       if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
       for (const id of toMount) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
       }
     }
   } finally {
@@ -348,12 +463,21 @@ async function mountOne(
   platform: NodeJS.Platform,
   cancelled: () => boolean,
   step: Step,
+  chosen: Chosen,
 ): Promise<string> {
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
-  if (id === 'spotify') await mountSpotifyFlow(recorded, cancelled)
-  else if (id === 'youtube') await mountCookieFlow(recorded, read, id, platform, cancelled)
-  else await mountQrFlow(recorded, id, cancelled, step)
+  // Soda Music has one road and is asked nothing: its entry is minted by the
+  // scan itself, so there is no browser to offer and a one-row card is noise.
+  if (id === 'qishui') await mountQrFlow(recorded, id, cancelled, step)
+  else {
+    const how = await askSignIn(recorded, read, id, chosen.profile, cancelled)
+    if (how === null) return stoppedRow(id)
+    if (how.kind === 'chrome') chosen.profile = how.profile
+    if (how.kind === 'scan') await mountQrFlow(recorded, id as QrSource, cancelled, step)
+    else if (id === 'spotify') await mountSpotifyFlow(recorded, cancelled, how.profile)
+    else await mountCookieFlow(recorded, read, id as CookieSource, platform, cancelled, how.profile)
+  }
   const name = SOURCE_NAMES[id]
   const who = notes.find((line) => line.startsWith('signed in as '))
   if (who !== undefined) return `ok connected ${name} — ${who} · ${counts(deps.store, id)}`
@@ -394,15 +518,18 @@ async function mountCookieFlow(
   id: CookieSource,
   platform: NodeJS.Platform,
   cancelled: () => boolean,
+  profile: string,
 ): Promise<void> {
   const { host } = deps
   const site = SOURCE_NAMES[id]
-  const pick = chromePick()
+  // The profile the listener picked on the card, pinned into the entry by the
+  // mount and read by every refresh after it — never resolved a second time.
+  const pick = { browser: CHROME, profile }
   host.info(`checking ${site} in Chrome...`)
-  type CookieMount = MountResult<YouTubeEntry>
+  type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry>
   const attempt = async (): Promise<CookieMount | null> => {
     try {
-      return await deps.mounts[id](pick)
+      return await deps.mounts.browser[id](pick)
     } catch (err) {
       if (err instanceof BrowserCookieError) {
         host.debug?.(`sources.cookies ${id} profile=${pick.profile} ${err.reason}: ${err.detail}`)
@@ -440,10 +567,12 @@ async function mountCookieFlow(
       return
     }
   }
-  await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
+  if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
+  else if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
+  else await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
 }
 
-async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean): Promise<void> {
+async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean, profile: string): Promise<void> {
   const { host } = deps
   const clientId = spotifyClientId()
   host.info('opening Spotify in your browser — approve there; I\'ll wait up to three minutes (Esc cancels).')
@@ -455,6 +584,9 @@ async function mountSpotifyFlow(deps: SourcesFlowDeps, cancelled: () => boolean)
       },
       onUrl: (url) => host.info(`if the browser did not open, approve here: ${url}`),
       cancelled,
+      // The consent page opens in the profile the card chose, so the account
+      // it offers is the one the listener meant. No cookie is read from it.
+      ...(deps.openUrl !== undefined && { openUrl: (url: string) => deps.openUrl?.(url, profile) }),
     })
   } catch (err) {
     host.info(`could not reach Spotify (${err instanceof Error ? err.message : String(err)}) — /sources to try again.`)

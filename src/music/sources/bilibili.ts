@@ -9,6 +9,7 @@ import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
 import { setCookieHeader } from './cookies.ts'
+import type { MountResult } from './netease.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
@@ -212,6 +213,14 @@ export class BilibiliClient {
 // borrowed from a browser by a mount made before the scan existed.
 export type BilibiliAccess = { auth: 'qr'; cookie: string } | { auth?: 'browser' | undefined; browser: BrowserName; profile?: string | undefined }
 export type BilibiliEntry = BilibiliAccess & { mid: string }
+
+// The browser mount (spec 14 §3.1): the account behind a Chrome profile's
+// cookie. The entry keeps the browser and the profile, never the cookie.
+export async function mountBilibili(browser: { browser: BrowserName; profile?: string | undefined }, deps: BilibiliClientDeps): Promise<MountResult<BilibiliEntry>> {
+  const nav = await new BilibiliClient(deps).nav()
+  if (nav === null) return { ok: false, reason: 'login-required' }
+  return { ok: true, who: nav.who, entry: { auth: 'browser', browser: browser.browser, ...(browser.profile !== undefined && { profile: browser.profile }), mid: nav.mid } }
+}
 
 // The scan mount (spec 14 §3.1): show the code, wait for the Bilibili app to
 // confirm it, keep the cookie the platform hands back. No browser is read.

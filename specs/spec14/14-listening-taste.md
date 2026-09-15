@@ -523,12 +523,72 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
 - The mount flows below keep their own asks (the YouTube sign-in Enter, the
   Spotify wait, the three scans) — they pop as before.
 
-**Mount, NetEase / Bilibili (scan)**: nothing is asked, and no browser is
-involved. murmur draws the platform's own code in the terminal and waits for
-the phone app to confirm it (§2.8). The steps are Soda Music's (§6), and the
-line names the app the listener must reach for — *the NetEase Cloud Music
-app*, *the Bilibili app* — because a code with the wrong app pointed at it is
-the failure this text exists to prevent.
+**How do I sign in?** — *added 2026-09-15*. Before **every** mount in the
+submit but Soda Music's, one single-select card comes first (`ask` with
+`options`, `multi: false` — 10 §3.2-B), and its answer picks the road:
+
+```
+How should I sign in to NetEase?
+signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.
+>> 1) [ ] scan with the NetEase Cloud Music app
+>> 2) [ ] Chrome — Work (zach.guo@opus.pro)
+>> 3) [x] Chrome — Personal (fawinell@gmail.com)
+```
+
+- **The scan row** leads, and only for NetEase and Bilibili — the two that
+  can go either way. It names the app in the platform's own terms (*the
+  NetEase Cloud Music app*, *the Bilibili app*), and picking it is the scan
+  mount below, unchanged.
+- **One row per Chrome profile**, named as Chrome's own profile menu names
+  them: `Chrome — <name> (<email>)`, the email omitted when Chrome holds
+  none. The list is `profiles()` (chrome.ts), read from the same `Local
+  State` file `last_used` comes from: `profile.info_cache[<dir>].name` and
+  `.user_name`, and nothing else. `Default` leads, then Chrome's own order; a
+  directory `info_cache` still lists but Chrome no longer has on disk is
+  dropped, because choosing it would mount an account that is not there. The
+  list is never empty — with nothing readable there is still `Default`.
+  Picking one is the browser mount below, with that profile pinned into the
+  entry (`auth: 'browser'`, `browser: 'chrome'`, `profile: <dir>`).
+- **The card is always shown**, with one profile as with five, and for
+  YouTube as for the rest: the listener may want to sign in as someone else
+  in that same profile, and a question they can answer with one keypress is
+  cheaper than a mount they have to undo. It is what restores the browser
+  road for NetEase and Bilibili, which the scan work (#242) had narrowed to
+  the scan alone.
+- **The note line** is the one failure the card itself cannot prevent: the
+  right profile picked, the wrong account signed in to the *site* inside it.
+  murmur cannot sign anyone out, so it says where to.
+- **Preselection**, in order: the profile pinned in that source's existing
+  entry → `$MURMUR_CHROME_PROFILE` → the profile this same submit already
+  chose (three sources in a row are one person's three accounts, not three
+  questions) → Chrome's `last_used` → `Default`. Every arm is a guess and
+  every one is one keypress from being overruled, which is the point of
+  asking. A profile the knob names that Chrome no longer lists is offered
+  anyway, so the deleted-profile road (#240) stays reachable.
+- **The answer** is the row's key (`scan`, `chrome:<dir>`), its number, or
+  the directory typed bare; an empty line takes the preselected row. A word
+  it cannot place is refused and the card re-asked — guessing here mounts the
+  wrong account. **Esc** hands the list back, exactly as an Esc on the menu
+  does: the submit stops, the row reads `-- could not connect <name> —
+  stopped — nothing was written`, and nothing is written.
+
+**Soda Music is never asked**: it has no browser road at all — its entry
+(`sessionCookie` / `deviceId` / `installId`) is minted by the scan itself —
+so its card would carry one row, which is noise, not a choice.
+
+**Spotify is asked too, and its rows are the profiles alone** — no scan row.
+A Chrome row there means *open the OAuth consent page in that profile*, so
+the account the page offers is the one the listener meant. murmur never reads
+a Spotify cookie; the profile decides nothing else.
+
+**Mount, NetEase / Bilibili**: the card above decides the road. A Chrome row
+is the browser mount YouTube takes below, reading that profile's cookie store
+for the site. The **scan** involves no browser at all: murmur draws the
+platform's own code in the terminal and waits for the phone app to confirm it
+(§2.8). The steps are Soda Music's (§6), and the line names the app the
+listener must reach for — *the NetEase Cloud Music app*, *the Bilibili app* —
+because a code with the wrong app pointed at it is the failure this text
+exists to prevent.
 
 1. Ask the platform for a key and draw the code **in a notice card** —
    `Host.notice`, spec 10 §3.2-E — and there only: it is an authorization
@@ -556,8 +616,8 @@ no "you must already be signed in somewhere", and no Arc — whose store
 yt-dlp cannot read at all (issue #221). A mount made the old way keeps
 working and is read exactly as before; unticking it is how it goes.
 
-**Mount, YouTube (browser)**: nothing is asked. Google has no sign-in murmur
-can drive without a registered app (issue #221 records why: the Data API
+**Mount, YouTube (browser)**: only the profile is asked (the card above).
+Google has no sign-in murmur can drive without a registered app (issue #221 records why: the Data API
 needs one, the device-code flow needs a client id, and yt-dlp's borrowed TV
 client id is blocked), so YouTube keeps the browser cookie. murmur reads
 **Chrome**, and opens the sign-in page in **Chrome specifically** — one
@@ -602,9 +662,12 @@ empty profile, reported "not signed in", and opened the sign-in page in a
 window the listener had never used — while their everyday profile was signed
 in all along (user report, 2026-09-15). Both halves name one profile now.
 
-*Resolving it*: the profile pinned in the entry, else
-`$MURMUR_CHROME_PROFILE` if set, else Chrome's own `profile.last_used` from
-its `Local State` file, else `Default`.
+*Resolving it*: the profile pinned in the entry, else Chrome's own
+`profile.last_used` from its `Local State` file, else `Default`.
+`$MURMUR_CHROME_PROFILE` is **not** in that order — *revised 2026-09-15*: the
+listener picks the profile on the sign-in card, so the knob preselects a row
+there and decides nothing. A knob that preselects wrongly costs one keypress;
+a knob that decided silently cost a mount.
 `Local State` is found under the same root yt-dlp resolves the cookie store
 under (`$XDG_CONFIG_HOME` on Linux, `%LOCALAPPDATA%` on Windows), and
 `last_used` is read **once per run** and held: the read and the write-back
@@ -625,18 +688,18 @@ moving a mount to another account between refreshes. The table:
 
 | when | what happens |
 | --- | --- |
-| new mount | resolve (knob → `last_used` → `Default`), write it into the entry |
+| new mount | the profile the sign-in card chose, written into the entry |
 | an older mount with no `profile` field | resolved by the same rule for the read; written back once the read works, pinned from then on |
-| `$MURMUR_CHROME_PROFILE` set | decides for a mount with no pin. It never moves a pinned one: the entry also holds that account's own identifiers (a Bilibili `mid`, a NetEase `userId`), and reading another profile's cookies against them would fold two accounts into one snapshot |
+| `$MURMUR_CHROME_PROFILE` set | preselects the card's row for a mount with no pin, and decides nothing on its own. It never moves a pinned one: the entry also holds that account's own identifiers (a Bilibili `mid`, a NetEase `userId`), and reading another profile's cookies against them would fold two accounts into one snapshot |
 | the knob names a profile other than the pin | neither is read — the mount takes the same road as a lost login (`expired`, "connect it again"). Ticking the row again is a fresh mount, and that one resolves by the knob |
 | the read says `no-profile` (the profile was deleted or renamed) | the mount takes the same road as a lost login: `expired`, and the /sources list says to connect it again. Never a silent move to another profile |
-| the listener wants a different account | untick the row and tick it again — an unmount and a fresh mount, resolved anew |
+| the listener wants a different account | untick the row and tick it again — an unmount and a fresh mount, whose sign-in card asks the profile again |
 
 Updating a pin is never a background decision: only a failed read or the
 listener's own action changes it.
 
-The cost, accepted: a listener who uses only Firefox or Safari cannot mount
-these three. It buys the removal of every failure the question created — an
+The cost, accepted: a listener who uses only Firefox or Safari cannot take
+the browser road (NetEase and Bilibili they can still scan). It buys the removal of every failure the question created — an
 uninstalled browser, an unreadable store, a login in the wrong one — and of
 the `BrowserName` list, the `chrome:Profile 1` syntax and the paragraph of
 per-browser caveats that had to be read before answering. Existing mounts

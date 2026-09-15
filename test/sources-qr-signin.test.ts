@@ -6,9 +6,9 @@ import { existsSync, readFileSync } from 'node:fs'
 
 import { describe, expect, it } from 'vitest'
 
-import { BilibiliClient, mountBilibiliQr } from '../src/music/sources/bilibili.ts'
+import { BilibiliClient, mountBilibili, mountBilibiliQr } from '../src/music/sources/bilibili.ts'
 import { jarRowsFromHeader, setCookieHeader, writeJar } from '../src/music/sources/cookies.ts'
-import { mountNeteaseQr, NeteaseClient, type NeteaseFetch } from '../src/music/sources/netease.ts'
+import { mountNetease, mountNeteaseQr, NeteaseClient, type NeteaseFetch } from '../src/music/sources/netease.ts'
 
 type Call = { url: string; headers: Record<string, string> }
 
@@ -175,5 +175,49 @@ describe('the cookie a scan hands back (spec 14 §2.5/§2.8)', () => {
 
   it('ignores anything in the header that is not a name=value pair', () => {
     expect(jarRowsFromHeader('  ; =nothing; SESSDATA=x ;', 'bilibili.com').map((r) => r.name)).toEqual(['SESSDATA'])
+  })
+})
+
+// The browser road back (spec 14 §3.1, revised 2026-09-15). #242 made the
+// scan the ONLY way into these two; the sign-in card offers both again, so
+// the cookie mounts they had before are here again — writing `auth:
+// 'browser'` this time, which the store's Borrowed arm has always read.
+describe('the browser mount for NetEase and Bilibili (spec 14 §3.1)', () => {
+  it('mounts NetEase from a browser cookie, naming the browser and the profile it was read from', async () => {
+    const { fetch } = fakeFetch({
+      '/nuser/account/get': { body: { code: 200, profile: { userId: 42, nickname: 'Chen X' } } },
+      '/user/playlist': { body: { code: 200, playlist: [{ id: 7, name: 'my likes', specialType: 5, userId: 42 }] } },
+    })
+    const result = await mountNetease({ browser: 'chrome', profile: 'Profile 3' }, { fetch, cookie: async () => 'MUSIC_U=x' })
+    expect(result).toEqual({
+      ok: true,
+      who: 'Chen X',
+      entry: { auth: 'browser', browser: 'chrome', profile: 'Profile 3', userId: '42', likedPlaylistId: '7' },
+    })
+  })
+
+  it('mounts Bilibili the same way', async () => {
+    const { fetch } = fakeFetch({ '/x/web-interface/nav': { body: { code: 0, data: { isLogin: true, uname: 'Zach G', mid: 42 } } } })
+    const result = await mountBilibili({ browser: 'chrome', profile: 'Default' }, { fetch, cookie: async () => 'SESSDATA=x' })
+    expect(result).toEqual({ ok: true, who: 'Zach G', entry: { auth: 'browser', browser: 'chrome', profile: 'Default', mid: '42' } })
+  })
+
+  it('never carries a cookie into the entry: a browser mount borrows one per read, it does not keep it', async () => {
+    const { fetch } = fakeFetch({ '/x/web-interface/nav': { body: { code: 0, data: { isLogin: true, uname: 'Zach G', mid: 42 } } } })
+    const result = await mountBilibili({ browser: 'chrome', profile: 'Default' }, { fetch, cookie: async () => 'SESSDATA=secret' })
+    expect(JSON.stringify(result)).not.toContain('secret')
+  })
+
+  it('a cookie that signs in to nobody is login-required, never an exception', async () => {
+    const { fetch } = fakeFetch({ '/nuser/account/get': { body: { code: 200, profile: null } } })
+    expect(await mountNetease({ browser: 'chrome' }, { fetch, cookie: async () => '' })).toEqual({ ok: false, reason: 'login-required' })
+    const bili = fakeFetch({ '/x/web-interface/nav': { body: { code: 0, data: { isLogin: false } } } })
+    expect(await mountBilibili({ browser: 'chrome' }, { fetch: bili.fetch, cookie: async () => '' })).toEqual({ ok: false, reason: 'login-required' })
+  })
+
+  it('leaves the profile off the entry when the pick carries none — an older file shape stays reachable', async () => {
+    const { fetch } = fakeFetch({ '/x/web-interface/nav': { body: { code: 0, data: { isLogin: true, uname: 'Zach G', mid: 42 } } } })
+    expect(await mountBilibili({ browser: 'firefox' }, { fetch, cookie: async () => 'x' })).toMatchObject({ entry: { browser: 'firefox' } })
+    expect((await mountBilibili({ browser: 'firefox' }, { fetch, cookie: async () => 'x' })) as { entry: object }).not.toHaveProperty('entry.profile')
   })
 })

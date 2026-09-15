@@ -8,17 +8,26 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthWatch } from '../src/music/sources/auth.ts'
-import { runSources, SOURCES_OFFER, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
+import { runSources, SOURCES_OFFER, type BrowserMounts, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
-import { CHROME_PROFILE_ENV } from '../src/music/sources/chrome.ts'
+import { CHROME_PROFILE_ENV, type ChromeDeps } from '../src/music/sources/chrome.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
 import { FakeHost } from './fakes.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
+
+// Two Chrome profiles, fixed, so the sign-in card is drawn from a file the
+// test owns and never from the machine running it. 'Profile 2' is last_used,
+// which makes it the row every card here opens on — and '' answers the card
+// by taking that row, the plain host's Enter on a preselected list.
+const LOCAL_STATE = JSON.stringify({
+  profile: { last_used: 'Profile 2', info_cache: { Default: { name: 'Work' }, 'Profile 2': { name: 'Personal' } } },
+})
+const CHROME: ChromeDeps = { env: {}, platform: 'linux', home: '/home/someone', readFile: () => LOCAL_STATE, exists: () => true }
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
@@ -39,7 +48,7 @@ type SpotifyOutcome = 'ok' | 'timeout' | 'esc'
 
 function build(
   lines: string[],
-  over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts>; onCookieDrop?: () => void } = {},
+  over: Partial<Omit<SourcesFlowDeps, 'mounts'>> & { mounts?: Partial<SourceMounts>; browser?: Partial<BrowserMounts>; onCookieDrop?: () => void } = {},
   spotifyOutcome: SpotifyOutcome = 'ok',
 ) {
   const dir = mkdtempSync(join(tmpdir(), 'murmur-flow-'))
@@ -53,7 +62,12 @@ function build(
   const refresher = new TasteRefresher({ store, source: (id) => sources.get(id) ?? null, watch, host, now: () => NOW })
   const mounted: string[] = []
   const mounts: SourceMounts = {
-    youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
+    browser: {
+      youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
+      netease: async (b) => (mounted.push(`netease:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Chen X', entry: { auth: 'browser', browser: b.browser, userId: '1', likedPlaylistId: '2' } }),
+      bilibili: async (b) => (mounted.push(`bilibili:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Bili', entry: { auth: 'browser', browser: b.browser, mid: '9' } }),
+      ...over.browser,
+    },
     bilibili: async (show, cancelled) => {
       show('https://account.bilibili.com/h5/scan?qrcode_key=k')
       mounted.push('bilibili:qr')
@@ -84,7 +98,7 @@ function build(
     },
     ...over.mounts,
   }
-  const { mounts: _mounts, onCookieDrop, ...rest } = over
+  const { mounts: _mounts, browser: _browser, onCookieDrop, ...rest } = over
   const deps: SourcesFlowDeps = {
     host,
     store,
@@ -99,6 +113,7 @@ function build(
     },
     platform: 'linux',
     now: () => NOW,
+    chrome: CHROME,
     forgetCookies: onCookieDrop ?? (() => {}),
     ...rest,
   }
@@ -139,8 +154,8 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(store.busy).toBe(false)
   })
 
-  it('mounts a cookie source without asking anything: Chrome is read, verified, snapshotted, said', async () => {
-    const { host, deps, store, mounted } = build(['youtube', 'youtube'], { platform: 'darwin' })
+  it('mounts a cookie source once the profile is picked: Chrome is read, verified, snapshotted, said', async () => {
+    const { host, deps, store, mounted } = build(['youtube', '', 'youtube'], { platform: 'darwin' })
     await runSources(deps)
     // The browser question is gone entirely — murmur reads the one browser
     // it also opens for signing in, so there is nothing to get wrong.
@@ -170,7 +185,7 @@ describe('runSources (spec 14 §3.1)', () => {
   it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
     // A signed-in mount is not re-run from the list; an expired one is
     // renewed by refresh, and that is the remount.
-    const { host, deps, store } = build(['netease refresh', 'netease'])
+    const { host, deps, store } = build(['netease refresh', 'scan', 'netease'])
     store.mount('netease', { browser: 'chrome', userId: 'old', likedPlaylistId: '1' })
     store.setStatus('netease', 'expired')
     store.writeSnapshot({ source: 'netease', takenAt: '2026-09-01T00:00:00.000Z', items: [{ kind: 'liked', title: 'the old account' }] })
@@ -193,10 +208,10 @@ describe('runSources (spec 14 §3.1)', () => {
     // First read finds no login; after the listener signs in and presses
     // Enter, the second read finds one.
     let attempt = 0
-    const { host, deps, store } = build(['youtube', '', 'youtube'], {
+    const { host, deps, store } = build(['youtube', '', '', 'youtube'], {
       onCookieDrop: () => dropped.push(1),
       openUrl: (url) => opened.push(url),
-      mounts: {
+      browser: {
         youtube: async () => (attempt++ === 0 ? { ok: false, reason: 'login-required' } : { ok: true, who: 'Zach G', entry: { browser: 'chrome' } }),
       },
     })
@@ -212,9 +227,9 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('still no login after the wait says so plainly and writes nothing', async () => {
-    const { host, deps, store } = build(['youtube', '', ''], {
+    const { host, deps, store } = build(['youtube', '', '', ''], {
       openUrl: () => {},
-      mounts: { youtube: async () => ({ ok: false, reason: 'login-required' }) },
+      browser: { youtube: async () => ({ ok: false, reason: 'login-required' }) },
     })
     await runSources(deps)
     expect(host.infos).toContain('still no YouTube login in Chrome — /sources when you have signed in.')
@@ -231,9 +246,9 @@ describe('runSources (spec 14 §3.1)', () => {
       ['no-ytdlp', /yt-dlp/],
     ] as const
     for (const [reason, matcher] of cases) {
-      const { host, deps, store } = build(['youtube', ''], {
+      const { host, deps, store } = build(['youtube', '', ''], {
         platform: 'darwin',
-        mounts: {
+        browser: {
           youtube: async () => {
             throw new BrowserCookieError('chrome', reason, 'yt-dlp said so')
           },
@@ -258,11 +273,11 @@ describe('runSources (spec 14 §3.1)', () => {
     const opened: string[] = []
     const dropped: number[] = []
     let attempt = 0
-    const { host, deps, store } = build(['youtube', '', 'youtube'], {
+    const { host, deps, store } = build(['youtube', '', '', 'youtube'], {
       platform: 'darwin',
       openUrl: (url) => opened.push(url),
       onCookieDrop: () => dropped.push(1),
-      mounts: {
+      browser: {
         youtube: async () => {
           if (attempt++ === 0) throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
           return { ok: true, who: 'Zach G', entry: { browser: 'chrome' } }
@@ -279,10 +294,10 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a profile still absent after the wait ends in the plain no-login word', async () => {
-    const { host, deps, store } = build(['youtube', '', ''], {
+    const { host, deps, store } = build(['youtube', '', '', ''], {
       platform: 'darwin',
       openUrl: () => {},
-      mounts: {
+      browser: {
         youtube: async () => {
           throw new BrowserCookieError('chrome', 'no-profile', 'could not find chrome cookies database in "/x/Chrome/Murmur Fresh"', 'Murmur Fresh')
         },
@@ -314,9 +329,9 @@ describe('runSources (spec 14 §3.1)', () => {
     // the cancel latch — or an Esc would mount the account anyway.
     let attempts = 0
     let escape: () => void = () => {}
-    const built = build(['youtube', '', ''], {
+    const built = build(['youtube', '', '', ''], {
       openUrl: () => {},
-      mounts: {
+      browser: {
         youtube: async () => {
           attempts++
           if (attempts === 1) {
@@ -336,9 +351,9 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('an unreadable cookie store quotes yt-dlp rather than claiming Chrome is missing', async () => {
-    const { host, deps } = build(['youtube', ''], {
+    const { host, deps } = build(['youtube', '', ''], {
       platform: 'win32',
-      mounts: {
+      browser: {
         youtube: async () => {
           throw new BrowserCookieError('chrome', 'unreadable', 'ERROR: Failed to decrypt with DPAPI')
         },
@@ -356,7 +371,7 @@ describe('runSources (spec 14 §3.1)', () => {
     const before = process.env[CHROME_PROFILE_ENV]
     process.env[CHROME_PROFILE_ENV] = 'Profile 2'
     try {
-      const { deps, store } = build(['youtube', 'youtube'])
+      const { deps, store } = build(['youtube', '', 'youtube'])
       await runSources(deps)
       expect(store.read().youtube).toMatchObject({ browser: 'chrome', profile: 'Profile 2' })
     } finally {
@@ -366,7 +381,8 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('mounts Spotify straight into the browser: no app to register, no client id asked for', async () => {
-    const { host, deps, store, mounted } = build(['spotify', 'spotify'])
+    // The one thing asked is which Chrome profile the consent page opens in.
+    const { host, deps, store, mounted } = build(['spotify', '', 'spotify'])
     await withClientIdEnv(undefined, () => runSources(deps))
     // The developer-portal walkthrough and its question are both gone: the
     // bundled client id carries the read-only scopes on its own.
@@ -378,13 +394,13 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a listener with their own app overrides the bundled client id through the environment', async () => {
-    const { deps, mounted } = build(['spotify', 'spotify'])
+    const { deps, mounted } = build(['spotify', '', 'spotify'])
     await withClientIdEnv('client-of-their-own', () => runSources(deps))
     expect(mounted).toEqual(['spotify:client-of-their-own'])
   })
 
   it('a Spotify callback that never arrives is the §3.7 line; the consent URL is printed either way', async () => {
-    const { host, deps, store } = build(['spotify', ''], {}, 'timeout')
+    const { host, deps, store } = build(['spotify', '', ''], {}, 'timeout')
     await runSources(deps)
     expect(host.infos).toContain("didn't hear back from Spotify — /sources to try again.")
     expect(host.infos.some((l) => l.includes('https://accounts.spotify.com/authorize'))).toBe(true)
@@ -392,7 +408,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('Esc during the Spotify wait cancels and writes nothing', async () => {
-    const { host, deps, store } = build(['spotify', ''], {}, 'esc')
+    const { host, deps, store } = build(['spotify', '', ''], {}, 'esc')
     await runSources(deps)
     expect(host.infos).toContain('cancelled — nothing was written.')
     expect(store.read()).toEqual({})
@@ -414,7 +430,7 @@ describe('runSources (spec 14 §3.1)', () => {
   // NetEase and Bilibili mount by scanning, exactly as Soda does — no
   // browser, so none of the browser obstacles can reach this path (#221).
   it('mounts NetEase by scan: the code on the unlogged surface, the app named, no browser anywhere', async () => {
-    const { host, deps, store, mounted } = build(['netease', 'netease'])
+    const { host, deps, store, mounted } = build(['netease', 'scan', 'netease'])
     await runSources(deps)
     expect(mounted).toEqual(['netease:qr'])
     expect(host.notices.find((n) => n.body.some((row) => row.includes('█')))!.body.length).toBeGreaterThan(10)
@@ -432,7 +448,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('mounts Bilibili by scan, and a code nobody scans is a timeout with nothing written', async () => {
-    const { host, deps, store } = build(['bilibili', ''], {
+    const { host, deps, store } = build(['bilibili', 'scan', ''], {
       mounts: { bilibili: async (show) => (show('https://account.bilibili.com/h5/scan?qrcode_key=k'), { ok: false, reason: 'timeout' }) },
     })
     await runSources(deps)
@@ -443,7 +459,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('Esc during a NetEase scan cancels and writes nothing', async () => {
-    const { host, deps, store } = build(['netease', ''], {
+    const { host, deps, store } = build(['netease', 'scan', ''], {
       mounts: {
         netease: async (show, cancelled) => {
           show('https://music.163.com/login?codekey=k')
@@ -458,7 +474,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('Esc while the scan is confirming writes nothing, even though the sign-in itself succeeded', async () => {
-    const { host, deps, store } = build(['netease', ''], {
+    const { host, deps, store } = build(['netease', 'scan', ''], {
       mounts: {
         // The platform confirms, but the listener pressed Esc while the poll
         // and the account read were in flight (codex review).
@@ -477,7 +493,7 @@ describe('runSources (spec 14 §3.1)', () => {
   it('a typed /quit while a scan is waiting stops it and writes nothing', async () => {
     const quit = quitLatch()
     let seenByTheScan: boolean | undefined
-    const { host, deps, store } = build(['netease', ''], {
+    const { host, deps, store } = build(['netease', 'scan', ''], {
       quit,
       mounts: {
         // The engine fires the latch as the /quit arrives — no read is open
@@ -499,7 +515,7 @@ describe('runSources (spec 14 §3.1)', () => {
   it('a typed /quit while Spotify consent is pending stops the wait and writes nothing', async () => {
     const quit = quitLatch()
     let seenByTheWait: boolean | undefined
-    const { deps, store } = build(['spotify', ''], {
+    const { deps, store } = build(['spotify', '', ''], {
       quit,
       mounts: {
         spotify: async (clientId, hooks) => {
@@ -519,7 +535,7 @@ describe('runSources (spec 14 §3.1)', () => {
 
   it('refuses a NetEase or Bilibili mount on a host that cannot show a line off the record', async () => {
     for (const id of ['netease', 'bilibili'] as const) {
-      const { host, deps, store, mounted } = build([id, ''])
+      const { host, deps, store, mounted } = build([id, 'scan', ''])
       host.notice = undefined
       await runSources(deps)
       expect(mounted).toEqual([])
@@ -542,7 +558,7 @@ describe('runSources (spec 14 §3.1)', () => {
   // rows under the portrait, so the listener came back from their phone to
   // half a code with the instruction scrolled off above it.
   it('draws the scan code in a notice card — progress in the title, the way out in the footer', async () => {
-    const { host, deps } = build(['netease bilibili', 'netease bilibili'], {
+    const { host, deps } = build(['netease bilibili', 'scan', 'scan', 'netease bilibili'], {
       mounts: {
         bilibili: async (show) => {
           show('https://account.bilibili.com/h5/scan?qrcode_key=k')
@@ -569,7 +585,7 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a single mount carries no counter, and a scanned code says to confirm on the phone', async () => {
-    const { host, deps } = build(['netease', 'netease'], {
+    const { host, deps } = build(['netease', 'scan', 'netease'], {
       mounts: {
         netease: async (show, _cancelled, onStatus) => {
           show('https://music.163.com/login?codekey=k')
@@ -663,13 +679,13 @@ describe('runSources (spec 14 §3.1)', () => {
     await runSources(forget.deps)
     expect(forget.store.read()).toEqual({})
     expect(forget.mounted).toEqual([])
-    const renew = build(['netease refresh', 'netease'])
+    const renew = build(['netease refresh', 'scan', 'netease'])
     renew.store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     renew.store.setStatus('netease', 'expired')
     await runSources(renew.deps)
     expect(renew.mounted).toEqual(['netease:qr'])
     expect(renew.store.read().netease?.status).toBe('ok')
-    expect(renew.host.asks[1]!.text.split('\n')[1]).toBe('ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist')
+    expect(renew.host.asks.at(-1)!.text.split('\n')[1]).toBe('ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist')
   })
 
   it('a line it does not understand asks again with the miss in the card; /quit leaves through the latch', async () => {
@@ -686,7 +702,7 @@ describe('runSources (spec 14 §3.1)', () => {
 
   it('holds the store for the whole conversation and hands the interrupt seam back', async () => {
     let busyDuring: boolean | null = null
-    const { deps, store, host } = build(['netease', 'netease'], {
+    const { deps, store, host } = build(['netease', 'scan', 'netease'], {
       build: (id) => {
         busyDuring = store.busy
         return new FakeSource(id)
@@ -699,16 +715,16 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a submit with two new ticks mounts them in row order, each result a row in the next card', async () => {
-    const { host, deps, store, mounted } = build(['spotify netease', 'netease spotify'])
+    const { host, deps, store, mounted } = build(['spotify netease', 'scan', '', 'netease spotify'])
     await runSources(deps)
     expect(mounted).toEqual(['netease:qr', `spotify:${BUNDLED_CLIENT_ID}`])
     expect(store.mounted()).toEqual(['netease', 'spotify'])
-    const rows = host.asks[1]!.text.split('\n')
+    const rows = host.asks.at(-1)!.text.split('\n')
     expect(rows.slice(1, 3)).toEqual([
       'ok connected NetEase — signed in as Chen X · 1 liked, 1 playlist',
       'ok connected Spotify — signed in as Listener · 1 liked, 1 playlist',
     ])
-    expect(host.asks).toHaveLength(2)
+    expect(host.asks).toHaveLength(4)
   })
 
   it('unticking a mounted one unmounts it; the rest are left alone', async () => {
@@ -722,14 +738,14 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('a mount that fails leaves its reason as a gap row, and a stopped one says so', async () => {
-    const failing = build(['spotify', ''], {}, 'timeout')
+    const failing = build(['spotify', '', ''], {}, 'timeout')
     await runSources(failing.deps)
-    expect(failing.host.asks[1]!.text.split('\n')[1]).toBe("-- could not connect Spotify — didn't hear back from Spotify — /sources to try again.")
+    expect(failing.host.asks.at(-1)!.text.split('\n')[1]).toBe("-- could not connect Spotify — didn't hear back from Spotify — /sources to try again.")
     // Esc mid-mount stops the rest of the submit: Soda was still to come.
-    const stopped = build(['spotify soda', ''], {}, 'esc')
+    const stopped = build(['spotify soda', '', ''], {}, 'esc')
     await runSources(stopped.deps)
     expect(stopped.mounted).toEqual([`spotify:${BUNDLED_CLIENT_ID}`])
-    expect(stopped.host.asks[1]!.text.split('\n')[1]).toBe('-- could not connect Spotify — stopped — nothing was written')
+    expect(stopped.host.asks.at(-1)!.text.split('\n')[1]).toBe('-- could not connect Spotify — stopped — nothing was written')
   })
 
   it('Esc during a refresh ends the submit before the mounts that were still to come (codex review)', async () => {
@@ -747,18 +763,20 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('sources that fail for one reason share one row, so three failures fit an 80x24 card (codex review)', async () => {
-    const { host, deps, store } = build(['youtube bilibili netease', ''], {
+    const { host, deps, store } = build(['youtube bilibili netease', '', 'scan', 'scan', ''], {
       platform: 'darwin',
-      mounts: {
+      browser: {
         youtube: async () => {
           throw new BrowserCookieError('chrome', 'no-permission', '')
         },
+      },
+      mounts: {
         bilibili: async (show) => (show('https://account.bilibili.com/h5/scan?qrcode_key=k'), { ok: false, reason: 'timeout' }),
         netease: async (show) => (show('https://music.163.com/login?codekey=k'), { ok: false, reason: 'timeout' }),
       },
     })
     await runSources(deps)
-    const rows = host.asks[1]!.text.split('\n').filter((l) => l.startsWith('-- '))
+    const rows = host.asks.at(-1)!.text.split('\n').filter((l) => l.startsWith('-- '))
     // Two kinds of failure, two rows: YouTube's browser obstacle, and the
     // two codes that timed out — which share one row because they end the
     // same way.
@@ -783,7 +801,7 @@ describe('runSources (spec 14 §3.1)', () => {
     // The plain front-end (TUI=0): the ask falls back to info, the rows are
     // numbered in the text, and the listener types numbers or names.
     for (const answer of ['3', 'netease', 'NetEase']) {
-      const { host, deps, store, mounted } = build([answer, ''])
+      const { host, deps, store, mounted } = build([answer, 'scan', ''])
       Object.defineProperty(host, 'ask', { value: undefined })
       await runSources(deps)
       expect(mounted).toEqual(['netease:qr'])
