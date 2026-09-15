@@ -14,9 +14,9 @@ import { buildRespondPrompt, buildSteerPrompt } from '../src/prompts/reply.ts'
 import { buildNextTalkPrompt, buildNextTalksPrompt, tasteBlock } from '../src/prompts/talk.ts'
 import { callTool, FakeMusicProvider } from './fakes.ts'
 
-// A cookie seam with bilibili and netease mounted: a jar lease per call,
+// A cookie seam with every cookie source mounted: a jar lease per call,
 // released after, and null for an unmounted host.
-function jars(mounted: CookieSource[] = ['bilibili', 'netease']) {
+function jars(mounted: CookieSource[] = ['youtube', 'bilibili', 'netease']) {
   const released: string[] = []
   const cookies = async (source: CookieSource): Promise<CookieLease | null> =>
     mounted.includes(source) ? { path: `/jar/${source}`, args: ['--cookies', `/jar/${source}`], release: () => void released.push(source) } : null
@@ -26,26 +26,21 @@ function jars(mounted: CookieSource[] = ['bilibili', 'netease']) {
 const hit = JSON.stringify({ title: 'Song', webpage_url: 'https://www.bilibili.com/video/BV1', uploader: 'up', duration: 200 })
 
 describe('YtDlpMusicProvider with mounted sources', () => {
-  it('searches bilibili through bilisearch with the leased jar, youtube exactly as before', async () => {
+  // Every search is anonymous: a signed-in bilisearch answers 412 (Bilibili
+  // risk control on the search API) where the same query with no cookie
+  // returns hits, and a YouTube search never needed one (spec 14 §2.5).
+  it('searches both catalogues with no cookie, mounted or not', async () => {
     const calls: string[][] = []
     const { cookies, released } = jars()
     const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies })
     const found = await provider.search('city pop', 5, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', '--cookies', '/jar/bilibili', 'bilisearch5:city pop'])
-    expect(released).toEqual(['bilibili'])
+    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', 'bilisearch5:city pop'])
     expect(found[0]).toMatchObject({ catalogue: 'bilibili', ref: 'https://www.bilibili.com/video/BV1' })
     await provider.search('city pop', 5)
     expect(calls[1]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch5:city pop'])
     await provider.search('city pop', 5, 'youtube')
     expect(calls[2]).toEqual(calls[1])
-    expect(released).toEqual(['bilibili']) // youtube search never touches the jar
-  })
-
-  it('bilibili search runs without a cookie when bilibili is not mounted', async () => {
-    const calls: string[][] = []
-    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies: jars([]).cookies })
-    await provider.search('x', 3, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', 'bilisearch3:x'])
+    expect(released).toEqual([]) // no search ever leases a jar
   })
 
   it('netease search goes through the client, and is refused when no client is wired', async () => {
@@ -70,12 +65,43 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     await provider.resolve('https://music.163.com/#/song?id=5')
     expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies', '/jar/netease', 'https://music.163.com/#/song?id=5'])
     expect(released).toEqual(['netease'])
+    await provider.resolve('https://www.bilibili.com/video/BV1')
+    expect(calls[1]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies', '/jar/bilibili', 'https://www.bilibili.com/video/BV1'])
+    // YouTube plays anonymously even with the jar mounted: a signed-in web
+    // client gets SABR-only formats whose URL answers 403 to ffmpeg.
     await provider.resolve('https://youtube.com/watch?v=a')
-    expect(calls[1]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://youtube.com/watch?v=a'])
+    expect(calls[2]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://youtube.com/watch?v=a'])
+    expect(released).toEqual(['netease', 'bilibili'])
     // No cookie seam at all = the pre-spec-14 provider, byte for byte.
     const plain = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n') })
     await plain.resolve('https://music.163.com/#/song?id=5')
-    expect(calls[2]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://music.163.com/#/song?id=5'])
+    expect(calls[3]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://music.163.com/#/song?id=5'])
+  })
+
+  // Anonymous is the rule, not the only attempt: an age-restricted or private
+  // video says so in words classifyAuthFailure knows, and only then is the
+  // mounted jar worth a second call (spec 14 §2.5).
+  it('retries a failed YouTube resolve with the jar only when yt-dlp asks for a login', async () => {
+    const calls: string[][] = []
+    const { cookies, released } = jars()
+    const failing = (stderr: string) =>
+      new YtDlpMusicProvider({
+        run: async (args) => {
+          calls.push(args)
+          if (args.includes('--cookies')) return '183\nhttps://s\n'
+          throw Object.assign(new Error('Command failed: yt-dlp'), { stderr })
+        },
+        cookies,
+      })
+    const restricted = failing('ERROR: [youtube] a: Sign in to confirm your age')
+    expect((await restricted.resolve('https://youtube.com/watch?v=a')).source).toBe('https://s')
+    expect(calls[0]).not.toContain('--cookies')
+    expect(calls[1]).toContain('--cookies')
+    expect(released).toEqual(['youtube'])
+    // Anything else fails on the first, anonymous call — no second spawn.
+    calls.length = 0
+    await expect(failing('ERROR: [youtube] a: Video unavailable').resolve('https://youtube.com/watch?v=a')).rejects.toThrow(/Command failed/)
+    expect(calls).toHaveLength(1)
   })
 
   it('turns an auth-shaped yt-dlp failure into a SourceAuthError, and leaves other failures alone', async () => {
@@ -89,8 +115,8 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const expired = failing('ERROR: [netease:song] 5: Login required to download: <redacted>')
     await expect(expired.resolve('https://music.163.com/#/song?id=5')).rejects.toBeInstanceOf(SourceAuthError)
     await expect(expired.resolve('https://music.163.com/#/song?id=5')).rejects.toMatchObject({ source: 'netease', reason: 'login-required' })
-    // A bilibili search that hits the auth wall names bilibili, whatever the query.
-    await expect(expired.search('x', 3, 'bilibili')).rejects.toMatchObject({ source: 'bilibili' })
+    // A search carries no jar, so its failure has no mount to name: plain error.
+    await expect(expired.search('x', 3, 'bilibili')).rejects.not.toBeInstanceOf(SourceAuthError)
     const dead = failing('ERROR: [youtube] a: Video unavailable')
     await expect(dead.resolve('https://youtube.com/watch?v=a')).rejects.not.toBeInstanceOf(SourceAuthError)
     // Auth text for a host with no mount stays a plain error: nothing to renew.

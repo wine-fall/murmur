@@ -269,8 +269,8 @@ catalogue: z.enum(['youtube', 'bilibili', 'netease']).optional()
 - `MusicProvider.search(query, limit, catalogue?)` — the third argument is
   additive; existing callers unchanged.
 - **YouTube**: `ytsearch{N}:` as today.
-- **Bilibili**: `bilisearch{N}:` through yt-dlp (`BiliBiliSearch`), flat,
-  cookie passed when mounted (better quality tiers; not required to search).
+- **Bilibili**: `bilisearch{N}:` through yt-dlp (`BiliBiliSearch`), flat, and
+  anonymous — a signed-in search trips Bilibili's risk control (§2.5).
 - **NetEase**: the NetEase client's `search(query, limit)` (§2.7) → candidates
   whose `ref` is `https://music.163.com/#/song?id=<id>`; `resolve` then goes
   through yt-dlp with the cookie (§2.5). The client requires a mount.
@@ -279,10 +279,9 @@ catalogue: z.enum(['youtube', 'bilibili', 'netease']).optional()
 
 ### 2.5 Cookie-aware resolve
 
-`YtDlpMusicProvider.resolve(ref)` (and `search` for Bilibili) consult the
-mounted sources: when `ref`'s host belongs to a mounted source, that mount's
-cookie is leased for the call and released after it. How the lease is
-obtained follows the mount (§2.1):
+`YtDlpMusicProvider.resolve(ref)` consults the mounted sources: when `ref`'s
+host belongs to a mounted source, that mount's cookie is leased for the call
+and released after it. How the lease is obtained follows the mount (§2.1):
 
 - **browser mount** → yt-dlp exports the store
   (`--cookies-from-browser <browser>[:<profile>]`, Chrome always by a named
@@ -300,6 +299,24 @@ Hosts: `youtube.com`/`youtu.be`/`music.youtube.com` → youtube;
 `bilibili.com`/`b23.tv` → bilibili; `music.163.com`/`163cn.tv` → netease.
 No mount → no cookie flag → today's behaviour exactly (a listener with no
 account sees no change — acceptance §5.1).
+
+**Where the jar does NOT go.** Two calls are anonymous on purpose, because
+the cookie makes them fail:
+
+- **YouTube playback.** Under a signed-in web client yt-dlp reports that
+  "some web_embedded client https formats have been skipped … YouTube may
+  have enabled the SABR-only streaming" and the googlevideo URL it prints
+  answers **403** to ffmpeg, so the probe kills the pick; the same video
+  resolved with no cookie probes clean. YouTube's mount therefore serves the
+  taste read alone (§2.8) — with one exception: when an anonymous resolve
+  fails with text `classifyAuthFailure` recognises (an age-restricted or
+  private video), the resolve is retried once with the jar.
+- **Bilibili search.** A signed-in `bilisearch` can answer "HTTP Error 412:
+  Precondition Failed" (Bilibili's risk control on the search API) where the
+  same query with no cookie returns hits. Bilibili *playback* keeps the jar —
+  it resolves and probes fine with it, and needs it for the better tiers.
+
+So the jar is for the taste reads, and for Bilibili and NetEase playback.
 
 *As built (review round)*: the cookie reaches yt-dlp as a **leased jar**
 (`--cookies <tmp>`, owner-only, deleted when the call returns) rather than

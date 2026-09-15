@@ -10,7 +10,11 @@
 // reject junk (hour-long loops, low-quality re-uploads) and prefer official
 // audio. Bilibili searches the same way through `bilisearch{limit}:`; NetEase
 // has no yt-dlp search, so a mounted NetEase client answers that catalogue
-// (spec 14 §2.8). resolve runs `-f bestaudio/best` with `--print` and returns a
+// (spec 14 §2.8). Searching is anonymous for both — Bilibili's risk control
+// answers a signed-in search 412 — and so is YouTube PLAYBACK: under a
+// signed-in web client yt-dlp skips the formats it can hand ffmpeg and the
+// URL it prints answers 403. The jar stays where it earns its keep: the
+// taste reads, and Bilibili/NetEase playback (spec 14 §2.5). resolve runs `-f bestaudio/best` with `--print` and returns a
 // STREAM URL plus the track's length, never a download (master decision A);
 // Phase 3's engine decodes it, and spec 10 §3.3's rail counts against the
 // length.
@@ -147,12 +151,12 @@ export class YtDlpMusicProvider implements MusicProvider {
       if (this.opts.netease === undefined) throw new Error('netease is not mounted')
       return this.opts.netease.search(query, limit)
     }
-    // Bilibili takes the cookie when there is one (better quality tiers); a
-    // YouTube search is exactly today's call, mounted or not.
+    // Both catalogues search anonymously: a signed-in `bilisearch` can answer
+    // "HTTP Error 412: Precondition Failed" (Bilibili's risk control on the
+    // search API) where the same query with no cookie returns hits, and a
+    // YouTube search never wanted one.
     const spec = `${catalogue === 'bilibili' ? 'bilisearch' : 'ytsearch'}${limit}:${query}`
-    const stdout = await this.withCookie(catalogue === 'bilibili' ? 'bilibili' : null, (cookie) =>
-      this.run(['--dump-json', '--flat-playlist', ...cookie, spec]),
-    )
+    const stdout = await this.run(['--dump-json', '--flat-playlist', spec])
     return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
   }
 
@@ -160,11 +164,20 @@ export class YtDlpMusicProvider implements MusicProvider {
     // `--print` in place of `-g`: the same single extraction yields the stream
     // url AND the track's length, which is what a progress bar needs as its
     // denominator (spec 10 §3.3). Measured at no cost over the bare `-g`.
-    const printed = await this.withCookie(sourceOfRef(ref), (cookie) =>
-      this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ...cookie, ref]),
-    )
-    const { source, durationS } = parseResolveOutput(printed)
-    return { source, kind: 'music', ...(durationS > 0 && { durationS }) }
+    const dump = (cookie: string[]): Promise<string> =>
+      this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ...cookie, ref])
+    // YouTube plays anonymously (see the header note), so its mount never
+    // reaches a resolve — except as the second chance for a video that says,
+    // in words classifyAuthFailure knows, that it wants a login.
+    const source = sourceOfRef(ref)
+    const printed = await (source === 'youtube'
+      ? this.withCookie(null, dump).catch((err: unknown) => {
+          if (classifyAuthFailure(ytdlpFailureText(err)) === null) throw err
+          return this.withCookie(source, dump)
+        })
+      : this.withCookie(source, dump))
+    const { source: streamUrl, durationS } = parseResolveOutput(printed)
+    return { source: streamUrl, kind: 'music', ...(durationS > 0 && { durationS }) }
   }
 
   // The call with the mounted host's jar leased around it, released after
