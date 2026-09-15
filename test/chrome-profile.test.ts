@@ -8,7 +8,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { CHROME_PROFILE_ENV, chromeProfile, knobDisagrees, localStatePath, preselectProfile, profiles } from '../src/music/sources/chrome.ts'
+import { CHROME_PROFILE_ENV, chromeProfile, localStatePath, preselectProfile, profiles } from '../src/music/sources/chrome.ts'
 import { browserArgs, SourcesStore } from '../src/music/sources/store.ts'
 
 const HOME = '/home/someone'
@@ -64,12 +64,6 @@ describe('chromeProfile (spec 14 §3.1)', () => {
 
   it('never lets the knob move a pinned mount: the entry holds that account\'s own ids, and a mixed snapshot is worse than none', () => {
     expect(chromeProfile('Default', deps({ env: { [CHROME_PROFILE_ENV]: 'Work' } }))).toBe('Default')
-    expect(knobDisagrees('Default', { [CHROME_PROFILE_ENV]: 'Work' })).toBe(true)
-    // Agreeing, unset, empty, or nothing pinned yet: no disagreement.
-    expect(knobDisagrees('Work', { [CHROME_PROFILE_ENV]: 'Work' })).toBe(false)
-    expect(knobDisagrees('Default', {})).toBe(false)
-    expect(knobDisagrees('Default', { [CHROME_PROFILE_ENV]: '  ' })).toBe(false)
-    expect(knobDisagrees(undefined, { [CHROME_PROFILE_ENV]: 'Work' })).toBe(false)
   })
 
   it('falls back to Default when Local State is missing, unreadable, not JSON, or has no last_used', () => {

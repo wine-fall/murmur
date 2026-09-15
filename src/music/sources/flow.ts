@@ -9,7 +9,7 @@ import type { Host, InfoTone } from '../../host/host.ts'
 import { ask } from '../../host/host.ts'
 import type { AskOption } from '../../host/ipc.ts'
 import { escPulse, lineReader, type QuitLatch } from '../../setup/guide.ts'
-import { AUTH_LINES, type SourceAuthWatch } from './auth.ts'
+import { AUTH_LINES, SourceAuthError, type SourceAuthWatch } from './auth.ts'
 import { type ChromeDeps, type ChromeProfileInfo, preselectProfile, profiles } from './chrome.ts'
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
@@ -428,7 +428,11 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       // which no open read is there to catch while a code is on screen —
       // ends the submit: the rows already done stay done, the rest are not
       // started, and the sign-in in flight is told to stop.
-      const stopped = (): boolean => cancelled || quit.requested
+      // A front-end that went away answers every read with '' — which on a
+      // sign-in card would read as "take the preselected profile", mounting
+      // an account nobody chose (codex review). It stops the submit, exactly
+      // as an Esc does.
+      const stopped = (): boolean => cancelled || gone || quit.requested
       // The sign-ins this submit will run, counted up front: the card's title
       // carries the position, and a refresh in between does not change it.
       const of = toRenew.length + toMount.length
@@ -531,6 +535,11 @@ async function mountCookieFlow(
     try {
       return await deps.mounts.browser[id](pick)
     } catch (err) {
+      // NetEase answers an expired cookie with `code: 301`, which the client
+      // raises rather than returns. It is the same "no login here" the
+      // no-login road exists for — reported as "could not reach", it left
+      // the listener with no sign-in page and nothing to do (codex review).
+      if (err instanceof SourceAuthError && err.reason === 'login-required') return { ok: false, reason: 'login-required' }
       if (err instanceof BrowserCookieError) {
         host.debug?.(`sources.cookies ${id} profile=${pick.profile} ${err.reason}: ${err.detail}`)
         // A profile Chrome has never opened is, to a listener, the same thing
@@ -567,6 +576,11 @@ async function mountCookieFlow(
       return
     }
   }
+  // Esc pressed while the cookie export or the account read was in flight:
+  // the read succeeded, but the listener asked to stop, and "stopped —
+  // nothing was written" has to mean it — as it already does on the scan
+  // road (codex review).
+  if (cancelled() || deps.quit.requested) return
   if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
   else if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
   else await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)

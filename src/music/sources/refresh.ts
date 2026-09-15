@@ -7,7 +7,6 @@
 
 import type { Host } from '../../host/host.ts'
 import { SourceAuthError, SourceAuthWatch } from './auth.ts'
-import { CHROME_PROFILE_ENV, knobDisagrees } from './chrome.ts'
 import { BrowserCookieError } from './cookies.ts'
 import type { SourcesStore } from './store.ts'
 import { SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
@@ -97,16 +96,6 @@ export class TasteRefresher {
     // some platforms serve public lists anonymously, and a read that
     // "works" would flip the status back to ok on a login that is gone.
     if (store.read()[id]?.status === 'expired') return { id, ok: false, error: 'expired' }
-    // MURMUR_CHROME_PROFILE naming a profile other than the one this mount is
-    // pinned to: the entry carries this account's own identifiers, so reading
-    // the other profile's cookies against them would fold two accounts into
-    // one snapshot. Neither profile is read — the mount asks to be connected
-    // again, and that re-mount resolves by the knob (spec 14 §3.1).
-    const entry = store.read()[id]
-    if (entry !== undefined && 'browser' in entry && entry.browser === 'chrome' && knobDisagrees(entry.profile)) {
-      watch.note(new SourceAuthError(id, 'expired', `${CHROME_PROFILE_ENV} names another profile than the pinned ${entry.profile ?? ''}`))
-      return { id, ok: false, error: 'profile-changed' }
-    }
     const source = this.deps.source(id)
     if (source === null) return { id, ok: false, error: 'no adapter for this entry' }
     this.tried.set(id, this.now().getTime())

@@ -13,8 +13,8 @@
 // `profile.last_used` → 'Default'. The pin comes first because the entry also
 // holds the account's own identifiers (a Bilibili `mid`, a NetEase `userId`):
 // reading another profile's cookies against them would mix two accounts into
-// one snapshot. A knob that disagrees with a pin sends that mount down the
-// reconnect road (`knobDisagrees`) rather than quietly changing account.
+// one snapshot. The pin is the listener's own answer on the sign-in card, so
+// nothing but a failed read or their own action ever changes it.
 //
 // `$MURMUR_CHROME_PROFILE` is NOT in that order any more. The listener now
 // chooses the profile on the sign-in card (spec 14 §3.1, revised), so the
@@ -94,14 +94,6 @@ export function chromeProfile(pinned?: string | undefined, deps: ChromeDeps = {}
   return DEFAULT_PROFILE
 }
 
-// The knob names one profile and the mount is pinned to another. murmur reads
-// neither mixture: the mount takes the same road as a lost login, and ticking
-// it again is a fresh mount, resolved by the knob (spec 14 §3.1).
-export function knobDisagrees(pinned: string | undefined, env: NodeJS.ProcessEnv = process.env): boolean {
-  const named = env[CHROME_PROFILE_ENV]?.trim()
-  if (named === undefined || named === '') return false
-  return pinned !== undefined && pinned.trim() !== '' && named !== pinned
-}
 
 // Read Local State whole, once, for whatever the caller wants out of it.
 // Absent, locked or not JSON is not an error here: every caller has a

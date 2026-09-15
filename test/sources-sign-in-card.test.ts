@@ -11,7 +11,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { SourceAuthWatch } from '../src/music/sources/auth.ts'
+import { SourceAuthError, SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { CHROME_PROFILE_ENV, type ChromeDeps } from '../src/music/sources/chrome.ts'
 import { runSources, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
@@ -238,6 +238,54 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     await runSources(deps)
     expect(host.asks.some((a) => a.text.startsWith('How should I sign in'))).toBe(false)
     expect(took).toEqual(['qishui:qr'])
+  })
+
+  // A front-end that goes away answers the pending read with '' — which on
+  // this card would mean "take the preselected profile", so a listener whose
+  // TUI died came back to a mount they never chose (codex review).
+  it('a front-end that leaves while the card is up mounts nothing', async () => {
+    const { host, store, deps, took } = build(['youtube'])
+    await Promise.all([
+      runSources(deps),
+      (async () => {
+        for (let i = 0; i < 200 && !host.asks.some((a) => a.text.startsWith('How should I sign in')); i++) {
+          await new Promise((resolve) => setTimeout(resolve, 1))
+        }
+        host.endInput()
+      })(),
+    ])
+    expect(took).toEqual([])
+    expect(store.read()).toEqual({})
+  })
+
+  // The scan road re-checks the latch before it persists anything; the
+  // browser road did not, so an Esc while the account read was in flight
+  // still wrote the mount and said "connected" (codex review).
+  it('Esc while the browser mount is in flight writes nothing, even though the read itself succeeded', async () => {
+    const { host, store, deps } = build(['netease', 'chrome:Default', ''])
+    deps.mounts.browser.netease = async (b) => {
+      host.pressEsc()
+      return { ok: true, who: 'Chen X', entry: { auth: 'browser', browser: b.browser, userId: '1', likedPlaylistId: '2' } }
+    }
+    await runSources(deps)
+    expect(store.read()).toEqual({})
+    expect(host.infos).not.toContain('signed in as Chen X')
+  })
+
+  // NetEase answers an expired cookie with `code: 301`, which the client
+  // RAISES. Reported as "could not reach", it left the listener with no
+  // sign-in page and nothing to do — it is the plain no-login road (codex
+  // review).
+  it('a login-required the client raises opens the sign-in page, it does not read as "could not reach"', async () => {
+    const opened: [string, string][] = []
+    const { host, deps } = build(['netease', 'chrome:Default', '', ''], { openUrl: (url, profile) => void opened.push([url, profile]) })
+    deps.mounts.browser.netease = async () => {
+      throw new SourceAuthError('netease', 'login-required', 'code 301 on /nuser/account/get')
+    }
+    await runSources(deps)
+    expect(opened).toEqual([['https://music.163.com/', 'Default']])
+    expect(host.infos.some((l) => l.includes('no NetEase login yet'))).toBe(true)
+    expect(host.infos.some((l) => /could not reach/.test(l))).toBe(false)
   })
 
   it('asks Spotify which profile the consent page opens in — murmur never reads a Spotify cookie', async () => {

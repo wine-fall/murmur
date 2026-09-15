@@ -640,6 +640,10 @@ not look.
    **A profile Chrome has never opened arrives here too**, not as an obstacle:
    to a listener it is the same thing as not being signed in, and Chrome
    creates the profile directory when it opens the page in it.
+   A `login-required` the platform's own client RAISES rather than returns
+   (NetEase answers an expired cookie with `code: 301`) takes this same road:
+   reported as "could not reach", it left the listener with no sign-in page
+   and nothing to do (codex review).
 4. **The store could not be read at all** is a different answer, and says
    which: Chrome not installed, the terminal not allowed to read its cookie
    store (macOS: Full Disk Access), no yt-dlp, or unreadable for a reason not
@@ -653,6 +657,9 @@ not look.
    resolving.
 5. First `snapshot()` in the foreground with a progress line (counts, not
    titles); write `sources.json` + the snapshot; "done — I'll keep it fresh".
+   The cancel latch is checked once more **before** anything is written: an
+   Esc while the cookie export or the account read was in flight has to mean
+   "nothing was written", as it already does on the scan road.
 
 **murmur always names the Chrome profile** — it never lets yt-dlp choose.
 Unnamed, yt-dlp searches the whole user-data directory and reads whichever
@@ -691,7 +698,7 @@ moving a mount to another account between refreshes. The table:
 | new mount | the profile the sign-in card chose, written into the entry |
 | an older mount with no `profile` field | resolved by the same rule for the read; written back once the read works, pinned from then on |
 | `$MURMUR_CHROME_PROFILE` set | preselects the card's row for a mount with no pin, and decides nothing on its own. It never moves a pinned one: the entry also holds that account's own identifiers (a Bilibili `mid`, a NetEase `userId`), and reading another profile's cookies against them would fold two accounts into one snapshot |
-| the knob names a profile other than the pin | neither is read — the mount takes the same road as a lost login (`expired`, "connect it again"). Ticking the row again is a fresh mount, and that one resolves by the knob |
+| the knob names a profile other than the pin | nothing happens — *revised 2026-09-15*. The pin is the listener's own answer on the sign-in card, and the knob only preselects, so a knob that disagrees is a stale preference, not a drifted mount. Expiring the mount here put an explicitly chosen profile in a reconnect loop it could never leave (codex review): every re-mount preselected the knob, and every refresh expired what the listener picked instead |
 | the read says `no-profile` (the profile was deleted or renamed) | the mount takes the same road as a lost login: `expired`, and the /sources list says to connect it again. Never a silent move to another profile |
 | the listener wants a different account | untick the row and tick it again — an unmount and a fresh mount, whose sign-in card asks the profile again |
 
