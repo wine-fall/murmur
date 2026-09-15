@@ -166,14 +166,63 @@ describe('skip and non-interactive (criterion 3)', () => {
     expect(readFileSync(home, 'utf-8')).not.toContain('{{')
   })
 
-  it('a closed stdin declines every question instead of wedging startup', async () => {
+  // spec 06 §3.4: three Enters are three answers a live listener chose not to
+  // give, not a host that went away — and that listener is exactly the one the
+  // consent cards are there for.
+  it('three empty typed lines still reach both consent cards, on the bundled seed', async () => {
     const { memoryDir, seed, home } = workspace()
     const brain = new FakeSeeder()
-    const host = scriptedHost([], { eof: true })
-    const path = await runFirstRun(deps({ host, brain, memoryDir, fallbackSeedPath: seed }))
+    const harness = new FakeHarness()
+    let sources = 0
+    const host = scriptedHost(['', '', '', 'y', 'n'])
+    const path = await runFirstRun(
+      deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void sources++ }),
+    )
+    const consents = host.asks.filter((a) => a.kind === 'consent')
+    expect(consents).toHaveLength(2)
+    expect(consents[0]!.text).toContain('Claude Code history')
+    expect(consents[1]!.text).toBe(SOURCES_OFFER.join('\n'))
     expect(path).toBe(home)
     expect(readFileSync(home, 'utf-8')).toBe(SEED_TEXT)
     expect(brain.calls).toHaveLength(0)
+    expect(host.infos.some((l) => l.includes('no answers'))).toBe(true)
+    expect(sources).toBe(0)
+    // A yes to slice B launches on the bundled-seed path too: no persona was
+    // written, but the listener still said yes.
+    await new Promise((r) => setImmediate(r))
+    expect(harness.calls).toBe(1)
+  })
+
+  it('/quit at a card after three empty lines leaves: no persona marker, no bootstrap', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const harness = new FakeHarness()
+    const quit = quitLatch()
+    const host = scriptedHost(['', '', '', '/quit'])
+    const path = await runFirstRun(deps({ host, harness, memoryDir, fallbackSeedPath: seed, quit }))
+    expect(quit.requested).toBe(true)
+    expect(path).toBe(seed)
+    expect(existsSync(home)).toBe(false)
+    await new Promise((r) => setImmediate(r))
+    expect(harness.calls).toBe(0)
+  })
+
+  it('a closed stdin declines every question instead of wedging startup', async () => {
+    const { memoryDir, seed, home } = workspace()
+    const brain = new FakeSeeder()
+    const harness = new FakeHarness()
+    let sources = 0
+    const host = scriptedHost([], { eof: true })
+    const path = await runFirstRun(
+      deps({ host, brain, harness, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => void sources++ }),
+    )
+    expect(path).toBe(home)
+    expect(readFileSync(home, 'utf-8')).toBe(SEED_TEXT)
+    expect(brain.calls).toHaveLength(0)
+    // The host is gone: no card is asked of nobody, and nothing is launched.
+    expect(host.asks.filter((a) => a.kind === 'consent')).toHaveLength(0)
+    expect(sources).toBe(0)
+    await new Promise((r) => setImmediate(r))
+    expect(harness.calls).toBe(0)
   })
 
   it('a partially answered onboarding still seeds (one answer is enough)', async () => {

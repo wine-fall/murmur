@@ -8,8 +8,8 @@
 //
 // Slice B (the optional Claude Code history -> profile bootstrap) is offered
 // here, before the persona call, and runs unawaited in the background once the
-// persona is written — the same posture spec 05 §3.6 uses for startup
-// catch-up compaction. The taste sources (spec 14 §3.9) are offered right
+// run reaches the air — on the bundled-seed path too — the same posture
+// spec 05 §3.6 uses for startup catch-up compaction. The taste sources (spec 14 §3.9) are offered right
 // after it, and a yes runs the /sources conversation before the persona
 // call: every question is asked before the one long wait.
 
@@ -125,7 +125,10 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   ]
   let bootstrap: BootstrapDeps | null = null
   let sourcesDone = false
-  let allSkipped = false
+  // A front-end that goes away answers every read with '' — the same line a
+  // live listener sends by pressing Enter. Only the flag tells them apart.
+  let gone = false
+  void host.eof?.().then(() => (gone = true))
   for (let i = 0; i < steps.length && !quit.requested; ) {
     const step = steps[i]!
     if (step.kind === 'seed') {
@@ -141,12 +144,11 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
       }
       if (line !== '') given[step.index] = line
       i++
-      // Nothing said at all ends the run here: no consent card is worth asking
-      // of a listener who answered nothing, and there is no persona to write.
-      if (steps[i]?.kind !== 'seed' && given.every((g) => g === '')) {
-        allSkipped = true
-        break
-      }
+      // A host that is gone ends the run here: there is nobody left to ask a
+      // consent card of, and no persona to write. A live listener who pressed
+      // Enter three times walks on to the cards — /sources matters most to
+      // exactly that listener.
+      if (gone && steps[i]?.kind !== 'seed' && given.every((g) => g === '')) break
       continue
     }
     const offer = step.kind === 'bootstrap' ? BOOTSTRAP_OFFER : SOURCES_OFFER
@@ -177,9 +179,11 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
   // again from the top.
   if (quit.requested) return deps.fallbackSeedPath
 
-  if (allSkipped || answers.every((a) => a.answer === '')) {
+  if (answers.every((a) => a.answer === '')) {
     host.info('no answers — starting with the default voice; you can edit it later.')
-    return useBundledSeed(deps)
+    const path = useBundledSeed(deps)
+    launchBootstrap(host, bootstrap)
+    return path
   }
 
   let persona: string
@@ -242,13 +246,18 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
     host.takeLine()
     quit.fire()
   }
-  if (bootstrap !== null && !quit.requested) {
-    host.info('reading in the background; the program starts now.')
-    // Unawaited on purpose: the bootstrap must never delay the first beat, and
-    // runProfileBootstrap is total, so there is no rejection to escape here.
-    void runProfileBootstrap(bootstrap)
-  }
+  if (!quit.requested) launchBootstrap(host, bootstrap)
   return home
+}
+
+// A yes to the slice-B card launches here, on both paths that reach the air:
+// the bundled seed is still a first run, and the listener still said yes.
+// Unawaited on purpose — the bootstrap must never delay the first beat, and
+// runProfileBootstrap is total, so there is no rejection to escape here.
+function launchBootstrap(host: Host, bootstrap: BootstrapDeps | null): void {
+  if (bootstrap === null) return
+  host.info('reading in the background; the program starts now.')
+  void runProfileBootstrap(bootstrap)
 }
 
 // One consent card's answer (§3.4). The legal inputs are the only inputs: an
