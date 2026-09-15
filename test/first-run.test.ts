@@ -206,6 +206,29 @@ describe('skip and non-interactive (criterion 3)', () => {
     expect(harness.calls).toBe(0)
   })
 
+  // codex review: a yes taken back with /back and never re-answered is not
+  // consent. If the host then goes away at the seed question, the early exit
+  // must not launch what the listener walked back from.
+  it('a yes walked back, then EOF, launches nothing', async () => {
+    const { memoryDir, seed } = workspace()
+    const harness = new FakeHarness()
+    const host = scriptedHost(['', '', '', 'y', '/back', '/back'])
+    // stdin closes once the scripted lines are spent: the re-asked seed
+    // question is answered by EOF, not by a listener.
+    let taken = 0
+    const takeLine = host.takeLine.bind(host)
+    host.takeLine = () => {
+      const line = takeLine()
+      if (line !== undefined && ++taken === 6) host.endInput()
+      return line
+    }
+    await runFirstRun(
+      deps({ host, harness, memoryDir, fallbackSeedPath: seed, sourcesRecall: async () => {} }),
+    )
+    await new Promise((r) => setImmediate(r))
+    expect(harness.calls).toBe(0)
+  })
+
   it('a closed stdin declines every question instead of wedging startup', async () => {
     const { memoryDir, seed, home } = workspace()
     const brain = new FakeSeeder()

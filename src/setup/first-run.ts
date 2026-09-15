@@ -148,7 +148,12 @@ export async function runFirstRun(deps: FirstRunDeps): Promise<string> {
       // consent card of, and no persona to write. A live listener who pressed
       // Enter three times walks on to the cards — /sources matters most to
       // exactly that listener.
-      if (gone && steps[i]?.kind !== 'seed' && given.every((g) => g === '')) break
+      if (gone && steps[i]?.kind !== 'seed' && given.every((g) => g === '')) {
+        // A consent walked back with '/back' and never re-answered is not
+        // consent, and nobody is left to re-answer it.
+        bootstrap = null
+        break
+      }
       continue
     }
     const offer = step.kind === 'bootstrap' ? BOOTSTRAP_OFFER : SOURCES_OFFER
