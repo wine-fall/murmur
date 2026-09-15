@@ -171,9 +171,13 @@ export class YtDlpMusicProvider implements MusicProvider {
     // in words classifyAuthFailure knows, that it wants a login.
     const source = sourceOfRef(ref)
     const printed = await (source === 'youtube'
-      ? this.withCookie(null, dump).catch((err: unknown) => {
+      ? this.withCookie(null, dump).catch(async (err: unknown) => {
           if (classifyAuthFailure(ytdlpFailureText(err)) === null) throw err
-          return this.withCookie(source, dump)
+          // Only a jar in hand is worth a second extraction: repeating the
+          // same anonymous arguments cannot answer a login wall.
+          const lease = await this.leaseFor(source)
+          if (lease === null) throw err
+          return this.withLease(source, lease, dump)
         })
       : this.withCookie(source, dump))
     const { source: streamUrl, durationS } = parseResolveOutput(printed)
@@ -184,19 +188,25 @@ export class YtDlpMusicProvider implements MusicProvider {
   // (success or failure). A failure for a mounted host is read for its auth
   // shape (spec 14 §2.6); every other failure passes through as it always did.
   private async withCookie(source: CookieSource | null, work: (cookie: string[]) => Promise<string>): Promise<string> {
-    // A cookie store that cannot be read is a mount diagnosis, not a reason
-    // to refuse the call: a public track resolves anonymously, exactly as it
-    // did before the reader learned to report its failures. /sources is where
-    // the obstacle gets said out loud.
-    let lease: CookieLease | null = null
-    if (source !== null) {
-      try {
-        lease = (await this.opts.cookies?.(source)) ?? null
-      } catch (err) {
-        if (!(err instanceof BrowserCookieError)) throw err
-        debug('music.cookies %s unreadable: %s', source, err.reason)
-      }
+    return this.withLease(source, await this.leaseFor(source), work)
+  }
+
+  // A cookie store that cannot be read is a mount diagnosis, not a reason to
+  // refuse the call: a public track resolves anonymously, exactly as it did
+  // before the reader learned to report its failures. /sources is where the
+  // obstacle gets said out loud.
+  private async leaseFor(source: CookieSource | null): Promise<CookieLease | null> {
+    if (source === null) return null
+    try {
+      return (await this.opts.cookies?.(source)) ?? null
+    } catch (err) {
+      if (!(err instanceof BrowserCookieError)) throw err
+      debug('music.cookies %s unreadable: %s', source, err.reason)
+      return null
     }
+  }
+
+  private async withLease(source: CookieSource | null, lease: CookieLease | null, work: (cookie: string[]) => Promise<string>): Promise<string> {
     try {
       return await work(lease?.args ?? [])
     } catch (err) {

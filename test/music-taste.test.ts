@@ -104,6 +104,23 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     expect(calls).toHaveLength(1)
   })
 
+  it('does not repeat the anonymous call when no YouTube jar can be leased', async () => {
+    // A retry with the very same arguments cannot answer a login wall: it
+    // just costs a second extraction and another knock on the rate limit.
+    for (const cookies of [jars(['bilibili']).cookies, undefined]) {
+      const calls: string[][] = []
+      const provider = new YtDlpMusicProvider({
+        run: async (args) => {
+          calls.push(args)
+          throw Object.assign(new Error('Command failed: yt-dlp'), { stderr: 'ERROR: [youtube] a: Sign in to confirm you are not a bot' })
+        },
+        ...(cookies !== undefined && { cookies }),
+      })
+      await expect(provider.resolve('https://youtube.com/watch?v=a')).rejects.toThrow(/Command failed/)
+      expect(calls).toHaveLength(1)
+    }
+  })
+
   it('turns an auth-shaped yt-dlp failure into a SourceAuthError, and leaves other failures alone', async () => {
     const failing = (stderr: string) =>
       new YtDlpMusicProvider({
