@@ -558,9 +558,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     // Nothing on screen claimed the arrows, so the wheel gets them: with
     // mouse reporting off, alternate-scroll mode (armed in main.tsx) delivers
     // a notch as an arrow, and the log creeps a row. A floor's composer is the
-    // last claimant: it is mounted only while a floor holds the keyboard, and
-    // its arrows walk the cursor through a multi-line draft.
-    if (!pane.current.open && composer.current === null && (key.name === 'up' || key.name === 'down')) {
+    // last claimant, and only while there is something to walk through: a
+    // draft taller than one row has an up and a down of its own, an empty or
+    // single-row one does not — so under a floor the wheel reads the log back
+    // exactly like the radio's, which is the whole point of the feature.
+    const draftRows = composer.current?.editorView.getTotalVirtualLineCount() ?? 1
+    if (!pane.current.open && draftRows <= 1 && (key.name === 'up' || key.name === 'down')) {
       if (scrollLog()) return
     }
     const { open, at, snap, edit } = pane.current

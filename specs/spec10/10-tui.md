@@ -903,7 +903,10 @@ contract (no framework until a second agent exists):
   listener's own terminal setting survives the run) makes the
   terminal send a notch as an Up/Down arrow, and the arrows scroll the log a
   row at a time whenever nothing else on screen claims them — a list card, the
-  command menu, the settings pane and a floor's composer all outrank the log.
+  command menu and the settings pane all outrank the log, and so does a floor's
+  composer, but only while its draft is taller than one row and therefore has
+  an up and a down of its own. Under a floor with nothing typed, the wheel
+  reads the log back exactly as it does on the radio.
 - **The busy sign (2026-09-01, user report).** A guide turn is a real model
   call — seconds, sometimes a WebFetch — and until it returns the frame does
   not move. That is the same silence the quit teardown was fixed for above,
