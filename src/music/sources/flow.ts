@@ -292,17 +292,19 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       const toMount = SOURCE_IDS.filter((id) => picked.has(id) && file[id] === undefined)
       if (toUnmount.length === 0 && toMount.length === 0 && !doRefresh) return
       for (const id of toUnmount) results.push(unmount(deps, id))
-      // Sign-ins may wait on the listener, and an Esc there ends the submit
-      // — the rows already done stay done, the rest are not started.
+      // Sign-ins may wait on the listener, and an Esc — or a typed /quit,
+      // which no open read is there to catch while a code is on screen —
+      // ends the submit: the rows already done stay done, the rest are not
+      // started, and the sign-in in flight is told to stop.
       const stopped = (): boolean => cancelled || quit.requested
       for (const id of toRenew) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, () => cancelled))
+        results.push(await mountOne(deps, read, id, platform, stopped))
       }
       if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
       for (const id of toMount) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, () => cancelled))
+        results.push(await mountOne(deps, read, id, platform, stopped))
       }
     }
   } finally {

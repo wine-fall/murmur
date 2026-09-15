@@ -5,6 +5,7 @@
 // user's smoke to confirm (§5.7).
 import { describe, expect, it } from 'vitest'
 
+import { QR_CANCEL_POLL_MS, QR_POLL_MS } from '../src/music/sources/qr.ts'
 import { mountQishui, QishuiClient, qrHalfBlocks, QishuiSource, type QishuiFetch } from '../src/music/sources/qishui.ts'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body: string }
@@ -166,7 +167,10 @@ describe('mountQishui (the QR conversation, polled)', () => {
     expect(result).toMatchObject({ ok: true, who: 'Soda Listener', entry: { sessionCookie: '<redacted-s>', deviceId: '1111111111111111', installId: '1111111111111111' } })
     expect(shown).toEqual(['https://bff-pc.qishui.com/ucenter_web/app/sdk-next?next_url=<redacted>'])
     expect(polls).toBe(3)
-    expect(waits.every((ms) => ms === 2000)).toBe(true)
+    // The cadence is slept in slices so a cancel is seen within a quarter
+    // second; what the poll waits for is still two seconds, twice.
+    expect(waits.every((ms) => ms <= QR_CANCEL_POLL_MS)).toBe(true)
+    expect(waits.reduce((a, b) => a + b, 0)).toBe(2 * QR_POLL_MS)
   })
 
   it('gives up at the timeout with the typed outcome, and stops on cancel', async () => {
@@ -175,8 +179,15 @@ describe('mountQishui (the QR conversation, polled)', () => {
     const timedOut = await mountQishui({ fetch, sleep: async (ms) => void (clock += ms), now: () => new Date(clock) }, { show: () => {}, timeoutMs: 10_000 })
     expect(timedOut).toEqual({ ok: false, reason: 'timeout' })
     let cancelled = false
-    const stopped = await mountQishui({ fetch, sleep: async () => void (cancelled = true) }, { show: () => {}, timeoutMs: 60_000, cancelled: () => cancelled })
+    let slept = 0
+    // A /quit mid-wait: the loop must not hold the listener for the rest of
+    // the cadence (spec 14 §3.1).
+    const stopped = await mountQishui(
+      { fetch, sleep: async (ms) => void ((cancelled = true), (slept += ms)) },
+      { show: () => {}, timeoutMs: 60_000, cancelled: () => cancelled },
+    )
     expect(stopped).toEqual({ ok: false, reason: 'cancelled' })
+    expect(slept).toBeLessThanOrEqual(QR_CANCEL_POLL_MS)
   })
 
   it('an expired code is the timeout outcome too', async () => {
