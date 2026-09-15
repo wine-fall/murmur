@@ -145,7 +145,7 @@ export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
     bilibili: (show, cancelled, onStatus) => mountBilibiliQr({}, { show, cancelled, onStatus }),
     netease: (show, cancelled, onStatus) => mountNeteaseQr({}, { show, cancelled, onStatus }),
     spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),
-    qishui: (show, cancelled) => mountQishui({}, { show, cancelled }),
+    qishui: (show, cancelled, onStatus) => mountQishui({}, { show, cancelled, onStatus }),
   }
 }
 
