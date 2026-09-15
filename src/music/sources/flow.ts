@@ -274,16 +274,20 @@ const SCAN_ROWS: Record<QrSource, string> = {
 // profile is always offered even when Chrome does not list it: the knob can
 // name a directory that was deleted, and that mount has a road of its own
 // (the no-login path, #240), which it cannot take if it cannot be picked.
-export function signInRows(id: SourceId, list: readonly ChromeProfileInfo[], preselect: string): SignInRow[] {
+//
+// `scanPicked` opens the card on the scan row instead of a profile: a source
+// that can scan and has never been mounted has no reason to prefer a browser,
+// and the scan is the road that asks the listener's machine for nothing.
+export function signInRows(id: SourceId, list: readonly ChromeProfileInfo[], preselect: string, scanPicked = false): SignInRow[] {
   const rows: SignInRow[] = []
-  if ((BOTH_ROADS as readonly SourceId[]).includes(id)) rows.push({ key: SCAN_KEY, label: SCAN_ROWS[id as QrSource], choice: { kind: 'scan' }, checked: false })
+  if ((BOTH_ROADS as readonly SourceId[]).includes(id)) rows.push({ key: SCAN_KEY, label: SCAN_ROWS[id as QrSource], choice: { kind: 'scan' }, checked: scanPicked })
   const dirs = list.some((p) => p.dir === preselect) ? list : [...list, { dir: preselect, name: preselect }]
   for (const profile of dirs) {
     rows.push({
       key: `${CHROME_KEY}${profile.dir}`,
       label: `Chrome — ${profile.name}${profile.email === undefined ? '' : ` (${profile.email})`}`,
       choice: { kind: 'chrome', profile: profile.dir },
-      checked: profile.dir === preselect,
+      checked: !scanPicked && profile.dir === preselect,
     })
   }
   return rows
@@ -317,7 +321,10 @@ function parseSignIn(line: string, rows: readonly SignInRow[]): SignInRow | stri
 async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, previous: string | undefined, cancelled: () => boolean): Promise<SignIn | null> {
   const { host } = deps
   const pinned = (deps.store.read()[id] as { profile?: string } | undefined)?.profile
-  const rows = signInRows(id, profiles(deps.chrome), preselectProfile(pinned, previous, deps.chrome))
+  // A source that can scan and carries no browser pin opens on its scan row;
+  // one being reconnected opens on the profile that mount already chose.
+  const scanPicked = (BOTH_ROADS as readonly SourceId[]).includes(id) && (pinned === undefined || pinned.trim() === '')
+  const rows = signInRows(id, profiles(deps.chrome), preselectProfile(pinned, previous, deps.chrome), scanPicked)
   // The row's own road stays here; the wire carries the option alone.
   const options: AskOption[] = rows.map(({ choice: _choice, ...option }) => option)
   for (;;) {

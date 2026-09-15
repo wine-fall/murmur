@@ -169,6 +169,32 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     expect(card(host).choices?.options?.[0]?.label).toBe('scan with the NetEase Cloud Music app')
   })
 
+  // Scanning is the road that needs no Chrome permission, no cookie store
+  // and no Full Disk Access — and the listener reached for it. A source that
+  // can scan and has never been mounted opens on it; the profile chain is
+  // for the sources that have no other road.
+  it('opens a never-mounted NetEase on the scan row, not on a Chrome profile', async () => {
+    const { host, deps } = build(['netease', '', 'netease'])
+    await runSources(deps)
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('scan')
+    // Enter with nothing changed takes it.
+    expect(card(host).text.split('\n')[2]).toBe('>> 1) [x] scan with the NetEase Cloud Music app')
+  })
+
+  it('opens a reconnect on the Chrome profile it was pinned to — that mount already answered the question', async () => {
+    const { host, deps, store } = build(['netease refresh', '', 'netease'])
+    store.mount('netease', { auth: 'browser', browser: 'chrome', profile: 'Profile 3', userId: '1', likedPlaylistId: '2' })
+    store.setStatus('netease', 'expired')
+    await runSources(deps)
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
+  it('YouTube has no scan row, so it still opens on a profile', async () => {
+    const { host, deps } = build(['youtube', '', 'youtube'])
+    await runSources(deps)
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
   it('sends a picked scan down the scan road, unchanged: the code on the notice card, the cookie kept here', async () => {
     const { host, store, deps, took } = build(['netease', 'scan', 'netease'])
     await runSources(deps)
@@ -200,12 +226,21 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     expect(host.infos.some((l) => l.includes('stopped') || l.includes('cancelled'))).toBe(false)
   })
 
-  it('preselects the profile this submit already chose, so three sources in a row are one account', async () => {
-    const { host, deps, took } = build(['youtube netease', 'chrome:Profile 3', 'chrome:Profile 3', 'youtube netease'])
+  it('preselects the profile this submit already chose, so two sources in a row are one account', async () => {
+    const { host, deps, took } = build(['youtube spotify', 'chrome:Profile 3', '', 'youtube spotify'])
     await runSources(deps)
     // The second card opens on Profile 3 — what the first one chose.
     expect(card(host, 1).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
-    expect(took).toEqual(['youtube:browser:Profile 3', 'netease:browser:Profile 3'])
+    expect(took).toEqual(['youtube:browser:Profile 3', 'spotify'])
+  })
+
+  // The carry-over is about which PROFILE, not which road: a scannable source
+  // still opens on its scan row even after a Chrome profile was just chosen.
+  it('does not let a carried profile pull a scannable source onto the browser road', async () => {
+    const { host, deps, took } = build(['youtube netease', 'chrome:Profile 3', '', 'youtube netease'])
+    await runSources(deps)
+    expect(card(host, 1).choices?.options?.find((o) => o.checked === true)?.key).toBe('scan')
+    expect(took).toEqual(['youtube:browser:Profile 3', 'netease:qr'])
   })
 
   it('preselects the knob when one is set — it preselects now, it no longer decides', async () => {

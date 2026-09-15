@@ -530,9 +530,9 @@ submit but Soda Music's, one single-select card comes first (`ask` with
 ```
 How should I sign in to NetEase?
 signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.
->> 1) [ ] scan with the NetEase Cloud Music app
+>> 1) [x] scan with the NetEase Cloud Music app
 >> 2) [ ] Chrome — Work (zach.guo@opus.pro)
->> 3) [x] Chrome — Personal (fawinell@gmail.com)
+>> 3) [ ] Chrome — Personal (fawinell@gmail.com)
 ```
 
 - **The scan row** leads, and only for NetEase and Bilibili — the two that
@@ -558,13 +558,20 @@ signed in to the wrong account there? sign out on the site in that Chrome window
 - **The note line** is the one failure the card itself cannot prevent: the
   right profile picked, the wrong account signed in to the *site* inside it.
   murmur cannot sign anyone out, so it says where to.
-- **Preselection**, in order: the profile pinned in that source's existing
-  entry → `$MURMUR_CHROME_PROFILE` → the profile this same submit already
-  chose (three sources in a row are one person's three accounts, not three
-  questions) → Chrome's `last_used` → `Default`. Every arm is a guess and
-  every one is one keypress from being overruled, which is the point of
-  asking. A profile the knob names that Chrome no longer lists is offered
-  anyway, so the deleted-profile road (#240) stays reachable.
+- **Preselection.** A source that **can scan and carries no browser pin**
+  opens on its **scan row**: the scan is the road that asks the listener's
+  machine for nothing — no cookie store to unlock, no Full Disk Access, no
+  browser that has to be installed — and it is the road they reached for.
+  Everything else opens on a profile, in order: the profile pinned in that
+  source's existing entry (a reconnect opens on the profile that mount
+  already chose) → `$MURMUR_CHROME_PROFILE` → the profile this same submit
+  already chose (two sources in a row are one person's two accounts, not two
+  questions) → Chrome's `last_used` → `Default`. That carry-over is about
+  which *profile*, never which *road*: a scannable source still opens on its
+  scan row after a Chrome profile was just picked for another. Every arm is a
+  guess and every one is one keypress from being overruled, which is the
+  point of asking. A profile the knob names that Chrome no longer lists is
+  offered anyway, so the deleted-profile road (#240) stays reachable.
 - **The answer** is the row's key (`scan`, `chrome:<dir>`), its number, or
   the directory typed bare; an empty line takes the preselected row. A word
   it cannot place is refused and the card re-asked — guessing here mounts the

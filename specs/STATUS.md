@@ -48,7 +48,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#197** (by-ear) Memory v1.5 by feel: fading, fold cadence, forgetting, how a recalled memory sounds — spec 05-01 §6.
 - **#198** (by-ear) The talk<->music transitions: announce hand-over and the slow lift — spec 03-02 §6.1.
 - **#202** (by-ear) Real-world topics as a friend would mention them, and the clock as bearings — spec 13 §5, spec 04 §3.4.
-- **#213** (by-ear) Listening-taste on the listener's own accounts: NetEase, Spotify, Soda, the expired line, the evening — spec 14 §5.12.
+- **#213** (by-ear) Listening-taste on the listener's own accounts: NetEase, Spotify, Soda, the expired line, the evening, and the sign-in card's road + profile — spec 14 §5.12, §3.1.
 - **#153** (bug, eng) First-run onboarding keeps asking after /quit and never says the answers were dropped.
 - **#163** (enhancement, eng) The director never interjects a talk beat over a ducked song — the engine seam is already there.
 - **#164** (watch, bug) Music picks failing and running long in one real session — dead probes, source health suspected.
