@@ -383,6 +383,18 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
     expect(pickToggle(pickMove(start, 1, options.length), options, false).checked).toEqual(['spotify'])
   })
 
+  // A single-pick list always answers with exactly one row (spec 14 §3.1, the
+  // sign-in card): space PICKS the row under the cursor, it never clears the
+  // list. Un-ticking left the card with nothing chosen and Enter answering
+  // '' — which the flow reads as the preselected row, so the listener got
+  // back the very row they had just un-ticked (caught in a rendered frame).
+  it('a single-pick list cannot be emptied: space moves the one tick, it never clears it', () => {
+    const start = pickStart(options)
+    expect(pickToggle(start, options, false).checked).toEqual(['netease'])
+    const moved = pickToggle(pickMove(start, 1, options.length), options, false)
+    expect(pickToggle(moved, options, false).checked).toEqual(['spotify'])
+  })
+
   it('answers with the ticked keys in row order, space-joined; nothing ticked is the empty line', () => {
     const start = pickStart(options)
     const both = pickToggle(pickMove(start, 2, options.length), options, true)

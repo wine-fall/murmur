@@ -5,10 +5,10 @@
 // that searches NetEase three times spawns yt-dlp once, not three times.
 
 import type { YtDlpRunner } from '../music.ts'
-import { BilibiliSource, mountBilibiliQr } from './bilibili.ts'
+import { BilibiliSource, mountBilibili, mountBilibiliQr } from './bilibili.ts'
 import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
-import { mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
+import { mountNetease, mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
 import { mountSpotify, SpotifySource } from './spotify.ts'
 import type { SourceEntry, SourcesStore } from './store.ts'
@@ -141,7 +141,14 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
 
 export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
   return {
-    youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
+    // The browser road, one per site the cookie store can mount. The jar is
+    // exported under the profile the sign-in card chose, so nothing here
+    // re-guesses which one (spec 14 §3.1).
+    browser: {
+      youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
+      netease: (b) => mountNetease(b, { cookie: deps.jars.header(b, SITES.netease) }),
+      bilibili: (b) => mountBilibili(b, { cookie: deps.jars.header(b, SITES.bilibili) }),
+    },
     bilibili: (show, cancelled, onStatus) => mountBilibiliQr({}, { show, cancelled, onStatus }),
     netease: (show, cancelled, onStatus) => mountNeteaseQr({}, { show, cancelled, onStatus }),
     spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),

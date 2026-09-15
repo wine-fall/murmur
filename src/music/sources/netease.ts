@@ -274,6 +274,20 @@ async function identify(client: NeteaseClient): Promise<{ who: string; userId: s
   return { who: account.who, userId: account.userId, likedPlaylistId: liked.id }
 }
 
+// The browser mount (spec 14 §3.1): the account behind a Chrome profile's
+// cookie, and its liked-songs playlist. The entry keeps the browser and the
+// profile, never the cookie — yt-dlp exports it again per read, so a sign-out
+// there is a sign-out here. No login = a plain "sign in there first".
+export async function mountNetease(browser: { browser: BrowserName; profile?: string | undefined }, deps: NeteaseClientDeps): Promise<MountResult<NeteaseEntry>> {
+  const who = await identify(new NeteaseClient(deps))
+  if (who === null) return { ok: false, reason: 'login-required' }
+  return {
+    ok: true,
+    who: who.who,
+    entry: { auth: 'browser', browser: browser.browser, ...(browser.profile !== undefined && { profile: browser.profile }), userId: who.userId, likedPlaylistId: who.likedPlaylistId },
+  }
+}
+
 // The scan mount (spec 14 §3.1): show the code, wait for the NetEase Cloud
 // Music app to confirm it, keep the cookie the platform hands back. No
 // browser is read, so nothing needs to be installed, unlocked or permitted.

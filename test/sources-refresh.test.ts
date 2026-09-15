@@ -272,7 +272,13 @@ describe('the Chrome profile a refresh reads', () => {
     expect(store.read().youtube?.profile).toBeUndefined()
   })
 
-  it('takes the expired road when the knob names a profile other than the pin — never a snapshot mixing two accounts', async () => {
+  // The knob used to RESOLVE a mount, so a pin it disagreed with meant the
+  // mount had drifted and had to be reconnected. Since the sign-in card
+  // (spec 14 §3.1) the pin is the listener's own answer, and the knob only
+  // preselects — so a knob that disagrees is a stale preference, not a
+  // drifted mount. Vetoing here put an explicitly chosen profile in a
+  // reconnect loop it could never leave (codex review).
+  it('never expires a pinned mount because the knob names another profile — the pin is the listener\'s own choice now', async () => {
     const { store, host, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome', profile: 'Default' })
     const yt = new FakeSource('youtube')
@@ -280,16 +286,16 @@ describe('the Chrome profile a refresh reads', () => {
     const before = process.env[CHROME_PROFILE_ENV]
     process.env[CHROME_PROFILE_ENV] = 'Work'
     try {
-      expect(await refresher.refreshAll()).toEqual([{ id: 'youtube', ok: false, error: 'profile-changed' }])
+      expect(await refresher.refreshAll()).toEqual([{ id: 'youtube', ok: true, count: 1 }])
     } finally {
       if (before === undefined) delete process.env[CHROME_PROFILE_ENV]
       else process.env[CHROME_PROFILE_ENV] = before
     }
-    // Nothing was read with the other profile's cookies, and the pin stands.
-    expect(yt.snapshots).toBe(0)
+    // Read under the pin, and the pin stands.
+    expect(yt.snapshots).toBe(1)
     expect(store.read().youtube?.profile).toBe('Default')
-    expect(store.read().youtube?.status).toBe('expired')
-    expect(host.infos.some((l) => /YouTube login has expired/.test(l))).toBe(true)
+    expect(store.read().youtube?.status).toBe('ok')
+    expect(host.infos.some((l) => /YouTube login has expired/.test(l))).toBe(false)
   })
 
   it('takes the expired road when the pinned profile is gone — never another profile', async () => {

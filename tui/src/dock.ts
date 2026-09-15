@@ -145,7 +145,7 @@ export function listRow(option: AskOption): string {
 }
 
 // The list card's cursor and ticks (spec 10 §3.2-B, rows to tick): up/down move,
-// Space toggles the row under the cursor (a single-pick list keeps one),
+// Space toggles the row under the cursor (a single-pick list moves its one tick),
 // Enter answers with the ticked keys in row order — the `line` the flow
 // reads. Pure, so app.tsx only has to hold the state and draw it.
 export type Pick = { at: number; checked: readonly string[] }
@@ -161,7 +161,11 @@ export function pickMove(pick: Pick, delta: number, count: number): Pick {
 export function pickToggle(pick: Pick, options: readonly AskOption[], multi: boolean): Pick {
   const key = options[pick.at]?.key
   if (key === undefined) return pick
-  if (!multi) return { ...pick, checked: pick.checked.includes(key) ? [] : [key] }
+  // A single-pick list always answers with one row: space MOVES the tick, it
+  // never clears it. Clearing left the card with nothing chosen and Enter
+  // answering '' — which the flow reads as the preselected row, handing back
+  // the very row the listener had just un-ticked (spec 14 §3.1).
+  if (!multi) return { ...pick, checked: [key] }
   return { ...pick, checked: pick.checked.includes(key) ? pick.checked.filter((k) => k !== key) : [...pick.checked, key] }
 }
 
