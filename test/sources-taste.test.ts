@@ -172,6 +172,21 @@ describe('renderTasteDigest', () => {
     expect(digest).toContain('artist 0 (')
   })
 
+  // codex review: a layer sized to the very last character left the block two
+  // characters over what the final line-boundary cut allows, and that cut
+  // dropped the whole layer rather than trimming it.
+  it('a layer that fills the budget exactly is trimmed, never dropped', () => {
+    const long: TasteSnapshot = {
+      source: 'youtube',
+      takenAt: netease.takenAt,
+      items: Array.from({ length: 200 }, (_, i) => ({ kind: 'history' as const, title: `${'t'.repeat(72)}${String(i).padStart(4, '0')}` })),
+    }
+    const digest = renderTasteDigest([long], NOW)
+    expect(digest.length).toBeLessThanOrEqual(1500)
+    expect(digest).toContain('Lately they have been listening to / watching:')
+    expect(digest.split('\n').at(-1)).not.toBe('\u2026')
+  })
+
   it('stays inside the budget with every kind present', () => {
     const crowded: TasteSnapshot = {
       source: 'bilibili',

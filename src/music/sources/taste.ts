@@ -105,11 +105,18 @@ function sourceSummary(snapshot: TasteSnapshot, items: readonly TasteItem[], now
 }
 
 // Join until the character bound, cut at an item boundary with an ellipsis.
+// A first part that does not fit on its own yields nothing: over-running the
+// bound would cost the whole line at the block-level cut, and the room it
+// leaves goes to the next layer instead.
 function joinCapped(parts: readonly string[], sep: string, max: number): string {
   let out = ''
-  for (const part of parts) {
-    const next = out === '' ? part : `${out}${sep}${part}`
-    if (next.length > max) return out === '' ? part : `${out}${sep}\u2026`
+  for (let i = 0; i < parts.length; i++) {
+    const next = out === '' ? parts[i]! : `${out}${sep}${parts[i]!}`
+    // Every part but the last leaves room for the ellipsis a cut after it
+    // would need, so the cut itself can never take the line past `max`.
+    if (next.length + (i === parts.length - 1 ? 0 : sep.length + 1) > max) {
+      return out === '' ? '' : `${out}${sep}\u2026`
+    }
     out = next
   }
   return out
@@ -217,7 +224,9 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
   const pending = layers.filter(([, parts]) => parts.length > 0)
   let used = lines.join('\n').length
   pending.forEach(([lead, parts, sep], i) => {
-    const share = Math.floor((budget - used) / (pending.length - i)) - lead.length - 3
+    // lead + ': ' + the newline this line adds + the two the block-level cut
+    // keeps for its own trailing ellipsis (codex review).
+    const share = Math.floor((budget - used) / (pending.length - i)) - lead.length - 5
     const text = joinCapped(parts, sep, Math.max(share, 0))
     if (text === '') return
     const line = `${lead}: ${text}`
