@@ -89,3 +89,71 @@ describe('BilibiliSpace.recent', () => {
     await expect(space.recent('1', 5)).rejects.toThrow(/412/)
   })
 })
+
+it('the timeout covers the body, not only the headers', async () => {
+  let aborted = false
+  const space = new BilibiliSpace({
+    timeoutMs: 20,
+    fetch: async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            // Headers land at once; the body never arrives. Only a timer still
+            // running past the headers can rescue this call.
+            init?.signal?.addEventListener('abort', () => {
+              aborted = true
+              controller.error(new Error('aborted'))
+            })
+          },
+        }),
+      ),
+  })
+  await expect(space.recent('1', 5)).rejects.toThrow()
+  expect(aborted).toBe(true)
+})
+
+it('re-reads the signing keys rather than holding them for the life of the process', async () => {
+  // Bilibili rotates the wbi keys; a long-lived radio that cached them once
+  // would sign every later request with a dead key and be refused forever.
+  let navs = 0
+  let at = 0
+  const space = new BilibiliSpace({
+    now: () => at,
+    fetch: async (url) => {
+      if (url.includes('/x/frontend/finger/spi')) return new Response(JSON.stringify({ code: 0, data: { b_3: 'B' } }), { status: 200 })
+      if (url.includes('/x/web-interface/nav')) {
+        navs++
+        return new Response(JSON.stringify({ code: 0, data: { wbi_img: { img_url: IMG, sub_url: SUB } } }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ code: 0, data: { list: { vlist: [] } } }), { status: 200 })
+    },
+  })
+  await space.recent('1', 5)
+  await space.recent('2', 5)
+  expect(navs).toBe(1) // one handshake serves a whole refresh
+  at += 30 * 60_000
+  await space.recent('3', 5)
+  expect(navs).toBe(2)
+})
+
+it('ages the signing keys from when they were read, not from the last call', async () => {
+  let navs = 0
+  let at = 0
+  const space = new BilibiliSpace({
+    now: () => at,
+    fetch: async (url) => {
+      if (url.includes('finger/spi')) return new Response(JSON.stringify({ code: 0, data: { b_3: 'B' } }), { status: 200 })
+      if (url.includes('web-interface/nav')) {
+        navs++
+        return new Response(JSON.stringify({ code: 0, data: { wbi_img: { img_url: IMG, sub_url: SUB } } }), { status: 200 })
+      }
+      return new Response(JSON.stringify({ code: 0, data: { list: { vlist: [] } } }), { status: 200 })
+    },
+  })
+  // A call every few minutes must not keep a dead key alive forever.
+  for (let i = 0; i < 5; i++) {
+    await space.recent(String(i), 5)
+    at += 4 * 60_000
+  }
+  expect(navs).toBe(2)
+})

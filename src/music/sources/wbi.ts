@@ -30,6 +30,10 @@ const DEFAULT_TIMEOUT_MS = 15_000
 // A browser's own User-Agent and Referer: the space API answers a request that
 // does not look like the web player with its risk-control page.
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+// Bilibili rotates the wbi keys (daily, in practice). One handshake serves a
+// whole pool refresh — which takes seconds — and is dropped well before a
+// rotation can make it sign every later request with a dead key.
+const SESSION_TTL_MS = 10 * 60_000
 // The web player's fingerprint fields. Constant, contentless, and required:
 // without them the same signed request is answered 412.
 const FINGERPRINT: Record<string, string> = {
@@ -87,9 +91,10 @@ export type BilibiliSpaceDeps = { fetch?: WbiFetch; timeoutMs?: number; now?: ()
 export class BilibiliSpace {
   private deps: BilibiliSpaceDeps
   private fetch: WbiFetch
-  // The signing material, good for the process's life: one nav + one spi read
-  // serves every channel in the manifest.
+  // The signing material: one nav + one spi read serves every channel in the
+  // manifest, and is re-read once it ages past SESSION_TTL_MS.
   private session: Promise<{ mixin: string; cookie: string }> | null = null
+  private openedAt = 0
 
   constructor(deps: BilibiliSpaceDeps = {}) {
     this.deps = deps
@@ -103,7 +108,7 @@ export class BilibiliSpace {
     const query = signedQuery(
       { mid, ps: String(Math.min(limit, 50)), pn: '1', order: 'pubdate', ...FINGERPRINT },
       mixin,
-      Math.floor((this.deps.now ?? Date.now)() / 1000),
+      Math.floor(this.now() / 1000),
     )
     const json = await this.get(`${API}/x/space/wbi/arc/search?${query}`, cookie, `https://space.bilibili.com/${mid}/video`)
     const page = SpaceSchema.parse(json)
@@ -124,7 +129,10 @@ export class BilibiliSpace {
   }
 
   private open(): Promise<{ mixin: string; cookie: string }> {
-    this.session ??= (async () => {
+    if (this.session !== null && this.now() - this.openedAt > SESSION_TTL_MS) this.session = null
+    if (this.session !== null) return this.session
+    this.openedAt = this.now()
+    this.session = (async () => {
       // A buvid the site itself issued: a request carrying none is risk-control
       // bait. Anonymous — it identifies a browser, not a person.
       const spi = SpiSchema.parse(await this.get(`${API}/x/frontend/finger/spi`, '', 'https://www.bilibili.com/'))
@@ -138,21 +146,26 @@ export class BilibiliSpace {
     return this.session
   }
 
+  private now(): number {
+    return (this.deps.now ?? Date.now)()
+  }
+
   private async get(url: string, cookie: string, referer: string): Promise<unknown> {
     const controller = new AbortController()
+    // The deadline covers the BODY too: headers can land at once and the body
+    // then stall forever, which would hang a refresh with no way out.
     const timer = setTimeout(() => controller.abort(), this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-    let response: Response
     try {
-      response = await this.fetch(url, {
+      const response = await this.fetch(url, {
         signal: controller.signal,
         headers: { 'User-Agent': UA, Referer: referer, ...(cookie === '' ? {} : { Cookie: cookie }) },
       })
+      // 412 is Bilibili's risk control, and it answers with an HTML page: read
+      // as JSON it would surface as a parse error that says nothing.
+      if (!response.ok) throw new Error(`bilibili ${new URL(url).pathname}: HTTP ${response.status}`)
+      return await response.json()
     } finally {
       clearTimeout(timer)
     }
-    // 412 is Bilibili's risk control, and it answers with an HTML page: read
-    // as JSON it would surface as a parse error that says nothing.
-    if (!response.ok) throw new Error(`bilibili ${new URL(url).pathname}: HTTP ${response.status}`)
-    return await response.json()
   }
 }

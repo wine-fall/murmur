@@ -383,3 +383,32 @@ describe('the pool on the pick pipeline (spec 14 §3.4 cadence)', () => {
     expect(await programmer.nextTrack(ctx)).toBeNull()
   })
 })
+
+describe('a refresh that fails is not tried again at every boundary', () => {
+  it('waits out the retry window before reading the channels again', async () => {
+    let at = 0
+    let reads = 0
+    const built = new ChannelPool({
+      dir,
+      manifest: async () => ['https://www.youtube.com/@One/videos', 'https://www.youtube.com/@Two/videos'],
+      uploads: async () => {
+        reads++
+        throw new Error('offline')
+      },
+      pauseMs: 0,
+      now: () => at,
+    })
+    expect(built.maybeRefresh()).toBe(true)
+    await built.idle()
+    expect(reads).toBe(2)
+    // The next two boundaries cost nothing: an offline listener must not
+    // respawn yt-dlp once a song.
+    expect(built.maybeRefresh()).toBe(false)
+    expect(built.maybeRefresh()).toBe(false)
+    expect(reads).toBe(2)
+    at += 61 * 60_000
+    expect(built.maybeRefresh()).toBe(true)
+    await built.idle()
+    expect(reads).toBe(4)
+  })
+})

@@ -30,7 +30,7 @@ import { z } from 'zod'
 import type { TrackCandidate } from '../contracts.ts'
 import { cacheRoot } from '../paths.ts'
 import type { YtDlpRunner } from './music.ts'
-import { STALE_MS } from './sources/refresh.ts'
+import { RETRY_MS, STALE_MS } from './sources/refresh.ts'
 import { BilibiliSpace, type ChannelTrack } from './sources/wbi.ts'
 
 export type { ChannelTrack }
@@ -208,6 +208,7 @@ export type ChannelPoolDeps = {
   manifest?: () => Promise<string[]>
   uploads?: (url: string, limit: number) => Promise<ChannelTrack[]>
   staleMs?: number
+  retryMs?: number
   pauseMs?: number
   now?: () => number
   debug?: (message: string) => void
@@ -223,6 +224,10 @@ export class ChannelPool {
   private tracks: ChannelTrack[]
   private at: number
   private running: Promise<unknown> | null = null
+  // When a refresh was last attempted, success or failure — in memory, so a
+  // restart tries again at once. Without it an offline listener would respawn
+  // yt-dlp over the whole list once a song: `at` only moves on success.
+  private tried: number | null = null
 
   constructor(deps: ChannelPoolDeps = {}) {
     this.deps = deps
@@ -242,7 +247,9 @@ export class ChannelPool {
     if (this.running !== null) return false
     // Empty is always due — the same "no snapshot yet" the taste refresh
     // treats as stale, and the only reason a first run ever builds a pool.
-    if (this.tracks.length > 0 && this.now() - this.at < (this.deps.staleMs ?? STALE_MS)) return false
+    const now = this.now()
+    if (this.tried !== null && now - this.tried < (this.deps.retryMs ?? RETRY_MS)) return false
+    if (this.tracks.length > 0 && now - this.at < (this.deps.staleMs ?? STALE_MS)) return false
     const work = this.refresh()
     this.running = work.finally(() => (this.running = null))
     return true
@@ -257,10 +264,11 @@ export class ChannelPool {
   // tracks the pool now holds. Never throws: a refresh that falls over leaves
   // the pool exactly as it was.
   async refresh(): Promise<number> {
+    this.tried = this.now()
     const read = this.deps.uploads ?? (() => Promise.resolve([]))
     let urls: string[]
     try {
-      urls = await (this.deps.manifest ?? loadChannelManifest)()
+      urls = await (this.deps.manifest ?? (() => loadChannelManifest({ dir: this.dir })))()
     } catch (err) {
       this.deps.debug?.(`channels.refresh manifest failed: ${String(err)}`)
       return this.tracks.length

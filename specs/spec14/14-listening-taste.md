@@ -512,7 +512,10 @@ a half-written file) is treated as a failure, not as "the list is now empty".
 **The pool.** Each listed channel's newest **20** uploads (title, ref,
 uploader) are pulled into `$MURMUR_HOME/cache/channels/pool.json`. A channel
 that fails costs that channel; a refresh where **nothing** answers keeps the
-pool it already had, so the catalogue never silently unmounts. Refreshed on the
+pool it already had, so the catalogue never silently unmounts. A refresh that
+was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
+outcome — the taste refresh's own cooldown, and the reason an offline listener
+does not respawn yt-dlp over the whole list once a song. Refreshed on the
 **same clock as the taste refresh** (§3.4, `STALE_MS` = 24 h) and through the
 same shape — a staleness gate plus a single-flight guard, poked from the music
 pipeline at a pick boundary. There is **no second scheduler**.
@@ -529,6 +532,14 @@ a site-issued `buvid3` and the web player's constant fingerprint fields —
 without them the same correct signature is answered `412`. Everything here is
 **anonymous**: the channels are public, so this never touches the listener's
 cookie or a mounted Bilibili account.
+
+The signing material is re-read once it ages past **10 minutes**: Bilibili
+rotates the keys, one handshake serves a whole refresh, and a process that runs
+across a rotation must not go on signing with a dead key (yt-dlp's own
+extractor gives it a short TTL for the same reason). The request deadline
+covers the **response body**, not only the headers — reads are serial, so one
+stalled body would otherwise hold the refresh and its single-flight lock open
+for good.
 
 *Measured ceiling (2026-09-16):* Bilibili rate-limits a burst of space reads
 per IP with `412` and an HTML body. Reads are spaced 1.5 s and a failed channel
@@ -1084,7 +1095,9 @@ falls back to the bundled copy on a network failure **and** on a malformed
 remote body; the pool builds from fake channel listings and keeps the channels
 that answered when one fails; the `channels` catalogue matches on title and
 uploader and returns refs; an empty pool is not offered and the guidance
-sentence is not rendered. The guidance sentence itself is asserted to say
+sentence is not rendered; a failed refresh waits out the retry window; the
+Bilibili request deadline covers the body; the signing keys are re-read once
+they age out. The guidance sentence itself is asserted to say
 nothing about the listener.
 
 Smoke (real services, `scratch/`): the committed manifest builds a pool with
