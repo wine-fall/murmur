@@ -60,7 +60,7 @@ importance:
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
-  | **QQ Music** | liked songs, own + favourited playlist names | no | no | signs in to Chrome — no scan road in this build (§2.10) |
+  | **QQ Music** | liked songs, own + favourited playlist names | no | no | scans a code with WeChat, or signs in to Chrome |
 
 - **`$MURMUR_HOME/sources.json`** — the mounted sources and their credentials
   (§2.1). Secret-bearing; guarded like `voice.json` (03-03 §3).
@@ -583,12 +583,46 @@ Modules, verified against the live service 2026-09-16:
 - **Auth failures**: inner `1000` / `104401` / `104400` → `login-required`;
   inner `104604` and HTTP 429 → `rate-limited` (§2.6). The existing
   expired/reconnect road then works unchanged.
-- **Sign-in**: the Chrome cookie road only, exactly as YouTube's (§3.1). A
-  QR road exists on the platform — a QQ one (`ptqrshow` / `ptqrlogin`, then
-  a five-step `check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQLogin`
-  exchange) and a cheaper WeChat one (`open.weixin.qq.com/connect/qrconnect`,
-  a long poll, then one `music.login.LoginServer.Login`) — but neither is
-  built here.
+**Sign-in — the WeChat scan, or Chrome** (§3.1). Both roads end in one
+cookie header, so nothing downstream learns which was taken.
+
+The scan, verified against the live endpoints 2026-09-16:
+
+1. `GET open.weixin.qq.com/connect/qrconnect?appid=wx48db31d50e334801&…`
+   answers a page carrying a `uuid`. The platform also serves the code as a
+   JPEG, but murmur draws its own: the image encodes
+   `https://open.weixin.qq.com/connect/confirm?uuid=<uuid>` (decoded from the
+   served file), which `qrHalfBlocks` renders like every other scan here.
+2. `GET lp.open.weixin.qq.com/connect/l/qrconnect?uuid=…` is a **long poll**
+   — the platform holds it ~15 s — whose body is
+   `window.wx_errcode=<n>;window.wx_code='<code>'`. **408** waiting · **404**
+   scanned, waiting for the confirm · **405** confirmed, the code in
+   `wx_code`. `402` / `403` (expired, refused) were never reached in the
+   capture and are **not claimed**: an unknown code reads as waiting, and the
+   scan loop's own deadline ends it — the same rule §2.8 states for NetEase.
+   Because the loop only hears a stop between polls, the poll carries its own
+   12 s patience: a listener pressing Esc is not held for the platform's hold,
+   and a timed-out poll reads as waiting, which is what it was.
+3. `music.login.LoginServer.Login` (`param {code, strAppid}`, `comm
+   {tmeLoginType: 1}`) exchanges the code for the credential.
+
+**`str_musicid`, never `musicid`.** The exchange answers with both. The
+account number is 19 digits, and `JSON.parse` rounds it through a double: a
+real uin of `…943987` comes back from `musicid` as `…944000`, and reads
+addressed with that number target an account that does not exist.
+
+**The scanned entry is a cookie header**, minted from the credential —
+`uin` / `wxuin` = `str_musicid`, `qm_keyst` / `qqmusic_key` = `musickey`,
+`euin` = `encryptUin` — and stored in §2.1's existing scanned arm
+(`{auth:'qr', cookie}`). `credentialFrom()` parses it exactly as it parses a
+browser jar, so the scan adds no second read path. A mount made before the
+scan existed carries no `auth` key and keeps parsing as the browser arm.
+
+**The account is read back before it is mounted.** The exchange also returns
+a `nick`, but it comes back **blank** for a returning listener, so the name
+is taken from the credential's own first `GetLoginUserInfo` — which also
+proves the minted cookie signs in, so no mount is ever made on a credential
+that does not work.
 
 ---
 
@@ -756,9 +790,11 @@ signed in to the wrong account there? sign out on the site in that Chrome window
 >> 3) [ ] Chrome — Personal (fawinell@gmail.com)
 ```
 
-- **The scan row** leads, and only for NetEase and Bilibili — the two that
-  can go either way. **YouTube and QQ Music have no scan row**, so their card
-  is the profile list alone (§2.10; issue #221). It names the app in the platform's own terms (*the
+- **The scan row** leads, and only for NetEase, Bilibili and QQ Music — the
+  three that can go either way. **YouTube has no scan row**, so its card is
+  the profile list alone (issue #221). QQ Music's row names **WeChat**, not
+  QQ: the code is issued on the WeChat open platform (§2.10), and a QQ app
+  pointed at it will not take. It names the app in the platform's own terms (*the
   NetEase Cloud Music app*, *the Bilibili app*), and picking it is the scan
   mount below, unchanged.
 - **One row per Chrome profile**, named as Chrome's own profile menu names
@@ -1136,13 +1172,17 @@ byte-identical in their yt-dlp arguments to today's (dev-log diff).
 - **YouTube**: `/sources`, tick the row; signed in to Chrome → mounts and
   names who. Not signed in → the sign-in page opens in the named Chrome
   profile and the wait resumes on Enter (§3.1).
-- **QQ Music**: `/sources`, tick the row; its card offers Chrome profiles
-  only. Signed in to that profile → mounts, names who, and the first snapshot
-  holds the liked songs plus the created and favourited playlist names. Not
-  signed in → `https://y.qq.com/` opens in the named profile and the wait
-  resumes on Enter, exactly as YouTube's does. Nothing is ever played from
-  QQ Music (§1, out of scope). Verified 2026-09-16: mount → verify →
-  snapshot against the live service, and the snapshot carries no cookie.
+- **QQ Music**: `/sources`, tick the row; its card offers the WeChat scan and
+  the Chrome profiles. **Scan** → the code is drawn on the notice surface
+  only, WeChat confirms it, and the account mounts with no browser read at
+  all (assert zero yt-dlp calls on that path). **Chrome** → signed in to that
+  profile mounts and names who; not signed in → `https://y.qq.com/` opens in
+  the named profile and the wait resumes on Enter, exactly as YouTube's does.
+  Either way the first snapshot holds the liked songs plus the created and
+  favourited playlist names, and nothing is ever played from QQ Music (§1,
+  out of scope). Verified 2026-09-16 against the live service, both roads:
+  mount → verify → snapshot, the snapshot carrying no credential, and the
+  scan reporting waiting → scanned → confirmed.
 - An older browser mount of NetEase or Bilibili keeps reading and refreshing
   untouched; unticking it is how it goes.
 

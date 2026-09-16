@@ -91,6 +91,11 @@ function build(lines: string[], over: Partial<SourcesFlowDeps> & { mounts?: Part
       { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
     ),
     qishui: async (show) => (show('https://example.com/qr'), took.push('qishui:qr'), { ok: true, who: 'Soda Listener', entry: { sessionCookie: 's', deviceId: 'd', installId: 'i' } }),
+    qqmusic: async (show) => (
+      show('https://open.weixin.qq.com/connect/confirm?uuid=u'),
+      took.push('qqmusic:qr'),
+      { ok: true, who: 'Wine', entry: { auth: 'qr', cookie: 'uin=1; qm_keyst=<redacted>; euin=e' } }
+    ),
     ...over.mounts,
   }
   const { mounts: _m, ...rest } = over
@@ -199,20 +204,33 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
   })
 
-  // QQ Music is a taste-only source read out of Chrome (spec 14 §2.9): there
-  // is no scan road in this build, so its card is the profile list alone.
-  it('offers QQ Music Chrome profiles only — it has no scan row to lead with', async () => {
+  // QQ Music signs in with a WeChat scan or out of Chrome (spec 14 §2.10).
+  // The row names WeChat, not QQ: the code is issued on the WeChat open
+  // platform, and a QQ app pointed at it simply will not take.
+  it('offers QQ Music the WeChat scan first and the Chrome profiles under it', async () => {
     const { host, deps } = build(['qqmusic', '', 'qqmusic'])
     await runSources(deps)
-    expect(card(host).choices?.options?.map((o) => o.key)).toEqual(['chrome:Default', 'chrome:Profile 3'])
-    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+    expect(card(host).choices?.options?.map((o) => o.key)).toEqual(['scan', 'chrome:Default', 'chrome:Profile 3'])
+    expect(card(host).choices?.options?.[0]?.label).toBe('scan with WeChat')
+    // Never mounted and carrying no browser pin: it opens on the scan.
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('scan')
+  })
+
+  it('sends a picked WeChat scan down the scan road, the credential kept here and no browser read', async () => {
+    const { host, store, deps, took } = build(['qqmusic', 'scan', 'qqmusic'])
+    await runSources(deps)
+    expect(took).toEqual(['qqmusic:qr'])
+    expect(host.notices.some((n) => n.body.some((row) => row.includes('█')))).toBe(true)
+    expect(store.read().qqmusic).toMatchObject({ auth: 'qr' })
+    // The scan road reads no browser, so nothing is pinned to a profile.
+    expect(store.read().qqmusic).not.toHaveProperty('profile')
   })
 
   // A listener who connects QQ Music and sees "1 liked" has no way to know
   // its audio is not reachable — the mount has to say so itself, not only
   // the spec (codex review).
-  it('says QQ Music is read for taste only, before anything is read', async () => {
-    const { host, deps } = build(['qqmusic', 'chrome:Default', 'qqmusic'])
+  it('says QQ Music is read for taste only, before anything is read — whichever road', async () => {
+    const { host, deps } = build(['qqmusic', 'scan', 'qqmusic'])
     await runSources(deps)
     expect(host.infos).toContain(QQMUSIC_TASTE_ONLY)
     // Said before the mount's own progress lines, so it frames the result.

@@ -9,7 +9,7 @@ import { BilibiliSource, mountBilibili, mountBilibiliQr } from './bilibili.ts'
 import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
 import { mountNetease, mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
-import { mountQQMusic, QQMusicSource } from './qqmusic.ts'
+import { mountQQMusic, mountQQMusicQr, QQMusicSource } from './qqmusic.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
 import { mountSpotify, SpotifySource } from './spotify.ts'
 import type { SourceEntry, SourcesStore } from './store.ts'
@@ -159,6 +159,7 @@ export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
     netease: (show, cancelled, onStatus) => mountNeteaseQr({}, { show, cancelled, onStatus }),
     spotify: (clientId, hooks) => mountSpotify(clientId, { openUrl: deps.openUrl, ...hooks }),
     qishui: (show, cancelled, onStatus) => mountQishui({}, { show, cancelled, onStatus }),
+    qqmusic: (show, cancelled, onStatus) => mountQQMusicQr({}, { show, cancelled, onStatus }),
   }
 }
 
