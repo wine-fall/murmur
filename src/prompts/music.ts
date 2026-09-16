@@ -90,12 +90,21 @@ catalogue, prefer a NetEase or Bilibili search where search_music lists it as
 available. In the announce, say where a pick came from only when it is theirs
 ("one you've kept"), never otherwise.`
 
+// What the `channels` catalogue IS (spec 14 §2.9), rendered only while the
+// pool holds something. This sentence is about WHERE TO LOOK and nothing else:
+// the curated list is a search source, never a statement about the listener —
+// what they like comes from their own accounts, and from nowhere else.
+export const CHANNELS_GUIDANCE = `The channels catalogue searches recent uploads from a curated list of music
+channels — good for something new, a cover, or a recent release that a plain
+search would bury.`
+
 export function buildFindMusicInstruction(
   policy: string = DEFAULT_MUSIC_POLICY,
-  opts: { taste?: boolean } = {},
+  opts: { taste?: boolean; channels?: boolean } = {},
 ): string {
   const taste = opts.taste === true ? `\n\n${TASTE_GUIDANCE}` : ''
-  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}${taste}`
+  const channels = opts.channels === true ? `\n\n${CHANNELS_GUIDANCE}` : ''
+  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}${taste}${channels}`
 }
 
 export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()

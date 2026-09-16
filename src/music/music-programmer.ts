@@ -15,7 +15,7 @@ import type {
   TrackPick,
   TrackSource,
 } from '../contracts.ts'
-import { musicTools, type StreamProbe, type TasteToolOptions } from './music-tools.ts'
+import { musicTools, type ChannelCatalogue, type StreamProbe, type TasteToolOptions } from './music-tools.ts'
 import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER } from '../prompts/music.ts'
 
 // Enough turns for several searches -> judge -> submit, and a couple of
@@ -44,6 +44,11 @@ export type MusicProgrammerDeps = {
   // report, the preview-trap probe. Absent = the tools are their pre-taste
   // selves and search_music lists youtube alone.
   taste?: TasteToolOptions
+  // The curated-channel pool (spec 14 §2.9): the extra place to LOOK for a
+  // song, never taste. Poked at each boundary — the pool's own staleness gate
+  // makes that a no-op on all but one pick a day, so there is no second
+  // scheduler here. Absent = the catalogue is not offered at all.
+  channels?: ChannelCatalogue & { maybeRefresh: () => boolean }
   // Per-stage discovery timing (spec 04 §3.1, issue #76): dev-log-only lines
   // that say where a pick's wall-clock goes. Optional — absent means silent.
   debug?: (message: string) => void
@@ -109,6 +114,9 @@ export class MusicProgrammer implements TrackSource {
   }
 
   async nextTrack(ctx: MusicContext): Promise<TrackPick | null> {
+    // Background, never awaited: a stale pool must not hold up a pick, and a
+    // fresh one is ready for the boundary after this.
+    this.deps.channels?.maybeRefresh()
     const [systemPrompt, situationBlock] = renderMusicContext(ctx)
     const { debug, probe } = this.deps
     const provider = debug === undefined ? this.deps.provider : timedProvider(this.deps.provider, debug)
@@ -122,7 +130,7 @@ export class MusicProgrammer implements TrackSource {
       prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste, this.deps.channels),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick
