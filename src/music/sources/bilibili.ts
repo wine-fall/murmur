@@ -1,9 +1,11 @@
 // Bilibili as a taste source (spec 14 §2.8): a small client over the web
-// APIs yt-dlp's own extractors read — nav (who, mid), the favourite folders,
-// a folder's contents, watch later, the account's audio uploads — with the
-// browser's cookie. The lists are read here rather than through yt-dlp's
-// flat output because that output carries ids alone, and a taste is titles.
-// Playback of a favourite still goes through yt-dlp (§2.5).
+// APIs yt-dlp's own extractors read — nav (who, mid), the watch history, the
+// accounts followed, the account's audio uploads — with the browser's cookie.
+// The lists are read here rather than through yt-dlp's flat output because
+// that output carries ids alone, and a taste is titles. What the listener
+// collected into a favourites folder is deliberately not read: a folder is
+// where a course or a recipe is filed, and the taste is what they watched
+// and who they follow (§2.3). Playback still goes through yt-dlp (§2.5).
 
 import { z } from 'zod'
 
@@ -17,8 +19,9 @@ import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type Veri
 const API = 'https://api.bilibili.com'
 const PASSPORT = 'https://passport.bilibili.com'
 const DEFAULT_TIMEOUT_MS = 15_000
-// The API's page size for a folder; pages are read until the bound or the end.
-const FOLDER_PAGE = 20
+// The APIs' page sizes; pages are read until the bound or the end.
+const HISTORY_PAGE = 30
+const FOLLOW_PAGE = 50
 const AUDIO_PAGE = 30
 
 export type BilibiliFetch = (url: string, init?: RequestInit) => Promise<Response>
@@ -32,19 +35,18 @@ export type BilibiliClientDeps = {
 
 const EnvelopeSchema = z.object({ code: z.number(), message: z.string().optional() })
 const NavSchema = z.object({ data: z.object({ isLogin: z.boolean().optional(), uname: z.string().optional(), mid: z.number().optional() }) })
-const FoldersSchema = z.object({ data: z.object({ list: z.array(z.object({ id: z.number(), title: z.string(), media_count: z.number().optional() })).nullish() }).nullish() })
-const MediaSchema = z.object({
-  title: z.string(),
-  upper: z.object({ name: z.string().optional() }).nullish(),
-  bvid: z.string().optional(),
-  fav_time: z.number().optional(),
-  // Bit 1 set = the video was taken down; the row's title is the platform's
-  // placeholder, not something the listener kept.
-  attr: z.number().optional(),
+const HistoryCursorSchema = z.object({
+  data: z.object({ cursor: z.object({ max: z.number(), view_at: z.number() }).nullish(), list: z.array(z.unknown()).nullish() }).nullish(),
 })
-const FavListSchema = z.object({ data: z.object({ medias: z.array(z.unknown()).nullish(), has_more: z.boolean().optional() }).nullish() })
-const ToViewSchema = z.object({ data: z.object({ list: z.array(z.unknown()).nullish() }).nullish() })
-const LaterSchema = z.object({ title: z.string(), owner: z.object({ name: z.string().optional() }).nullish(), bvid: z.string().optional(), add_at: z.number().optional() })
+const HistoryRowSchema = z.object({
+  title: z.string(),
+  author_name: z.string().nullish(),
+  view_at: z.number().optional(),
+  tag_name: z.string().nullish(),
+  history: z.object({ bvid: z.string().nullish() }).nullish(),
+})
+const FollowingsSchema = z.object({ data: z.object({ list: z.array(z.unknown()).nullish() }).nullish() })
+const FollowingSchema = z.object({ mid: z.number(), uname: z.string(), mtime: z.number().optional() })
 const AudioPageSchema = z.object({ data: z.object({ pageCount: z.number().optional(), data: z.array(z.unknown()).nullish() }).nullish() })
 const AudioSchema = z.object({ id: z.number(), title: z.string(), author: z.string().optional() })
 const QrKeySchema = z.object({ code: z.number(), data: z.object({ url: z.string(), qrcode_key: z.string() }) })
@@ -52,10 +54,9 @@ const QrKeySchema = z.object({ code: z.number(), data: z.object({ url: z.string(
 // code still waiting to be scanned as much as for one just confirmed.
 const QrPollSchema = z.object({ code: z.number(), data: z.object({ code: z.number() }).nullish() })
 
-export type BilibiliFolder = { id: string; title: string; count: number }
-
 const stamp = (seconds: number | undefined): { at?: string } => (seconds === undefined ? {} : { at: new Date(seconds * 1000).toISOString() })
 const withArtist = (name: string | undefined): { artist?: string } => (name === undefined || name.trim() === '' ? {} : { artist: name.trim() })
+const withCategory = (tag: string | undefined): { category?: string } => (tag === undefined || tag.trim() === '' ? {} : { category: tag.trim() })
 
 export class BilibiliClient {
   private deps: BilibiliClientDeps
@@ -74,42 +75,57 @@ export class BilibiliClient {
     return { mid: String(parsed.data.data.mid), who: parsed.data.data.uname ?? 'your Bilibili account' }
   }
 
-  async folders(mid: string): Promise<BilibiliFolder[]> {
-    const parsed = FoldersSchema.parse(await this.get('/x/v3/fav/folder/created/list-all', { up_mid: mid }))
-    return (parsed.data?.list ?? []).map((f) => ({ id: String(f.id), title: f.title, count: f.media_count ?? 0 }))
-  }
-
-  async folderItems(folderId: string, bound: number): Promise<TasteItem[]> {
+  // What the listener has actually been watching (spec 14 §2.3), newest
+  // first, paged by the cursor the last page handed back. Each row carries
+  // Bilibili's own sub-zone as its category, which is how the digest tells a
+  // music row from a cooking one.
+  async history(bound: number): Promise<TasteItem[]> {
     const items: TasteItem[] = []
-    for (let page = 1; items.length < bound; page++) {
-      const parsed = FavListSchema.parse(await this.get('/x/v3/fav/resource/list', { media_id: folderId, pn: String(page), ps: String(FOLDER_PAGE) }))
-      const medias = parsed.data?.medias ?? []
-      for (const raw of medias) {
-        const media = MediaSchema.safeParse(raw)
-        if (!media.success || media.data.title.trim() === '' || media.data.bvid === undefined) continue
-        if (((media.data.attr ?? 0) & 1) === 1) continue
+    let cursor: { max: number; view_at: number } | null = null
+    while (items.length < bound) {
+      const query: Record<string, string> = { ps: String(HISTORY_PAGE), business: 'archive' }
+      if (cursor !== null) {
+        query.max = String(cursor.max)
+        query.view_at = String(cursor.view_at)
+      }
+      const parsed = HistoryCursorSchema.safeParse(await this.get('/x/web-interface/history/cursor', query))
+      if (!parsed.success) break
+      const rows = parsed.data.data?.list ?? []
+      for (const raw of rows) {
+        const row = HistoryRowSchema.safeParse(raw)
+        const bvid = row.success ? row.data.history?.bvid : undefined
+        if (!row.success || row.data.title.trim() === '' || bvid === undefined || bvid === null) continue
         items.push({
-          kind: 'favourite',
-          title: media.data.title,
-          ...withArtist(media.data.upper?.name),
-          ...stamp(media.data.fav_time),
-          ref: `https://www.bilibili.com/video/${media.data.bvid}`,
+          kind: 'history',
+          title: row.data.title,
+          ...withArtist(row.data.author_name ?? undefined),
+          ...stamp(row.data.view_at),
+          ...withCategory(row.data.tag_name ?? undefined),
+          ref: `https://www.bilibili.com/video/${bvid}`,
         })
       }
-      if (medias.length < FOLDER_PAGE || parsed.data?.has_more === false) break
+      const next = parsed.data.data?.cursor
+      if (rows.length === 0 || next === undefined || next === null || next.max === 0) break
+      cursor = next
     }
     return items.slice(0, bound)
   }
 
-  async watchLater(): Promise<TasteItem[]> {
-    const parsed = ToViewSchema.parse(await this.get('/x/v2/history/toview/web', { jsonp: 'jsonp' }))
+  // Who the listener follows: 'follows' is the platform's default order, which
+  // is follow-time descending — who they took to lately; 'frequents' asks for
+  // order_type=attention, which is who they visit most (spec 14 §2.3).
+  async followings(mid: string, bound: number, kind: 'follows' | 'frequents'): Promise<TasteItem[]> {
+    const query: Record<string, string> = { vmid: mid, ps: String(Math.min(bound, FOLLOW_PAGE)), pn: '1' }
+    if (kind === 'frequents') query.order_type = 'attention'
+    const parsed = FollowingsSchema.safeParse(await this.get('/x/relation/followings', query))
+    if (!parsed.success) return []
     const items: TasteItem[] = []
-    for (const raw of parsed.data?.list ?? []) {
-      const row = LaterSchema.safeParse(raw)
-      if (!row.success || row.data.title.trim() === '' || row.data.bvid === undefined) continue
-      items.push({ kind: 'favourite', title: row.data.title, ...withArtist(row.data.owner?.name), ...stamp(row.data.add_at), ref: `https://www.bilibili.com/video/${row.data.bvid}` })
+    for (const raw of parsed.data.data?.list ?? []) {
+      const row = FollowingSchema.safeParse(raw)
+      if (!row.success || row.data.uname.trim() === '') continue
+      items.push({ kind, title: row.data.uname, ...stamp(row.data.mtime), ref: `https://space.bilibili.com/${row.data.mid}` })
     }
-    return items
+    return items.slice(0, bound)
   }
 
   // The account's own audio uploads: kept as liked — they are the listener's
@@ -260,18 +276,15 @@ export class BilibiliSource implements TasteSource {
     return nav === null ? { ok: false, reason: 'login-required' } : { ok: true, who: nav.who }
   }
 
-  // Folder names first, then the favourites (folders in the account's own
-  // order until the bound), watch later, and the account's audio uploads.
+  // What they watched, who they took to lately, who they keep going back to,
+  // and the account's own audio uploads (spec 14 §2.3).
   async snapshot(): Promise<TasteSnapshot> {
-    const folders = (await this.client.folders(this.entry.mid)).slice(0, BOUNDS.playlist)
-    const items: TasteItem[] = folders.map((f): TasteItem => ({ kind: 'playlist', title: f.title }))
-    const favourites: TasteItem[] = []
-    for (const folder of folders) {
-      if (favourites.length >= BOUNDS.liked) break
-      if (folder.count === 0) continue
-      favourites.push(...(await this.client.folderItems(folder.id, BOUNDS.liked - favourites.length)))
-    }
-    items.push(...favourites, ...(await this.client.watchLater()), ...(await this.client.spaceAudio(this.entry.mid, BOUNDS.liked)))
+    const items: TasteItem[] = [
+      ...(await this.client.history(BOUNDS.history)),
+      ...(await this.client.followings(this.entry.mid, BOUNDS.follows, 'follows')),
+      ...(await this.client.followings(this.entry.mid, BOUNDS.follows, 'frequents')),
+      ...(await this.client.spaceAudio(this.entry.mid, BOUNDS.liked)),
+    ]
     return { source: 'bilibili', takenAt: this.now().toISOString(), items }
   }
 }
