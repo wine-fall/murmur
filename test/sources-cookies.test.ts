@@ -11,7 +11,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { classifyCookieFailure, cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
-import type { YtDlpRunner } from '../src/music/music.ts'
+import { YtDlpTimeoutError, type YtDlpRunner } from '../src/music/music.ts'
 
 // A Netscape jar as yt-dlp writes it, values redacted.
 const JAR = [
@@ -141,6 +141,17 @@ describe('exportCookieJar', () => {
       reason: 'no-profile',
       profile: "Murmur's Fresh",
     })
+  })
+
+  // A killed yt-dlp writes no jar and says nothing usable on stderr, so the
+  // export reads as "unreadable" and quotes the kill at the listener. The
+  // timeout carries its own reason instead (user report: an indefinite hang
+  // behind "checking YouTube in Chrome...").
+  it('reads a timed-out export as its own obstacle, not an unreadable store', async () => {
+    expect(classifyCookieFailure(new YtDlpTimeoutError(90_000))).toMatchObject({ reason: 'timed-out' })
+    await expect(
+      exportCookieJar({ browser: 'chrome' }, () => Promise.reject(new YtDlpTimeoutError(90_000))),
+    ).rejects.toMatchObject({ name: 'BrowserCookieError', reason: 'timed-out' })
   })
 
   it('an export that worked but holds no row for the site is not a failure — it is a missing login', async () => {
