@@ -832,6 +832,12 @@ signed in to the wrong account there? sign out on the site in that Chrome window
 >> 3) [ ] Chrome — Personal (fawinell@gmail.com)
 ```
 
+- **QQ Music's card says what it can play**, before either road runs, so the
+  line frames the result whichever way the listener signs in: *"QQ Music plays
+  here - but not its VIP-only tracks, so when a song needs a subscription I'll
+  skip it and find another."* A listener who connects it and then never hears
+  the one song they went looking for (§2.4 drops the VIP hits) has no other
+  way to learn why.
 - **The scan row** leads, and only for NetEase, Bilibili and QQ Music — the
   three that can go either way. **YouTube has no scan row**, so its card is
   the profile list alone (issue #221). QQ Music's row names **WeChat**, not
