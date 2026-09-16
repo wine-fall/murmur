@@ -86,7 +86,15 @@ export function parseSearchOutput(stdout: string, limit: number): TrackCandidate
 // length, then its stream url. The url is found by shape rather than by
 // position — a duration handed to the decoder as a source is a song that dies
 // silently, and this is an untrusted boundary like the search JSON above.
-export function parseResolveOutput(stdout: string): { source: string; durationS: number } {
+// yt-dlp's `%(http_headers)j`: the request that made the extraction work. A
+// trust boundary — an object of strings or nothing at all, never coerced.
+const HttpHeadersSchema = z.record(z.string(), z.string())
+
+export function parseResolveOutput(stdout: string): {
+  source: string
+  durationS: number
+  headers?: Record<string, string>
+} {
   const lines = stdout
     .split('\n')
     .map((line) => line.trim())
@@ -97,7 +105,23 @@ export function parseResolveOutput(stdout: string): { source: string; durationS:
   // stream, a hit whose extractor omits it). 0 = unknown, the same reading
   // TrackCandidate.durationS gives a missing duration.
   const durationS = Math.trunc(Number(lines[0]))
-  return { source, durationS: Number.isFinite(durationS) && durationS > 0 ? durationS : 0 }
+  // The headers line is the one JSON object; junk there costs the headers, not
+  // the song — the stream still plays for every host that needs none.
+  const printed = lines.find((line) => line.startsWith('{'))
+  const headers = printed === undefined ? undefined : HttpHeadersSchema.safeParse(tryJson(printed)).data
+  return {
+    source,
+    durationS: Number.isFinite(durationS) && durationS > 0 ? durationS : 0,
+    ...(headers !== undefined && Object.keys(headers).length > 0 && { headers }),
+  }
+}
+
+function tryJson(line: string): unknown {
+  try {
+    return JSON.parse(line)
+  } catch {
+    return undefined
+  }
 }
 
 // Injectable so the unit layer covers argument construction without the binary
@@ -165,7 +189,20 @@ export class YtDlpMusicProvider implements MusicProvider {
     // url AND the track's length, which is what a progress bar needs as its
     // denominator (spec 10 §3.3). Measured at no cost over the bare `-g`.
     const dump = (cookie: string[]): Promise<string> =>
-      this.run(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', ...cookie, ref])
+      this.run([
+        '-f',
+        'bestaudio/best',
+        '--print',
+        '%(duration)s',
+        '--print',
+        'urls',
+        // The headers that extraction used: a Bilibili CDN answers 403 to a
+        // request without them, so the decoder must send the same ones.
+        '--print',
+        '%(http_headers)j',
+        ...cookie,
+        ref,
+      ])
     // YouTube plays anonymously (see the header note), so its mount never
     // reaches a resolve — except as the second chance for a video that says,
     // in words classifyAuthFailure knows, that it wants a login.
@@ -180,8 +217,13 @@ export class YtDlpMusicProvider implements MusicProvider {
           return this.withLease(source, lease, dump)
         })
       : this.withCookie(source, dump))
-    const { source: streamUrl, durationS } = parseResolveOutput(printed)
-    return { source: streamUrl, kind: 'music', ...(durationS > 0 && { durationS }) }
+    const { source: streamUrl, durationS, headers } = parseResolveOutput(printed)
+    return {
+      source: streamUrl,
+      kind: 'music',
+      ...(durationS > 0 && { durationS }),
+      ...(headers !== undefined && { headers }),
+    }
   }
 
   // The call with the mounted host's jar leased around it, released after

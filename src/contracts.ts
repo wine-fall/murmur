@@ -20,6 +20,10 @@ export type AudioClip = {
   // The track's length, when the source knew it (spec 03-01 §2.2 resolve).
   // Absent = unknown — a live stream, or an extractor that omits it.
   readonly durationS?: number
+  // The headers the source needs to answer at all (spec 03-01 §2.2): a
+  // Bilibili CDN 403s a request with no browser User-Agent. Absent for a local
+  // file and for a stream that never needed any.
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 export type Turn = {

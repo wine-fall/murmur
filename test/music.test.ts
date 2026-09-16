@@ -79,6 +79,27 @@ describe('parseResolveOutput', () => {
     expect(parseResolveOutput('  \n183\n  https://stream/1  \n').source).toBe('https://stream/1')
   })
 
+  it('reads the http_headers object yt-dlp prints, and leaves headers off when it printed none', () => {
+    const line = '{"User-Agent": "Mozilla/5.0 Chrome/145", "Referer": "http://www.bilibili.com/"}'
+    expect(parseResolveOutput(`183\nhttps://stream/1\n${line}\n`)).toEqual({
+      source: 'https://stream/1',
+      durationS: 183,
+      headers: { 'User-Agent': 'Mozilla/5.0 Chrome/145', Referer: 'http://www.bilibili.com/' },
+    })
+    expect(parseResolveOutput('183\nhttps://stream/1\n')).not.toHaveProperty('headers')
+  })
+
+  it('ignores an http_headers line that is not an object of strings — the stream still plays', () => {
+    // A trust boundary: yt-dlp's output is parsed, never trusted. A junk line
+    // must cost the headers, not the song.
+    for (const junk of ['NA', 'not json', '[1,2]', '{"UA": 3}', '{"a": {"b": 1}}']) {
+      expect(parseResolveOutput(`183\nhttps://stream/1\n${junk}\n`)).toEqual({
+        source: 'https://stream/1',
+        durationS: 183,
+      })
+    }
+  })
+
   it('fails loudly when yt-dlp printed no url', () => {
     expect(() => parseResolveOutput('   \n')).toThrow(/stream url/i)
     expect(() => parseResolveOutput('183\n')).toThrow(/stream url/i)
@@ -120,9 +141,24 @@ describe('YtDlpMusicProvider', () => {
       '%(duration)s',
       '--print',
       'urls',
+      '--print',
+      '%(http_headers)j',
       'https://youtube.com/watch?v=a',
     ])
     expect(clip).toEqual({ source: 'https://stream/audio', kind: 'music', durationS: 183 })
+  })
+
+  it('carries the headers yt-dlp says the stream needs onto the clip (a Bilibili CDN 403s without them)', async () => {
+    const headers = { 'User-Agent': 'Mozilla/5.0 Chrome/145', Referer: 'http://www.bilibili.com/video/BV1xx' }
+    const provider = new YtDlpMusicProvider({
+      run: async () => `183\nhttps://upos.akamaized.net/s\n${JSON.stringify(headers)}\n`,
+    })
+    expect(await provider.resolve('https://www.bilibili.com/video/BV1xx')).toEqual({
+      source: 'https://upos.akamaized.net/s',
+      kind: 'music',
+      durationS: 183,
+      headers,
+    })
   })
 
   it('leaves durationS off the clip when yt-dlp does not know the length', async () => {

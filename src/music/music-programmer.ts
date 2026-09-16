@@ -93,9 +93,9 @@ function timedProvider(provider: MusicProvider, debug: (message: string) => void
 }
 
 function timedProbe(probe: StreamProbe, debug: (message: string) => void): StreamProbe {
-  return async (source) => {
+  return async (source, headers) => {
     const t = performance.now()
-    const ok = await probe(source)
+    const ok = await probe(source, headers)
     debug(`music.probe ${elapsed(t)} ${ok ? 'ok' : 'dead'}`)
     return ok
   }
