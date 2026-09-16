@@ -9,7 +9,7 @@ import { BilibiliSource, mountBilibili, mountBilibiliQr } from './bilibili.ts'
 import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
 import { mountNetease, mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
-import { mountQQMusic, mountQQMusicQr, QQMusicSource } from './qqmusic.ts'
+import { mountQQMusic, mountQQMusicQr, QQMusicClient, QQMusicSource } from './qqmusic.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
 import { mountSpotify, SpotifySource } from './spotify.ts'
 import type { SourceEntry, SourcesStore } from './store.ts'
@@ -163,15 +163,28 @@ export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
   }
 }
 
-// The NetEase catalogue for the music provider (spec 14 §2.4): a search that
-// reads the mount at call time, so a NetEase mounted mid-session searches
-// on the very next pick and an unmounted one is refused.
+// The client catalogues for the music provider (spec 14 §2.4): a search that
+// reads the mount at call time, so a source mounted mid-session searches on
+// the very next pick and an unmounted one is refused.
+// `async`, not a bare arrow: an unmounted source must REJECT, not throw from
+// under a call the type says returns a promise — a caller reaching for
+// `.catch()` would never see it.
 export function neteaseSearch(deps: SourceBuildDeps): { search: NeteaseClient['search'] } {
   return {
-    search: (query, limit) => {
+    search: async (query, limit) => {
       const entry = deps.store.read().netease
       if (entry === undefined) throw new Error('netease is not mounted')
       return new NeteaseClient({ cookie: cookieOf(deps.jars, entry, SITES.netease) }).search(query, limit)
+    },
+  }
+}
+
+export function qqmusicSearch(deps: SourceBuildDeps): { search: QQMusicClient['search'] } {
+  return {
+    search: async (query, limit) => {
+      const entry = deps.store.read().qqmusic
+      if (entry === undefined) throw new Error('qqmusic is not mounted')
+      return new QQMusicClient({ cookie: cookieOf(deps.jars, entry, SITES.qqmusic) }).search(query, limit)
     },
   }
 }

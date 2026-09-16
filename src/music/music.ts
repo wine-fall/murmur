@@ -30,7 +30,7 @@ import { debuglog, promisify } from 'node:util'
 import { z } from 'zod'
 
 import type { AudioClip, Catalogue, MusicProvider, TrackCandidate } from '../contracts.ts'
-import { classifyAuthFailure, SourceAuthError } from './sources/auth.ts'
+import { classifyAuthFailure, rightsMiss, SourceAuthError, TrackRightsError } from './sources/auth.ts'
 import { BrowserCookieError, type CookieLease } from './sources/cookies.ts'
 import { sourceOfRef, type CookieSource } from './sources/store.ts'
 
@@ -135,9 +135,11 @@ export function ytdlpFailureText(err: unknown): string {
   return typeof stderr === 'string' && stderr.trim() !== '' ? stderr : String(err)
 }
 
-// The NetEase half of search (spec 14 §2.8): the one catalogue yt-dlp cannot
-// search. Wired only when NetEase is mounted.
-export type NeteaseSearch = { search(query: string, limit: number): Promise<TrackCandidate[]> }
+// The catalogues yt-dlp cannot search (spec 14 §2.8): NetEase has no
+// extractor search, QQ Music has no `qqmusicsearch:` prefix, so each is
+// answered by its own mounted client. Wired only while that source is
+// mounted.
+export type ClientCatalogue = { search(query: string, limit: number): Promise<TrackCandidate[]> }
 
 // The cookie seam (spec 14 §2.5): a leased jar for a mounted cookie source
 // (its `args` ride the call, `release` runs after), null when that source
@@ -148,7 +150,8 @@ export type YtDlpMusicProviderOptions = {
   binary?: string
   run?: YtDlpRunner
   cookies?: CookieLeaser
-  netease?: NeteaseSearch
+  netease?: ClientCatalogue
+  qqmusic?: ClientCatalogue
 }
 
 // The real runner: one yt-dlp subprocess per call. Shared with the taste
@@ -171,9 +174,11 @@ export class YtDlpMusicProvider implements MusicProvider {
   }
 
   async search(query: string, limit = 5, catalogue: Catalogue = 'youtube'): Promise<TrackCandidate[]> {
-    if (catalogue === 'netease') {
-      if (this.opts.netease === undefined) throw new Error('netease is not mounted')
-      return this.opts.netease.search(query, limit)
+    // The client catalogues: each answers only while its own mount is there.
+    if (catalogue === 'netease' || catalogue === 'qqmusic') {
+      const client = this.opts[catalogue]
+      if (client === undefined) throw new Error(`${catalogue} is not mounted`)
+      return client.search(query, limit)
     }
     // Both catalogues search anonymously: a signed-in `bilisearch` can answer
     // "HTTP Error 412: Precondition Failed" (Bilibili's risk control on the
@@ -252,10 +257,15 @@ export class YtDlpMusicProvider implements MusicProvider {
     try {
       return await work(lease?.args ?? [])
     } catch (err) {
-      if (source !== null && lease !== null) {
+      if (source !== null) {
         const text = ytdlpFailureText(err)
-        const reason = classifyAuthFailure(text)
-        if (reason !== null) throw new SourceAuthError(source, reason, text.trim().split('\n').at(-1) ?? '')
+        const last = text.trim().split('\n').at(-1) ?? ''
+        // Rights first: QQ Music's VIP wall wears the words of a lost login
+        // (spec 14 §2.5), and reading it as one would unmount a healthy
+        // account over a track the listener was never allowed to hear.
+        if (rightsMiss(source, text)) throw new TrackRightsError(source, last)
+        const reason = lease === null ? null : classifyAuthFailure(text)
+        if (reason !== null) throw new SourceAuthError(source, reason, last)
       }
       throw err
     } finally {

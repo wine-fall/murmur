@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError, SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { CHROME_PROFILE_ENV, type ChromeDeps } from '../src/music/sources/chrome.ts'
-import { QQMUSIC_TASTE_ONLY, runSources, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
+import { QQMUSIC_VIP_NOTE, runSources, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
@@ -226,15 +226,19 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     expect(store.read().qqmusic).not.toHaveProperty('profile')
   })
 
-  // A listener who connects QQ Music and sees "1 liked" has no way to know
-  // its audio is not reachable — the mount has to say so itself, not only
-  // the spec (codex review).
-  it('says QQ Music is read for taste only, before anything is read — whichever road', async () => {
+  // QQ Music plays now (spec 14 §2.5), but not its VIP half — and a listener
+  // who connects it has no other way to learn why the track they went looking
+  // for never comes up. The mount says it itself, not only the spec.
+  it('says what QQ Music can and cannot play, before anything is read — whichever road', async () => {
     const { host, deps } = build(['qqmusic', 'scan', 'qqmusic'])
     await runSources(deps)
-    expect(host.infos).toContain(QQMUSIC_TASTE_ONLY)
+    expect(host.infos).toContain(QQMUSIC_VIP_NOTE)
+    // The promise the notice must not make: this used to claim QQ Music could
+    // not be played at all, which stopped being true when playback landed.
+    expect(QQMUSIC_VIP_NOTE).not.toMatch(/taste only|can't play from it/i)
+    expect(QQMUSIC_VIP_NOTE).toMatch(/VIP/)
     // Said before the mount's own progress lines, so it frames the result.
-    expect(host.infos.indexOf(QQMUSIC_TASTE_ONLY)).toBeLessThan(host.infos.findIndex((l) => l.startsWith('signed in as')))
+    expect(host.infos.indexOf(QQMUSIC_VIP_NOTE)).toBeLessThan(host.infos.findIndex((l) => l.startsWith('signed in as')))
   })
 
   it('sends QQ Music down the cookie road, with the chosen profile pinned into the entry', async () => {

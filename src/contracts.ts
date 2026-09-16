@@ -225,7 +225,7 @@ export type TrackCandidate = {
 // `channels` (spec 14 §2.9) is the odd one: not an account and not a network
 // search, but a local pool of recent uploads from the curated channel list —
 // a place to LOOK, never a statement about the listener's taste.
-export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'channels'
+export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'qqmusic' | 'channels'
 
 // The low-level music source (spec 03-01 §2.2). No start/close: the default
 // adapter is a binary invoked per call, with nothing to warm or release.

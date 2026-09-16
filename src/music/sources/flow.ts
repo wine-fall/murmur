@@ -244,11 +244,12 @@ function recording(host: Host, notes: string[]): Host {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
-// QQ Music is read, never played (spec 14 §2.10). The mount says so itself,
-// before anything is read: a listener who connects it and is told "1 liked"
-// has no other way to learn its audio is not reachable from here.
-export const QQMUSIC_TASTE_ONLY =
-  "QQ Music is read for taste only - I can't play from it, so I'll use what you keep there to pick on YouTube, Bilibili and NetEase."
+// QQ Music plays, but only the half this account has rights to (spec 14
+// §2.5): VIP tracks are dropped at search. The mount says so itself, before
+// anything is read — a listener who connects it and then never hears the one
+// song they went looking for has no other way to learn why.
+export const QQMUSIC_VIP_NOTE =
+  "QQ Music plays here - but not its VIP-only tracks, so when a song needs a subscription I'll skip it and find another."
 
 // Where each source is signed in, opened in Chrome when no login is found.
 const SIGN_IN_URL: Record<CookieSource, string> = {
@@ -506,7 +507,7 @@ async function mountOne(
   // scan itself, so there is no browser to offer and a one-row card is noise.
   // Said before either road runs, so it frames the result whichever way the
   // listener signs in.
-  if (id === 'qqmusic') recorded.host.info(QQMUSIC_TASTE_ONLY)
+  if (id === 'qqmusic') recorded.host.info(QQMUSIC_VIP_NOTE)
   if (id === 'qishui') await mountQrFlow(recorded, id, cancelled, step)
   else {
     const how = await askSignIn(recorded, read, id, chosen.profile, cancelled)

@@ -1,10 +1,10 @@
-// The QQ Music client (spec 14 §2.10): a taste-only source. QQ Music is read,
-// never played — yt-dlp's `qqmusic` extractor cannot resolve a song today
-// ("unable to extract init data" / "only available for registered users",
-// with and without a browser cookie), and there is no `qqmusicsearch:` prefix
-// to search with. So this client identifies the account and reads what it
-// keeps; the digest then shapes what murmur searches for on YouTube,
-// Bilibili and NetEase (§2.4).
+// The QQ Music client (spec 14 §2.10): it identifies the account and reads
+// what it keeps. It does not play and it does not search. Playing is yt-dlp's
+// (§2.5) — a kept song's `ref` is a `y.qq.com/n/ryqq/songDetail/<mid>` URL its
+// `qqmusic` extractor takes, resolved with this same mount's cookie, and a
+// VIP track is dropped as a per-track rights miss. Searching stays out: there
+// is no `qqmusicsearch:` prefix, so the digest is what shapes murmur's
+// searches on YouTube, Bilibili and NetEase (§2.4).
 //
 // One endpoint does all of it: `u.y.qq.com/cgi-bin/musicu.fcg` takes a POST
 // whose body names a module and a method, and answers `{code, req:{code,
@@ -18,6 +18,7 @@
 
 import { z } from 'zod'
 
+import type { TrackCandidate } from '../../contracts.ts'
 import { SourceAuthError } from './auth.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
@@ -26,6 +27,10 @@ import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type Veri
 const API = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 const SONG_URL = 'https://y.qq.com/n/ryqq/songDetail/'
 const DEFAULT_TIMEOUT_MS = 15_000
+// How far over the asked-for limit a search reaches, and the page the service
+// is willing to answer, so the playable remainder still fills the limit.
+const VIP_HEADROOM = 3
+const SEARCH_PAGE_MAX = 30
 // The web player's own user agent; an unbranded client is answered with empty
 // lists rather than an error.
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -112,6 +117,9 @@ const SongSchema = z.object({
   album: z.object({ name: z.string().optional() }).nullish(),
 })
 const FavouritesSchema = z.object({ v_list: z.array(z.object({ name: z.string() })).nullish() })
+const SearchSchema = z.object({ body: z.object({ song: z.object({ list: z.array(z.unknown()).nullish() }).nullish() }).nullish() })
+// A search hit is a song row plus the rights flag the taste reads never carry.
+const SearchHitSchema = SongSchema.extend({ interval: z.number().nullish(), pay: z.object({ pay_play: z.number().nullish() }).nullish() })
 // The scan's exchange answers with some three dozen keys; these five are the
 // whole of what a mount needs. `str_musicid` is NOT interchangeable with
 // `musicid`: the account number is 19 digits, and JSON.parse rounds it
@@ -156,6 +164,52 @@ export class QQMusicClient {
     const who = WhoSchema.parse(data).info.nick
     if (who.trim() === '') throw new Error('qqmusic GetLoginUserInfo: a signed-in account with no name')
     return { uin: credential.uin, euin: credential.euin, who }
+  }
+
+  // The search catalogue (spec 14 §2.4). This is what makes QQ Music playback
+  // reachable: the taste digest carries titles, not refs, so without a search
+  // the brain can never hand submit_pick a y.qq.com ref.
+  //
+  // Signed in only. An unsigned search is not refused — it answers `code: 0`
+  // with an EMPTY list, which reads exactly like "no such song", so a mount
+  // with no credential is turned away here rather than surfacing as no hits.
+  async search(query: string, limit: number): Promise<TrackCandidate[]> {
+    const cookie = await this.deps.cookie()
+    if (credentialFrom(cookie) === null) throw new SourceAuthError('qqmusic', 'login-required', 'a search needs the account')
+    const data = await this.call('music.search.SearchCgiService', 'DoSearchForQQMusicDesktop', {
+      query,
+      search_type: 0,
+      // Roughly two thirds of a real result page is VIP (measured over a
+      // 60-song sample, 2026-09-16), so asking for exactly the limit would
+      // leave the brain one or two candidates to choose between.
+      num_per_page: Math.min(limit * VIP_HEADROOM, SEARCH_PAGE_MAX),
+      page_num: 1,
+      // Off, or the service wraps the matched words in markup and the title
+      // reaches the brain with tags in it.
+      highlight: 0,
+    })
+    const candidates: TrackCandidate[] = []
+    for (const raw of SearchSchema.parse(data).body?.song?.list ?? []) {
+      const hit = SearchHitSchema.safeParse(raw)
+      if (!hit.success || hit.data.name.trim() === '') continue
+      // A VIP track cannot play on this account (§2.5). The rights miss at
+      // resolve time is the safety net — a flag can be stale or regional —
+      // not the plan: dropping it here saves an extraction and a model turn.
+      if (hit.data.pay?.pay_play === 1) continue
+      const album = hit.data.album?.name?.trim()
+      candidates.push({
+        ref: `${SONG_URL}${hit.data.mid}`,
+        title: hit.data.name,
+        uploader: (hit.data.singer ?? [])
+          .map((singer) => singer.name.trim())
+          .filter((name) => name !== '')
+          .join(' / '),
+        durationS: Math.trunc(hit.data.interval ?? 0),
+        extra: album === undefined || album === '' ? {} : { album },
+        catalogue: 'qqmusic',
+      })
+    }
+    return candidates.slice(0, limit)
   }
 
   // The lists the account created. The liked one is the fixed dir 201 — it is

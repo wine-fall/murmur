@@ -53,7 +53,7 @@ import { startReport, type ReportDeps, type ReportSession } from './support/repo
 import { SteerResponder } from './brain/steer-responder.ts'
 import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
-import { buildSource, CookieJars, cookieLeaser, defaultMounts, neteaseSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { buildSource, CookieJars, cookieLeaser, defaultMounts, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
@@ -297,7 +297,8 @@ export function buildTaste(config: Config, host: Host, ytdlp: YtDlpRunner = ytdl
     watch,
     refresher,
     build,
-    catalogues: () => store.mounted().filter((id): id is 'bilibili' | 'netease' => id === 'bilibili' || id === 'netease'),
+    catalogues: () =>
+      store.mounted().filter((id): id is 'bilibili' | 'netease' | 'qqmusic' => id === 'bilibili' || id === 'netease' || id === 'qqmusic'),
     lines: () => {
       const file = store.read()
       return store.mounted().map((id) => {
@@ -325,7 +326,7 @@ function buildMusic(
   // cookie-less provider it always was.
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
-    ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build) }),
+    ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build), qqmusic: qqmusicSearch(taste.build) }),
   })
   // The listener's policy file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).

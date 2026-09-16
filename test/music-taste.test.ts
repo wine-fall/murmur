@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import type { ContextPack, TrackCandidate } from '../src/contracts.ts'
 import { musicTools } from '../src/music/music-tools.ts'
 import { YtDlpMusicProvider } from '../src/music/music.ts'
-import { SourceAuthError } from '../src/music/sources/auth.ts'
+import { SourceAuthError, TrackRightsError } from '../src/music/sources/auth.ts'
 import type { CookieLease } from '../src/music/sources/cookies.ts'
 import type { CookieSource } from '../src/music/sources/store.ts'
 import { buildFindMusicInstruction, buildMusicSituation, TASTE_GUIDANCE } from '../src/prompts/music.ts'
@@ -16,7 +16,7 @@ import { callTool, FakeMusicProvider } from './fakes.ts'
 
 // A cookie seam with every cookie source mounted: a jar lease per call,
 // released after, and null for an unmounted host.
-function jars(mounted: CookieSource[] = ['youtube', 'bilibili', 'netease']) {
+function jars(mounted: CookieSource[] = ['youtube', 'bilibili', 'netease', 'qqmusic']) {
   const released: string[] = []
   const cookies = async (source: CookieSource): Promise<CookieLease | null> =>
     mounted.includes(source) ? { path: `/jar/${source}`, args: ['--cookies', `/jar/${source}`], release: () => void released.push(source) } : null
@@ -56,6 +56,21 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     expect(searches).toEqual([['q', 4]])
     const bare = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies })
     await expect(bare.search('q', 4, 'netease')).rejects.toThrow(/not mounted/)
+  })
+
+  it('qqmusic search goes through the client, and is refused when no client is wired', async () => {
+    const searches: [string, number][] = []
+    const qqmusic = {
+      search: async (query: string, limit: number): Promise<TrackCandidate[]> => {
+        searches.push([query, limit])
+        return [{ ref: 'https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE', title: 't', uploader: 'a', durationS: 235, extra: {}, catalogue: 'qqmusic' }]
+      },
+    }
+    const provider = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies, qqmusic })
+    expect((await provider.search('q', 4, 'qqmusic'))[0]?.ref).toBe('https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE')
+    expect(searches).toEqual([['q', 4]])
+    const bare = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies })
+    await expect(bare.search('q', 4, 'qqmusic')).rejects.toThrow(/not mounted/)
   })
 
   it('resolves with the leased jar for a mounted host and without one otherwise (spec 14 §5.1)', async () => {
@@ -119,6 +134,58 @@ describe('YtDlpMusicProvider with mounted sources', () => {
       await expect(provider.resolve('https://youtube.com/watch?v=a')).rejects.toThrow(/Command failed/)
       expect(calls).toHaveLength(1)
     }
+  })
+
+  // QQ Music playback (spec 14 §2.5): a free track resolves with the mount's
+  // jar exactly as NetEase's does.
+  it('resolves a QQ Music song with the mounted jar', async () => {
+    const calls: string[][] = []
+    const { cookies, released } = jars()
+    const ref = 'https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE'
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '215\nhttps://dl.stream.qqmusic.qq.com/M500.mp3?vkey=<redacted>\n'), cookies })
+    const clip = await provider.resolve(ref)
+    expect(clip).toMatchObject({ kind: 'music', durationS: 215, source: 'https://dl.stream.qqmusic.qq.com/M500.mp3?vkey=<redacted>' })
+    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', '--cookies', '/jar/qqmusic', ref])
+    expect(released).toEqual(['qqmusic'])
+  })
+
+  // The VIP fall-through (spec 14 §2.5): a pay-play track answers with every
+  // purl empty, and yt-dlp — whose _get_uin() reads a cookie a WeChat login
+  // never sets — calls that "only available for registered users". Nothing is
+  // wrong with the login, so this must NOT become a SourceAuthError: it is one
+  // track's rights, and the radio drops the candidate and tries the next.
+  it('reads a rights-less QQ Music track as a dropped candidate, never a lost login', async () => {
+    const { cookies, released } = jars()
+    const ref = 'https://y.qq.com/n/ryqq/songDetail/000P8peU0HhORi'
+    const failing = (stderr: string) =>
+      new YtDlpMusicProvider({
+        run: async () => {
+          throw Object.assign(new Error('Command failed: yt-dlp'), { stderr })
+        },
+        cookies,
+      })
+    for (const stderr of [
+      'ERROR: [qqmusic] 000P8peU0HhORi: This video is only available for registered users. Use --cookies-from-browser or --cookies for the authentication.',
+      'ERROR: [qqmusic] 000P8peU0HhORi: Failed to download format info, error code 104003',
+      'ERROR: [qqmusic] 000P8peU0HhORi: Requested format is not available',
+    ]) {
+      const err = await failing(stderr).resolve(ref).catch((e: unknown) => e)
+      expect(err).toBeInstanceOf(TrackRightsError)
+      expect(err).not.toBeInstanceOf(SourceAuthError)
+      expect(String(err)).toMatch(/pick another/)
+      // yt-dlp's own advice would tell the brain to go and sign in, which is
+      // the one wrong reading of this failure: it is dropped from the detail.
+      expect(String(err)).not.toMatch(/--cookies/)
+    }
+    // The jar is still released, once per attempt.
+    expect(released).toEqual(['qqmusic', 'qqmusic', 'qqmusic'])
+    // The same words from a source whose login really can go stale stay an
+    // auth failure — the rights read is QQ Music's alone.
+    await expect(failing('ERROR: [netease:song] 5: This video is only available for registered users').resolve('https://music.163.com/#/song?id=5')).rejects.toBeInstanceOf(
+      SourceAuthError,
+    )
+    // And a QQ Music failure of any other shape is still a plain error.
+    await expect(failing('ERROR: [qqmusic] x: Unable to download webpage').resolve(ref)).rejects.not.toBeInstanceOf(TrackRightsError)
   })
 
   it('turns an auth-shaped yt-dlp failure into a SourceAuthError, and leaves other failures alone', async () => {
@@ -225,6 +292,25 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     expect(result.ok).toBe(false)
     expect(result).not.toHaveProperty('reason')
     expect(auth).toHaveLength(0)
+  })
+
+  it('a rights-less QQ Music track is dropped without touching the mount (spec 14 §2.5)', async () => {
+    const { provider, tools, auth, picks } = build({ mounted: ['netease'] })
+    const ref = 'https://y.qq.com/n/ryqq/songDetail/000P8peU0HhORi'
+    provider.candidates = [{ ref, title: 'VIP Song', uploader: 'Artist', durationS: 240, extra: {} }]
+    provider.failWith = new TrackRightsError('qqmusic', 'only available for registered users')
+    const result = await callTool(tools, 'submit_pick', { ref, why: 'w' })
+    expect(result.ok).toBe(false)
+    // Not an auth result: nothing to renew, so the Director hears nothing and
+    // the mount's status is never touched.
+    expect(result).not.toHaveProperty('reason')
+    expect(String(result.error)).toMatch(/pick another/)
+    expect(auth).toHaveLength(0)
+    expect(picks).toHaveLength(0)
+    // The other catalogues are untouched — the next candidate still resolves.
+    provider.failWith = null
+    await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect(provider.searches).toHaveLength(1)
   })
 
   it('the preview trap: a 30 s netease clip against a 240 s candidate is login-required; 235 s plays (spec 14 §5.6)', async () => {
