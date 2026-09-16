@@ -1,0 +1,36 @@
+# murmur curated music channels (spec 14 §2.9)
+#
+# One channel URL per line; blank lines and lines starting with "#" are
+# ignored. Adding a channel is adding a line — that is the whole editing story.
+#
+# What this list IS: an extra place to LOOK for a song. murmur pulls each
+# channel's recent uploads into a local pool and offers it to the pick task as
+# the `channels` catalogue, which is good for something new, a cover, or a
+# recent release that a plain search would not surface.
+#
+# What this list is NOT: taste. Nothing here ever describes what the listener
+# likes — that comes from their own accounts (`/sources`) and from nowhere
+# else. The listener's taste decides WHAT KIND of song to look for; these
+# channels are one of the places to look for it.
+#
+# Supported shapes:
+#   https://www.youtube.com/@<handle>/videos
+#   https://space.bilibili.com/<mid>/video
+#
+# murmur re-reads this list from GitHub at runtime, so a channel added here
+# reaches a listener without waiting for a release; a listener who edits their
+# own copy has it read from disk. A failed fetch keeps the copy that shipped.
+
+# -- YouTube: live sessions and first performances (new songs, new artists)
+https://www.youtube.com/@ColorsxStudios/videos
+https://www.youtube.com/@NPRMusic/videos
+https://www.youtube.com/@KEXP/videos
+https://www.youtube.com/@MahoganySessions/videos
+
+# -- YouTube: calm instrumental, for an hour that wants cover rather than company
+https://www.youtube.com/@LofiGirl/videos
+
+# -- Bilibili: Chinese-language labels and their MV releases
+https://space.bilibili.com/607217518/video
+https://space.bilibili.com/1745584728/video
+https://space.bilibili.com/669334488/video

@@ -12,8 +12,8 @@
 > **Part**: Delivers ROADMAP line 5 (retitled with this spec). Feeds the music
 > pick task (spec 03-01 §2.3) and the context pack (spec 05 §2.2) a **taste
 > digest** read from the platforms the listener opts in, and lets the pick task
-> **search a named catalogue** (YouTube, Bilibili, NetEase) with that taste in
-> hand. Does not touch the ducking engine (spec 03-02), the director's segment
+> **search a named catalogue** (YouTube, Bilibili, NetEase, and the curated
+> `channels` pool of §2.9) with that taste in hand. Does not touch the ducking engine (spec 03-02), the director's segment
 > loop (spec 04), or `profile.md`'s ownership (spec 05 §3.2, spec 13 §3.4).
 > **Milestone**: companion character. Depends on the music task (03-01), the
 > memory pack (05), settings (12), the command grammar (10 §3.2-C), and the
@@ -528,6 +528,93 @@ rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 
 ---
 
+### 2.9 Curated music channels — a place to LOOK, never taste
+
+> *Added 2026-09-16.* A committed list of music channels becomes an extra
+> **search source**. It is not a taste source and must never be read as one.
+
+**The one distinction.** The listener's own accounts (§2.2/§2.3) decide **what
+kind** of song to look for. The curated channels are one of the **places to
+look for it**. Nothing from this list may enter the taste digest ("What the
+listener keeps", §2.3) or the situation block (spec 03-01 §2.5) — those speak
+about the listener, and a channel someone else curated says nothing about them.
+Code-wise this is structural: `src/music/channels.ts` never imports the digest
+and is never handed to the pack.
+
+**The manifest** — `assets/music_channels.txt`, exactly the shape of
+`assets/bed_sources.txt` (spec 03-04): one URL per line, blank lines and `#`
+comments ignored, anything that is not an `http(s)` URL skipped. Adding a
+channel is adding a line. Two shapes are understood:
+
+| Shape | Read by |
+|---|---|
+| `https://www.youtube.com/@<handle>/videos` | yt-dlp `--dump-json --flat-playlist` |
+| `https://space.bilibili.com/<mid>/video` | Bilibili's own space API, wbi-signed |
+
+**Runtime refresh.** The list is re-read from
+`https://raw.githubusercontent.com/wine-fall/murmur/main/assets/music_channels.txt`
+so a channel added upstream reaches a listener **without a release**. Cached at
+`$MURMUR_HOME/cache/channels/manifest.json` (rebuildable → `cacheRoot`, never
+`~/.cache`) with a **12 h** TTL: the file changes when a human edits the repo,
+so hourly polls a constant and a week makes an added channel feel broken. The
+fallback chain is total and never throws — cache inside TTL → fresh fetch →
+stale cache → **the copy that shipped**. A body with no URLs in it (a 404 page,
+a half-written file) is treated as a failure, not as "the list is now empty".
+
+**The pool.** Each listed channel's newest **20** uploads (title, ref,
+uploader) are pulled into `$MURMUR_HOME/cache/channels/pool.json`. A channel
+that fails costs that channel; a refresh where **nothing** answers keeps the
+pool it already had, so the catalogue never silently unmounts. A refresh that
+was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
+outcome — the taste refresh's own cooldown, and the reason an offline listener
+does not respawn yt-dlp over the whole list once a song. Refreshed on the
+**same clock as the taste refresh** (§3.4, `STALE_MS` = 24 h) and through the
+same shape — a staleness gate plus a single-flight guard, poked from the music
+pipeline at a pick boundary. There is **no second scheduler**.
+
+**Why Bilibili needs a signature.** yt-dlp's flat read of a space
+(`--flat-playlist https://space.bilibili.com/<mid>/video`) returns the refs with
+**every title empty** — measured — and a pool searched by title is useless
+without them. Bilibili's own listing (`/x/space/wbi/arc/search`) carries the
+titles and refuses an unsigned request, so `src/music/sources/wbi.ts` signs it:
+the two image URLs in the anonymous `nav` answer spell a 64-char raw key, a
+fixed permutation of it cut to 32 is the **mixin key**, and the sorted query
+plus `wts` is md5'd with that key appended as `w_rid`. The request also carries
+a site-issued `buvid3` and the web player's constant fingerprint fields —
+without them the same correct signature is answered `412`. Everything here is
+**anonymous**: the channels are public, so this never touches the listener's
+cookie or a mounted Bilibili account.
+
+The signing material is re-read once it ages past **10 minutes**: Bilibili
+rotates the keys, one handshake serves a whole refresh, and a process that runs
+across a rotation must not go on signing with a dead key (yt-dlp's own
+extractor gives it a short TTL for the same reason). The request deadline
+covers the **response body**, not only the headers — reads are serial, so one
+stalled body would otherwise hold the refresh and its single-flight lock open
+for good.
+
+*Measured ceiling (2026-09-16):* Bilibili rate-limits a burst of space reads
+per IP with `412` and an HTML body. Reads are spaced 1.5 s and a failed channel
+is simply skipped; a daily refresh that loses a channel picks it up the next
+day. If a listener's list ever grows to many Bilibili channels, the upgrade is
+a longer spacing or a resume across refreshes — not a retry loop.
+
+**The catalogue.** `search_music(catalogue: 'channels')` is a **local**
+substring match over the pool on **title and uploader** — every word of the
+query has to land — with **no network at search time**. It returns the same
+`TrackCandidate` shape as every other catalogue, so `submit_pick` resolves the
+ref through the unchanged yt-dlp path (§2.5). Like the other catalogues it is
+offered **only while it holds something**: an empty pool is not mounted, and
+asking for it returns the same `{ ok: false, reason: 'not-mounted' }`.
+
+**What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`), one
+sentence rendered only while the pool is non-empty: the catalogue searches
+recent uploads from a curated list of music channels — good for something new,
+a cover, or a recent release a plain search would bury. That sentence is about
+**where to look**. It must not describe the listener.
+
+---
+
 ## 3. Design
 
 ### 3.1 `/sources` — the only entry
@@ -844,6 +931,8 @@ where a pick came from only when it is theirs ("one you've kept").
 
 ### 3.4 Boot and refresh
 
+- The curated-channel pool (§2.9) rides this same clock and the same shape —
+  stale past 24 h, single-flight, never awaited by the loop.
 - Boot: read `sources.json`; **never block the broadcast**. If any snapshot is
   older than **24 h**, schedule a background refresh after the second beat
   airs (the same "after boot settles" point the bed uses, 03-04). Failures log
@@ -1051,6 +1140,29 @@ misses — over one real evening with NetEase and Spotify mounted, versus the
 evening before. Recorded as the spec's one by-ear issue; the eval that would
 make it repeatable is #98.
 
+### 5.13 Curated channels (unit + smoke) — *added 2026-09-16*
+
+Unit: the manifest parse drops comments, blanks and junk lines; the GitHub
+refresh serves a fresh fetch, a cache hit inside the TTL with no network, and
+falls back to the bundled copy on a network failure **and** on a malformed
+remote body; the pool builds from fake channel listings and keeps the channels
+that answered when one fails; the `channels` catalogue matches on title and
+uploader and returns refs; an empty pool is not offered and the guidance
+sentence is not rendered; a failed refresh waits out the retry window; the
+Bilibili request deadline covers the body; the signing keys are re-read once
+they age out. The guidance sentence itself is asserted to say
+nothing about the listener.
+
+Smoke (real services, `scratch/`): the committed manifest builds a pool with
+titled rows from **both** transports, and a Bilibili row carries a real title —
+which is the whole reason §2.9 signs the request.
+
+*As built, 2026-09-16*: the pool built 120 titled tracks from 8 channels in
+20 s; searching `tiny desk` and `kexp` matched on title and on uploader. Two of
+three Bilibili channels answered `412` in that run (the measured ceiling in
+§2.9) and were skipped without costing the pool. YouTube refs from the pool
+resolve through the unchanged path; a Bilibili resolve was 412 from the same
+rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
 ---
 
 ## 6. Resolved decisions
