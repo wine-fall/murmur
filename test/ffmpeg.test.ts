@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -178,5 +182,51 @@ describe('stream headers on the ffmpeg invocations', () => {
     const args = decodeArgs('https://cdn/s', undefined, undefined, { 'User-Agent': 'UA', Host: 'h' })
     expect(args).not.toContain('-headers')
     expect(args[args.indexOf('-user_agent') + 1]).toBe('UA')
+  })
+})
+
+// --- segment playback (spec 14 §2.9, "a chapter is a song") ---------------- //
+//
+// A chapter clip is one slice of a long upload: `-ss` already opened at the
+// right place (that is how the bed resumes), but with no STOP the decoder
+// would run on to the end of a two-hour playlist.
+describe('segment decoding', () => {
+  it('bounds the decode with -t after the input when a length is given', () => {
+    const args = decodeArgs('song.m4a', 612, MIX_RATE, undefined, 256)
+    const t = args.indexOf('-t')
+    expect(t).toBeGreaterThan(args.indexOf('-i'))
+    expect(args[t + 1]).toBe('256')
+    expect(args[args.indexOf('-ss') + 1]).toBe('612')
+  })
+
+  it('is byte-identical to today when no length is given', () => {
+    expect(decodeArgs('song.m4a', 612, MIX_RATE, undefined, undefined)).toEqual(decodeArgs('song.m4a', 612))
+    expect(decodeArgs('song.m4a', undefined, MIX_RATE, undefined, 0)).toEqual(decodeArgs('song.m4a'))
+  })
+
+  it('probes at the offset the clip will actually start from', () => {
+    const args = probeArgs('stream', undefined, 612)
+    const ss = args.indexOf('-ss')
+    expect(args[ss + 1]).toBe('612')
+    expect(ss).toBeLessThan(args.indexOf('-i'))
+    // Without an offset the probe keeps today's argument list exactly.
+    expect(probeArgs('stream')).toEqual(probeArgs('stream', undefined, 0))
+  })
+
+  it('reports the length still ahead of the offset, not the whole upload', async () => {
+    // A stub ffprobe that answers the upload's full length whatever it is
+    // asked: the offset arithmetic is this function's own, not ffprobe's.
+    const dir = await mkdtemp(join(tmpdir(), 'murmur-ffprobe-'))
+    const stub = join(dir, 'ffprobe-stub')
+    await writeFile(stub, '#!/bin/sh\necho 7506\n', { mode: 0o755 })
+    try {
+      expect(await probeDurationS('src', stub)).toBe(7506)
+      expect(await probeDurationS('src', stub, undefined, undefined, 7000)).toBe(506)
+      // An offset at or past the end is no remaining audio at all, not a
+      // negative length that would read as "unknown, carry on".
+      expect(await probeDurationS('src', stub, undefined, undefined, 9000)).toBe(null)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })

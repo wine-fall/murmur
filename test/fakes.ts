@@ -29,6 +29,7 @@ import type { DirectorSettings } from '../src/director/director.ts'
 import type { AskChoices, AskKind, FloorMode, Host } from '../src/host/host.ts'
 import type { Invitation, ProgramState } from '../src/host/ipc.ts'
 import { LineQueue } from '../src/host/host.ts'
+import { parseSegmentRef } from '../src/music/music.ts'
 
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
 // returned object to exercise hot application.
@@ -91,7 +92,15 @@ export class FakeMusicProvider implements MusicProvider {
   async resolve(ref: string): Promise<AudioClip> {
     if (this.failWith !== null) throw this.failWith
     if (this.broken.has(ref)) throw new Error(`cannot resolve ${ref}`)
-    return { source: `https://stream/${ref}`, kind: 'music', ...(this.headers !== null && { headers: this.headers }) }
+    // The real provider turns a media fragment into a segment (spec 14 §2.9);
+    // the fake does too, or nothing downstream of it could be tested.
+    const { segment } = parseSegmentRef(ref)
+    return {
+      source: `https://stream/${ref}`,
+      kind: 'music',
+      ...(segment !== undefined && { durationS: segment.endS - segment.startS, segment }),
+      ...(this.headers !== null && { headers: this.headers }),
+    }
   }
 }
 

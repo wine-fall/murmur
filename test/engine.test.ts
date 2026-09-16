@@ -105,6 +105,22 @@ describe('stream headers', () => {
     await settle()
     expect(seen).toEqual([headers, undefined])
   })
+
+  // A chapter clip (spec 14 §2.9) is a slice of a long upload: the decoder has
+  // to be told BOTH where to open and when to stop, or the song runs on into
+  // the rest of the playlist.
+  it('hands the decoder the segment offset and length, and neither for a whole track', async () => {
+    const seen: [number | undefined, number | undefined][] = []
+    const decode: Decode = (source, signal, startS, _headers, lengthS) => {
+      seen.push([startS, lengthS])
+      return dcChunks(0.4, 0.5)(source, signal)
+    }
+    const { engine } = build(1, decode)
+    await engine.playMusic({ source: 'fake://chapter', kind: 'music', durationS: 256, segment: { startS: 612, endS: 868 } })
+    await engine.playMusic(MUSIC)
+    await settle()
+    expect(seen).toEqual([[612, 256], [undefined, undefined]])
+  })
 })
 
 describe('voice channel', () => {

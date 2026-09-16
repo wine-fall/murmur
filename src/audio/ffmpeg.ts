@@ -91,6 +91,9 @@ export type DecodeOptions = {
   // The headers the source needs to answer at all (a CDN that 403s a
   // header-less request). Absent for a local file.
   headers?: StreamHeaders
+  // Stop after this many seconds of audio (spec 14 §2.9): a chapter clip is
+  // one slice of a long upload, and `startS` alone would run on to its end.
+  lengthS?: number
 }
 
 // The decoder invocation, exposed for tests: `-ss` sits BEFORE `-i` (input-side
@@ -99,11 +102,14 @@ export type DecodeOptions = {
 // 44.1 kHz Bluetooth headset ignores the 48 kHz request) and the engine
 // schedules PCM frames on that clock unresampled, so decoding at any other
 // rate plays every song stretched.
+// `lengthS` is the STOP: an output-side `-t` after `-i`, so the pair says
+// "from here, this long" — a chapter played out of a two-hour playlist.
 export function decodeArgs(
   source: string,
   startS?: number,
   rate: number = MIX_RATE,
   headers?: StreamHeaders,
+  lengthS?: number,
 ): string[] {
   // prettier-ignore
   return [
@@ -111,6 +117,7 @@ export function decodeArgs(
     ...headerArgs(headers),
     ...(startS ? ['-ss', String(startS)] : []),
     '-i', source,
+    ...(lengthS ? ['-t', String(lengthS)] : []),
     '-f', 'f32le', '-ar', String(rate), '-ac', String(MIX_CHANNELS),
     'pipe:1',
   ]
@@ -123,10 +130,10 @@ export function decodeArgs(
 // Ending the iteration early (break / return) kills the decoder; no orphans.
 export async function* ffmpegDecode(
   source: string,
-  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal, startS, rate, headers }: DecodeOptions = {},
+  { ffmpegCmd = 'ffmpeg', chunkFrames = CHUNK_FRAMES, signal, startS, rate, headers, lengthS }: DecodeOptions = {},
 ): AsyncGenerator<Float32Array> {
   if (signal?.aborted) return
-  const proc = spawn(ffmpegCmd, decodeArgs(source, startS, rate, headers), { stdio: ['ignore', 'pipe', 'pipe'] })
+  const proc = spawn(ffmpegCmd, decodeArgs(source, startS, rate, headers, lengthS), { stdio: ['ignore', 'pipe', 'pipe'] })
   let stderr = ''
   proc.stderr.on('data', (c: Buffer) => (stderr = (stderr + c.toString()).slice(-2000)))
   const onAbort = () => proc.kill('SIGKILL')
@@ -171,11 +178,17 @@ export function probeDurationArgs(source: string, headers?: StreamHeaders): stri
   ]
 }
 
+// `startS` makes the answer the length still AHEAD of the offset — what a
+// segment clip will really play. ffprobe reports the container's duration
+// whatever seek it is given, so the offset is subtracted here rather than
+// handed to the binary; an offset at or past the end is null (no audio left),
+// never a negative length the caller would read as "unknown".
 export function probeDurationS(
   source: string,
   ffprobeCmd = 'ffprobe',
   timeoutMs = 15_000,
   headers?: StreamHeaders,
+  startS?: number,
 ): Promise<number | null> {
   return new Promise((resolve) => {
     execFile(
@@ -184,7 +197,7 @@ export function probeDurationS(
       { timeout: timeoutMs },
       (err, stdout) => {
         if (err) return resolve(null)
-        const seconds = Number.parseFloat(stdout.trim())
+        const seconds = Number.parseFloat(stdout.trim()) - (startS ?? 0)
         resolve(Number.isFinite(seconds) && seconds > 0 ? seconds : null)
       },
     )
@@ -197,9 +210,11 @@ export function probeDurationS(
 // while the model can still pick another candidate. Bounded: a probe that hangs
 // (a stalled stream open) is killed and reported unplayable — it must never
 // wedge the pick task that awaits it.
-export function probeArgs(source: string, headers?: StreamHeaders): string[] {
+// `startS` probes the part that will actually play: for a chapter clip the
+// head of the upload proves nothing about the slice half an hour in.
+export function probeArgs(source: string, headers?: StreamHeaders, startS?: number): string[] {
   // prettier-ignore
-  return ['-nostdin', ...headerArgs(headers), '-i', source, '-t', '0.5', '-f', 'null', '-']
+  return ['-nostdin', ...headerArgs(headers), ...(startS ? ['-ss', String(startS)] : []), '-i', source, '-t', '0.5', '-f', 'null', '-']
 }
 
 export function probeStream(
@@ -207,9 +222,10 @@ export function probeStream(
   ffmpegCmd = 'ffmpeg',
   timeoutMs = 15_000,
   headers?: StreamHeaders,
+  startS?: number,
 ): Promise<boolean> {
   return new Promise((resolve) => {
-    const proc = spawn(ffmpegCmd, probeArgs(source, headers), {
+    const proc = spawn(ffmpegCmd, probeArgs(source, headers, startS), {
       stdio: 'ignore',
     })
     const deadline = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
