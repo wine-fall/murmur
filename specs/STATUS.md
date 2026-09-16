@@ -42,6 +42,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#98** (eng) Steer tool-choice eval (Ollama) owed — the smoke is on-demand only; spec 11 §5.
 - **#102** (enhancement, eng) The voice guide's live policy check burns ~6 consent rounds before degrading.
 - **#104** (eng) DESIGN.md still claims fully-local / two hops / Claude-brain — stale vs what shipped.
+- **#255** (bug, eng) The NetEase / Bilibili / Soda clients read the response body outside their timeout — a stalled body hangs a mount.
 - **#138** (by-ear) Quit feel + the entry-authorization setup flow — spec 03-03 §5.3.
 - **#99** (by-ear) Spec 11 acceptance pass — handover feel, slow-pick cover, two-phase off.
 - **#149** (by-ear) Does the music pick actually stop repeating — spec 03-01 §2.3.
