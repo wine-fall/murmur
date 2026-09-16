@@ -9,6 +9,7 @@ import { BilibiliSource, mountBilibili, mountBilibiliQr } from './bilibili.ts'
 import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
 import { mountNetease, mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
+import { mountQQMusic, QQMusicSource } from './qqmusic.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
 import { mountSpotify, SpotifySource } from './spotify.ts'
 import type { SourceEntry, SourcesStore } from './store.ts'
@@ -18,7 +19,7 @@ import { mountYouTube, YouTubeSource } from './youtube.ts'
 // How long an exported jar is trusted before yt-dlp is asked again.
 export const COOKIE_TTL_MS = 10 * 60_000
 
-const SITES = { youtube: 'youtube.com', bilibili: 'bilibili.com', netease: 'music.163.com' } as const
+const SITES = { youtube: 'youtube.com', bilibili: 'bilibili.com', netease: 'music.163.com', qqmusic: 'y.qq.com' } as const
 type CookieSite = keyof typeof SITES
 
 // The jar cache: one export per browser (and profile) per site per TTL, and
@@ -136,6 +137,10 @@ export function buildSource(id: SourceId, entry: SourceEntry[SourceId], deps: So
       const e = entry as SourceEntry['qishui']
       return new QishuiSource(e, {})
     }
+    case 'qqmusic': {
+      const e = entry as SourceEntry['qqmusic']
+      return new QQMusicSource({ cookie: cookieOf(deps.jars, e, SITES.qqmusic) })
+    }
   }
 }
 
@@ -148,6 +153,7 @@ export function defaultMounts(deps: SourceBuildDeps): SourceMounts {
       youtube: (b) => mountYouTube(b, { run: deps.ytdlp, lease: (pick) => deps.jars.lease(pick, SITES.youtube) }),
       netease: (b) => mountNetease(b, { cookie: deps.jars.header(b, SITES.netease) }),
       bilibili: (b) => mountBilibili(b, { cookie: deps.jars.header(b, SITES.bilibili) }),
+      qqmusic: (b) => mountQQMusic(b, { cookie: deps.jars.header(b, SITES.qqmusic) }),
     },
     bilibili: (show, cancelled, onStatus) => mountBilibiliQr({}, { show, cancelled, onStatus }),
     netease: (show, cancelled, onStatus) => mountNeteaseQr({}, { show, cancelled, onStatus }),

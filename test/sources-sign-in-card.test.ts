@@ -72,6 +72,10 @@ function build(lines: string[], over: Partial<SourcesFlowDeps> & { mounts?: Part
         took.push(`bilibili:browser:${b.profile ?? ''}`),
         { ok: true, who: 'Bili Me', entry: { auth: 'browser', browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }), mid: '9' } }
       ),
+      qqmusic: async (b) => (
+        took.push(`qqmusic:browser:${b.profile ?? ''}`),
+        { ok: true, who: 'Wine', entry: { auth: 'browser', browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }
+      ),
     },
     netease: async (show) => (
       show('https://music.163.com/login?codekey=k'),
@@ -193,6 +197,22 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     const { host, deps } = build(['youtube', '', 'youtube'])
     await runSources(deps)
     expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
+  // QQ Music is a taste-only source read out of Chrome (spec 14 §2.9): there
+  // is no scan road in this build, so its card is the profile list alone.
+  it('offers QQ Music Chrome profiles only — it has no scan row to lead with', async () => {
+    const { host, deps } = build(['qqmusic', '', 'qqmusic'])
+    await runSources(deps)
+    expect(card(host).choices?.options?.map((o) => o.key)).toEqual(['chrome:Default', 'chrome:Profile 3'])
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
+  it('sends QQ Music down the cookie road, with the chosen profile pinned into the entry', async () => {
+    const { store, deps, took } = build(['qqmusic', 'chrome:Default', 'qqmusic'])
+    await runSources(deps)
+    expect(took).toEqual(['qqmusic:browser:Default'])
+    expect(store.read().qqmusic).toMatchObject({ auth: 'browser', browser: 'chrome', profile: 'Default' })
   })
 
   it('sends a picked scan down the scan road, unchanged: the code on the notice card, the cookie kept here', async () => {

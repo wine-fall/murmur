@@ -14,6 +14,7 @@ import { type ChromeDeps, type ChromeProfileInfo, preselectProfile, profiles } f
 import { BrowserCookieError, type CookieFailure } from './cookies.ts'
 import type { BilibiliEntry } from './bilibili.ts'
 import type { MountResult, NeteaseEntry } from './netease.ts'
+import type { QQMusicEntry, QQMusicMountResult } from './qqmusic.ts'
 import type { QishuiEntry, QishuiMountResult } from './qishui.ts'
 import { qrHalfBlocks } from './qishui.ts'
 import type { QrMountResult, QrStatus } from './qr.ts'
@@ -30,7 +31,7 @@ import type { YouTubeEntry } from './youtube.ts'
 // the invitation (§3.8) carries the option from then on.
 export const SOURCES_OFFER = [
   'Connect the music you already keep? [y/N]',
-  'NetEase, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.',
+  'NetEase, QQ Music, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.',
   'Nothing is read until you say yes; /sources any time later.',
 ] as const
 
@@ -42,13 +43,15 @@ export type BrowserPick = { browser: BrowserName; profile?: string | undefined }
 // the page it opens, nothing more.
 export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: string) => void; cancelled: () => boolean; openUrl?: (url: string) => void }
 
-// The three sources that can be read out of a browser's cookie store.
-// NetEase and Bilibili can also be scanned; YouTube cannot (issue #221), so
-// for it this is the only road.
+// The four sources that can be read out of a browser's cookie store.
+// NetEase and Bilibili can also be scanned; YouTube cannot (issue #221) and
+// QQ Music has no scan road in this build (spec 14 §2.9), so for those two
+// this is the only road.
 export type BrowserMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
   netease(b: BrowserPick): Promise<MountResult<NeteaseEntry>>
   bilibili(b: BrowserPick): Promise<MountResult<BilibiliEntry>>
+  qqmusic(b: BrowserPick): Promise<QQMusicMountResult>
 }
 
 // The platform adapters behind the conversation, injectable so the flow is
@@ -111,6 +114,8 @@ const NAMES: Record<string, MenuKey> = {
   spotify: 'spotify',
   soda: 'qishui',
   qishui: 'qishui',
+  qqmusic: 'qqmusic',
+  qq: 'qqmusic',
   refresh: 'refresh',
 }
 
@@ -238,6 +243,7 @@ const SIGN_IN_URL: Record<CookieSource, string> = {
   youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
   netease: 'https://music.163.com/',
   bilibili: 'https://passport.bilibili.com/login',
+  qqmusic: 'https://y.qq.com/',
 }
 
 // --- the sign-in card (spec 14 §3.1) ------------------------------------- //
@@ -537,7 +543,7 @@ async function mountCookieFlow(
   // mount and read by every refresh after it — never resolved a second time.
   const pick = { browser: CHROME, profile }
   host.info(`checking ${site} in Chrome...`)
-  type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry>
+  type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry | QQMusicEntry>
   const attempt = async (): Promise<CookieMount | null> => {
     try {
       return await deps.mounts.browser[id](pick)
@@ -590,6 +596,7 @@ async function mountCookieFlow(
   if (cancelled() || deps.quit.requested) return
   if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
   else if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
+  else if (id === 'qqmusic') await finishMount(deps, 'qqmusic', result.who, result.entry as QQMusicEntry)
   else await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
 }
 

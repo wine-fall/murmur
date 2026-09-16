@@ -66,6 +66,7 @@ function build(
       youtube: async (b) => (mounted.push(`youtube:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Zach G', entry: { browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }),
       netease: async (b) => (mounted.push(`netease:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Chen X', entry: { auth: 'browser', browser: b.browser, userId: '1', likedPlaylistId: '2' } }),
       bilibili: async (b) => (mounted.push(`bilibili:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Bili', entry: { auth: 'browser', browser: b.browser, mid: '9' } }),
+      qqmusic: async (b) => (mounted.push(`qqmusic:${b.browser}:${b.profile ?? ''}`), { ok: true, who: 'Wine', entry: { auth: 'browser', browser: b.browser } }),
       ...over.browser,
     },
     bilibili: async (show, cancelled) => {
@@ -137,6 +138,7 @@ describe('runSources (spec 14 §3.1)', () => {
       '>> 3) [ ] NetEase - not connected',
       '>> 4) [ ] Spotify - not connected',
       '>> 5) [ ] Soda Music - not connected',
+      '>> 6) [ ] QQ Music - not connected',
     ])
     expect(host.asks[0]!.kind).toBe('question')
     // The rows to tick (spec 10 §3.2-D): nothing mounted, so nothing ticked
@@ -148,6 +150,7 @@ describe('runSources (spec 14 §3.1)', () => {
         { key: 'netease', label: 'NetEase', note: 'not connected', checked: false },
         { key: 'spotify', label: 'Spotify', note: 'not connected', checked: false },
         { key: 'qishui', label: 'Soda Music', note: 'not connected', checked: false },
+        { key: 'qqmusic', label: 'QQ Music', note: 'not connected', checked: false },
       ],
       multi: true,
     })
@@ -176,7 +179,7 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(menu[1]).toBe('ok connected YouTube — signed in as Zach G · 1 liked, 1 playlist')
     expect(menu).toContain('>> 1) [x] YouTube - 1 liked, 1 playlist · read just now')
     expect(menu).toContain('>> 3) [ ] NetEase - not connected')
-    expect(menu).toContain('>> 6) [ ] refresh - re-read every connected account now')
+    expect(menu).toContain('>> 7) [ ] refresh - re-read every connected account now')
     const options = host.asks.at(-1)!.choices!.options!
     expect(options[0]).toEqual({ key: 'youtube', label: 'YouTube', note: '1 liked, 1 playlist · read just now', checked: true })
     expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false })
@@ -646,16 +649,17 @@ describe('runSources (spec 14 §3.1)', () => {
   })
 
   it('with everything mounted the menu is all status rows — no option left, still the menu', async () => {
-    const { host, deps, store } = build(['youtube bilibili netease spotify qishui'])
+    const { host, deps, store } = build(['youtube bilibili netease spotify qishui qqmusic'])
     store.mount('youtube', { browser: 'chrome' })
     store.mount('bilibili', { browser: 'chrome', mid: '7' })
     store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
     store.mount('spotify', { clientId: 'c', refreshToken: 'r', accessToken: 'a', expiresAt: 'x' })
     store.mount('qishui', { sessionCookie: 's', deviceId: 'd', installId: 'i' })
+    store.mount('qqmusic', { browser: 'chrome' })
     await runSources(deps)
     const menu = host.asks[0]!.text.split('\n')
-    expect(menu.filter((l) => l.startsWith('>> ') && l.includes('[x]'))).toHaveLength(5)
-    expect(host.asks[0]!.choices!.options!.map((o) => o.checked)).toEqual([true, true, true, true, true, false])
+    expect(menu.filter((l) => l.startsWith('>> ') && l.includes('[x]'))).toHaveLength(6)
+    expect(host.asks[0]!.choices!.options!.map((o) => o.checked)).toEqual([true, true, true, true, true, true, false])
     // The unchanged submit leaves: one card, nothing done.
     expect(host.asks).toHaveLength(1)
     expect(host.infos).toEqual([])

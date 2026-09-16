@@ -121,7 +121,7 @@ export type SettingsPatch = z.infer<typeof SettingsPatchSchema>
 // ids are spelled out here rather than imported: this module is the one the
 // front-end ships with, so it carries no other engine module along.
 export const SourceLineSchema = z.object({
-  id: z.enum(['youtube', 'bilibili', 'netease', 'spotify', 'qishui']),
+  id: z.enum(['youtube', 'bilibili', 'netease', 'spotify', 'qishui', 'qqmusic']),
   name: z.string(),
   status: z.enum(['ok', 'expired', 'error']),
   refreshed: z.string().optional(),
