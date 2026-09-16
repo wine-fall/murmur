@@ -60,7 +60,7 @@ importance:
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
-  | **QQ Music** | liked songs, own + favourited playlist names | no | yes (yt-dlp with cookie, free tracks; VIP skipped per track) | scans a code with WeChat, or signs in to Chrome |
+  | **QQ Music** | liked songs, own + favourited playlist names | yes (own client, signed in) | yes (yt-dlp with cookie, free tracks; VIP dropped at search) | scans a code with WeChat, or signs in to Chrome |
 
 - **`$MURMUR_HOME/sources.json`** — the mounted sources and their credentials
   (§2.1). Secret-bearing; guarded like `voice.json` (03-03 §3).
@@ -88,15 +88,10 @@ importance:
   these two sources are complete as **read-only** taste sources. A listener
   who wants to *hear* a Spotify or Soda track gets it via catalogue search on
   YouTube / Bilibili / NetEase, which is the whole point of §2.4.
-- **Searching QQ Music.** QQ Music **plays** (§2.5): a free track resolves
-  through yt-dlp's `qqmusic` extractor with the mount's cookie, and a VIP one
-  is skipped per track. What it is not is a search **catalogue** — there is no
-  `qqmusicsearch:` prefix, so searching it would need a second HTTP client of
-  murmur's own, the way NetEase's is, and that is not in this build. So the
-  brain never asks QQ Music for candidates; it reaches a QQ Music ref through
-  the curated-channel pool (§2.9, a `y.qq.com` playlist or singer URL in the
-  manifest), and the digest still shapes what it searches for on YouTube,
-  Bilibili and NetEase.
+- ~~**Playback from QQ Music, and searching it.**~~ Both are **in** scope as
+  of this build: QQ Music searches through its own client (§2.4) and plays
+  through yt-dlp with the mount's cookie (§2.5). The sentence this bullet used
+  to carry — that yt-dlp's extractor was broken — was simply false.
 - **A brain-written taste summary.** The digest is deterministic (§2.3). The
   brain forms its own picture inside the pick task; whether a distilled
   paragraph would pick better is an eval question (#98), not a build item.
@@ -310,8 +305,8 @@ whatever is left in `data/taste/`.
 `search_music` (in `src/music/music-tools.ts`) gains one optional argument:
 
 ```ts
-catalogue: z.enum(['youtube', 'bilibili', 'netease']).optional()
-  .describe('where to search; default youtube. bilibili and netease are available only when mounted — the tool result says which are')
+catalogue: z.enum(['youtube', 'bilibili', 'netease', 'qqmusic', 'channels']).optional()
+  .describe('where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are')
 ```
 
 - The tool's description lists the catalogues **currently mounted**, so the
@@ -326,6 +321,18 @@ catalogue: z.enum(['youtube', 'bilibili', 'netease']).optional()
 - **NetEase**: the NetEase client's `search(query, limit)` (§2.7) → candidates
   whose `ref` is `https://music.163.com/#/song?id=<id>`; `resolve` then goes
   through yt-dlp with the cookie (§2.5). The client requires a mount.
+- **QQ Music**: the QQ Music client's `search(query, limit)` (§2.10) →
+  candidates whose `ref` is `https://y.qq.com/n/ryqq/songDetail/<mid>`;
+  `resolve` then goes through yt-dlp with the cookie (§2.5). Like NetEase's,
+  it requires a mount — and unlike NetEase's, it requires the **login**: the
+  service answers an unsigned search `code: 0` with an empty list, a silent
+  nothing indistinguishable from "no such song", so a mount carrying no
+  credential is refused with `login-required` rather than returning no hits.
+  **VIP hits are dropped here** (§2.5): the result rows carry `pay.pay_play`,
+  and a track this account cannot play is not a candidate. The search asks for
+  three times the limit (capped at 30) so the playable remainder still fills
+  it — roughly two thirds of a real result page is VIP. The rights miss at
+  resolve time stays as the safety net, because the flag can be stale.
 - Candidates keep today's shape (`ref, title, uploader, durationS`) plus
   `catalogue`.
 
@@ -561,17 +568,18 @@ Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 (trust boundary — CLAUDE.md types rule).
 
-### 2.10 The QQ Music client — taste, and a playable ref
+### 2.10 The QQ Music client — taste, search and a playable ref
 
 **`qqmusic.ts`** — one endpoint does all of it: `POST
 https://u.y.qq.com/cgi-bin/musicu.fcg`, whose body names a `module` and a
 `method` and whose answer is `{code, req:{code, data}}`. The **inner**
 `req.code` is the real one; the envelope is always HTTP 200 with an outer
-`code: 0`. Nothing is played and nothing is searched **here**: this client
-identifies the account and reads what it keeps, and the digest does the rest.
-Playback is yt-dlp's, through the same mount's cookie (§2.5) — a kept song's
-`ref` is `https://y.qq.com/n/ryqq/songDetail/<mid>`, which is exactly what
-that extractor takes.
+`code: 0`. Nothing is **played** here: this client identifies the account,
+reads what it keeps and answers the search catalogue (§2.4). Playback is
+yt-dlp's, through the same mount's cookie (§2.5) — a song's `ref` is
+`https://y.qq.com/n/ryqq/songDetail/<mid>`, which is exactly what that
+extractor takes, and the search is what puts such a ref in the brain's hands
+in the first place.
 
 **Credential — the browser's own.** A signed-in `y.qq.com` jar carries
 `qm_keyst` (the key, also spelled `qqmusic_key`), the account number as `uin`
@@ -591,6 +599,7 @@ Modules, verified against the live service 2026-09-16:
 | created lists | `music.musicasset.PlaylistBaseRead.GetPlaylistByUin` | `{uin}` → `data.v_playlist[]` (`dirId`, `dirName`, `tid`, `songNum`) |
 | liked songs | `music.srfDissInfo.DissInfo.CgiGetDiss` | `{dirid:201, song_begin:0, song_num:<§3.5 cap>, enc_host_uin:<euin>, …}` → `data.songlist[]` |
 | favourited lists | `music.musicasset.PlaylistFavRead.CgiGetPlaylistFavInfo` | `{uin:<euin>, offset:0, size:<§3.5 cap>}` → `data.v_list[].name` |
+| search | `music.search.SearchCgiService.DoSearchForQQMusicDesktop` | `{query, search_type:0, num_per_page, page_num:1, highlight:0}` → `data.body.song.list[]` |
 
 - **`dirid` 201 is the liked list**, fixed across accounts — its *name* is
   localised, its dir id is not. It is one of the created lists, so it never
@@ -600,6 +609,13 @@ Modules, verified against the live service 2026-09-16:
   `singer[].name`, `album.name` and `interval`, but **no kept-at date** —
   `time_public` is the release date, not when the listener kept it — so the
   liked items carry no `at`, and the digest orders them as the platform did.
+- **Search needs the signed-in cookie, and says so.** The same query answered
+  5 hits signed in and **0 hits, `code: 0`** anonymously (verified
+  2026-09-16). A silent empty page is the worst possible failure here — it
+  reads as "no such song" — so a credential-less mount is refused before the
+  round trip. `highlight: 0` keeps the service from wrapping the matched words
+  in markup that would reach the brain inside the title. A hit carries `mid`,
+  `name`, `singer[].name`, `album.name`, `interval` and `pay.pay_play`.
 - **The login is checked first, every snapshot.** With the key flipped,
   `GetLoginUserInfo` answers `code 1000` but `GetPlaylistByUin` **still
   returns the account's lists** — it authenticates on the `uin` alone. A
@@ -1229,6 +1245,12 @@ task's situation contains the heading; `.dev/dev.log` of a real pick shows
 flag; `catalogue:'netease'` returns candidates whose `ref` is a `music.163.com`
 song URL, and `submit_pick` on one plays it end to end (smoke; a VIP account
 yields a `lossless` or better format in the yt-dlp JSON).
+`catalogue:'qqmusic'` returns candidates whose `ref` is a
+`y.qq.com/n/ryqq/songDetail/<mid>` URL, **none of them VIP**, and `submit_pick`
+on one resolves, probes and finishes the task (smoke, verified 2026-09-16:
+three queries → 5 playable candidates each in 0.2–1.0 s, `submit_pick` ok in
+3.1 s). An unmounted QQ Music is `not-mounted`; a mounted one whose cookie
+carries no credential is `reason: 'auth'`, not an empty result page.
 
 ### 5.5 Expired says expired (unit + smoke)
 Captured yt-dlp stderr fixtures classify to the four `AuthFailure`s; a

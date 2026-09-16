@@ -44,7 +44,7 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
-const CATALOGUES = ['youtube', 'bilibili', 'netease', 'channels'] as const
+const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels'] as const
 
 // The curated-channel pool (spec 14 §2.9), read live: a local match over the
 // recent uploads of the channels the listener curated. It is offered only
@@ -104,7 +104,7 @@ export function musicTools(
         .enum(CATALOGUES)
         .optional()
         .describe(
-          'where to search; default youtube. bilibili, netease and channels are available only when mounted — the tool result says which are',
+          'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are',
         ),
     },
     async (args) => {

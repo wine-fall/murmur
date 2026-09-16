@@ -5,7 +5,7 @@ import { dirname } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { cookieLeaser, cookieOf, COOKIE_TTL_MS, CookieJars } from '../src/music/sources/build.ts'
+import { cookieLeaser, cookieOf, COOKIE_TTL_MS, CookieJars, qqmusicSearch } from '../src/music/sources/build.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -305,5 +305,26 @@ describe('the QQ Music jar lease, either road (spec 14 §2.5)', () => {
   it('leases nothing when QQ Music is not mounted', async () => {
     const { store, jars } = seam()
     expect(await cookieLeaser({ jars, store })('qqmusic')).toBeNull()
+  })
+})
+
+// The catalogue reads the mount at call time (spec 14 §2.4), so QQ Music
+// mounted mid-session searches on the very next pick.
+describe('qqmusicSearch', () => {
+  it('refuses while nothing is mounted, and searches once it is', async () => {
+    const runs: string[][] = []
+    const run: YtDlpRunner = async (args) => (runs.push(args), '')
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-qqsearch-'))
+    const store = new SourcesStore({ path: join(dir, 'sources.json'), tasteDir: join(dir, 'taste') })
+    const deps = { ytdlp: run, jars: new CookieJars(run), store, openUrl: () => {} }
+    const search = () => qqmusicSearch(deps).search('q', 3)
+    await expect(search).rejects.toThrow(/not mounted/)
+    // Mounted, but the scanned cookie carries no credential. The refusal is
+    // now the client's own, which it answers with no round trip at all — so
+    // this proves the call got past the mount gate without touching the
+    // network, and that the scanned arm is the one it read.
+    store.mount('qqmusic', { auth: 'qr', cookie: 'fqm_pvqid=<redacted>' })
+    await expect(search).rejects.toMatchObject({ source: 'qqmusic', reason: 'login-required' })
+    expect(runs).toEqual([])
   })
 })

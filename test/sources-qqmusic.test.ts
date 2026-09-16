@@ -1,6 +1,7 @@
 // The QQ Music client (spec 14 §2.10): one POST endpoint, musicu.fcg, carrying
 // the browser's cookie. Parsed from shapes captured against the live service
-// on 2026-09-16 (values redacted). Taste only — QQ Music is never played.
+// on 2026-09-16 (values redacted) — the taste reads, and the search that
+// feeds the pick (§2.4).
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError } from '../src/music/sources/auth.ts'
@@ -66,6 +67,27 @@ const client = (answers: Record<string, unknown>, cookie = COOKIE, status = 200)
   return { client: new QQMusicClient({ cookie: async () => cookie, fetch }), calls }
 }
 
+// One search answer, as the live service shapes it: hits arrive under
+// body.song.list, and every hit carries pay.pay_play — 1 = VIP, which this
+// account cannot play (§2.5). Rows captured against the live service
+// 2026-09-16 for "What You Made Me", plus the VIP track §2.5's smoke uses.
+const SEARCH = {
+  code: 0,
+  data: {
+    body: {
+      song: {
+        list: [
+          { mid: '000P8peU0HhORi', name: 'Hua', interval: 168, singer: [{ name: 'G.E.M.' }], album: { name: 'Hua (Live Piano Session)' }, pay: { pay_play: 1 } },
+          { mid: '003s9sXr2So0QE', name: 'What You Made Me (feat. Aleesia)', interval: 235, singer: [{ name: 'Deoxik' }, { name: 'Aleesia' }], album: { name: 'What You Made Me' }, pay: { pay_play: 0 } },
+          { mid: '002RbFdB0DoURh', name: 'What You Made Me', interval: 390, singer: [{ name: 'The Wreckage' }], album: { name: 'Vaudeville' }, pay: { pay_play: 0 } },
+          { mid: '000hHsXz1OCVL9', name: '', interval: 223, singer: [{ name: 'Post Paradise' }], album: { name: '' }, pay: { pay_play: 0 } },
+          { mid: '003Oe8qc0AGV2P', name: 'Call Out', interval: 172, singer: [], album: { name: '' }, pay: { pay_play: 0 } },
+        ],
+      },
+    },
+  },
+}
+
 describe('credentialFrom', () => {
   it('reads the uin, the encrypted uin and the key out of the browser cookie', () => {
     expect(credentialFrom(COOKIE)).toEqual({ uin: '1152921504873943987', euin: '<redacted-euin>', key: '<redacted-key>' })
@@ -80,6 +102,67 @@ describe('credentialFrom', () => {
     expect(credentialFrom('wxuin=999; euin=e')).toBeNull()
     expect(credentialFrom('qm_keyst=k; euin=e')).toBeNull()
     expect(credentialFrom('')).toBeNull()
+  })
+})
+
+// The search catalogue (spec 14 §2.4): the one thing that makes QQ Music
+// playback reachable — without it the brain can name a QQ Music track but
+// never hand submit_pick a y.qq.com ref.
+describe('QQMusicClient.search', () => {
+  const SEARCH_KEY = 'music.search.SearchCgiService.DoSearchForQQMusicDesktop'
+
+  it('asks musicu.fcg for songs and maps the hits to candidates', async () => {
+    const { client: c, calls } = client({ [SEARCH_KEY]: SEARCH })
+    const found = await c.search('what you made me', 3)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]!.body.req.param).toMatchObject({ query: 'what you made me', search_type: 0, page_num: 1, highlight: 0 })
+    expect(found[0]).toEqual({
+      ref: 'https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE',
+      title: 'What You Made Me (feat. Aleesia)',
+      uploader: 'Deoxik / Aleesia',
+      durationS: 235,
+      extra: { album: 'What You Made Me' },
+      catalogue: 'qqmusic',
+    })
+    expect(found[1]).toMatchObject({ ref: 'https://y.qq.com/n/ryqq/songDetail/002RbFdB0DoURh', uploader: 'The Wreckage' })
+  })
+
+  // A VIP hit is a candidate the radio cannot play (§2.5). The rights miss at
+  // resolve time is the safety net, not the plan: dropping them here saves a
+  // wasted extraction and a wasted turn of the model's attention.
+  it('drops the VIP hits and the nameless ones', async () => {
+    const { client: c } = client({ [SEARCH_KEY]: SEARCH })
+    const found = await c.search('what you made me', 10)
+    expect(found.map((f) => f.ref)).toEqual([
+      'https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE',
+      'https://y.qq.com/n/ryqq/songDetail/002RbFdB0DoURh',
+      'https://y.qq.com/n/ryqq/songDetail/003Oe8qc0AGV2P',
+    ])
+    // A hit with no singer at all still travels; the brain judges it.
+    expect(found[2]).toMatchObject({ uploader: '' })
+  })
+
+  // About two thirds of a real result page is VIP, so asking for exactly the
+  // limit would hand the brain one or two candidates to choose between.
+  it('over-asks so the playable remainder still fills the limit, and caps at it', async () => {
+    const { client: c, calls } = client({ [SEARCH_KEY]: SEARCH })
+    const found = await c.search('what you made me', 2)
+    expect(Number(calls[0]!.body.req.param.num_per_page)).toBeGreaterThan(2)
+    expect(found).toHaveLength(2)
+  })
+
+  // The service answers an unsigned search `code: 0` with an EMPTY list — a
+  // silent nothing that reads exactly like "no such song". A mount that
+  // carries no credential must say so instead (§2.6).
+  it('refuses a search with no login rather than returning a silent nothing', async () => {
+    const { client: c, calls } = client({ [SEARCH_KEY]: SEARCH }, 'fqm_pvqid=<redacted>')
+    await expect(c.search('what you made me', 3)).rejects.toMatchObject({ source: 'qqmusic', reason: 'login-required' })
+    expect(calls).toEqual([])
+  })
+
+  it('reads an empty result page as no candidates, not as a failure', async () => {
+    const { client: c } = client({ [SEARCH_KEY]: { code: 0, data: { body: { song: { list: [] } } } } })
+    expect(await c.search('nothing at all', 5)).toEqual([])
   })
 })
 

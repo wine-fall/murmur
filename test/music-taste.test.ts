@@ -58,6 +58,21 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     await expect(bare.search('q', 4, 'netease')).rejects.toThrow(/not mounted/)
   })
 
+  it('qqmusic search goes through the client, and is refused when no client is wired', async () => {
+    const searches: [string, number][] = []
+    const qqmusic = {
+      search: async (query: string, limit: number): Promise<TrackCandidate[]> => {
+        searches.push([query, limit])
+        return [{ ref: 'https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE', title: 't', uploader: 'a', durationS: 235, extra: {}, catalogue: 'qqmusic' }]
+      },
+    }
+    const provider = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies, qqmusic })
+    expect((await provider.search('q', 4, 'qqmusic'))[0]?.ref).toBe('https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE')
+    expect(searches).toEqual([['q', 4]])
+    const bare = new YtDlpMusicProvider({ run: async () => '', cookies: jars().cookies })
+    await expect(bare.search('q', 4, 'qqmusic')).rejects.toThrow(/not mounted/)
+  })
+
   it('resolves with the leased jar for a mounted host and without one otherwise (spec 14 §5.1)', async () => {
     const calls: string[][] = []
     const { cookies, released } = jars()
