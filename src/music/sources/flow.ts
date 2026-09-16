@@ -118,6 +118,9 @@ const NAMES: Record<string, MenuKey> = {
   qqmusic: 'qqmusic',
   qq: 'qqmusic',
   refresh: 'refresh',
+  // The row is drawn as a button — `( refresh now )` — so that is what gets
+  // typed, and one word the flow cannot place fails the whole line.
+  now: 'refresh',
 }
 
 type MenuKey = SourceId | 'refresh'

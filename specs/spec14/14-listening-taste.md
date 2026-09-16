@@ -859,7 +859,9 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   whether unticking it turns something off. Space or Enter on that row
   submits at once: the current ticks and `refresh` together, which is the
   same `line` the flow always parsed. The plain host's numbered row drops the
-  box for the same reason; typing `refresh` still names it.
+  box for the same reason; typing `refresh` still names it, and so does
+  `refresh now`, the way it is drawn — a listener types the row they can see,
+  and one word the flow cannot place fails the whole line (codex review).
 - **The TUI's multi card closes on an `( apply )` row it synthesizes itself**
   (10 §3.2-D) — not on the wire, not this flow's business: the card offered
   nothing that looked like a submit. Its note says what applying would do

@@ -648,6 +648,18 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(host.infos.some((l) => /cancelled/.test(l))).toBe(true)
   })
 
+  // The button is drawn `( refresh now )`, so that is what a plain-host
+  // listener types — and one word the flow cannot place fails the WHOLE line
+  // (codex review), which would have left them typing a row they can read.
+  it('takes the refresh row typed as it is drawn, two words and all', async () => {
+    const { host, deps, store, sources } = build(['netease refresh now', 'netease'])
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' })
+    sources.set('netease', new FakeSource('netease'))
+    await runSources(deps)
+    expect(host.infos.some((l) => /didn't catch/.test(l))).toBe(false)
+    expect(host.asks[1]!.text.split('\n')[1]).toBe('ok refreshed NetEase — 2 items')
+  })
+
   it('refresh re-reads every mounted source in the foreground with counts; unmount deletes entry and snapshot', async () => {
     // Ticking refresh re-reads; unticking both then leaves nothing ticked,
     // and the empty submit is that — not an exit — on a host with a list.
