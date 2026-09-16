@@ -12,8 +12,8 @@
 > **Part**: Delivers ROADMAP line 5 (retitled with this spec). Feeds the music
 > pick task (spec 03-01 §2.3) and the context pack (spec 05 §2.2) a **taste
 > digest** read from the platforms the listener opts in, and lets the pick task
-> **search a named catalogue** (YouTube, Bilibili, NetEase) with that taste in
-> hand. Does not touch the ducking engine (spec 03-02), the director's segment
+> **search a named catalogue** (YouTube, Bilibili, NetEase, and the curated
+> `channels` pool of §2.9) with that taste in hand. Does not touch the ducking engine (spec 03-02), the director's segment
 > loop (spec 04), or `profile.md`'s ownership (spec 05 §3.2, spec 13 §3.4).
 > **Milestone**: companion character. Depends on the music task (03-01), the
 > memory pack (05), settings (12), the command grammar (10 §3.2-C), and the
@@ -55,12 +55,12 @@ importance:
 
   | source | taste read | search | play | how the listener mounts it |
   |---|---|---|---|---|
-  | **YouTube / YouTube Music** | liked (`:ytfav`), history (`:ythistory`), subscriptions | yes (exists) | yes (exists) | signs in to Chrome — the one source with no scan to offer |
-  | **Bilibili** | favourite folders, "watch later", space audio | yes (`bilisearch`) | yes | scans a code with the Bilibili app |
+  | **YouTube / YouTube Music** | history (`:ythistory`), the subscriptions feed (`:ytsubs`); `:ytfav` names the account only | yes (exists) | yes (exists) | signs in to Chrome — the one source with no scan to offer |
+  | **Bilibili** | watch history (with its category), accounts recently followed, accounts most visited, space audio | yes (`bilisearch`) | yes | scans a code with the Bilibili app |
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
-  | **QQ Music** | liked songs, own + favourited playlist names | no | no | signs in to Chrome — no scan road in this build (§2.9) |
+  | **QQ Music** | liked songs, own + favourited playlist names | no | no | signs in to Chrome — no scan road in this build (§2.10) |
 
 - **`$MURMUR_HOME/sources.json`** — the mounted sources and their credentials
   (§2.1). Secret-bearing; guarded like `voice.json` (03-03 §3).
@@ -89,7 +89,7 @@ importance:
   who wants to *hear* a Spotify or Soda track gets it via catalogue search on
   YouTube / Bilibili / NetEase, which is the whole point of §2.4.
 - **Playback from QQ Music, and searching it.** QQ Music is a **taste-only**
-  source (§2.9). yt-dlp ships a `qqmusic` extractor, but its song extractor
+  source (§2.10). yt-dlp ships a `qqmusic` extractor, but its song extractor
   is broken today — `WARNING: [qqmusic] unable to extract init data` then
   `ERROR: This video is only available for registered users`, with and
   without `--cookies-from-browser` (verified 2026-09-16) — and there is no
@@ -192,11 +192,13 @@ type SourcesFile = {
 ```ts
 type TasteItem = {
   readonly kind: 'liked' | 'history' | 'top-track' | 'top-artist' | 'playlist' | 'favourite' | 'subscription' | 'daily'
-  readonly title: string          // track title, artist name, playlist/folder/channel name
+            | 'follows' | 'frequents'    // an account they recently followed / one they keep visiting
+  readonly title: string          // track title, artist name, playlist/channel name
   readonly artist?: string
   readonly album?: string
-  readonly at?: string            // ISO, when the platform says it was liked/played (if it says)
+  readonly at?: string            // ISO, when the platform says it was liked/played/watched (if it says)
   readonly ref?: string           // a URL the resolve path could play (cookie sources only)
+  readonly category?: string      // the platform's own category for a watched row (Bilibili's sub-zone)
 }
 type TasteSnapshot = {
   readonly source: SourceId       // 'youtube' | 'bilibili' | 'netease' | 'spotify' | 'qishui'
@@ -229,17 +231,57 @@ A pure function; same inputs, same output; unit-tested on fixtures. Shape
 
 ```
 ## What the listener keeps (as of 2026-09-06)
-Sources: NetEase (312 liked, 9 playlists), Spotify (top 50), YouTube (history 200)
-Artists they return to: Cheer Chen (41), Bon Iver (27), Ryuichi Sakamoto (19), …   ← top 25 by count across sources
-Recently kept: "Travel Is Meaningful" Cheer Chen · "Holocene" Bon Iver · …   ← 20 newest by `at`, then by source order
-Playlists: late drive, deep focus, Liked from Radio, …                   ← names only, ≤ 12
-Spotify says (top, medium term): artists — …; tracks — …                ← Spotify's own ranking, ≤ 10 each
+Sources: NetEase (312 liked, 9 playlists), Bilibili (history 200, 50 recently followed, 50 they go back to)
+Lately they have been listening to / watching: "..." Night Tape (<music sub-zone>) - "..." Chef Wang (<cooking sub-zone>) - ...
+Recently followed: Night Tape, Chef Wang, ...                            <- names only, <= 12
+Who they keep going back to: Midnight Haven Jazz, ...                    <- names only, <= 12
+Artists they return to: Cheer Chen (41), Bon Iver (27), ...              <- top 25 by count across sources
+Playlists: late drive, deep focus, Liked from Radio, ...                 <- names only, <= 12
+Songs they keep: "Travel Is Meaningful" Cheer Chen - "Holocene" Bon Iver <- 20 newest by `at`, then by source order
+Spotify says (top, medium term): artists - ...; tracks - ...             <- Spotify's own ranking, <= 10 each
 ```
+
+The layering is by what the signal IS, and its order is its priority: what
+the listener has been **watching** leads, then who they **recently
+followed**, then who they **keep going back to**, then the musical rows
+(artists, the playlist names they keep, the songs). Inside the watch layer a
+row whose category is one of the platform's music sub-zones sorts above one
+that is not, so a music-zone row outranks a cooking one; within each of those
+two ranks it is newest first.
+
+**Nothing collected is taste** (the listener's decision, 2026-09-16, taken on
+their own rendered digest): a Bilibili favourites folder is where a Java
+course, a recipe and an audiobook are filed, and it drowned everything
+musical in the block. So Bilibili's favourites folders, their contents and
+watch-later are not read at all, and YouTube's liked list is read only to
+name the account (its uploader), never for its items. What they watched and
+who they follow is the signal.
+
+The render enforces this on **any** snapshot, not only a freshly read one: a
+returning listener keeps yesterday's `bilibili.json` until the next refresh,
+so the render drops every `favourite` row, every Bilibili `playlist` row (a
+favourites folder) and YouTube's `liked` rows outright, counts included. The
+kinds stay in the union so an old file still parses; nothing produces them
+any more. A snapshot left with nothing to say drops out of the `Sources`
+line rather than standing there as an empty pair of brackets.
+
+**No one layer may eat the block**: each layer gets an equal share of what is
+left of the budget when its turn comes, and whatever it does not use rolls
+forward to the next. A layer that runs out of room ends at an item boundary
+with a trailing `...`. Without this, 200 watched rows with long titles filled
+all 1500 characters by themselves and the musical source beside them never
+reached the page (measured on the real snapshot, 2026-09-16).
+
+**Artist counts come from the musical rows alone** (`liked`, `favourite`,
+`top-artist`, `top-track`, `daily`): a watched video's uploader is not an
+artist and neither is a followed channel, or a Java course channel outranks
+every musician in "artists they return to".
 
 (The example above is romanised only because committed sources are
 English-only; the real digest keeps every value verbatim in its own script.)
 
-Rules: artist counts merge across sources by exact string after trim;
+Rules: artist counts merge across sources by exact string after trim (from
+the musical rows only, above);
 no translation, no romanisation; items whose `title` is empty are dropped;
 the block is cut to `budget` characters at a line boundary with a trailing
 `…`. With no snapshots it renders `''` and nothing is injected. Stale
@@ -443,13 +485,23 @@ empty answer from a minute ago.
   waiting · **86090** the phone has it · **0** confirmed, with `SESSDATA`,
   `bili_jct` and `DedeUserID` arriving as `Set-Cookie` · **86038** the code is
   spent. Verified against the live endpoints 2026-09-15.
-  Then `x/web-interface/nav` (who, `mid`) and
-  `x/v3/fav/folder/created/list-all` (folders); folder contents, watch-later
-  and space audio read from the same web APIs yt-dlp's extractors call
-  (*as built*: yt-dlp's flat output for these lists carries ids alone, and a
-  taste is titles — so the client reads the JSON directly; a favourite whose
-  `attr` bit 1 is set is a taken-down video and is dropped). Playback of a
-  favourite still goes through yt-dlp with the cookie (§2.5).
+  Then `x/web-interface/nav` (who, `mid`), and the taste reads, all from the
+  same web APIs yt-dlp's extractors call (yt-dlp's flat output for these
+  lists carries ids alone, and a taste is titles — so the client reads the
+  JSON directly). Verified against the live endpoints 2026-09-16:
+  `x/web-interface/history/cursor?ps=30&business=archive` — the watch
+  history, newest first, each row carrying the title, `author_name`,
+  `view_at` and `tag_name`, which is Bilibili's own sub-zone and becomes the
+  item's `category`; the next page is asked for with the `max` and `view_at`
+  the last page's `cursor` handed back.
+  `x/relation/followings?vmid=<mid>&ps=50&pn=1` — the accounts followed, the
+  platform's default order being follow-time descending (`uname`, `mtime`,
+  `mid`) → `follows`; the same read with `&order_type=attention` is ordered
+  by how often the listener visits them → `frequents`.
+  `audio/music-service/web/song/upper` — the account's own audio uploads.
+  The favourites folders, their contents and watch-later are **not** read
+  (§2.3: collected is not taste). Playback still goes through yt-dlp with
+  the cookie (§2.5).
 - **`spotify.ts`** — OAuth 2.0 **PKCE** (no client secret) against the
   listener's own registered app (`clientId`); local redirect
   `http://127.0.0.1:39917/callback` (*as built*: a registered redirect URI
@@ -485,7 +537,7 @@ Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 (trust boundary — CLAUDE.md types rule).
 
-### 2.9 The QQ Music client — taste only
+### 2.10 The QQ Music client — taste only
 
 **`qqmusic.ts`** — one endpoint does all of it: `POST
 https://u.y.qq.com/cgi-bin/musicu.fcg`, whose body names a `module` and a
@@ -537,6 +589,93 @@ Modules, verified against the live service 2026-09-16:
   exchange) and a cheaper WeChat one (`open.weixin.qq.com/connect/qrconnect`,
   a long poll, then one `music.login.LoginServer.Login`) — but neither is
   built here.
+
+---
+
+### 2.9 Curated music channels — a place to LOOK, never taste
+
+> *Added 2026-09-16.* A committed list of music channels becomes an extra
+> **search source**. It is not a taste source and must never be read as one.
+
+**The one distinction.** The listener's own accounts (§2.2/§2.3) decide **what
+kind** of song to look for. The curated channels are one of the **places to
+look for it**. Nothing from this list may enter the taste digest ("What the
+listener keeps", §2.3) or the situation block (spec 03-01 §2.5) — those speak
+about the listener, and a channel someone else curated says nothing about them.
+Code-wise this is structural: `src/music/channels.ts` never imports the digest
+and is never handed to the pack.
+
+**The manifest** — `assets/music_channels.txt`, exactly the shape of
+`assets/bed_sources.txt` (spec 03-04): one URL per line, blank lines and `#`
+comments ignored, anything that is not an `http(s)` URL skipped. Adding a
+channel is adding a line. Two shapes are understood:
+
+| Shape | Read by |
+|---|---|
+| `https://www.youtube.com/@<handle>/videos` | yt-dlp `--dump-json --flat-playlist` |
+| `https://space.bilibili.com/<mid>/video` | Bilibili's own space API, wbi-signed |
+
+**Runtime refresh.** The list is re-read from
+`https://raw.githubusercontent.com/wine-fall/murmur/main/assets/music_channels.txt`
+so a channel added upstream reaches a listener **without a release**. Cached at
+`$MURMUR_HOME/cache/channels/manifest.json` (rebuildable → `cacheRoot`, never
+`~/.cache`) with a **12 h** TTL: the file changes when a human edits the repo,
+so hourly polls a constant and a week makes an added channel feel broken. The
+fallback chain is total and never throws — cache inside TTL → fresh fetch →
+stale cache → **the copy that shipped**. A body with no URLs in it (a 404 page,
+a half-written file) is treated as a failure, not as "the list is now empty".
+
+**The pool.** Each listed channel's newest **20** uploads (title, ref,
+uploader) are pulled into `$MURMUR_HOME/cache/channels/pool.json`. A channel
+that fails costs that channel; a refresh where **nothing** answers keeps the
+pool it already had, so the catalogue never silently unmounts. A refresh that
+was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
+outcome — the taste refresh's own cooldown, and the reason an offline listener
+does not respawn yt-dlp over the whole list once a song. Refreshed on the
+**same clock as the taste refresh** (§3.4, `STALE_MS` = 24 h) and through the
+same shape — a staleness gate plus a single-flight guard, poked from the music
+pipeline at a pick boundary. There is **no second scheduler**.
+
+**Why Bilibili needs a signature.** yt-dlp's flat read of a space
+(`--flat-playlist https://space.bilibili.com/<mid>/video`) returns the refs with
+**every title empty** — measured — and a pool searched by title is useless
+without them. Bilibili's own listing (`/x/space/wbi/arc/search`) carries the
+titles and refuses an unsigned request, so `src/music/sources/wbi.ts` signs it:
+the two image URLs in the anonymous `nav` answer spell a 64-char raw key, a
+fixed permutation of it cut to 32 is the **mixin key**, and the sorted query
+plus `wts` is md5'd with that key appended as `w_rid`. The request also carries
+a site-issued `buvid3` and the web player's constant fingerprint fields —
+without them the same correct signature is answered `412`. Everything here is
+**anonymous**: the channels are public, so this never touches the listener's
+cookie or a mounted Bilibili account.
+
+The signing material is re-read once it ages past **10 minutes**: Bilibili
+rotates the keys, one handshake serves a whole refresh, and a process that runs
+across a rotation must not go on signing with a dead key (yt-dlp's own
+extractor gives it a short TTL for the same reason). The request deadline
+covers the **response body**, not only the headers — reads are serial, so one
+stalled body would otherwise hold the refresh and its single-flight lock open
+for good.
+
+*Measured ceiling (2026-09-16):* Bilibili rate-limits a burst of space reads
+per IP with `412` and an HTML body. Reads are spaced 1.5 s and a failed channel
+is simply skipped; a daily refresh that loses a channel picks it up the next
+day. If a listener's list ever grows to many Bilibili channels, the upgrade is
+a longer spacing or a resume across refreshes — not a retry loop.
+
+**The catalogue.** `search_music(catalogue: 'channels')` is a **local**
+substring match over the pool on **title and uploader** — every word of the
+query has to land — with **no network at search time**. It returns the same
+`TrackCandidate` shape as every other catalogue, so `submit_pick` resolves the
+ref through the unchanged yt-dlp path (§2.5). Like the other catalogues it is
+offered **only while it holds something**: an empty pool is not mounted, and
+asking for it returns the same `{ ok: false, reason: 'not-mounted' }`.
+
+**What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`), one
+sentence rendered only while the pool is non-empty: the catalogue searches
+recent uploads from a curated list of music channels — good for something new,
+a cover, or a recent release a plain search would bury. That sentence is about
+**where to look**. It must not describe the listener.
 
 ---
 
@@ -619,7 +758,7 @@ signed in to the wrong account there? sign out on the site in that Chrome window
 
 - **The scan row** leads, and only for NetEase and Bilibili — the two that
   can go either way. **YouTube and QQ Music have no scan row**, so their card
-  is the profile list alone (§2.9; issue #221). It names the app in the platform's own terms (*the
+  is the profile list alone (§2.10; issue #221). It names the app in the platform's own terms (*the
   NetEase Cloud Music app*, *the Bilibili app*), and picking it is the scan
   mount below, unchanged.
 - **One row per Chrome profile**, named as Chrome's own profile menu names
@@ -858,6 +997,8 @@ where a pick came from only when it is theirs ("one you've kept").
 
 ### 3.4 Boot and refresh
 
+- The curated-channel pool (§2.9) rides this same clock and the same shape —
+  stale past 24 h, single-flight, never awaited by the loop.
 - Boot: read `sources.json`; **never block the broadcast**. If any snapshot is
   older than **24 h**, schedule a background refresh after the second beat
   airs (the same "after boot settles" point the bed uses, 03-04). Failures log
@@ -870,7 +1011,9 @@ where a pick came from only when it is theirs ("one you've kept").
 Per source per snapshot: liked/collection ≤ 500 newest, history ≤ 200,
 playlists ≤ 50 names (contents are not snapshotted except the liked list
 itself — NetEase's liked playlist and QQ Music's dir 201, which *are* the
-liked list; QQ Music's created and favourited names share the one 50 bound), top lists ≤ 50, subscriptions ≤ 100.
+liked list; QQ Music's created and favourited names share the one 50 bound),
+top lists ≤ 50, subscriptions ≤ 100, followed accounts ≤ 50 per order
+(recently followed, most visited).
 Digest ≤ 1500 chars (§2.3). A snapshot file over 1 MB is a bug.
 
 ### 3.6 Privacy and the dev log
@@ -1072,6 +1215,29 @@ misses — over one real evening with NetEase and Spotify mounted, versus the
 evening before. Recorded as the spec's one by-ear issue; the eval that would
 make it repeatable is #98.
 
+### 5.13 Curated channels (unit + smoke) — *added 2026-09-16*
+
+Unit: the manifest parse drops comments, blanks and junk lines; the GitHub
+refresh serves a fresh fetch, a cache hit inside the TTL with no network, and
+falls back to the bundled copy on a network failure **and** on a malformed
+remote body; the pool builds from fake channel listings and keeps the channels
+that answered when one fails; the `channels` catalogue matches on title and
+uploader and returns refs; an empty pool is not offered and the guidance
+sentence is not rendered; a failed refresh waits out the retry window; the
+Bilibili request deadline covers the body; the signing keys are re-read once
+they age out. The guidance sentence itself is asserted to say
+nothing about the listener.
+
+Smoke (real services, `scratch/`): the committed manifest builds a pool with
+titled rows from **both** transports, and a Bilibili row carries a real title —
+which is the whole reason §2.9 signs the request.
+
+*As built, 2026-09-16*: the pool built 120 titled tracks from 8 channels in
+20 s; searching `tiny desk` and `kexp` matched on title and on uploader. Two of
+three Bilibili channels answered `412` in that run (the measured ceiling in
+§2.9) and were skipped without costing the pool. YouTube refs from the pool
+resolve through the unchanged path; a Bilibili resolve was 412 from the same
+rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
 ---
 
 ## 6. Resolved decisions

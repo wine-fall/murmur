@@ -15,7 +15,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { Catalogue, MusicProvider, TaskTool, TrackPick } from '../contracts.ts'
+import type { Catalogue, MusicProvider, TaskTool, TrackCandidate, TrackPick } from '../contracts.ts'
 import { ANNOUNCE_FIELD_DESCRIPTION } from '../prompts/music.ts'
 import { previewTrap, SourceAuthError } from './sources/auth.ts'
 import { sourceOfRef } from './sources/store.ts'
@@ -44,17 +44,31 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
-const CATALOGUES = ['youtube', 'bilibili', 'netease'] as const
+const CATALOGUES = ['youtube', 'bilibili', 'netease', 'channels'] as const
+
+// The curated-channel pool (spec 14 §2.9), read live: a local match over the
+// recent uploads of the channels the listener curated. It is offered only
+// while it holds something, and searching it never touches the network.
+export type ChannelCatalogue = {
+  count: () => number
+  search: (query: string, limit?: number) => TrackCandidate[]
+}
 
 export function musicTools(
   provider: MusicProvider,
   finish: (pick: TrackPick) => void,
   probe?: StreamProbe,
   taste?: TasteToolOptions,
+  channels?: ChannelCatalogue,
 ): TaskTool[] {
   // What this task may search: youtube always, the rest while mounted and
-  // not yet closed by an auth failure in this very task.
-  const mounted: Catalogue[] = ['youtube', ...(taste?.catalogues() ?? []).filter((c) => c !== 'youtube')]
+  // not yet closed by an auth failure in this very task. An empty channel
+  // pool is not mounted — there is nothing in it to find.
+  const mounted: Catalogue[] = [
+    'youtube',
+    ...(taste?.catalogues() ?? []).filter((c) => c !== 'youtube'),
+    ...(channels !== undefined && channels.count() > 0 ? (['channels'] as const) : []),
+  ]
   const closed = new Set<Catalogue>()
   const open = (): Catalogue[] => mounted.filter((c) => !closed.has(c))
   // Each candidate's stated length, for the preview trap at submit time.
@@ -82,7 +96,7 @@ export function musicTools(
     'search_music',
     'Search for candidate tracks by query; returns candidates (ref, title, ' +
       'uploader, durationS) to judge before picking.' +
-      (taste === undefined ? '' : ` Catalogues available now: ${mounted.join(', ')}.`),
+      (taste === undefined && channels === undefined ? '' : ` Catalogues available now: ${mounted.join(', ')}.`),
     {
       query: z.string().describe('search terms for the track'),
       limit: z.number().int().min(1).max(10).optional().describe('max candidates (default 5)'),
@@ -90,7 +104,7 @@ export function musicTools(
         .enum(CATALOGUES)
         .optional()
         .describe(
-          'where to search; default youtube. bilibili and netease are available only when mounted — the tool result says which are',
+          'where to search; default youtube. bilibili, netease and channels are available only when mounted — the tool result says which are',
         ),
     },
     async (args) => {
@@ -99,6 +113,9 @@ export function musicTools(
         return reply({ ok: false, reason: 'not-mounted', mounted: open() })
       }
       if (closed.has(catalogue ?? 'youtube')) return reply({ ok: false, reason: 'unavailable', mounted: open() })
+      // The curated channels are already on disk: matched here, so a search of
+      // them costs nothing and cannot fail (spec 14 §2.9).
+      if (catalogue === 'channels') return reply({ candidates: channels?.search(args.query, args.limit) ?? [] })
       try {
         const candidates = await provider.search(args.query, args.limit, catalogue)
         for (const c of candidates) stated.set(c.ref, c.durationS)

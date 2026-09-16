@@ -1,4 +1,4 @@
-// The QQ Music client (spec 14 §2.9): a taste-only source. QQ Music is read,
+// The QQ Music client (spec 14 §2.10): a taste-only source. QQ Music is read,
 // never played — yt-dlp's `qqmusic` extractor cannot resolve a song today
 // ("unable to extract init data" / "only available for registered users",
 // with and without a browser cookie), and there is no `qqmusicsearch:` prefix

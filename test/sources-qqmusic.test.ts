@@ -1,4 +1,4 @@
-// The QQ Music client (spec 14 §2.9): one POST endpoint, musicu.fcg, carrying
+// The QQ Music client (spec 14 §2.10): one POST endpoint, musicu.fcg, carrying
 // the browser's cookie. Parsed from shapes captured against the live service
 // on 2026-09-16 (values redacted). Taste only — QQ Music is never played.
 import { describe, expect, it } from 'vitest'

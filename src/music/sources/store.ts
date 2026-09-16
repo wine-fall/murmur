@@ -42,7 +42,7 @@ export const SourceInputSchemas = {
   netease: access(NETEASE_FIELDS),
   spotify: z.object({ clientId: z.string(), refreshToken: z.string(), accessToken: z.string(), expiresAt: z.string() }),
   qishui: z.object({ sessionCookie: z.string(), deviceId: z.string(), installId: z.string() }),
-  // Taste only, and a browser mount only (spec 14 §2.9): the account's own
+  // Taste only, and a browser mount only (spec 14 §2.10): the account's own
   // identifiers ride in the cookie, so the Chrome pin is the whole entry.
   qqmusic: z.object(Borrowed),
 } as const

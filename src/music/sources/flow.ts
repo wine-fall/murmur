@@ -45,7 +45,7 @@ export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: str
 
 // The four sources that can be read out of a browser's cookie store.
 // NetEase and Bilibili can also be scanned; YouTube cannot (issue #221) and
-// QQ Music has no scan road in this build (spec 14 §2.9), so for those two
+// QQ Music has no scan road in this build (spec 14 §2.10), so for those two
 // this is the only road.
 export type BrowserMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
@@ -143,6 +143,11 @@ function counts(store: SourcesStore, id: SourceId): string {
   const parts: string[] = []
   const liked = (by.get('liked') ?? 0) + (by.get('favourite') ?? 0)
   if (liked > 0) parts.push(`${liked} liked`)
+  const watched = by.get('history') ?? 0
+  if (watched > 0) parts.push(`${watched} watched`)
+  // 'frequents' is the same accounts in another order, so it is not added in.
+  const followed = by.get('follows') ?? 0
+  if (followed > 0) parts.push(`${followed} followed`)
   const playlists = by.get('playlist') ?? 0
   if (playlists > 0) parts.push(`${playlists} playlist${playlists === 1 ? '' : 's'}`)
   const tops = (by.get('top-artist') ?? 0) + (by.get('top-track') ?? 0)
@@ -238,7 +243,7 @@ function recording(host: Host, notes: string[]): Host {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
-// QQ Music is read, never played (spec 14 §2.9). The mount says so itself,
+// QQ Music is read, never played (spec 14 §2.10). The mount says so itself,
 // before anything is read: a listener who connects it and is told "1 liked"
 // has no other way to learn its audio is not reachable from here.
 export const QQMUSIC_TASTE_ONLY =

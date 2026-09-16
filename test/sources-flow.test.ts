@@ -185,6 +185,27 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false })
   })
 
+  // spec 14 §2.3: Bilibili's snapshot is a watch history and a follow list
+  // now, so the row has to count those — "1 liked" for an account with 200
+  // watched rows is the card telling the listener nothing.
+  it('the menu row counts what the snapshot actually holds, watches and follows included', async () => {
+    const { host, deps, store } = build(['bilibili'])
+    store.mount('bilibili', { browser: 'chrome', mid: '4486056' })
+    store.writeSnapshot({
+      source: 'bilibili',
+      takenAt: NOW.toISOString(),
+      items: [
+        { kind: 'history', title: 'a city pop set' },
+        { kind: 'history', title: 'braised pork' },
+        { kind: 'follows', title: 'Night Tape' },
+        { kind: 'frequents', title: 'Night Tape' },
+        { kind: 'liked', title: 'My upload' },
+      ],
+    })
+    await runSources(deps)
+    expect(host.asks.at(-1)!.text.split('\n').find((l) => l.includes('Bilibili'))).toBe('>> 2) [x] Bilibili - 1 liked, 2 watched, 1 followed · never read')
+  })
+
   it('a remount drops the previous account\'s snapshot before reading the new one', async () => {
     // A signed-in mount is not re-run from the list; an expired one is
     // renewed by refresh, and that is the remount.
