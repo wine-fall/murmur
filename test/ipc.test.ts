@@ -43,7 +43,8 @@ const ENGINE_MESSAGES: EngineMessage[] = [
     options: [
       { key: 'netease', label: 'NetEase', note: '312 liked', checked: true },
       { key: 'spotify', label: 'Spotify' },
-      { key: 'refresh', label: 'refresh', note: 're-read every connected account now' },
+      // An action row (spec 10 §3.2-D): a button, not a state to tick.
+      { key: 'refresh', label: 'refresh now', note: 're-read every connected account now', action: true },
     ],
     multi: true,
   },

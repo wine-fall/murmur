@@ -180,10 +180,13 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(menu[1]).toBe('ok connected YouTube — signed in as Zach G · 1 liked, 1 playlist')
     expect(menu).toContain('>> 1) [x] YouTube - 1 liked, 1 playlist · read just now')
     expect(menu).toContain('>> 3) [ ] NetEase - not connected')
-    expect(menu).toContain('>> 7) [ ] refresh - re-read every connected account now')
+    // Refresh is an ACTION, not a state (spec 14 §3.1, 2026-09-16): no box
+    // to tick, on the card or in the numbered rows a plain host reads.
+    expect(menu).toContain('>> 7) ( refresh now ) - re-read every connected account now')
+    expect(menu.some((row) => /refresh/.test(row) && /\[[ x]\]/.test(row))).toBe(false)
     const options = host.asks.at(-1)!.choices!.options!
     expect(options[0]).toEqual({ key: 'youtube', label: 'YouTube', note: '1 liked, 1 playlist · read just now', checked: true })
-    expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false })
+    expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh now', note: 're-read every connected account now', checked: false, action: true })
   })
 
   // spec 14 §2.3: Bilibili's snapshot is a watch history and a follow list

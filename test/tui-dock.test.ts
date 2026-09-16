@@ -36,6 +36,10 @@ import {
   pageStep,
   pickAnswer,
   pickMove,
+  listRow,
+  listRows,
+  APPLY_KEY,
+  APPLY_NOTHING,
   pickStart,
   pickToggle,
   visibleLogRows,
@@ -285,6 +289,8 @@ describe('cardRows / cardTopRow', () => {
     // 1 lead row + 2 list rows + action row (2) + chrome (4) + margin (1); no
     // divider (no facts), no field — the list IS the answer.
     expect(cardRows(text, 200, 'question', options)).toBe(10)
+    // A multi list also stands on the apply row the client synthesizes.
+    expect(cardRows(text, 200, 'question', options, false, true)).toBe(11)
     // A result row above the list brings the divider back.
     expect(cardRows(`which accounts should I read?\nok NetEase - signed in\n${text.split('\n').slice(1).join('\n')}`, 200, 'question', options)).toBe(12)
   })
@@ -371,7 +377,7 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
   const options = [
     { key: 'netease', label: 'NetEase', checked: true },
     { key: 'spotify', label: 'Spotify' },
-    { key: 'refresh', label: 'refresh' },
+    { key: 'refresh', label: 'refresh now', action: true },
   ]
 
   it('starts on the first row with the pre-ticked keys ticked', () => {
@@ -393,6 +399,22 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
     expect(pickToggle(pickMove(start, 1, options.length), options, false).checked).toEqual(['spotify'])
   })
 
+  // An action row is a BUTTON, not a state (spec 10 §3.2-D, 2026-09-16): it
+  // cannot be ticked, so Space on it never changes the selection — pressing
+  // it is a submit, which app.tsx reads off the same flag.
+  it('an action row cannot be ticked: Space leaves the selection where it was', () => {
+    const onRefresh = pickMove(pickStart(options), 2, options.length)
+    expect(pickToggle(onRefresh, options, true)).toEqual(onRefresh)
+    expect(pickToggle(onRefresh, options, false)).toEqual(onRefresh)
+  })
+
+  // Pressing it submits the ticks AND its key — the same line the flow has
+  // always parsed ('netease refresh'), so nothing changes engine-side.
+  it('answering from an action row adds that row\'s key to the ticked ones', () => {
+    const onRefresh = pickMove(pickStart(options), 2, options.length)
+    expect(pickAnswer(onRefresh, options)).toBe('netease refresh')
+  })
+
   // A single-pick list always answers with exactly one row (spec 14 §3.1, the
   // sign-in card): space PICKS the row under the cursor, it never clears the
   // list. Un-ticking left the card with nothing chosen and Enter answering
@@ -407,9 +429,52 @@ describe('the list card\'s pick model (spec 10 §3.2-B, rows to tick)', () => {
 
   it('answers with the ticked keys in row order, space-joined; nothing ticked is the empty line', () => {
     const start = pickStart(options)
-    const both = pickToggle(pickMove(start, 2, options.length), options, true)
-    expect(pickAnswer(both, options)).toBe('netease refresh')
+    expect(pickAnswer(start, options)).toBe('netease')
     expect(pickAnswer(pickToggle(start, options, true), options)).toBe('')
+  })
+})
+
+// The submit the card was missing (spec 10 §3.2-D / 14 §3.1, user report):
+// the multi card had no button, only a grey footer, so nothing on screen
+// said what counted as submitting. The row is the CLIENT's — the engine
+// never sees it and must never be answered with its key.
+describe('the synthesized apply row', () => {
+  const options = [
+    { key: 'netease', label: 'NetEase', checked: true },
+    { key: 'spotify', label: 'Spotify' },
+    { key: 'refresh', label: 'refresh now', action: true },
+  ]
+
+  it('closes a multi list and says the card has no changes yet', () => {
+    const rows = listRows(options, true, pickStart(options))
+    expect(rows).toHaveLength(options.length + 1)
+    expect(rows.at(-1)).toEqual({ key: APPLY_KEY, label: 'apply', action: true, note: APPLY_NOTHING })
+    expect(APPLY_NOTHING).toBe('nothing changed — Enter leaves')
+  })
+
+  it('counts the changes against what stands, ticks and unticks alike', () => {
+    const start = pickStart(options)
+    const off = pickToggle(start, options, true)
+    expect(listRows(options, true, off).at(-1)?.note).toBe('1 change')
+    const swapped = pickToggle(pickMove(off, 1, options.length), options, true)
+    expect(listRows(options, true, swapped).at(-1)?.note).toBe('2 changes')
+  })
+
+  it('never joins a single-pick card, where Enter already means take this row', () => {
+    expect(listRows(options, false, pickStart(options))).toEqual(options)
+  })
+
+  it('is a cursor stop that answers with the ticks alone — its key stays off the wire', () => {
+    const rows = listRows(options, true, pickStart(options))
+    const onApply = pickMove(pickStart(options), rows.length - 1, rows.length)
+    expect(onApply.at).toBe(3)
+    expect(pickAnswer(onApply, rows)).toBe('netease')
+    expect(pickToggle(onApply, rows, true)).toEqual(onApply)
+  })
+
+  it('draws as a button, while a state row keeps its box', () => {
+    expect(listRow({ key: 'refresh', label: 'refresh now', action: true, note: 'now' })).toBe('  ( refresh now )  now')
+    expect(listRow({ key: 'netease', label: 'NetEase', checked: true, note: '312 liked' })).toBe('  [x] NetEase  312 liked')
   })
 })
 
