@@ -116,9 +116,13 @@ export class QQMusicClient {
       if (err instanceof SourceAuthError && err.reason === 'login-required') return null
       throw err
     }
-    const parsed = WhoSchema.safeParse(data)
-    if (!parsed.success || parsed.data.info.nick.trim() === '') return null
-    return { uin: credential.uin, euin: credential.euin, who: parsed.data.info.nick }
+    // Parsed strictly: only a missing credential or a login code is "no
+    // account". A body that does not fit the shape is a bug at the far end,
+    // and read as a lost login it would flip the mount to expired and stop
+    // the refresher re-reading it — demanding a sign-in nothing is wrong with.
+    const who = WhoSchema.parse(data).info.nick
+    if (who.trim() === '') throw new Error('qqmusic GetLoginUserInfo: a signed-in account with no name')
+    return { uin: credential.uin, euin: credential.euin, who }
   }
 
   // The lists the account created. The liked one is the fixed dir 201 — it is
@@ -201,17 +205,21 @@ export class QQMusicClient {
       },
       req: { module, method, param },
     })
-    const response = await this.send(cookie, body)
-    if (response.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', `HTTP 429 on ${module}.${method}`)
-    if (!response.ok) throw new Error(`qqmusic ${module}.${method}: HTTP ${response.status}`)
-    const { req } = EnvelopeSchema.parse(await response.json())
+    const answer = await this.send(cookie, body)
+    if (answer.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', `HTTP 429 on ${module}.${method}`)
+    if (answer.json === undefined) throw new Error(`qqmusic ${module}.${method}: HTTP ${answer.status}`)
+    const { req } = EnvelopeSchema.parse(answer.json)
     if (LOGIN_CODES.has(req.code)) throw new SourceAuthError('qqmusic', 'login-required', `code ${req.code} on ${module}.${method}`)
     if (req.code === RATE_LIMITED_CODE) throw new SourceAuthError('qqmusic', 'rate-limited', `code ${req.code} on ${module}.${method}`)
     if (req.code !== 0) throw new Error(`qqmusic ${module}.${method}: code ${req.code}`)
     return req.data
   }
 
-  private async send(cookie: string, body: string): Promise<Response> {
+  // The status, and the parsed body for an answer that has one. The body is
+  // read INSIDE the timeout: fetch resolves on the headers alone, so a
+  // response that stalls mid-body would hang the mount the listener is
+  // waiting on and leave a background refresh unable to finish.
+  private async send(cookie: string, body: string): Promise<{ status: number; json?: unknown }> {
     const init: RequestInit = {
       method: 'POST',
       headers: { 'User-Agent': USER_AGENT, Referer: 'https://y.qq.com/', 'Content-Type': 'application/json', ...(cookie !== '' && { Cookie: cookie }) },
@@ -224,11 +232,14 @@ export class QQMusicClient {
     }
   }
 
-  private async once(init: RequestInit): Promise<Response> {
+  private async once(init: RequestInit): Promise<{ status: number; json?: unknown }> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     try {
-      return await this.fetch(API, { ...init, signal: controller.signal })
+      const response = await this.fetch(API, { ...init, signal: controller.signal })
+      // A body that is not going to be read is not waited for either.
+      if (!response.ok) return { status: response.status }
+      return { status: response.status, json: await response.json() }
     } finally {
       clearTimeout(timer)
     }

@@ -238,6 +238,12 @@ function recording(host: Host, notes: string[]): Host {
 // whose cookie store it may not read, or one never signed in to (§3.1).
 const CHROME = 'chrome' as const
 
+// QQ Music is read, never played (spec 14 §2.9). The mount says so itself,
+// before anything is read: a listener who connects it and is told "1 liked"
+// has no other way to learn its audio is not reachable from here.
+export const QQMUSIC_TASTE_ONLY =
+  "QQ Music is read for taste only - I can't play from it, so I'll use what you keep there to pick on YouTube, Bilibili and NetEase."
+
 // Where each source is signed in, opened in Chrome when no login is found.
 const SIGN_IN_URL: Record<CookieSource, string> = {
   youtube: 'https://accounts.google.com/ServiceLogin?service=youtube',
@@ -542,6 +548,7 @@ async function mountCookieFlow(
   // The profile the listener picked on the card, pinned into the entry by the
   // mount and read by every refresh after it — never resolved a second time.
   const pick = { browser: CHROME, profile }
+  if (id === 'qqmusic') host.info(QQMUSIC_TASTE_ONLY)
   host.info(`checking ${site} in Chrome...`)
   type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry | QQMusicEntry>
   const attempt = async (): Promise<CookieMount | null> => {

@@ -166,6 +166,33 @@ describe('QQMusicClient', () => {
     await expect(c.playlists('1')).rejects.toThrow()
   })
 
+  // A garbled body is a bug at the far end, not a lost login: routed as one,
+  // SourceAuthWatch flips the mount to expired and the refresher stops
+  // re-reading it, so one bad response would demand a fresh sign-in
+  // (codex review).
+  it('an account body that does not fit the shape is a plain error, never "expired"', async () => {
+    const { client: c } = client({ ...ALL, 'music.UserInfo.userInfoServer.GetLoginUserInfo': { code: 0, data: { info: { nick: 42 } } } })
+    await expect(c.account()).rejects.not.toBeInstanceOf(SourceAuthError)
+    const { client: blank } = client({ ...ALL, 'music.UserInfo.userInfoServer.GetLoginUserInfo': { code: 0, data: { info: { nick: '  ' } } } })
+    await expect(blank.account()).rejects.not.toBeInstanceOf(SourceAuthError)
+  })
+
+  // The timeout has to cover the BODY: fetch resolves on the headers, so a
+  // response that stalls mid-body would hang the foreground mount and leave
+  // the background refresh unable to finish (codex review).
+  it('times out a response whose body never arrives, not just its headers', async () => {
+    const stalled: QQMusicFetch = async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(new Error('aborted')))
+          },
+        }),
+      )
+    const c = new QQMusicClient({ cookie: async () => COOKIE, fetch: stalled, timeoutMs: 20 })
+    await expect(c.account()).rejects.toThrow()
+  })
+
   it('retries a network error once, never an auth answer', async () => {
     let n = 0
     const flaky: QQMusicFetch = async () => {
