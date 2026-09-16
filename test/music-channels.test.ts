@@ -321,15 +321,22 @@ describe('the chaptered pool', () => {
   })
 
   it('a video whose metadata call fails costs that video, not the channel', async () => {
-    const read = channelUploads({
-      run: async (args) => {
-        if (args.includes('--flat-playlist')) return listing([{ id: 'broken', duration: 5987 }, { id: 'song', duration: 240 }])
-        throw new Error('video unavailable')
-      },
-      space: { recent: async () => [] },
-      dir,
-    })
-    expect((await read('https://www.youtube.com/@90sNeonSoul/videos', 20)).map((t) => t.title)).toEqual(['upload song'])
+    const calls: string[][] = []
+    const make = () =>
+      channelUploads({
+        run: async (args) => {
+          calls.push(args)
+          if (args.includes('--flat-playlist')) return listing([{ id: 'broken', duration: 5987 }, { id: 'song', duration: 240 }])
+          throw new Error('video unavailable')
+        },
+        space: { recent: async () => [] },
+        dir,
+      })
+    expect((await make()('https://www.youtube.com/@90sNeonSoul/videos', 20)).map((t) => t.title)).toEqual(['upload song'])
+    // And it is remembered as nothing, so it cannot spend the budget again
+    // every refresh and starve the long uploads behind it.
+    await make()('https://www.youtube.com/@90sNeonSoul/videos', 20)
+    expect(calls.filter((c) => !c.includes('--flat-playlist'))).toHaveLength(1)
   })
 })
 
@@ -363,6 +370,17 @@ describe('ChannelPool', () => {
     expect(existsSync(join(dir, 'pool.json'))).toBe(true)
     // A fresh pool over the same cache dir has the tracks without a refresh.
     expect(pool().count()).toBe(3)
+  })
+
+  // The chapter rules changed what belongs in a pool: a pool.json written
+  // before them is full of the hour-long mixes they now drop, and the
+  // "nothing answered, keep what we had" rule would preserve them for good.
+  it('does not read a pool written before the chapter rules', async () => {
+    writeFileSync(
+      join(dir, 'pool.json'),
+      JSON.stringify({ at: 1_000, tracks: [{ ref: 'https://u/mix', title: '3 HOURS of lofi', uploader: 'ch', durationS: 10_800 }] }),
+    )
+    expect(pool().count()).toBe(0)
   })
 
   it('keeps the channels that answered when one of them fails', async () => {

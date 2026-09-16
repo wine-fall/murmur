@@ -245,6 +245,14 @@ export class YtDlpMusicProvider implements MusicProvider {
     // On a segment clip the length that matters is the chapter's, never the
     // two-hour upload's: everything downstream (the coda timing, the announce,
     // the talk-ahead) reads durationS and knows nothing about segments.
+    // A source shorter than the segment claims would seek past its end and
+    // decode NOTHING — and ffmpeg exits 0 doing it, so the playability probe
+    // would wave it through and the announce would cover silence. Fail here
+    // instead, where submit_pick can tell the model to pick another. A
+    // duration of 0 is "unknown" (a live stream), not "too short".
+    if (segment !== undefined && durationS > 0 && segment.startS >= durationS) {
+      throw new Error(`${fullRef} starts past the end of what resolved (${durationS}s)`)
+    }
     const length = segment === undefined ? durationS : segment.endS - segment.startS
     return {
       source: streamUrl,

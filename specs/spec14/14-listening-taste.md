@@ -769,8 +769,11 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
   whose `chapters: [{start_time, end_time, title}]` is the song list. That is
   paid **once per upload, ever**: the expansion is cached at
   `$MURMUR_HOME/cache/channels/chapters.json`, keyed by the upload's ref and
-  bounded at 500 entries. A video that will not answer costs that video and is
-  **not** cached as "no chapters" — the next refresh asks again.
+  bounded at 500 entries. A video that will **not** answer is remembered as
+  nothing, exactly like a mix: otherwise the same handful of failing uploads
+  would spend the whole budget every refresh and the good ones behind them
+  would never be read. The cost of that choice is one transiently-failing
+  upload dropped from a pool that holds dozens.
 - **The call budget** — `CHAPTER_LOOKUPS_PER_CHANNEL` = **4** per channel per
   refresh. Only a long upload is ever asked, the cache answers the rest, and a
   daily refresh therefore adds at most a few seconds of network per channel.
@@ -783,6 +786,16 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
 - **The caps** — `MAX_CHAPTERS_PER_UPLOAD` = **12** (an evening's worth from a
   single file) and `TRACKS_PER_CHANNEL` = **40**, so 20 uploads x 29 chapters
   cannot swamp the catalogue and crowd out every other channel.
+- **The old pool is discarded once.** `pool.json` carries a version; the
+  chapter rules changed what belongs in a pool, so a file written before them
+  reads as no cache at all. Without that, a listener whose channels are all
+  long-mix uploads would hit the "nothing answered, keep what we had" rule and
+  keep serving the very mixes these rules exist to drop.
+- **A segment that cannot play is refused at resolve.** If the resolved source
+  is shorter than the segment claims, `resolve` throws rather than hand back a
+  clip that would seek past the end and decode nothing — ffmpeg **exits 0**
+  doing that, so the playability probe would wave it through and the announce
+  would cover silence. `submit_pick` turns the throw into "pick another".
 - **The candidate.** A chapter's `ChannelTrack` carries the **chapter title**
   as its title, the **channel** as its uploader, the **chapter's length** as
   `durationS`, and as its ref the upload's own url plus a **W3C media

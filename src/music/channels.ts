@@ -97,7 +97,11 @@ const CHAPTER_CACHE_ENTRIES = 500
 
 const ManifestCacheSchema = z.object({ at: z.number(), text: z.string() })
 const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1), uploader: z.string(), durationS: z.number() })
-const PoolCacheSchema = z.object({ at: z.number(), tracks: z.array(TrackSchema) })
+// The chapter rules (spec 14 §2.9) changed what belongs in a pool, so a file
+// written before them is stale by construction: a version that does not match
+// reads as no cache at all, and the pool rebuilds on the next poke.
+const POOL_CACHE_VERSION = 2
+const PoolCacheSchema = z.object({ v: z.literal(POOL_CACHE_VERSION), at: z.number(), tracks: z.array(TrackSchema) })
 const ChapterCacheSchema = z.record(z.string(), z.array(TrackSchema))
 
 // One url per line; `#` comments, blanks and anything that is not an http(s)
@@ -312,12 +316,12 @@ async function withChapters(deps: UploadsDeps, uploads: ChannelTrack[]): Promise
     if (chapters === undefined) {
       if (lookups >= CHAPTER_LOOKUPS_PER_CHANNEL) continue
       lookups++
-      const read = await readChapters(deps, upload)
-      // A video that would not answer costs that video and is not cached as
-      // "no chapters": the next refresh asks again.
-      if (read === null) continue
-      chapters = read
-      cache[upload.ref] = read
+      // A video that would not answer is remembered as nothing, exactly like
+      // a mix: otherwise the same handful of failing uploads would spend the
+      // whole budget every refresh and the good ones behind them would never
+      // be read at all.
+      chapters = (await readChapters(deps, upload)) ?? []
+      cache[upload.ref] = chapters
       wrote = true
     }
     tracks.push(...chapters.slice(0, TRACKS_PER_CHANNEL - tracks.length))
@@ -426,7 +430,7 @@ export class ChannelPool {
     if (found.length === 0) return this.tracks.length
     this.tracks = found
     this.at = this.now()
-    writeJson(join(this.dir, 'pool.json'), { at: this.at, tracks: this.tracks })
+    writeJson(join(this.dir, 'pool.json'), { v: POOL_CACHE_VERSION, at: this.at, tracks: this.tracks })
     this.deps.debug?.(`channels.refresh n=${found.length} channels=${urls.length}`)
     return found.length
   }

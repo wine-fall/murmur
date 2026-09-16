@@ -243,4 +243,16 @@ describe('segment refs', () => {
       segment: { startS: 612, endS: 868 },
     })
   })
+
+  // A resolved stream that is shorter than the segment claims would decode to
+  // nothing: ffmpeg seeks past the end, exits 0, and the probe would call it
+  // playable. The pick has to fail here, while the model can still pick again.
+  it('refuses a segment that starts past the end of what resolved', async () => {
+    const provider = new YtDlpMusicProvider({ run: async () => '300\nhttps://stream/audio\n' })
+    await expect(provider.resolve('https://www.youtube.com/watch?v=a#t=612,868')).rejects.toThrow(/past the end/)
+    // A length of 0 is "unknown" (a live stream, an extractor that omits it),
+    // not "shorter than the segment": that resolve still goes through.
+    const unknown = new YtDlpMusicProvider({ run: async () => 'NA\nhttps://stream/audio\n' })
+    expect((await unknown.resolve('https://www.youtube.com/watch?v=a#t=612,868')).segment).toEqual({ startS: 612, endS: 868 })
+  })
 })
