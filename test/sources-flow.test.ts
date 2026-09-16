@@ -269,6 +269,10 @@ describe('runSources (spec 14 §3.1)', () => {
       ['no-browser', /I could not find Chrome/],
       ['no-permission', /Full Disk Access|permission/i],
       ['no-ytdlp', /yt-dlp/],
+      // A yt-dlp that never came back: the kill leaves no jar and no words of
+      // its own, so it used to be quoted at the listener as an unreadable
+      // store. The timeout's own sentence carries instead (user report).
+      ['timed-out', /yt-dlp said so Either way, \/sources again once it is moving\./],
     ] as const
     for (const [reason, matcher] of cases) {
       const { host, deps, store } = build(['youtube', '', ''], {
@@ -289,6 +293,24 @@ describe('runSources (spec 14 §3.1)', () => {
       expect(row.startsWith('-- could not connect YouTube — ')).toBe(true)
       expect(matcher.test(row)).toBe(true)
     }
+  })
+
+  // "checking YouTube in Chrome..." against a yt-dlp that never answers: the
+  // wait did not look at the latch, so Esc did nothing and the only way out
+  // was killing murmur (user report). The stop now lands while the mount is
+  // still in flight, and the account it was about to verify is not written.
+  it('an Esc while the cookie mount is in flight stops it and writes nothing', async () => {
+    const { host, deps, store } = build(['youtube', '', ''], {
+      browser: {
+        // A yt-dlp hung on a slow network or a keychain prompt behind another
+        // window: the call simply never settles.
+        youtube: () => (host.pressEsc(), new Promise(() => {})),
+      },
+    })
+    await runSources(deps)
+    expect(store.read()).toEqual({})
+    expect(host.infos.some((l) => /signed in as/.test(l))).toBe(false)
+    expect(host.asks.at(-1)!.text.split('\n')[1]).toBe('-- could not connect YouTube — stopped — nothing was written')
   })
 
   // A profile named by MURMUR_CHROME_PROFILE that Chrome has never opened is

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseResolveOutput, parseSearchOutput, parseSegmentRef, YtDlpMusicProvider } from '../src/music/music.ts'
+import { parseResolveOutput, parseSearchOutput, parseSegmentRef, ytdlpFailureText, ytdlpRunner, YtDlpMusicProvider, YtDlpTimeoutError } from '../src/music/music.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 
 // One line of real-shaped `yt-dlp --dump-json` output.
@@ -254,5 +254,32 @@ describe('segment refs', () => {
     // not "shorter than the segment": that resolve still goes through.
     const unknown = new YtDlpMusicProvider({ run: async () => 'NA\nhttps://stream/audio\n' })
     expect((await unknown.resolve('https://www.youtube.com/watch?v=a#t=612,868')).segment).toEqual({ startS: 612, endS: 868 })
+  })
+})
+
+// A yt-dlp that never returns used to hang the caller forever — the cookie
+// export and the account read behind `/sources` left one progress line on
+// screen and no way out (user report). Every spawn now has a ceiling.
+describe('ytdlpRunner (spec 14 §2.8)', () => {
+  it('kills a subprocess that outlives the ceiling and says so in human words', async () => {
+    const run = ytdlpRunner('sleep', 50)
+    const err = await run(['30']).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(YtDlpTimeoutError)
+    expect((err as Error).message).toMatch(/did not answer/)
+    // What a listener can act on: the two things that actually stall it.
+    expect((err as Error).message).toMatch(/network|keychain/i)
+  })
+
+  it('leaves an ordinary failure as it came, so its stderr still classifies', async () => {
+    const run = ytdlpRunner('sh')
+    const err = await run(['-c', 'echo boom >&2; exit 1']).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).not.toBeInstanceOf(YtDlpTimeoutError)
+    expect(ytdlpFailureText(err)).toContain('boom')
   })
 })
