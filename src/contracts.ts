@@ -24,6 +24,12 @@ export type AudioClip = {
   // Bilibili CDN 403s a request with no browser User-Agent. Absent for a local
   // file and for a stream that never needed any.
   readonly headers?: Readonly<Record<string, string>>
+  // One slice of a longer source (spec 14 §2.9, "a chapter is a song"): a
+  // YouTube chapter played out of a two-hour playlist upload. Absent for a
+  // whole track and for every talk clip. When it is present `durationS` is
+  // the SEGMENT's length, so the Director's coda timing, the announce and the
+  // talk-ahead all see the length that will really play.
+  readonly segment?: { readonly startS: number; readonly endS: number }
 }
 
 export type Turn = {

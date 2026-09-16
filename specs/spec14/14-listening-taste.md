@@ -747,6 +747,52 @@ ref through the unchanged yt-dlp path (§2.5). Like the other catalogues it is
 offered **only while it holds something**: an empty pool is not mounted, and
 asking for it returns the same `{ ok: false, reason: 'not-mounted' }`.
 
+**A chapter is a song.** *(Added 2026-09-16.)* A city-pop or lofi channel
+uploads one **1.5-2 h** file and marks each song as a **YouTube chapter**
+(`@90sNeonSoul` is the case that motivated this: `kx22t0PBrKM` is 7506 s with
+16 chapters, `ZD8G8Bo40-w` 5987 s with 29). Played whole that upload is not a
+song at all; played per chapter it is twenty. So the pool reads chapters and a
+**chapter becomes one candidate**:
+
+- **The mix threshold** — `MIX_DURATION_S` = **12 min**. Under it, an upload is
+  a song and reaches the pool exactly as it did before. Over it, the upload has
+  to justify itself with chapters, and **a long upload with no chapters is
+  dropped** — `@MidnightHavenJazz`'s 68-minute mixes carry zero chapters and
+  zero description timestamps, and nothing about them is a track. Twelve
+  minutes clears the longest thing anyone calls a song and is far under the
+  shortest thing anyone calls a mix. A duration of **0** is *unknown*, not
+  long: a live stream or an extractor that omits the field keeps today's
+  behaviour.
+- **Where the chapters come from.** The flat listing the pool is built from
+  carries **no chapters** — measured. A chaptered upload therefore costs **one
+  full-metadata call** (`yt-dlp --dump-json <video>`, no `--flat-playlist`),
+  whose `chapters: [{start_time, end_time, title}]` is the song list. That is
+  paid **once per upload, ever**: the expansion is cached at
+  `$MURMUR_HOME/cache/channels/chapters.json`, keyed by the upload's ref and
+  bounded at 500 entries. A video that will not answer costs that video and is
+  **not** cached as "no chapters" — the next refresh asks again.
+- **The call budget** — `CHAPTER_LOOKUPS_PER_CHANNEL` = **4** per channel per
+  refresh. Only a long upload is ever asked, the cache answers the rest, and a
+  daily refresh therefore adds at most a few seconds of network per channel.
+  A channel's remaining long uploads are read on a later refresh.
+- **Which chapters count.** Dropped: yt-dlp's placeholder run-up chapter
+  (`<Untitled Chapter N>`, the intro before the creator's first marker);
+  anything shorter than `MIN_CHAPTER_S` = **45 s** (an intro, an outro, a
+  sting); and anything **longer than the mix threshold** — a real playlist's
+  closing "Replay The Vibes" chapter is a 3754 s re-run of its own first half.
+- **The caps** — `MAX_CHAPTERS_PER_UPLOAD` = **12** (an evening's worth from a
+  single file) and `TRACKS_PER_CHANNEL` = **40**, so 20 uploads x 29 chapters
+  cannot swamp the catalogue and crowd out every other channel.
+- **The candidate.** A chapter's `ChannelTrack` carries the **chapter title**
+  as its title, the **channel** as its uploader, the **chapter's length** as
+  `durationS`, and as its ref the upload's own url plus a **W3C media
+  fragment**, `#t=<start>,<end>` in seconds
+  (`https://www.youtube.com/watch?v=kx22t0PBrKM#t=612,868`). `sourceOfRef` keys
+  on the hostname, so nothing about the mount, the cookie rule or the stream
+  headers changes; yt-dlp resolves the fragment-carrying url exactly as it
+  resolves the bare one (verified), and `resolve` strips it anyway. What the
+  fragment becomes on the clip is spec 03-01 §2.2's business.
+
 **What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`), one
 sentence rendered only while the pool is non-empty: the catalogue searches
 recent uploads from a curated list of music channels — good for something new,

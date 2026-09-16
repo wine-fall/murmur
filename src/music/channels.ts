@@ -56,9 +56,49 @@ export const UPLOADS_PER_CHANNEL = 20
 // refresh is a background job with a whole day to finish, so it waits.
 const BETWEEN_CHANNELS_MS = 1_500
 
+// --- chapters as songs (spec 14 §2.9) ------------------------------------- //
+//
+// A city-pop channel uploads one 1.5-2 h file a week and marks each song as a
+// YouTube CHAPTER. Played whole it is not a song at all; played per chapter it
+// is twenty. So an upload past the mix threshold below has to justify itself
+// with chapters, and each chapter becomes its own candidate.
+
+// Past this, an upload is a set, not a song — a DJ mix, a "3 hours of lofi",
+// a playlist. Twelve minutes clears the longest thing anyone calls a track
+// (a prog side, a live jam) and is far under the shortest thing anyone calls
+// a mix. It bounds CHAPTERS too: the closing "Replay The Vibes" chapter of a
+// real playlist upload is an hour-long re-run of its own first half.
+export const MIX_DURATION_S = 12 * 60
+
+// yt-dlp writes the run-up before a creator's first marker as a placeholder
+// chapter with this exact title.
+const PLACEHOLDER_CHAPTER = /^<untitled chapter \d+>$/i
+
+// Under this a chapter is an intro, an outro or a sting, not a song.
+export const MIN_CHAPTER_S = 45
+
+// One upload can carry 29 chapters. Twelve is an evening's worth from a single
+// file and leaves room in the pool for the other channels.
+export const MAX_CHAPTERS_PER_UPLOAD = 12
+
+// The ceiling on what one channel puts in the pool, so 20 uploads x 29
+// chapters cannot swamp the `channels` catalogue and crowd out everyone else.
+export const TRACKS_PER_CHANNEL = 40
+
+// Full metadata costs one yt-dlp extraction per upload (~2 s), and only a long
+// upload is ever asked. Four per channel per refresh bounds a daily refresh at
+// a few seconds of extra network per channel; the rest of that channel's long
+// uploads are read on a later refresh, out of the cache below or fresh.
+export const CHAPTER_LOOKUPS_PER_CHANNEL = 4
+
+// Paid once per upload: an upload's chapter split does not change. Bounded so
+// a year of channel history cannot grow the file without limit.
+const CHAPTER_CACHE_ENTRIES = 500
+
 const ManifestCacheSchema = z.object({ at: z.number(), text: z.string() })
 const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1), uploader: z.string(), durationS: z.number() })
 const PoolCacheSchema = z.object({ at: z.number(), tracks: z.array(TrackSchema) })
+const ChapterCacheSchema = z.record(z.string(), z.array(TrackSchema))
 
 // One url per line; `#` comments, blanks and anything that is not an http(s)
 // url are skipped. A listener edits this by adding a line, so a line they got
@@ -185,9 +225,55 @@ export function parseFlatUploads(stdout: string, limit: number): ChannelTrack[] 
   return tracks
 }
 
+export type Chapter = { start_time: number; end_time: number; title: string }
+
+const FullMetaSchema = z.object({
+  chapters: z.array(z.object({ start_time: z.number(), end_time: z.number(), title: z.string() })).nullish(),
+})
+
+// `yt-dlp --dump-json <video>` (full metadata, NOT --flat-playlist — the flat
+// listing the pool is built from carries no chapters at all). An untrusted
+// boundary like every other yt-dlp read: [] = this upload has no chapters,
+// null = yt-dlp said something that is not an upload, which is not the same
+// answer and must not be cached as one.
+export function parseChapters(stdout: string): Chapter[] | null {
+  for (const line of stdout.split('\n')) {
+    const text = line.trim()
+    if (!text.startsWith('{')) continue
+    let json: unknown
+    try {
+      json = JSON.parse(text)
+    } catch {
+      continue
+    }
+    const meta = FullMetaSchema.safeParse(json)
+    if (meta.success) return meta.data.chapters ?? []
+  }
+  return null
+}
+
+// One upload's chapters as pool candidates: the chapter title is the song, the
+// channel is the uploader, the chapter's length is the length, and the ref is
+// the upload's own url carrying a W3C media fragment (`#t=<start>,<end>`, in
+// seconds) that resolve strips back off (spec 03-01 §2.2).
+export function chapterTracks(upload: ChannelTrack, chapters: readonly Chapter[]): ChannelTrack[] {
+  const tracks: ChannelTrack[] = []
+  for (const chapter of chapters) {
+    if (tracks.length >= MAX_CHAPTERS_PER_UPLOAD) break
+    const title = chapter.title.trim()
+    const startS = Math.trunc(chapter.start_time)
+    const endS = Math.trunc(chapter.end_time)
+    const lengthS = endS - startS
+    if (title === '' || PLACEHOLDER_CHAPTER.test(title)) continue
+    if (lengthS < MIN_CHAPTER_S || lengthS > MIX_DURATION_S) continue
+    tracks.push({ ref: `${upload.ref}#t=${startS},${endS}`, title, uploader: upload.uploader, durationS: lengthS })
+  }
+  return tracks
+}
+
 const BILIBILI_SPACE = /^https?:\/\/space\.bilibili\.com\/(\d+)\b/
 
-export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliSpace, 'recent'> }
+export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliSpace, 'recent'>; dir?: string }
 
 // One channel's recent uploads, by the shape of its url. YouTube goes through
 // yt-dlp, whose flat listing carries the titles; Bilibili goes through the
@@ -199,7 +285,53 @@ export function channelUploads(deps: UploadsDeps): (url: string, limit: number) 
     if (space !== null) return await deps.space.recent(space[1] ?? '', limit)
     if (!/^https?:\/\/(www\.)?youtube\.com\//.test(url)) return []
     const stdout = await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', url])
-    return parseFlatUploads(stdout, limit)
+    return await withChapters(deps, parseFlatUploads(stdout, limit))
+  }
+}
+
+// The chapter pass over one channel's flat listing. A short upload is a song
+// and passes through untouched; a long one is a mix unless its chapters say
+// otherwise, and then it is not one candidate but many. The cost is bounded
+// twice over — by the cache (an upload is read once, ever) and by the lookup
+// budget (a channel asks for at most a handful of extractions per refresh).
+// A length of 0 is "unknown", not "long": a live stream or an extractor that
+// omits the field keeps today's behaviour.
+async function withChapters(deps: UploadsDeps, uploads: ChannelTrack[]): Promise<ChannelTrack[]> {
+  const path = join(deps.dir ?? channelsCacheDir(), 'chapters.json')
+  const cache = readJson(path, ChapterCacheSchema) ?? {}
+  const tracks: ChannelTrack[] = []
+  let lookups = 0
+  let wrote = false
+  for (const upload of uploads) {
+    if (tracks.length >= TRACKS_PER_CHANNEL) break
+    if (upload.durationS === 0 || upload.durationS <= MIX_DURATION_S) {
+      tracks.push(upload)
+      continue
+    }
+    let chapters = cache[upload.ref]
+    if (chapters === undefined) {
+      if (lookups >= CHAPTER_LOOKUPS_PER_CHANNEL) continue
+      lookups++
+      const read = await readChapters(deps, upload)
+      // A video that would not answer costs that video and is not cached as
+      // "no chapters": the next refresh asks again.
+      if (read === null) continue
+      chapters = read
+      cache[upload.ref] = read
+      wrote = true
+    }
+    tracks.push(...chapters.slice(0, TRACKS_PER_CHANNEL - tracks.length))
+  }
+  if (wrote) writeJson(path, Object.fromEntries(Object.entries(cache).slice(-CHAPTER_CACHE_ENTRIES)))
+  return tracks
+}
+
+async function readChapters(deps: UploadsDeps, upload: ChannelTrack): Promise<ChannelTrack[] | null> {
+  try {
+    const chapters = parseChapters(await deps.run(['--dump-json', '--no-warnings', upload.ref]))
+    return chapters === null ? null : chapterTracks(upload, chapters)
+  } catch {
+    return null
   }
 }
 

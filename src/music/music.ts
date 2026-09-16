@@ -124,6 +124,22 @@ function tryJson(line: string): unknown {
   }
 }
 
+// The chapter ref (spec 14 §2.9): a curated-channel candidate that is one
+// chapter of a long upload carries the upload's own url plus a W3C media
+// fragment, `#t=<start>,<end>` in seconds. Only the complete, forward pair is
+// a segment — half a fragment or someone else's `#` (a NetEase ref is
+// `.../#/song?id=5`) leaves the ref exactly as it came.
+const MEDIA_FRAGMENT = /^(.*)#t=(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/
+
+export function parseSegmentRef(ref: string): { url: string; segment?: { startS: number; endS: number } } {
+  const match = MEDIA_FRAGMENT.exec(ref)
+  if (match === null) return { url: ref }
+  const startS = Number(match[2])
+  const endS = Number(match[3])
+  if (!(endS > startS)) return { url: ref }
+  return { url: match[1] ?? ref, segment: { startS, endS } }
+}
+
 // Injectable so the unit layer covers argument construction without the binary
 // or the network; the real runner is the yt-dlp subprocess.
 export type YtDlpRunner = (args: string[]) => Promise<string>
@@ -189,7 +205,10 @@ export class YtDlpMusicProvider implements MusicProvider {
     return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
   }
 
-  async resolve(ref: string): Promise<AudioClip> {
+  async resolve(fullRef: string): Promise<AudioClip> {
+    // A chapter ref resolves through the unchanged path: yt-dlp is handed the
+    // upload, and the fragment becomes the clip's segment.
+    const { url: ref, segment } = parseSegmentRef(fullRef)
     // `--print` in place of `-g`: the same single extraction yields the stream
     // url AND the track's length, which is what a progress bar needs as its
     // denominator (spec 10 §3.3). Measured at no cost over the bare `-g`.
@@ -223,11 +242,16 @@ export class YtDlpMusicProvider implements MusicProvider {
         })
       : this.withCookie(source, dump))
     const { source: streamUrl, durationS, headers } = parseResolveOutput(printed)
+    // On a segment clip the length that matters is the chapter's, never the
+    // two-hour upload's: everything downstream (the coda timing, the announce,
+    // the talk-ahead) reads durationS and knows nothing about segments.
+    const length = segment === undefined ? durationS : segment.endS - segment.startS
     return {
       source: streamUrl,
       kind: 'music',
-      ...(durationS > 0 && { durationS }),
+      ...(length > 0 && { durationS: length }),
       ...(headers !== undefined && { headers }),
+      ...(segment !== undefined && { segment }),
     }
   }
 

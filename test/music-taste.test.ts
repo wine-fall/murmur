@@ -3,7 +3,7 @@
 // the task, the preview trap, and the prompt halves that carry the digest.
 import { describe, expect, it } from 'vitest'
 
-import type { ContextPack, TrackCandidate } from '../src/contracts.ts'
+import type { ContextPack, TrackCandidate, TrackPick } from '../src/contracts.ts'
 import { musicTools } from '../src/music/music-tools.ts'
 import { YtDlpMusicProvider } from '../src/music/music.ts'
 import { SourceAuthError, TrackRightsError } from '../src/music/sources/auth.ts'
@@ -365,6 +365,35 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })
     expect(probes).toEqual([])
     expect(picks).toHaveLength(1)
+  })
+
+  // A chapter clip (spec 14 §2.9) plays one slice of a long upload, so both
+  // probes have to look at THAT slice: the head of a two-hour playlist proves
+  // nothing about the song half an hour in, and the length the trap compares
+  // against is the chapter's, not the upload's.
+  it('probes a segment clip at its offset and traps against the chapter length', async () => {
+    const ref = 'https://music.163.com/song?id=5#t=612,868'
+    const probes: (number | undefined)[] = []
+    const provider = new FakeMusicProvider()
+    const auth: SourceAuthError[] = []
+    const picks: TrackPick[] = []
+    const tools = musicTools(
+      provider,
+      (p) => picks.push(p),
+      async (_source, _h, startS) => (probes.push(startS), true),
+      {
+        catalogues: () => ['netease'],
+        probeDurationS: async (_source, _h, startS) => (probes.push(startS), 30),
+        onAuthFailure: (e) => auth.push(e),
+      },
+    )
+    // No search ran, so there is no stated length: only the segment can say
+    // how long this pick is meant to be.
+    const trapped = await callTool(tools, 'submit_pick', { ref, why: 'w' })
+    expect(trapped).toMatchObject({ ok: false, reason: 'auth', detail: 'login-required' })
+    expect(auth).toHaveLength(1)
+    expect(picks).toHaveLength(0)
+    expect(probes).toEqual([612])
   })
 
   it('without taste options the tools are exactly their pre-spec-14 selves', async () => {

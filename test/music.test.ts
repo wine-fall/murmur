@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { parseResolveOutput, parseSearchOutput, YtDlpMusicProvider } from '../src/music/music.ts'
+import { parseResolveOutput, parseSearchOutput, parseSegmentRef, YtDlpMusicProvider } from '../src/music/music.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 
 // One line of real-shaped `yt-dlp --dump-json` output.
@@ -200,4 +200,47 @@ describe.skipIf(!process.env.MURMUR_INTEGRATION)('YtDlpMusicProvider (integratio
     const clip = await provider.resolve(candidates[0]!.ref)
     expect(clip.source).toMatch(/^https?:\/\//)
   }, 120_000)
+})
+
+// --- the chapter fragment (spec 14 §2.9 / spec 03-01 §2.2) ----------------- //
+//
+// A chapter candidate's ref is the upload's own url carrying a W3C media
+// fragment: `#t=<start>,<end>` in seconds. Nothing else in the pipeline has to
+// learn about chapters — `sourceOfRef` keys on the hostname, and resolve is
+// where the fragment turns into a segment on the clip.
+describe('segment refs', () => {
+  it('reads a media fragment off a ref and leaves a bare one alone', () => {
+    expect(parseSegmentRef('https://www.youtube.com/watch?v=kx22t0PBrKM#t=612,868')).toEqual({
+      url: 'https://www.youtube.com/watch?v=kx22t0PBrKM',
+      segment: { startS: 612, endS: 868 },
+    })
+    expect(parseSegmentRef('https://www.youtube.com/watch?v=kx22t0PBrKM')).toEqual({
+      url: 'https://www.youtube.com/watch?v=kx22t0PBrKM',
+    })
+    // Half a fragment, a backwards one, or someone else's `#` is not a segment.
+    for (const ref of ['https://u/v#t=612', 'https://u/v#t=868,612', 'https://u/v#/song?id=5', 'https://u/v#t=a,b']) {
+      expect(parseSegmentRef(ref).segment).toBeUndefined()
+    }
+  })
+
+  it('resolves the bare url and hands back the segment, with the segment length as durationS', async () => {
+    const calls: string[][] = []
+    const provider = new YtDlpMusicProvider({
+      run: async (args) => {
+        calls.push(args)
+        return '7506\nhttps://stream/audio\n'
+      },
+    })
+    const clip = await provider.resolve('https://www.youtube.com/watch?v=kx22t0PBrKM#t=612,868')
+    // yt-dlp is handed the upload, not the fragment.
+    expect(calls[0]?.at(-1)).toBe('https://www.youtube.com/watch?v=kx22t0PBrKM')
+    expect(clip).toEqual({
+      source: 'https://stream/audio',
+      kind: 'music',
+      // The SEGMENT's length, not the two-hour upload's: the coda timing, the
+      // announce and the talk-ahead all read this.
+      durationS: 256,
+      segment: { startS: 612, endS: 868 },
+    })
+  })
 })

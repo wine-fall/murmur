@@ -50,13 +50,15 @@ const MUTE_RAMP_S = 0.08
 const FFT_SIZE = 1024
 const VIZ_SMOOTHING = 0.5
 
-// `startS` asks the decoder to begin that many seconds in (the bed resume);
-// implementations without a seek are free to ignore it.
+// `startS` asks the decoder to begin that many seconds in (the bed resume, and
+// a chapter clip's offset); `lengthS` asks it to stop after that much audio
+// (spec 14 §2.9). Implementations without a seek are free to ignore both.
 export type Decode = (
   source: string,
   signal: AbortSignal,
   startS?: number,
   headers?: Readonly<Record<string, string>>,
+  lengthS?: number,
 ) => AsyncIterable<Float32Array>
 
 function sleepUnref(ms: number): Promise<void> {
@@ -407,9 +409,15 @@ export class AudioEngine implements MixingPlayer {
     const gain = this.ctx.createGain()
     gain.connect(this.bus)
     const abort = new AbortController()
-    const stream = scheduleStream(this.ctx, gain, this.decode(clip.source, abort.signal, undefined, clip.headers), {
-      leadS: this.leadS,
-    })
+    // A chapter clip plays one slice of its upload; a whole track passes the
+    // same two undefineds it always did.
+    const segment = clip.segment
+    const stream = scheduleStream(
+      this.ctx,
+      gain,
+      this.decode(clip.source, abort.signal, segment?.startS, clip.headers, segment && segment.endS - segment.startS),
+      { leadS: this.leadS },
+    )
     const handle = new MixedHandle({
       ctx: this.ctx,
       gain,

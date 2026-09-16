@@ -24,7 +24,13 @@ import { SOURCE_NAMES } from './sources/taste.ts'
 // Pull-time playability check: given a resolved stream source, does it actually
 // decode? Injected — the real one belongs to the audio engine (Phase 3), so this
 // module stays free of it.
-export type StreamProbe = (source: string, headers?: Readonly<Record<string, string>>) => Promise<boolean>
+// `startS` is a segment clip's offset (spec 14 §2.9): the probe has to open
+// the slice that will play, not the head of a two-hour upload.
+export type StreamProbe = (
+  source: string,
+  headers?: Readonly<Record<string, string>>,
+  startS?: number,
+) => Promise<boolean>
 
 // The taste wiring (spec 14): which catalogues beyond youtube are mounted for
 // this task, where an auth failure is reported, and the decoded-length probe
@@ -32,7 +38,11 @@ export type StreamProbe = (source: string, headers?: Readonly<Record<string, str
 export type TasteToolOptions = {
   catalogues: () => readonly Catalogue[]
   onAuthFailure?: (err: SourceAuthError) => void
-  probeDurationS?: (source: string, headers?: Readonly<Record<string, string>>) => Promise<number | null>
+  probeDurationS?: (
+    source: string,
+    headers?: Readonly<Record<string, string>>,
+    startS?: number,
+  ) => Promise<number | null>
 }
 
 function reply(payload: Record<string, unknown>) {
@@ -153,15 +163,18 @@ export function musicTools(
       // 30 s clip with no error, so the decoded length is checked against the
       // length the candidate claimed.
       if (taste?.probeDurationS !== undefined && sourceOfRef(ref) === 'netease') {
-        const probed = await taste.probeDurationS(clip.source, clip.headers)
-        if (previewTrap(stated.get(ref) ?? 0, probed)) {
+        const probed = await taste.probeDurationS(clip.source, clip.headers, clip.segment?.startS)
+        // A segment clip is meant to be its chapter's length; a whole track is
+        // meant to be the length its candidate claimed.
+        const expected = clip.segment === undefined ? (stated.get(ref) ?? 0) : clip.segment.endS - clip.segment.startS
+        if (previewTrap(expected, probed)) {
           return authResult(new SourceAuthError('netease', 'login-required', `preview clip of ${String(probed)}s`))
         }
       }
       // A resolved stream URL can still 403 in the decoder and never produce a
       // frame. Reject it now, during talk, so the announce never claims a track
       // that turns out silent.
-      if (probe !== undefined && !(await probe(clip.source, clip.headers))) {
+      if (probe !== undefined && !(await probe(clip.source, clip.headers, clip.segment?.startS))) {
         return reply({ ok: false, error: `${ref} resolved but the stream did not play; pick another` })
       }
 

@@ -17,6 +17,10 @@
 #   https://www.youtube.com/@<handle>/videos
 #   https://space.bilibili.com/<mid>/video
 #
+# An upload longer than 12 minutes has to justify itself with chapters: a
+# chapter becomes one candidate, and murmur plays just that chapter. A long
+# upload with no chapters is a mix, not a song, and is left out of the pool.
+#
 # murmur re-reads this list from GitHub at runtime, so a channel added here
 # reaches a listener without waiting for a release; a listener who edits their
 # own copy has it read from disk. A failed fetch keeps the copy that shipped.
@@ -29,6 +33,10 @@ https://www.youtube.com/@MahoganySessions/videos
 
 # -- YouTube: calm instrumental, for an hour that wants cover rather than company
 https://www.youtube.com/@LofiGirl/videos
+
+# -- YouTube: city pop. These are 1.5-2 h playlist uploads whose CHAPTERS are
+#    the songs; murmur reads the chapters and plays one of them as a track.
+https://www.youtube.com/@90sNeonSoul/videos
 
 # -- Bilibili: Chinese-language labels and their MV releases
 https://space.bilibili.com/607217518/video

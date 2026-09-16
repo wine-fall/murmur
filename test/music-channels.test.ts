@@ -27,7 +27,12 @@ import {
   channelsCacheDir,
   loadChannelManifest,
   parseChannelManifest,
+  CHAPTER_LOOKUPS_PER_CHANNEL,
+  chapterTracks,
+  MAX_CHAPTERS_PER_UPLOAD,
+  parseChapters,
   parseFlatUploads,
+  TRACKS_PER_CHANNEL,
 } from '../src/music/channels.ts'
 
 let dir: string
@@ -189,6 +194,142 @@ describe('channelUploads', () => {
   it('ignores a url that is neither', async () => {
     const read = channelUploads({ run: async () => 'never', space: { recent: async () => [] } })
     expect(await read('https://example.com/whatever', 4)).toEqual([])
+  })
+})
+
+// --- chapters as songs (spec 14 §2.9) ------------------------------------- //
+//
+// Captured from the real `yt-dlp --dump-json https://www.youtube.com/watch?v=kx22t0PBrKM`
+// on 2026-09-16 — a 7506 s city-pop playlist whose 16 chapters ARE the songs.
+// Trimmed to the rows that decide something: the placeholder intro yt-dlp
+// writes as chapter 1, ordinary song chapters, and the closing "Replay The
+// Vibes" chapter that is itself an hour-long re-run of the whole first half.
+// The real titles are bilingual; only their English halves are kept here,
+// because a committed source file may not carry CJK (the language gate).
+const REAL_CHAPTERS = [
+  { start_time: 0, end_time: 1, title: '<Untitled Chapter 1>' },
+  { start_time: 1, end_time: 265, title: 'Silver Screen Glow' },
+  { start_time: 265, end_time: 517, title: 'Ephemeral Dream' },
+  { start_time: 517, end_time: 807, title: 'Observatory Secret' },
+  { start_time: 3752, end_time: 7506, title: 'Replay The Vibes' },
+]
+
+const PLAYLIST = {
+  ref: 'https://www.youtube.com/watch?v=kx22t0PBrKM',
+  title: '80s CITY POP PLAYLIST',
+  uploader: '90s Neon Soul',
+  durationS: 7506,
+}
+
+const meta = (chapters: unknown) => JSON.stringify({ id: 'x', title: PLAYLIST.title, duration: PLAYLIST.durationS, chapters })
+
+describe('parseChapters', () => {
+  it('reads the chapter list off a full-metadata dump', () => {
+    expect(parseChapters(meta(REAL_CHAPTERS))).toEqual(REAL_CHAPTERS)
+  })
+
+  it('reads an upload with no chapters as none, and junk as unknown', () => {
+    expect(parseChapters(meta(null))).toEqual([])
+    expect(parseChapters(JSON.stringify({ id: 'x' }))).toEqual([])
+    expect(parseChapters('yt-dlp said something else entirely')).toBe(null)
+  })
+})
+
+describe('chapterTracks', () => {
+  it('turns the songs into candidates and drops what is not one', () => {
+    const tracks = chapterTracks(PLAYLIST, REAL_CHAPTERS)
+    expect(tracks).toEqual([
+      // The fragment is the upload's own url plus `#t=<start>,<end>`; resolve
+      // strips it back off and plays exactly that slice.
+      { ref: `${PLAYLIST.ref}#t=1,265`, title: 'Silver Screen Glow', uploader: '90s Neon Soul', durationS: 264 },
+      { ref: `${PLAYLIST.ref}#t=265,517`, title: 'Ephemeral Dream', uploader: '90s Neon Soul', durationS: 252 },
+      { ref: `${PLAYLIST.ref}#t=517,807`, title: 'Observatory Secret', uploader: '90s Neon Soul', durationS: 290 },
+    ])
+    // Dropped: the placeholder intro (1 s and titled `<Untitled Chapter 1>`),
+    // and "Replay The Vibes" — a 3754 s chapter is a mix by the same measure
+    // that drops a mix upload.
+  })
+
+  it('drops a chapter too short to be a song', () => {
+    const short = [{ start_time: 0, end_time: 30, title: 'Intro' }, { start_time: 30, end_time: 300, title: 'Real Song' }]
+    expect(chapterTracks(PLAYLIST, short).map((t) => t.title)).toEqual(['Real Song'])
+  })
+
+  it('takes at most MAX_CHAPTERS_PER_UPLOAD from one upload', () => {
+    const many = Array.from({ length: 29 }, (_, i) => ({ start_time: i * 200, end_time: i * 200 + 200, title: `Song ${i}` }))
+    expect(chapterTracks(PLAYLIST, many)).toHaveLength(MAX_CHAPTERS_PER_UPLOAD)
+  })
+})
+
+describe('the chaptered pool', () => {
+  const listing = (rows: { id: string; duration: number }[]) =>
+    rows.map((r) => JSON.stringify({ title: `upload ${r.id}`, url: `https://www.youtube.com/watch?v=${r.id}`, duration: r.duration, playlist_uploader: '90s Neon Soul' })).join('\n')
+
+  function reader(rows: { id: string; duration: number }[], chapters: Record<string, unknown>) {
+    const calls: string[][] = []
+    const read = channelUploads({
+      run: async (args) => {
+        calls.push(args)
+        if (args.includes('--flat-playlist')) return listing(rows)
+        const id = (args.at(-1) ?? '').split('=').at(-1) ?? ''
+        return meta(chapters[id] ?? null)
+      },
+      space: { recent: async () => [] },
+      dir,
+    })
+    return { read, calls }
+  }
+
+  it('expands a chaptered upload, keeps a short one, and drops a long one with no chapters', async () => {
+    const { read, calls } = reader(
+      [
+        { id: 'chaptered', duration: 5987 },
+        { id: 'song', duration: 240 },
+        { id: 'mix', duration: 4080 },
+      ],
+      { chaptered: [{ start_time: 0, end_time: 300, title: 'A' }, { start_time: 300, end_time: 600, title: 'B' }] },
+    )
+    const tracks = await read('https://www.youtube.com/@90sNeonSoul/videos', 20)
+    expect(tracks.map((t) => t.title)).toEqual(['A', 'B', 'upload song'])
+    expect(tracks[0]?.ref).toBe('https://www.youtube.com/watch?v=chaptered#t=0,300')
+    // A 68-minute upload with no chapters is a mix, not a song: it never
+    // reaches the pool, and it costs exactly one metadata call to find out.
+    const full = calls.filter((c) => !c.includes('--flat-playlist'))
+    expect(full).toHaveLength(2)
+  })
+
+  it('pays for an upload once: the second refresh reads the cache', async () => {
+    const rows = [{ id: 'chaptered', duration: 5987 }]
+    const chapters = { chaptered: [{ start_time: 0, end_time: 300, title: 'A' }] }
+    const first = reader(rows, chapters)
+    expect(await first.read('https://www.youtube.com/@90sNeonSoul/videos', 20)).toHaveLength(1)
+    const second = reader(rows, chapters)
+    expect(await second.read('https://www.youtube.com/@90sNeonSoul/videos', 20)).toHaveLength(1)
+    expect(second.calls.filter((c) => !c.includes('--flat-playlist'))).toHaveLength(0)
+  })
+
+  it('bounds the metadata calls per channel and caps what one channel contributes', async () => {
+    const rows = Array.from({ length: 20 }, (_, i) => ({ id: `v${i}`, duration: 5987 }))
+    const chapters = Object.fromEntries(
+      rows.map((r) => [r.id, Array.from({ length: 29 }, (_, i) => ({ start_time: i * 200, end_time: i * 200 + 200, title: `${r.id} song ${i}` }))]),
+    )
+    const { read, calls } = reader(rows, chapters)
+    const tracks = await read('https://www.youtube.com/@90sNeonSoul/videos', 20)
+    // 20 uploads x 29 chapters must not swamp the catalogue.
+    expect(tracks.length).toBeLessThanOrEqual(TRACKS_PER_CHANNEL)
+    expect(calls.filter((c) => !c.includes('--flat-playlist'))).toHaveLength(CHAPTER_LOOKUPS_PER_CHANNEL)
+  })
+
+  it('a video whose metadata call fails costs that video, not the channel', async () => {
+    const read = channelUploads({
+      run: async (args) => {
+        if (args.includes('--flat-playlist')) return listing([{ id: 'broken', duration: 5987 }, { id: 'song', duration: 240 }])
+        throw new Error('video unavailable')
+      },
+      space: { recent: async () => [] },
+      dir,
+    })
+    expect((await read('https://www.youtube.com/@90sNeonSoul/videos', 20)).map((t) => t.title)).toEqual(['upload song'])
   })
 })
 
