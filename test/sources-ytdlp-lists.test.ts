@@ -8,7 +8,7 @@ import { BrowserCookieError } from '../src/music/sources/cookies.ts'
 import { BilibiliClient, BilibiliSource, type BilibiliFetch } from '../src/music/sources/bilibili.ts'
 import { flatEntries } from '../src/music/sources/flat.ts'
 import { mountYouTube, YouTubeSource } from '../src/music/sources/youtube.ts'
-import type { YtDlpRunner } from '../src/music/music.ts'
+import { YtDlpTimeoutError, type YtDlpRunner } from '../src/music/music.ts'
 
 const line = (o: Record<string, unknown>): string => JSON.stringify(o)
 
@@ -250,5 +250,20 @@ describe('a cookie store that cannot be read is not a missing login', () => {
         },
       ),
     ).rejects.toBeInstanceOf(BrowserCookieError)
+  })
+
+  // The export can succeed and the account read still hang: a timeout is no
+  // more an answer about the login than an unreadable store is, and read as
+  // one it sends the listener to a sign-in page that changes nothing.
+  it('mountYouTube lets a YtDlpTimeoutError through', async () => {
+    await expect(
+      mountYouTube(
+        { browser: 'chrome' },
+        {
+          run: () => Promise.reject(new YtDlpTimeoutError(90_000)),
+          lease: async () => ({ path: '/jar', args: ['--cookies', '/jar'], release: () => {} }),
+        },
+      ),
+    ).rejects.toBeInstanceOf(YtDlpTimeoutError)
   })
 })

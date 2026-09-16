@@ -139,7 +139,10 @@ export async function exportCookieJar(
     // written by yt-dlp's exit regardless. A run that wrote no jar at all is
     // a real failure, and its own words say which one.
     let failure: unknown = null
-    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL]).catch((err: unknown) => {
+    // The child scratches in this directory too: reading a cookie store
+    // copies the whole database, and a spawn killed at its ceiling never
+    // deletes that copy. Here, the `finally` below does.
+    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL], { tmpdir: dir }).catch((err: unknown) => {
       failure = err
       return ''
     })
