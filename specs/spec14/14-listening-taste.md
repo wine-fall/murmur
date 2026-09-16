@@ -246,6 +246,14 @@ watch-later are not read at all, and YouTube's liked list is read only to
 name the account (its uploader), never for its items. What they watched and
 who they follow is the signal.
 
+The render enforces this on **any** snapshot, not only a freshly read one: a
+returning listener keeps yesterday's `bilibili.json` until the next refresh,
+so the render drops every `favourite` row, every Bilibili `playlist` row (a
+favourites folder) and YouTube's `liked` rows outright, counts included. The
+kinds stay in the union so an old file still parses; nothing produces them
+any more. A snapshot left with nothing to say drops out of the `Sources`
+line rather than standing there as an empty pair of brackets.
+
 **No one layer may eat the block**: each layer gets an equal share of what is
 left of the budget when its turn comes, and whatever it does not use rolls
 forward to the next. A layer that runs out of room ends at an item boundary

@@ -77,6 +77,50 @@ describe('renderTasteDigest', () => {
     )
   })
 
+  // A returning listener keeps yesterday's bilibili.json until the next
+  // refresh, and that file still holds favourites and folder names. Nothing
+  // produces those rows any more, so the render drops them outright — the
+  // invariant has to hold on an old snapshot too, not only on a fresh read.
+  it('ignores an old snapshot\'s favourites and folder names, keeping the musical source beside it', () => {
+    const old: TasteSnapshot = {
+      source: 'bilibili',
+      takenAt: '2026-09-05T09:00:00.000Z',
+      items: [
+        { kind: 'playlist', title: 'default folder' },
+        { kind: 'playlist', title: 'algorithms' },
+        { kind: 'playlist', title: 'back end' },
+        { kind: 'favourite', title: 'a Java course, lesson 12', artist: 'a course channel', at: '2026-09-04T00:00:00.000Z' },
+        { kind: 'favourite', title: 'braised pork, step by step', artist: 'a cooking channel', at: '2026-09-03T00:00:00.000Z' },
+        { kind: 'history', title: 'a city pop set', artist: 'Night Tape', at: '2026-09-04T02:00:00.000Z', category: MUSIC_ZONE },
+        { kind: 'liked', title: 'My upload', artist: 'FAWineLL' },
+      ],
+    }
+    // The same for YouTube's liked list, which is collected in the same way.
+    const oldYouTube: TasteSnapshot = {
+      source: 'youtube',
+      takenAt: '2026-09-05T09:00:00.000Z',
+      items: [
+        { kind: 'liked', title: 'a video they thumbed up once', artist: 'some channel' },
+        { kind: 'subscription', title: 'a fresh upload', artist: 'a channel they follow' },
+      ],
+    }
+    const digest = renderTasteDigest([old, oldYouTube, netease], NOW)
+    for (const gone of ['default folder', 'algorithms', 'back end', 'a Java course, lesson 12', 'braised pork, step by step', 'a course channel', 'a cooking channel', 'a video they thumbed up once', 'some channel']) {
+      expect(digest).not.toContain(gone)
+    }
+    // The counts stop claiming them too, and what is still taste still shows.
+    expect(digest).toContain('Bilibili (1 liked, history 1)')
+    expect(digest).toContain('YouTube (1 subscription)')
+    expect(digest).toContain('Playlists: late drive, deep focus')
+    expect(digest).toContain('a city pop set')
+    expect(digest).toContain('Songs they keep:')
+    // A snapshot left with nothing to say drops out of the source list
+    // rather than standing there as an empty pair of brackets.
+    const emptied = renderTasteDigest([{ source: 'bilibili', takenAt: old.takenAt, items: old.items.filter((i) => i.kind === 'favourite' || i.kind === 'playlist') }, netease], NOW)
+    expect(emptied).not.toContain('Bilibili')
+    expect(emptied).toContain('Sources: NetEase (3 liked, 2 playlists)')
+  })
+
   // spec 14 §2.3: the digest is layered by what the signal IS. What the
   // listener watched and who they follow lead; a music-zone row outranks a
   // cooking one inside the watch layer.
@@ -116,7 +160,7 @@ describe('renderTasteDigest', () => {
 
   it('cuts to the budget at a line boundary with a trailing ellipsis', () => {
     const many: TasteSnapshot = {
-      source: 'youtube',
+      source: 'netease',
       takenAt: netease.takenAt,
       items: Array.from({ length: 300 }, (_, i) => ({ kind: 'liked' as const, title: `song number ${i}`, artist: `artist ${i}` })),
     }

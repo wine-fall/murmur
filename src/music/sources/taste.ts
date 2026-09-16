@@ -84,7 +84,6 @@ const byName = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0)
 
 const COUNT_ORDER: [TasteKind, (n: number) => string][] = [
   ['liked', (n) => `${n} liked`],
-  ['favourite', (n) => `${n} favourite${n === 1 ? '' : 's'}`],
   ['history', (n) => `history ${n}`],
   ['follows', (n) => `${n} recently followed`],
   ['frequents', (n) => `${n} they go back to`],
@@ -158,12 +157,23 @@ export function isMusicCategory(category: string | undefined): boolean {
 
 // Only these rows are a musical taste: a watched video's uploader is not an
 // artist, and neither is a channel the listener follows (spec 14 §2.3).
-const MUSICAL: readonly TasteKind[] = ['liked', 'favourite', 'top-artist', 'top-track', 'daily']
+const MUSICAL: readonly TasteKind[] = ['liked', 'top-artist', 'top-track', 'daily']
 
 export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date, budget = DIGEST_BUDGET): string {
   if (snapshots.length === 0) return ''
-  // Items whose title is empty are dropped everywhere, counts included.
-  const kept = snapshots.map((s) => ({ snapshot: s, items: s.items.filter((i) => i.title.trim() !== '') }))
+  // Items whose title is empty are dropped everywhere, counts included — and
+  // so is everything the listener merely collected (spec 14 §2.3): any
+  // 'favourite' row, a Bilibili 'playlist' (which is a favourites folder) and
+  // YouTube's liked list. No source produces those any more, but a returning
+  // listener keeps yesterday's snapshot until the next refresh, and that file
+  // must not paint what it painted yesterday.
+  const collected = (source: SourceId, item: TasteItem): boolean =>
+    item.kind === 'favourite' || (source === 'bilibili' && item.kind === 'playlist') || (source === 'youtube' && item.kind === 'liked')
+  const kept = snapshots
+    .map((s) => ({ snapshot: s, items: s.items.filter((i) => i.title.trim() !== '' && !collected(s.source, i)) }))
+    // A snapshot left with nothing to say is not a source line.
+    .filter((k) => k.items.length > 0)
+  if (kept.length === 0) return ''
   const newest = kept.map((k) => k.snapshot.takenAt).sort().at(-1)!
   const lines: string[] = [
     `## What the listener keeps (as of ${day(newest)})`,
@@ -187,7 +197,7 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
         if (name !== '') artists.set(name, (artists.get(name) ?? 0) + 1)
       }
       if (item.kind === 'history') lately.push({ item, order })
-      if (item.kind === 'liked' || item.kind === 'favourite') songs.push({ item, order })
+      if (item.kind === 'liked') songs.push({ item, order })
       if (item.kind === 'follows') follows.push({ item, order })
       if (item.kind === 'frequents') frequents.push(item.title.trim())
       if (item.kind === 'playlist') playlists.push(item.title.trim())
