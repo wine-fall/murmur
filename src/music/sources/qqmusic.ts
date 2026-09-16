@@ -226,21 +226,28 @@ export class QQMusicClient {
       self_redirect: 'default',
     })
     const page = await this.text(`${WX_QRCONNECT}?${query}`, WX_QRCONNECT)
-    const uuid = /uuid=([A-Za-z0-9_-]+)/.exec(page)?.[1]
+    if (page.text === undefined) throw new Error(`qqmusic wechat qrconnect: HTTP ${page.status}`)
+    const uuid = /uuid=([A-Za-z0-9_-]+)/.exec(page.text)?.[1]
     if (uuid === undefined) throw new Error('qqmusic wechat qrconnect: no uuid in the page')
     return { uuid, url: `${WX_CONFIRM}${uuid}` }
   }
 
   // One long poll. Its whole answer is a pair of assignments in a script body.
   async wxQrPoll(uuid: string): Promise<QrPoll<string>> {
-    let body: string
+    let answer: { status: number; text?: string }
     try {
-      body = await this.text(`${WX_POLL}?uuid=${encodeURIComponent(uuid)}&_=${Date.now()}`, 'https://open.weixin.qq.com/', this.deps.timeoutMs ?? WX_POLL_MS, false)
+      answer = await this.text(`${WX_POLL}?uuid=${encodeURIComponent(uuid)}&_=${Date.now()}`, 'https://open.weixin.qq.com/', this.deps.timeoutMs ?? WX_POLL_MS, false)
     } catch {
-      // The platform held the connection past our own patience: still waiting.
+      // Aborted at our own patience, or the network blinked: still waiting,
+      // which is what it was. Only THIS is read as a quiet wait.
       return { status: 'waiting' }
     }
-    const seen = /window\.wx_errcode=(\d+);window\.wx_code='([^']*)'/.exec(body)
+    // A refusal from the service is not a quiet wait. Swallowed as one, the
+    // loop would keep asking a service that just said to stop for the whole
+    // three minutes, and then report the code as expired.
+    if (answer.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', 'HTTP 429 on the WeChat poll')
+    if (answer.text === undefined) throw new Error(`qqmusic wechat poll: HTTP ${answer.status}`)
+    const seen = /window\.wx_errcode=(\d+);window\.wx_code='([^']*)'/.exec(answer.text)
     if (seen === null) return { status: 'waiting' }
     const [, code, granted] = seen as unknown as [string, string, string]
     if (Number(code) === WX_SCANNED) return { status: 'scanned' }
@@ -317,31 +324,20 @@ export class QQMusicClient {
     return req.data
   }
 
-  // The status, and the parsed body for an answer that has one. The body is
-  // read INSIDE the timeout: fetch resolves on the headers alone, so a
-  // response that stalls mid-body would hang the mount the listener is
-  // waiting on and leave a background refresh unable to finish.
-  private async post(body: string, cookie: string): Promise<{ status: number; json?: unknown }> {
+  private post(body: string, cookie: string): Promise<{ status: number; json?: unknown }> {
     const init: RequestInit = {
       method: 'POST',
       headers: { 'User-Agent': USER_AGENT, Referer: 'https://y.qq.com/', 'Content-Type': 'application/json', ...(cookie !== '' && { Cookie: cookie }) },
       body,
     }
-    return this.retried(async () => {
-      const response = await this.bounded(API, init)
-      if (!response.ok) return { status: response.status }
-      return { status: response.status, json: await this.inside(response, (r) => r.json()) }
-    })
+    return this.retried(() => this.round(API, init, (r) => r.json(), 'json'))
   }
 
   // A plain GET whose body is text: the two scan calls, neither of which
   // carries a cookie — there is not one yet.
-  private text(url: string, referer: string, timeoutMs?: number, retry = true): Promise<string> {
-    const read = async (): Promise<string> => {
-      const response = await this.bounded(url, { method: 'GET', headers: { 'User-Agent': USER_AGENT, Referer: referer } }, timeoutMs)
-      if (!response.ok) throw new Error(`qqmusic ${url}: HTTP ${response.status}`)
-      return this.inside(response, (r) => r.text(), timeoutMs)
-    }
+  private text(url: string, referer: string, timeoutMs?: number, retry = true): Promise<{ status: number; text?: string }> {
+    const init: RequestInit = { method: 'GET', headers: { 'User-Agent': USER_AGENT, Referer: referer } }
+    const read = (): Promise<{ status: number; text?: string }> => this.round(url, init, (r) => r.text(), 'text', timeoutMs)
     return retry ? this.retried(read) : read()
   }
 
@@ -353,41 +349,31 @@ export class QQMusicClient {
     }
   }
 
-  // The request, aborted at the deadline.
-  private async bounded(url: string, init: RequestInit, timeoutMs?: number): Promise<Response> {
+  // ONE round trip under ONE deadline. The timer is cleared only once the
+  // body has been read, so the abort it fires covers the whole request:
+  // fetch resolves on the headers alone, and a body that then stalls must be
+  // ABORTED, not merely stopped being waited for — otherwise every stalled
+  // read leaks its connection while the scan loop keeps polling.
+  private async round(
+    url: string,
+    init: RequestInit,
+    read: (r: Response) => Promise<unknown>,
+    key: 'json' | 'text',
+    timeoutMs?: number,
+  ): Promise<{ status: number; json?: unknown; text?: string }> {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     try {
-      return await this.fetch(url, { ...init, signal: controller.signal })
-    } finally {
-      clearTimeout(timer)
-    }
-  }
-
-  // The BODY, under its own deadline. fetch resolves on the headers alone, so
-  // a response that stalls mid-body would hang the mount the listener is
-  // waiting on and leave a background refresh unable to finish.
-  private async inside<T>(response: Response, read: (r: Response) => Promise<T>, timeoutMs?: number): Promise<T> {
-    const ms = timeoutMs ?? this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      return await Promise.race([
-        read(response),
-        new Promise<never>((_resolve, reject) => {
-          timer = setTimeout(() => reject(new Error('qqmusic: the response body stalled')), ms)
-        }),
-      ])
+      const response = await this.fetch(url, { ...init, signal: controller.signal })
+      // A body that is not going to be read is not waited for either.
+      if (!response.ok) return { status: response.status }
+      return { status: response.status, [key]: await read(response) }
     } finally {
       clearTimeout(timer)
     }
   }
 }
 
-// A QQ Music mount is a browser mount and nothing else (spec 14 §3.1): there
-// is no scan road in this build, so the entry is the Chrome pin alone — the
-// account's own identifiers ride in the cookie, which is re-exported per read.
-// The `auth` key is written for symmetry with the other cookie sources and to
-// leave the scanned arm free if a scan road is ever added.
 // A mount made by scanning holds the credential itself, written as the very
 // cookie header a browser jar would have carried; a browser mount holds the
 // Chrome pin and re-exports that jar per read.

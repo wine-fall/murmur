@@ -179,18 +179,25 @@ describe('QQMusicClient', () => {
 
   // The timeout has to cover the BODY: fetch resolves on the headers, so a
   // response that stalls mid-body would hang the foreground mount and leave
-  // the background refresh unable to finish (codex review).
-  it('times out a response whose body never arrives, not just its headers', async () => {
-    const stalled: QQMusicFetch = async (_url, init) =>
-      new Response(
+  // the background refresh unable to finish (codex review). And rejecting is
+  // not enough — the request itself must be ABORTED, or every stalled read
+  // leaks its connection while the scan loop keeps polling (codex review).
+  it('times out a response whose body never arrives, and aborts the request with it', async () => {
+    const signals: AbortSignal[] = []
+    const stalled: QQMusicFetch = async (_url, init) => {
+      if (init?.signal != null) signals.push(init.signal)
+      return new Response(
         new ReadableStream({
           start(controller) {
             init?.signal?.addEventListener('abort', () => controller.error(new Error('aborted')))
           },
         }),
       )
+    }
     const c = new QQMusicClient({ cookie: async () => COOKIE, fetch: stalled, timeoutMs: 20 })
     await expect(c.account()).rejects.toThrow()
+    expect(signals.length).toBeGreaterThan(0)
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
   })
 
   it('retries a network error once, never an auth answer', async () => {
@@ -319,6 +326,22 @@ describe('the WeChat scan', () => {
     expect(await poll(body(402))).toEqual({ status: 'waiting' })
     // A confirmation with no code is not a sign-in.
     expect(await poll(body(405))).toEqual({ status: 'waiting' })
+  })
+
+  // A rate limit is not a quiet wait: swallowed as one, the loop would keep
+  // hammering a service that just said to stop, for three minutes, and then
+  // tell the listener the code expired (codex review).
+  it('a rate-limited poll is the typed failure, not another silent wait', async () => {
+    const limited: QQMusicFetch = async () => new Response('', { status: 429 })
+    await expect(new QQMusicClient({ cookie: async () => '', fetch: limited }).wxQrPoll('u')).rejects.toMatchObject({
+      source: 'qqmusic',
+      reason: 'rate-limited',
+    })
+  })
+
+  it('a poll the service answers with a server error is raised, not read as waiting', async () => {
+    const broken: QQMusicFetch = async () => new Response('', { status: 503 })
+    await expect(new QQMusicClient({ cookie: async () => '', fetch: broken }).wxQrPoll('u')).rejects.toThrow(/503/)
   })
 
   it('a long poll that times out reads as waiting, so an Esc is not held for it', async () => {
