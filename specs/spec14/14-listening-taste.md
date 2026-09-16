@@ -60,7 +60,7 @@ importance:
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
-  | **QQ Music** | liked songs, own + favourited playlist names | no | no | scans a code with WeChat, or signs in to Chrome |
+  | **QQ Music** | liked songs, own + favourited playlist names | no | yes (yt-dlp with cookie, free tracks; VIP skipped per track) | scans a code with WeChat, or signs in to Chrome |
 
 - **`$MURMUR_HOME/sources.json`** — the mounted sources and their credentials
   (§2.1). Secret-bearing; guarded like `voice.json` (03-03 §3).
@@ -88,16 +88,15 @@ importance:
   these two sources are complete as **read-only** taste sources. A listener
   who wants to *hear* a Spotify or Soda track gets it via catalogue search on
   YouTube / Bilibili / NetEase, which is the whole point of §2.4.
-- **Playback from QQ Music, and searching it.** QQ Music is a **taste-only**
-  source (§2.10). yt-dlp ships a `qqmusic` extractor, but its song extractor
-  is broken today — `WARNING: [qqmusic] unable to extract init data` then
-  `ERROR: This video is only available for registered users`, with and
-  without `--cookies-from-browser` (verified 2026-09-16) — and there is no
-  `qqmusicsearch:` prefix, so a search would need a second HTTP client of
-  murmur's own, the way NetEase's is. Neither is in this build. QQ Music
-  behaves exactly like a NetEase whose playback is failing: the digest shapes
-  what murmur searches for on YouTube, Bilibili and NetEase, and the listener
-  is told so on the card rather than left expecting QQ Music audio.
+- **Searching QQ Music.** QQ Music **plays** (§2.5): a free track resolves
+  through yt-dlp's `qqmusic` extractor with the mount's cookie, and a VIP one
+  is skipped per track. What it is not is a search **catalogue** — there is no
+  `qqmusicsearch:` prefix, so searching it would need a second HTTP client of
+  murmur's own, the way NetEase's is, and that is not in this build. So the
+  brain never asks QQ Music for candidates; it reaches a QQ Music ref through
+  the curated-channel pool (§2.9, a `y.qq.com` playlist or singer URL in the
+  manifest), and the digest still shapes what it searches for on YouTube,
+  Bilibili and NetEase.
 - **A brain-written taste summary.** The digest is deterministic (§2.3). The
   brain forms its own picture inside the pick task; whether a distilled
   paragraph would pick better is an eval question (#98), not a build item.
@@ -349,9 +348,34 @@ function cookieLeaser(deps): (source) => Promise<CookieLease | null>   // null w
 ```
 
 Hosts: `youtube.com`/`youtu.be`/`music.youtube.com` → youtube;
-`bilibili.com`/`b23.tv` → bilibili; `music.163.com`/`163cn.tv` → netease.
-No mount → no cookie flag → today's behaviour exactly (a listener with no
-account sees no change — acceptance §5.1).
+`bilibili.com`/`b23.tv` → bilibili; `music.163.com`/`163cn.tv` → netease;
+`y.qq.com` and its subdomains → qqmusic. No mount → no cookie flag → today's
+behaviour exactly (a listener with no account sees no change — acceptance
+§5.1).
+
+**The QQ Music rights miss — a dropped candidate, never a lost login.**
+About a third of a real listener's liked list is `pay_play: 1`. For such a
+track the vkey call answers `req_1.code: 0` with **every** format's `purl`
+empty (`result: 104003`), yt-dlp finds no format, and — because its
+`_get_uin()` reads a `uin` cookie a **WeChat** sign-in never sets, so
+`is_logged_in` is false — it reports `This video is only available for
+registered users`. Those are the words of a lost login and they are the wrong
+reading: nothing about the mount is stale, and flipping it to `expired` would
+send a signed-in listener to renew a login that works. So a rights-shaped
+failure on a `y.qq.com` ref becomes its own type, never a `SourceAuthError`:
+
+```ts
+class TrackRightsError extends Error { readonly source: SourceId }   // "no rights to that track here — pick another"
+function rightsMiss(source: SourceId, text: string): boolean          // qqmusic alone
+```
+
+It travels the plain-error road: `submit_pick` answers `{ ok: false, error }`,
+the model picks another candidate, the `SourceAuthWatch` hears nothing, the
+mount keeps `status: 'ok'` and no catalogue is closed. yt-dlp's own advice
+("Use `--cookies-from-browser` … for the authentication") is stripped from the
+detail, because it is the one move that cannot help here. The rights read is
+QQ Music's alone: NetEase words a genuinely stale login the same way, and its
+rights-less answer is the preview trap (§2.6) rather than an error.
 
 **Where the jar does NOT go.** Two calls are anonymous on purpose, because
 the cookie makes them fail:
@@ -369,7 +393,7 @@ the cookie makes them fail:
   same query with no cookie returns hits. Bilibili *playback* keeps the jar —
   it resolves and probes fine with it, and needs it for the better tiers.
 
-So the jar is for the taste reads, and for Bilibili and NetEase playback.
+So the jar is for the taste reads, and for Bilibili, NetEase and QQ Music playback.
 
 *As built (review round)*: the cookie reaches yt-dlp as a **leased jar**
 (`--cookies <tmp>`, owner-only, deleted when the call returns) rather than
@@ -537,15 +561,17 @@ Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 (trust boundary — CLAUDE.md types rule).
 
-### 2.10 The QQ Music client — taste only
+### 2.10 The QQ Music client — taste, and a playable ref
 
 **`qqmusic.ts`** — one endpoint does all of it: `POST
 https://u.y.qq.com/cgi-bin/musicu.fcg`, whose body names a `module` and a
 `method` and whose answer is `{code, req:{code, data}}`. The **inner**
 `req.code` is the real one; the envelope is always HTTP 200 with an outer
-`code: 0`. Nothing is played and nothing is searched here (§1, out of scope):
-this client identifies the account and reads what it keeps, and the digest
-does the rest.
+`code: 0`. Nothing is played and nothing is searched **here**: this client
+identifies the account and reads what it keeps, and the digest does the rest.
+Playback is yt-dlp's, through the same mount's cookie (§2.5) — a kept song's
+`ref` is `https://y.qq.com/n/ryqq/songDetail/<mid>`, which is exactly what
+that extractor takes.
 
 **Credential — the browser's own.** A signed-in `y.qq.com` jar carries
 `qm_keyst` (the key, also spelled `qqmusic_key`), the account number as `uin`
@@ -1179,10 +1205,17 @@ byte-identical in their yt-dlp arguments to today's (dev-log diff).
   profile mounts and names who; not signed in → `https://y.qq.com/` opens in
   the named profile and the wait resumes on Enter, exactly as YouTube's does.
   Either way the first snapshot holds the liked songs plus the created and
-  favourited playlist names, and nothing is ever played from QQ Music (§1,
-  out of scope). Verified 2026-09-16 against the live service, both roads:
-  mount → verify → snapshot, the snapshot carrying no credential, and the
-  scan reporting waiting → scanned → confirmed.
+  favourited playlist names. Verified 2026-09-16 against the live service,
+  both roads: mount → verify → snapshot, the snapshot carrying no credential,
+  and the scan reporting waiting → scanned → confirmed.
+- **QQ Music plays** (smoke, §2.5): with the mount in place, `resolve()` on a
+  **free** `y.qq.com/n/ryqq/songDetail/<mid>` ref returns a
+  `dl.stream.qqmusic.qq.com` M500 mp3 whose `probeStream` is true and whose
+  decoded length matches the track's stated one (no preview clip), and
+  `submit_pick` on it ends the task. `resolve()` on a **VIP** (`pay_play: 1`)
+  ref raises a `TrackRightsError`, `submit_pick` answers a plain
+  `{ ok: false, error }` so the model picks another, the auth watch is never
+  told, and `sources.json` still reads `qqmusic.status: "ok"`.
 - An older browser mount of NetEase or Bilibili keeps reading and refreshing
   untouched; unticking it is how it goes.
 

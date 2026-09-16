@@ -1,10 +1,10 @@
-// The QQ Music client (spec 14 §2.10): a taste-only source. QQ Music is read,
-// never played — yt-dlp's `qqmusic` extractor cannot resolve a song today
-// ("unable to extract init data" / "only available for registered users",
-// with and without a browser cookie), and there is no `qqmusicsearch:` prefix
-// to search with. So this client identifies the account and reads what it
-// keeps; the digest then shapes what murmur searches for on YouTube,
-// Bilibili and NetEase (§2.4).
+// The QQ Music client (spec 14 §2.10): it identifies the account and reads
+// what it keeps. It does not play and it does not search. Playing is yt-dlp's
+// (§2.5) — a kept song's `ref` is a `y.qq.com/n/ryqq/songDetail/<mid>` URL its
+// `qqmusic` extractor takes, resolved with this same mount's cookie, and a
+// VIP track is dropped as a per-track rights miss. Searching stays out: there
+// is no `qqmusicsearch:` prefix, so the digest is what shapes murmur's
+// searches on YouTube, Bilibili and NetEase (§2.4).
 //
 // One endpoint does all of it: `u.y.qq.com/cgi-bin/musicu.fcg` takes a POST
 // whose body names a module and a method, and answers `{code, req:{code,

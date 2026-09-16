@@ -133,6 +133,17 @@ describe('sourceOfRef (spec 14 §2.5)', () => {
     expect(sourceOfRef('https://example.com')).toBeNull()
     expect(sourceOfRef('not a url')).toBeNull()
   })
+
+  // QQ Music plays now (spec 14 §2.5): a song ref carries the mount's cookie
+  // like every other cookie source. The API hosts are subdomains of the same
+  // site the song page lives on, so the whole family maps to the one mount.
+  it('names qqmusic for the song page and its sibling hosts', () => {
+    expect(sourceOfRef('https://y.qq.com/n/ryqq/songDetail/003s9sXr2So0QE')).toBe('qqmusic')
+    expect(sourceOfRef('https://u.y.qq.com/cgi-bin/musicu.fcg')).toBe('qqmusic')
+    expect(sourceOfRef('https://c.y.qq.com/base/fcgi-bin/u')).toBe('qqmusic')
+    // Not a y.qq.com host, however much it looks like one.
+    expect(sourceOfRef('https://noty.qq.com/n/ryqq/songDetail/x')).toBeNull()
+  })
 })
 
 // How a source's cookie was obtained (spec 14 §2.8): NetEase and Bilibili

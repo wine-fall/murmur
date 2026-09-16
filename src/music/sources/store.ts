@@ -42,9 +42,10 @@ export const SourceInputSchemas = {
   netease: access(NETEASE_FIELDS),
   spotify: z.object({ clientId: z.string(), refreshToken: z.string(), accessToken: z.string(), expiresAt: z.string() }),
   qishui: z.object({ sessionCookie: z.string(), deviceId: z.string(), installId: z.string() }),
-  // Taste only (spec 14 §2.10). Either road ends in one cookie header: a
-  // scan mints it from the exchange and holds it, a browser mount re-exports
-  // it per read, and the client cannot tell which it was handed.
+  // Taste and playback (spec 14 §2.10, §2.5). Either road ends in one cookie
+  // header: a scan mints it from the exchange and holds it, a browser mount
+  // re-exports it per read, and neither the client nor the jar lease can tell
+  // which it was handed.
   qqmusic: access({}),
 } as const
 
@@ -67,7 +68,7 @@ const SourcesFileSchema = z.object({
 export type SourcesFile = z.infer<typeof SourcesFileSchema>
 export type SourceInput = { [K in SourceId]: z.infer<(typeof SourceInputSchemas)[K]> }
 export type SourceEntry = { [K in SourceId]: NonNullable<SourcesFile[K]> }
-export type CookieSource = 'youtube' | 'bilibili' | 'netease'
+export type CookieSource = 'youtube' | 'bilibili' | 'netease' | 'qqmusic'
 
 type Log = (message: string) => void
 
@@ -244,6 +245,9 @@ const HOSTS: [RegExp, CookieSource][] = [
   [/(^|\.)(youtube\.com|youtu\.be)$/, 'youtube'],
   [/(^|\.)(bilibili\.com|b23\.tv)$/, 'bilibili'],
   [/(^|\.)(music\.163\.com|163cn\.tv)$/, 'netease'],
+  // The song page and the API hosts are one site: `u.y.qq.com` signs the vkey
+  // request the song page's own cookie authorises (spec 14 §2.5).
+  [/(^|\.)y\.qq\.com$/, 'qqmusic'],
 ]
 
 export function sourceOfRef(ref: string): CookieSource | null {

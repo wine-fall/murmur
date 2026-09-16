@@ -250,3 +250,60 @@ describe('the cookie seam for a scanned mount', () => {
     lease!.release()
   })
 })
+
+// QQ Music plays now (spec 14 §2.5), so its mount has to hand the provider a
+// jar down BOTH roads — the WeChat scan holds the cookie header itself, the
+// Chrome mount re-exports the browser's store. Nothing downstream may be able
+// to tell which road a jar came from.
+describe('the QQ Music jar lease, either road (spec 14 §2.5)', () => {
+  const QQ_JAR = [
+    '# Netscape HTTP Cookie File',
+    '.qq.com\tTRUE\t/\tFALSE\t1790000000\twxuin\t<redacted-wxuin>',
+    '.y.qq.com\tTRUE\t/\tFALSE\t1790000000\tqm_keyst\t<redacted-keyst>',
+    '.youtube.com\tTRUE\t/\tTRUE\t1790000000\tSID\t<redacted-sid>',
+    '',
+  ].join('\n')
+
+  function seam(): { store: SourcesStore; jars: CookieJars; runs: string[][] } {
+    const runs: string[][] = []
+    const run: YtDlpRunner = async (args) => {
+      runs.push(args)
+      writeFileSync(args[args.indexOf('--cookies') + 1]!, QQ_JAR)
+      return ''
+    }
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-qq-'))
+    return { store: new SourcesStore({ path: join(dir, 'sources.json'), tasteDir: join(dir, 'taste') }), jars: new CookieJars(run), runs }
+  }
+
+  it('writes the scanned header as a jar, with no browser read at all', async () => {
+    const { store, jars, runs } = seam()
+    store.mount('qqmusic', { auth: 'qr', cookie: 'wxuin=<redacted-wxuin>; qm_keyst=<redacted-keyst>; euin=<redacted-euin>' })
+    const lease = await cookieLeaser({ jars, store })('qqmusic')
+    expect(lease).not.toBeNull()
+    const text = readFileSync(lease!.path, 'utf-8')
+    expect(text).toContain('.y.qq.com\tTRUE\t/\tFALSE\t2000000000\tqm_keyst\t<redacted-keyst>')
+    expect(text).toContain('wxuin\t<redacted-wxuin>')
+    expect(runs).toEqual([])
+    lease!.release()
+    expect(existsSync(lease!.path)).toBe(false)
+  })
+
+  it('exports the browser store for a Chrome mount, keeping that site alone', async () => {
+    const { store, jars, runs } = seam()
+    store.mount('qqmusic', { browser: 'chrome', profile: 'Default' })
+    const lease = await cookieLeaser({ jars, store })('qqmusic')
+    expect(runs).toHaveLength(1)
+    expect(runs[0]).toContain('--cookies-from-browser')
+    const text = readFileSync(lease!.path, 'utf-8')
+    // `.qq.com` is a parent of y.qq.com, so its row rides along; YouTube's does not.
+    expect(text).toContain('qm_keyst')
+    expect(text).toContain('wxuin')
+    expect(text).not.toContain('SID')
+    lease!.release()
+  })
+
+  it('leases nothing when QQ Music is not mounted', async () => {
+    const { store, jars } = seam()
+    expect(await cookieLeaser({ jars, store })('qqmusic')).toBeNull()
+  })
+})

@@ -49,6 +49,35 @@ export function previewTrap(candidateS: number, probedS: number | null): boolean
   return probedS > 0 && probedS < PREVIEW_MAX_S
 }
 
+// The rights miss (spec 14 §2.5): QQ Music answers a pay-play track with
+// req_1.code 0 and every format's `purl` empty, so yt-dlp finds no format and
+// — because its `_get_uin()` reads a `uin` cookie a WeChat login never sets —
+// reports "only available for registered users". Nothing about the login is
+// wrong: the listener simply has no rights to that one track, and roughly a
+// third of a real playlist is like it. So this is NOT a SourceAuthError — it
+// must never flip the mount to expired — it is one candidate dropped, and the
+// pick moves on to the next.
+const RIGHTS_MISS = /only available for registered users|error code 104003\b|requested format is not available|no video formats/i
+
+export class TrackRightsError extends Error {
+  readonly source: SourceId
+
+  constructor(source: SourceId, detail: string) {
+    // yt-dlp appends "Use --cookies-from-browser … for the authentication" to
+    // the line it mistakes for a login wall. The brain reads this text, and
+    // that advice is exactly the wrong move here, so it does not travel.
+    super(`${SOURCE_NAMES[source]}: no rights to that track here (${detail.replace(/\.?\s*Use --cookies.*$/is, '')}) — pick another`)
+    this.name = 'TrackRightsError'
+    this.source = source
+  }
+}
+
+// QQ Music alone: NetEase words a genuinely stale login the same way, and its
+// rights-less answer is the preview trap above, not an error at all.
+export function rightsMiss(source: SourceId, text: string): boolean {
+  return source === 'qqmusic' && RIGHTS_MISS.test(text)
+}
+
 // The listener-facing lines (spec 14 §3.7), exact.
 export const AUTH_LINES = {
   expired: (site: string): string => `your ${site} login has expired — /sources to renew; picking from elsewhere for now.`,

@@ -30,7 +30,7 @@ import { debuglog, promisify } from 'node:util'
 import { z } from 'zod'
 
 import type { AudioClip, Catalogue, MusicProvider, TrackCandidate } from '../contracts.ts'
-import { classifyAuthFailure, SourceAuthError } from './sources/auth.ts'
+import { classifyAuthFailure, rightsMiss, SourceAuthError, TrackRightsError } from './sources/auth.ts'
 import { BrowserCookieError, type CookieLease } from './sources/cookies.ts'
 import { sourceOfRef, type CookieSource } from './sources/store.ts'
 
@@ -252,10 +252,15 @@ export class YtDlpMusicProvider implements MusicProvider {
     try {
       return await work(lease?.args ?? [])
     } catch (err) {
-      if (source !== null && lease !== null) {
+      if (source !== null) {
         const text = ytdlpFailureText(err)
-        const reason = classifyAuthFailure(text)
-        if (reason !== null) throw new SourceAuthError(source, reason, text.trim().split('\n').at(-1) ?? '')
+        const last = text.trim().split('\n').at(-1) ?? ''
+        // Rights first: QQ Music's VIP wall wears the words of a lost login
+        // (spec 14 §2.5), and reading it as one would unmount a healthy
+        // account over a track the listener was never allowed to hear.
+        if (rightsMiss(source, text)) throw new TrackRightsError(source, last)
+        const reason = lease === null ? null : classifyAuthFailure(text)
+        if (reason !== null) throw new SourceAuthError(source, reason, last)
       }
       throw err
     } finally {
