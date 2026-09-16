@@ -838,7 +838,7 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
 >> 4) [x] Spotify - expired — untick to forget it, tick refresh to sign in again
 >> 5) [ ] Soda Music - not connected
 >> 6) [ ] QQ Music - not connected
->> 7) [ ] refresh - re-read every connected account now   ← only once something is mounted
+>> 7) ( refresh now ) - re-read every connected account now   ← only once something is mounted
 ```
 
 - **Ticked = mounted**, an expired login included: unticking it is how it
@@ -852,6 +852,21 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   they are — it has no ticks to submit, so `''` cannot mean "none". One
   word the flow cannot place fails the whole line ("I didn't catch
   "<word>" — numbers or names from the list") and nothing is applied.
+- **The refresh row is an ACTION, not a state** (*2026-09-16, user report*).
+  It carried `action: true` on the wire (10 §2.3) and is drawn as a button —
+  `( refresh now )`, no tick box — because "re-read them now" is not a thing
+  you can be connected to, and a listener reading `[ ] refresh` cannot tell
+  whether unticking it turns something off. Space or Enter on that row
+  submits at once: the current ticks and `refresh` together, which is the
+  same `line` the flow always parsed. The plain host's numbered row drops the
+  box for the same reason; typing `refresh` still names it, and so does
+  `refresh now`, the way it is drawn — a listener types the row they can see,
+  and one word the flow cannot place fails the whole line (codex review).
+- **The TUI's multi card closes on an `( apply )` row it synthesizes itself**
+  (10 §3.2-D) — not on the wire, not this flow's business: the card offered
+  nothing that looked like a submit. Its note says what applying would do
+  (`2 changes`, or `nothing changed — Enter leaves`). Enter anywhere still
+  submits, exactly as before.
 - **Submit = a diff against what stands.** Unticked-and-mounted →
   unmount; ticked-and-not → the mount flow below, in row order; `refresh`
   → re-read now, and an expired login ticked alongside it goes through the

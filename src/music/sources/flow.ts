@@ -118,13 +118,19 @@ const NAMES: Record<string, MenuKey> = {
   qqmusic: 'qqmusic',
   qq: 'qqmusic',
   refresh: 'refresh',
+  // The row is drawn as a button — `( refresh now )` — so that is what gets
+  // typed, and one word the flow cannot place fails the whole line.
+  now: 'refresh',
 }
 
 type MenuKey = SourceId | 'refresh'
 type MenuRow = AskOption & { key: MenuKey; note: string; checked: boolean }
 
 const QUESTION = 'which accounts should I read? Enter with nothing changed leaves'
-const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false }
+// An ACTION, not a state (spec 14 §3.1): re-reading is something you do
+// now, not something you are connected to, so the row carries `action` and
+// is drawn as a button — on the card and in the numbered rows alike.
+const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh now', note: 're-read every connected account now', checked: false, action: true }
 
 function ago(iso: string | undefined, now: Date): string {
   if (iso === undefined) return 'never read'
@@ -178,7 +184,7 @@ function menuRows(store: SourcesStore, now: Date): MenuRow[] {
 // (#231) — and the rows numbered, so a host without a list surface reads
 // the same menu and answers with numbers or names.
 function menuText(rows: readonly MenuRow[], results: readonly string[]): string {
-  const numbered = rows.map((row, i) => `>> ${i + 1}) [${row.checked ? 'x' : ' '}] ${row.label} - ${row.note}`)
+  const numbered = rows.map((row, i) => `>> ${i + 1}) ${row.action === true ? `( ${row.label} )` : `[${row.checked ? 'x' : ' '}] ${row.label}`} - ${row.note}`)
   return [QUESTION, ...mergeRows(results), ...numbered].join('\n')
 }
 

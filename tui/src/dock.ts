@@ -103,7 +103,7 @@ export function cardLines(text: string): CardLine[] {
 // width and chrome math replayed as a number. The raster layer needs it: a
 // kitty image sits ABOVE text cells, so while the card is up the sky's images
 // may keep the stage (dimmed) only where the card cannot reach.
-export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false): number {
+export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false): number {
   const width = Math.min(Math.floor(cols * 0.55), cols - 4)
   const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
   // A list card draws its rows from `options`; the text's own '>> ' rows are
@@ -116,7 +116,11 @@ export function cardRows(text: string, cols: number, kind: AskKind, options?: re
       line.role === 'ready' || line.role === 'gap' ? 4 : line.role === 'option' ? 3 : 0
     rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
   }
-  for (const option of options ?? []) rows += Math.max(1, Math.ceil(listRow(option).length / inner))
+  // A multi list stands on the apply row too, measured at its longest note:
+  // over-reserving a row only lifts the raster ceiling, under-reserving it
+  // would let an image sit on the card.
+  const drawn = options === undefined ? [] : listRows(options, multi, pickStart(options))
+  for (const option of drawn) rows += Math.max(1, Math.ceil(listRow(option).length / inner))
   if (facts) rows += 1 // the divider above the options
   // A consent checklist's choices are its own option rows; every other card
   // keeps the renderer's action row (a question's Enter hint stays even
@@ -137,14 +141,30 @@ export function cardRows(text: string, cols: number, kind: AskKind, options?: re
 // The first terminal row the card can touch: the card floats anchored to the
 // window's bottom rule (the quiet line that keeps the frame closed), so its
 // top is the window height minus its own rows. Rasters end above this.
-export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[], back = false): number {
-  return Math.max(1, height - 1 - cardRows(text, cols, kind, options, back))
+export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false): number {
+  return Math.max(1, height - 1 - cardRows(text, cols, kind, options, back, multi))
 }
 
-// One list row as the renderer lays it out: the cursor slot, the tick box,
-// the label, the note.
+// One list row as the renderer lays it out: the cursor slot, the tick box —
+// or, for an action row, the button that replaces it — the label, the note.
 export function listRow(option: AskOption): string {
-  return `  [${option.checked === true ? 'x' : ' '}] ${option.label}${option.note === undefined ? '' : `  ${option.note}`}`
+  const head = option.action === true ? `( ${option.label} )` : `[${option.checked === true ? 'x' : ' '}] ${option.label}`
+  return `  ${head}${option.note === undefined ? '' : `  ${option.note}`}`
+}
+
+// The submit the card was missing (spec 10 §3.2-D, user report): a multi
+// list closed on nothing that looked like a button, only a grey footer, so
+// what counted as submitting was a guess. The row is the CLIENT's own — it
+// never goes on the wire, and its key never goes back as an answer — and its
+// note is the state of the card, so Enter's cost is read where Enter is. A
+// single-pick card gets none: there Enter already means "take this row".
+export const APPLY_KEY = 'apply'
+export const APPLY_NOTHING = 'nothing changed — Enter leaves'
+
+export function listRows(options: readonly AskOption[], multi: boolean, pick: Pick): AskOption[] {
+  if (!multi) return [...options]
+  const changed = options.filter((o) => o.action !== true && (o.checked === true) !== pick.checked.includes(o.key)).length
+  return [...options, { key: APPLY_KEY, label: 'apply', action: true, note: changed === 0 ? APPLY_NOTHING : `${String(changed)} change${changed === 1 ? '' : 's'}` }]
 }
 
 // The list card's cursor and ticks (spec 10 §3.2-B, rows to tick): up/down move,
@@ -162,8 +182,11 @@ export function pickMove(pick: Pick, delta: number, count: number): Pick {
 }
 
 export function pickToggle(pick: Pick, options: readonly AskOption[], multi: boolean): Pick {
-  const key = options[pick.at]?.key
-  if (key === undefined) return pick
+  const row = options[pick.at]
+  // An action row is a button, not a state: Space on it is a press (app.tsx
+  // submits), never a tick, so the selection stands exactly as it was.
+  if (row === undefined || row.action === true) return pick
+  const key = row.key
   // A single-pick list always answers with one row: space MOVES the tick, it
   // never clears it. Clearing left the card with nothing chosen and Enter
   // answering '' — which the flow reads as the preselected row, handing back
@@ -172,8 +195,15 @@ export function pickToggle(pick: Pick, options: readonly AskOption[], multi: boo
   return { ...pick, checked: pick.checked.includes(key) ? pick.checked.filter((k) => k !== key) : [...pick.checked, key] }
 }
 
+// The ticked keys in row order — plus, when the cursor sits on an action row,
+// that row's key: pressing `( refresh now )` submits the ticks AND the
+// refresh, which is the same line the flow has always parsed. The client's
+// own apply row answers with the ticks alone; the engine never knew it.
 export function pickAnswer(pick: Pick, options: readonly AskOption[]): string {
-  return options.filter((o) => pick.checked.includes(o.key)).map((o) => o.key).join(' ')
+  const keys = options.filter((o) => o.action !== true && pick.checked.includes(o.key)).map((o) => o.key)
+  const here = options[pick.at]
+  if (here?.action === true && here.key !== APPLY_KEY) keys.push(here.key)
+  return keys.join(' ')
 }
 
 // What a submitted line becomes on the wire. While a question is docked,
