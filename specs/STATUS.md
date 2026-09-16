@@ -33,6 +33,7 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#264** (bug, eng) The /sources cards overflow 80x24 when an obstacle line is long — 26/27 rows against §3.1's 22.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#44** (eng) Cold-start talk repeats the same cozy imagery — absorbed by spec 13; closes on #202's first box.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
