@@ -69,7 +69,10 @@ describe('YouTube (spec 14 §2.8)', () => {
     expect(anon.released).toHaveLength(1)
   })
 
-  it('snapshots liked, history and subscriptions within the bounds', async () => {
+  // The listener's decision (spec 14 §2.3): a liked video is collected, not
+  // watched, so it is no longer taste — but :ytfav is still the call that
+  // names the account, so mounting and verify keep it.
+  it('snapshots history and the subscriptions feed, not the liked list, carrying every ref', async () => {
     const { deps, calls, released } = ytdlp({ ':ytfav': FAV, ':ythistory': HISTORY, ':ytsubs': SUBS })
     const source = new YouTubeSource({ browser: 'chrome' }, { ...deps, now: () => new Date('2026-09-06T10:00:00Z') })
     const snapshot = await source.snapshot()
@@ -77,19 +80,16 @@ describe('YouTube (spec 14 §2.8)', () => {
       source: 'youtube',
       takenAt: '2026-09-06T10:00:00.000Z',
       items: [
-        { kind: 'liked', title: 'Deep Bass Lo-Fi Jazz', artist: 'Midnight Haven Jazz', ref: 'https://www.youtube.com/watch?v=0wysL8y88HE' },
-        { kind: 'liked', title: 'Holocene', artist: 'Bon Iver', ref: 'https://www.youtube.com/watch?v=TWcyIpul8OE' },
         { kind: 'history', title: 'Bon Iver - Holocene - Official Video', ref: 'https://www.youtube.com/watch?v=TWcyIpul8OE' },
-        { kind: 'subscription', title: 'Sally Jo' },
+        { kind: 'subscription', title: 'Sally Jo', artist: 'Sally Jo', ref: 'https://www.youtube.com/channel/UCB' },
       ],
     })
     const ends = calls.map((c) => [c[c.indexOf('--playlist-end') + 1], c.at(-1)])
     expect(ends).toEqual([
-      ['500', ':ytfav'],
       ['200', ':ythistory'],
       ['100', ':ytsubs'],
     ])
-    expect(released).toHaveLength(3)
+    expect(released).toHaveLength(2)
   })
 
   it('a cookie that no longer logs in throws the typed failure from the snapshot', async () => {
@@ -115,64 +115,122 @@ function biliFetch(answers: Record<string, unknown>, status = 200): { fetch: Bil
   return { fetch, calls }
 }
 
-// Captured from the real API (2026-09-06), values kept, ids shortened.
+// Captured from the real API (nav/audio 2026-09-06, the watch and follow
+// reads 2026-09-16), values kept, ids shortened and Chinese titles replaced
+// (committed sources hold no CJK) — except tag_name, which is the category
+// under test: MUSIC_ZONE romanises as "guo chan yuan chuang xiang guan"
+// (Bilibili's original-music sub-zone), DANCE_ZONE as "jie wu" (street dance).
+const MUSIC_ZONE = '\u56fd\u4ea7\u539f\u521b\u76f8\u5173'
+const DANCE_ZONE = '\u8857\u821e'
 const NAV = { code: 0, data: { isLogin: true, uname: 'FAWineLL', mid: 4486056 } }
-const FOLDERS = { code: 0, data: { list: [{ id: 66275456, title: 'default folder', media_count: 287 }, { id: 3387798356, title: 'japan', media_count: 1 }, { id: 946277156, title: 'algorithms', media_count: 0 }] } }
-// The third row is a video the platform has since taken down (attr bit 1):
-// its title is the platform's placeholder, not the listener's taste.
-const FAVLIST = { code: 0, data: { medias: [{ title: 'A whole series in one go', upper: { name: 'Fries Says Film' }, duration: 18488, bvid: 'BV1c94y1q7br', fav_time: 1786337563, attr: 0 }, { title: 'A beginner guide', upper: { name: 'Takumi' }, duration: 1405, bvid: 'BV1MubUzkEfp', fav_time: 1785600894 }, { title: 'video no longer available', upper: { name: 'account deleted' }, bvid: 'BV1gone', fav_time: 1785000000, attr: 9 }], has_more: false } }
-const WATCHLATER = { code: 0, data: { count: 1, list: [{ title: 'Later', owner: { name: 'Someone' }, duration: 300, bvid: 'BV1later', add_at: 1786000000 }] } }
+const historyRow = (title: string, author: string, bvid: string, viewAt: number, tag: string): Record<string, unknown> => ({
+  title,
+  uri: `https://www.bilibili.com/video/${bvid}`,
+  history: { oid: 117240259156786, bvid, page: 1, business: 'archive', dt: 1 },
+  videos: 1,
+  author_name: author,
+  author_mid: 554434890,
+  view_at: viewAt,
+  progress: 120,
+  duration: 232,
+  tag_name: tag,
+})
+const HISTORY_PAGE_1 = {
+  code: 0,
+  data: {
+    cursor: { max: 117263277491939, view_at: 1789488107, business: 'archive', ps: 30 },
+    list: [historyRow('a city pop set', 'Night Tape', 'BV1qYYx6HEYD', 1789488255, MUSIC_ZONE), historyRow('Popping 1vs1 final', 'mklike', 'BV11qYB6TEea', 1789488123, DANCE_ZONE)],
+  },
+}
+const HISTORY_PAGE_2 = { code: 0, data: { cursor: { max: 0, view_at: 0, business: 'archive', ps: 30 }, list: [] } }
+const FOLLOWINGS = { code: 0, data: { total: 297, list: [{ mid: 3546624089393431, attribute: 2, mtime: 1789488105, uname: 'Purple Sword' }, { mid: 313310554, attribute: 2, mtime: 1789297816, uname: 'Cat Seven' }] } }
+const ATTENTION = { code: 0, data: { total: 297, list: [{ mid: 2137589551, attribute: 2, mtime: 1785426794, uname: 'Midnight Haven Jazz' }] } }
 const AUDIO = { code: 0, data: { curPage: 1, pageCount: 1, totalSize: 1, pageSize: 30, data: [{ id: 123, title: 'My upload', author: 'FAWineLL', duration: 200 }] } }
 
+// The favourites reads are gone from the snapshot, so a fetch fake that answers
+// by path needs one answer per page of the history cursor.
+function biliPages(answers: Record<string, unknown>, pages: Record<string, unknown[]> = {}): { fetch: BilibiliFetch; calls: Call[] } {
+  const seen = new Map<string, number>()
+  const base = biliFetch(answers)
+  const fetch: BilibiliFetch = async (url, init) => {
+    const u = new URL(String(url))
+    const key = Object.keys(pages).find((k) => u.pathname.endsWith(k))
+    if (key !== undefined) {
+      const n = seen.get(key) ?? 0
+      seen.set(key, n + 1)
+      base.calls.push({ url: String(url), headers: (init?.headers ?? {}) as Record<string, string> })
+      return new Response(JSON.stringify(pages[key]![Math.min(n, pages[key]!.length - 1)]), { status: 200 })
+    }
+    return base.fetch(url, init)
+  }
+  return { fetch, calls: base.calls }
+}
+
 describe('Bilibili (spec 14 §2.8)', () => {
-  it('the client answers who and the folders with the cookie, and reads as anonymous without one', async () => {
-    const { fetch, calls } = biliFetch({ '/x/web-interface/nav': NAV, '/x/v3/fav/folder/created/list-all': FOLDERS })
+  it('the client answers who with the cookie, and reads as anonymous without one', async () => {
+    const { fetch, calls } = biliFetch({ '/x/web-interface/nav': NAV })
     const client = new BilibiliClient({ cookie: async () => 'SESSDATA=<redacted>; DedeUserID=4486056', fetch })
     expect(await client.nav()).toEqual({ mid: '4486056', who: 'FAWineLL' })
     expect(calls[0]!.headers.Cookie).toContain('SESSDATA=<redacted>')
     expect(calls[0]!.headers.Referer).toBe('https://www.bilibili.com/')
-    expect(await client.folders('4486056')).toEqual([
-      { id: '66275456', title: 'default folder', count: 287 },
-      { id: '3387798356', title: 'japan', count: 1 },
-      { id: '946277156', title: 'algorithms', count: 0 },
-    ])
-    expect(calls[1]!.url).toContain('up_mid=4486056')
     const anon = new BilibiliClient({ cookie: async () => '', fetch: biliFetch({ '/x/web-interface/nav': { code: 0, data: { isLogin: false } } }).fetch })
     expect(await anon.nav()).toBeNull()
   })
 
-  it('snapshots the folder names, the favourites (newest first, dated), watch later and space audio', async () => {
-    const { fetch, calls } = biliFetch({
-      '/x/web-interface/nav': NAV,
-      '/x/v3/fav/folder/created/list-all': FOLDERS,
-      '/x/v3/fav/resource/list': FAVLIST,
-      '/x/v2/history/toview/web': WATCHLATER,
-      '/audio/music-service/web/song/upper': AUDIO,
-    })
+  // The listener's decision (spec 14 §2.3): what they watched and who they
+  // follow is the taste; what they collected into a folder is not.
+  it('snapshots the watch history with its category, the recent follows, the channels revisited — and no favourites', async () => {
+    const { fetch, calls } = biliPages(
+      { '/x/web-interface/nav': NAV, '/audio/music-service/web/song/upper': AUDIO },
+      { '/x/web-interface/history/cursor': [HISTORY_PAGE_1, HISTORY_PAGE_2], '/x/relation/followings': [FOLLOWINGS, ATTENTION] },
+    )
     const source = new BilibiliSource({ browser: 'chrome', mid: '4486056' }, { cookie: async () => 'x', fetch, now: () => new Date('2026-09-06T10:00:00Z') })
     expect(await source.verify()).toEqual({ ok: true, who: 'FAWineLL' })
     const snapshot = await source.snapshot()
     expect(snapshot.source).toBe('bilibili')
     expect(snapshot.items).toEqual([
-      { kind: 'playlist', title: 'default folder' },
-      { kind: 'playlist', title: 'japan' },
-      { kind: 'playlist', title: 'algorithms' },
-      { kind: 'favourite', title: 'A whole series in one go', artist: 'Fries Says Film', at: '2026-08-10T04:52:43.000Z', ref: 'https://www.bilibili.com/video/BV1c94y1q7br' },
-      { kind: 'favourite', title: 'A beginner guide', artist: 'Takumi', at: '2026-08-01T16:14:54.000Z', ref: 'https://www.bilibili.com/video/BV1MubUzkEfp' },
-      { kind: 'favourite', title: 'A whole series in one go', artist: 'Fries Says Film', at: '2026-08-10T04:52:43.000Z', ref: 'https://www.bilibili.com/video/BV1c94y1q7br' },
-      { kind: 'favourite', title: 'A beginner guide', artist: 'Takumi', at: '2026-08-01T16:14:54.000Z', ref: 'https://www.bilibili.com/video/BV1MubUzkEfp' },
-      { kind: 'favourite', title: 'Later', artist: 'Someone', at: '2026-08-06T07:06:40.000Z', ref: 'https://www.bilibili.com/video/BV1later' },
+      { kind: 'history', title: 'a city pop set', artist: 'Night Tape', at: '2026-09-15T16:04:15.000Z', category: MUSIC_ZONE, ref: 'https://www.bilibili.com/video/BV1qYYx6HEYD' },
+      { kind: 'history', title: 'Popping 1vs1 final', artist: 'mklike', at: '2026-09-15T16:02:03.000Z', category: DANCE_ZONE, ref: 'https://www.bilibili.com/video/BV11qYB6TEea' },
+      { kind: 'follows', title: 'Purple Sword', at: '2026-09-15T16:01:45.000Z', ref: 'https://space.bilibili.com/3546624089393431' },
+      { kind: 'follows', title: 'Cat Seven', at: '2026-09-13T11:10:16.000Z', ref: 'https://space.bilibili.com/313310554' },
+      { kind: 'frequents', title: 'Midnight Haven Jazz', at: '2026-07-30T15:53:14.000Z', ref: 'https://space.bilibili.com/2137589551' },
       { kind: 'liked', title: 'My upload', artist: 'FAWineLL', ref: 'https://www.bilibili.com/audio/au123' },
     ])
-    // An empty folder is not read; the two with contents are, one page each.
-    expect(calls.filter((c) => c.url.includes('/x/v3/fav/resource/list'))).toHaveLength(2)
+    expect(snapshot.items.some((i) => i.kind === 'playlist' || i.kind === 'favourite')).toBe(false)
+    // No folder is read at all any more.
+    expect(calls.some((c) => c.url.includes('/x/v3/fav/'))).toBe(false)
+    // The history is paged by the cursor the last page handed back; the two
+    // follow reads differ only by order_type, which is what "revisited" means.
+    const history = calls.filter((c) => c.url.includes('/history/cursor'))
+    expect(history).toHaveLength(2)
+    expect(history[0]!.url).not.toContain('max=')
+    expect(history[1]!.url).toContain('max=117263277491939')
+    expect(history[1]!.url).toContain('view_at=1789488107')
+    const follows = calls.filter((c) => c.url.includes('/x/relation/followings')).map((c) => c.url)
+    expect(follows[0]).toContain('vmid=4486056')
+    expect(follows[0]).not.toContain('order_type')
+    expect(follows[1]).toContain('order_type=attention')
   })
 
-  it('a 429 is rate limiting; a -101 mid-read is the login gone', async () => {
+  it('an expired cookie is the typed login failure on every new read', async () => {
+    const gone = (path: string): BilibiliClient =>
+      new BilibiliClient({ cookie: async () => 'x', fetch: biliFetch({ [path]: { code: -101, message: '<not logged in>' } }).fetch })
+    await expect(gone('/x/web-interface/history/cursor').history(10)).rejects.toMatchObject({ source: 'bilibili', reason: 'login-required' })
+    await expect(gone('/x/relation/followings').followings('1', 10, 'follows')).rejects.toMatchObject({ source: 'bilibili', reason: 'login-required' })
+    await expect(gone('/x/relation/followings').followings('1', 10, 'frequents')).rejects.toMatchObject({ source: 'bilibili', reason: 'login-required' })
     const busy = new BilibiliClient({ cookie: async () => 'x', fetch: biliFetch({}, 429).fetch })
-    await expect(busy.nav()).rejects.toMatchObject({ source: 'bilibili', reason: 'rate-limited' })
-    const gone = new BilibiliClient({ cookie: async () => 'x', fetch: biliFetch({ '/x/v3/fav/folder/created/list-all': { code: -101, message: '<not logged in>' } }).fetch })
-    await expect(gone.folders('1')).rejects.toMatchObject({ source: 'bilibili', reason: 'login-required' })
+    await expect(busy.history(10)).rejects.toMatchObject({ source: 'bilibili', reason: 'rate-limited' })
+    await expect(busy.followings('1', 10, 'follows')).rejects.toMatchObject({ source: 'bilibili', reason: 'rate-limited' })
+  })
+
+  // A shape murmur does not recognise is not an auth failure and must not be
+  // dressed as one: the read degrades to nothing, and the rest of the snapshot
+  // still reaches the digest.
+  it('a malformed body reads as no rows, never as a login problem', async () => {
+    const junk = { code: 0, data: { list: [{ nothing: 'useful' }, 42], cursor: 'not an object' } }
+    const { fetch } = biliPages({ '/x/web-interface/nav': NAV, '/audio/music-service/web/song/upper': AUDIO }, { '/x/web-interface/history/cursor': [junk], '/x/relation/followings': [junk] })
+    const source = new BilibiliSource({ browser: 'chrome', mid: '4486056' }, { cookie: async () => 'x', fetch, now: () => new Date('2026-09-06T10:00:00Z') })
+    expect((await source.snapshot()).items).toEqual([{ kind: 'liked', title: 'My upload', artist: 'FAWineLL', ref: 'https://www.bilibili.com/audio/au123' }])
   })
 })
 

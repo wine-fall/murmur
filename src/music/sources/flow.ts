@@ -138,6 +138,11 @@ function counts(store: SourcesStore, id: SourceId): string {
   const parts: string[] = []
   const liked = (by.get('liked') ?? 0) + (by.get('favourite') ?? 0)
   if (liked > 0) parts.push(`${liked} liked`)
+  const watched = by.get('history') ?? 0
+  if (watched > 0) parts.push(`${watched} watched`)
+  // 'frequents' is the same accounts in another order, so it is not added in.
+  const followed = by.get('follows') ?? 0
+  if (followed > 0) parts.push(`${followed} followed`)
   const playlists = by.get('playlist') ?? 0
   if (playlists > 0) parts.push(`${playlists} playlist${playlists === 1 ? '' : 's'}`)
   const tops = (by.get('top-artist') ?? 0) + (by.get('top-track') ?? 0)

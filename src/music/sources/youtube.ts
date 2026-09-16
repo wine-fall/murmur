@@ -1,7 +1,8 @@
 // YouTube as a taste source (spec 14 §2.8): yt-dlp reads the account's own
-// lists — liked (:ytfav), history (:ythistory), subscriptions (:ytsubs) —
-// with the browser's cookie, and the liked-videos playlist names the account
-// (its uploader is the listener). No client of murmur's own: yt-dlp is the
+// lists — history (:ythistory) and the subscriptions feed (:ytsubs) — with
+// the browser's cookie. The liked-videos playlist (:ytfav) is read for one
+// thing only: its uploader names the account. Its contents are collected, not
+// watched, so they are not taste (§2.3). No client of murmur's own: yt-dlp is the
 // whole transport, and a failure's stderr is read for the auth shape. The
 // cookie reaches each spawn as a leased jar (one store unlock per export,
 // not one per list), released as soon as the call returns.
@@ -88,16 +89,13 @@ export class YouTubeSource implements TasteSource {
   }
 
   async snapshot(): Promise<TasteSnapshot> {
-    const [liked, history, subs] = await Promise.all([
-      this.list(':ytfav', BOUNDS.liked),
-      this.list(':ythistory', BOUNDS.history),
-      this.list(':ytsubs', BOUNDS.subscription),
-    ])
+    const [history, subs] = await Promise.all([this.list(':ythistory', BOUNDS.history), this.list(':ytsubs', BOUNDS.subscription)])
     const items: TasteItem[] = [
-      ...liked.map((e): TasteItem => ({ kind: 'liked', title: e.title, ...(e.uploader !== '' && { artist: e.uploader }), ref: e.url })),
       // History rows carry no channel in the flat list; the title is the fact.
       ...history.map((e): TasteItem => ({ kind: 'history', title: e.title, ...(e.uploader !== '' && { artist: e.uploader }), ref: e.url })),
-      ...subs.map((e): TasteItem => ({ kind: 'subscription', title: e.title })),
+      // The subscriptions feed: what the channels they follow just put up, so
+      // the uploader and the ref travel with the title (spec 14 §2.3).
+      ...subs.map((e): TasteItem => ({ kind: 'subscription', title: e.title, ...(e.uploader !== '' && { artist: e.uploader }), ref: e.url })),
     ]
     return { source: 'youtube', takenAt: (this.deps.now ?? (() => new Date()))().toISOString(), items }
   }

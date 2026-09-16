@@ -55,8 +55,8 @@ importance:
 
   | source | taste read | search | play | how the listener mounts it |
   |---|---|---|---|---|
-  | **YouTube / YouTube Music** | liked (`:ytfav`), history (`:ythistory`), subscriptions | yes (exists) | yes (exists) | signs in to Chrome — the one source with no scan to offer |
-  | **Bilibili** | favourite folders, "watch later", space audio | yes (`bilisearch`) | yes | scans a code with the Bilibili app |
+  | **YouTube / YouTube Music** | history (`:ythistory`), the subscriptions feed (`:ytsubs`); `:ytfav` names the account only | yes (exists) | yes (exists) | signs in to Chrome — the one source with no scan to offer |
+  | **Bilibili** | watch history (with its category), accounts recently followed, accounts most visited, space audio | yes (`bilisearch`) | yes | scans a code with the Bilibili app |
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
@@ -181,11 +181,13 @@ type SourcesFile = {
 ```ts
 type TasteItem = {
   readonly kind: 'liked' | 'history' | 'top-track' | 'top-artist' | 'playlist' | 'favourite' | 'subscription' | 'daily'
-  readonly title: string          // track title, artist name, playlist/folder/channel name
+            | 'follows' | 'frequents'    // an account they recently followed / one they keep visiting
+  readonly title: string          // track title, artist name, playlist/channel name
   readonly artist?: string
   readonly album?: string
-  readonly at?: string            // ISO, when the platform says it was liked/played (if it says)
+  readonly at?: string            // ISO, when the platform says it was liked/played/watched (if it says)
   readonly ref?: string           // a URL the resolve path could play (cookie sources only)
+  readonly category?: string      // the platform's own category for a watched row (Bilibili's sub-zone)
 }
 type TasteSnapshot = {
   readonly source: SourceId       // 'youtube' | 'bilibili' | 'netease' | 'spotify' | 'qishui'
@@ -218,17 +220,57 @@ A pure function; same inputs, same output; unit-tested on fixtures. Shape
 
 ```
 ## What the listener keeps (as of 2026-09-06)
-Sources: NetEase (312 liked, 9 playlists), Spotify (top 50), YouTube (history 200)
-Artists they return to: Cheer Chen (41), Bon Iver (27), Ryuichi Sakamoto (19), …   ← top 25 by count across sources
-Recently kept: "Travel Is Meaningful" Cheer Chen · "Holocene" Bon Iver · …   ← 20 newest by `at`, then by source order
-Playlists: late drive, deep focus, Liked from Radio, …                   ← names only, ≤ 12
-Spotify says (top, medium term): artists — …; tracks — …                ← Spotify's own ranking, ≤ 10 each
+Sources: NetEase (312 liked, 9 playlists), Bilibili (history 200, 50 recently followed, 50 they go back to)
+Lately they have been listening to / watching: "..." Night Tape (<music sub-zone>) - "..." Chef Wang (<cooking sub-zone>) - ...
+Recently followed: Night Tape, Chef Wang, ...                            <- names only, <= 12
+Who they keep going back to: Midnight Haven Jazz, ...                    <- names only, <= 12
+Artists they return to: Cheer Chen (41), Bon Iver (27), ...              <- top 25 by count across sources
+Playlists: late drive, deep focus, Liked from Radio, ...                 <- names only, <= 12
+Songs they keep: "Travel Is Meaningful" Cheer Chen - "Holocene" Bon Iver <- 20 newest by `at`, then by source order
+Spotify says (top, medium term): artists - ...; tracks - ...             <- Spotify's own ranking, <= 10 each
 ```
+
+The layering is by what the signal IS, and its order is its priority: what
+the listener has been **watching** leads, then who they **recently
+followed**, then who they **keep going back to**, then the musical rows
+(artists, the playlist names they keep, the songs). Inside the watch layer a
+row whose category is one of the platform's music sub-zones sorts above one
+that is not, so a music-zone row outranks a cooking one; within each of those
+two ranks it is newest first.
+
+**Nothing collected is taste** (the listener's decision, 2026-09-16, taken on
+their own rendered digest): a Bilibili favourites folder is where a Java
+course, a recipe and an audiobook are filed, and it drowned everything
+musical in the block. So Bilibili's favourites folders, their contents and
+watch-later are not read at all, and YouTube's liked list is read only to
+name the account (its uploader), never for its items. What they watched and
+who they follow is the signal.
+
+The render enforces this on **any** snapshot, not only a freshly read one: a
+returning listener keeps yesterday's `bilibili.json` until the next refresh,
+so the render drops every `favourite` row, every Bilibili `playlist` row (a
+favourites folder) and YouTube's `liked` rows outright, counts included. The
+kinds stay in the union so an old file still parses; nothing produces them
+any more. A snapshot left with nothing to say drops out of the `Sources`
+line rather than standing there as an empty pair of brackets.
+
+**No one layer may eat the block**: each layer gets an equal share of what is
+left of the budget when its turn comes, and whatever it does not use rolls
+forward to the next. A layer that runs out of room ends at an item boundary
+with a trailing `...`. Without this, 200 watched rows with long titles filled
+all 1500 characters by themselves and the musical source beside them never
+reached the page (measured on the real snapshot, 2026-09-16).
+
+**Artist counts come from the musical rows alone** (`liked`, `favourite`,
+`top-artist`, `top-track`, `daily`): a watched video's uploader is not an
+artist and neither is a followed channel, or a Java course channel outranks
+every musician in "artists they return to".
 
 (The example above is romanised only because committed sources are
 English-only; the real digest keeps every value verbatim in its own script.)
 
-Rules: artist counts merge across sources by exact string after trim;
+Rules: artist counts merge across sources by exact string after trim (from
+the musical rows only, above);
 no translation, no romanisation; items whose `title` is empty are dropped;
 the block is cut to `budget` characters at a line boundary with a trailing
 `…`. With no snapshots it renders `''` and nothing is injected. Stale
@@ -432,13 +474,23 @@ empty answer from a minute ago.
   waiting · **86090** the phone has it · **0** confirmed, with `SESSDATA`,
   `bili_jct` and `DedeUserID` arriving as `Set-Cookie` · **86038** the code is
   spent. Verified against the live endpoints 2026-09-15.
-  Then `x/web-interface/nav` (who, `mid`) and
-  `x/v3/fav/folder/created/list-all` (folders); folder contents, watch-later
-  and space audio read from the same web APIs yt-dlp's extractors call
-  (*as built*: yt-dlp's flat output for these lists carries ids alone, and a
-  taste is titles — so the client reads the JSON directly; a favourite whose
-  `attr` bit 1 is set is a taken-down video and is dropped). Playback of a
-  favourite still goes through yt-dlp with the cookie (§2.5).
+  Then `x/web-interface/nav` (who, `mid`), and the taste reads, all from the
+  same web APIs yt-dlp's extractors call (yt-dlp's flat output for these
+  lists carries ids alone, and a taste is titles — so the client reads the
+  JSON directly). Verified against the live endpoints 2026-09-16:
+  `x/web-interface/history/cursor?ps=30&business=archive` — the watch
+  history, newest first, each row carrying the title, `author_name`,
+  `view_at` and `tag_name`, which is Bilibili's own sub-zone and becomes the
+  item's `category`; the next page is asked for with the `max` and `view_at`
+  the last page's `cursor` handed back.
+  `x/relation/followings?vmid=<mid>&ps=50&pn=1` — the accounts followed, the
+  platform's default order being follow-time descending (`uname`, `mtime`,
+  `mid`) → `follows`; the same read with `&order_type=attention` is ordered
+  by how often the listener visits them → `frequents`.
+  `audio/music-service/web/song/upper` — the account's own audio uploads.
+  The favourites folders, their contents and watch-later are **not** read
+  (§2.3: collected is not taste). Playback still goes through yt-dlp with
+  the cookie (§2.5).
 - **`spotify.ts`** — OAuth 2.0 **PKCE** (no client secret) against the
   listener's own registered app (`clientId`); local redirect
   `http://127.0.0.1:39917/callback` (*as built*: a registered redirect URI
@@ -892,7 +944,8 @@ where a pick came from only when it is theirs ("one you've kept").
 
 Per source per snapshot: liked/collection ≤ 500 newest, history ≤ 200,
 playlists ≤ 50 names (contents are not snapshotted except NetEase's liked
-playlist, which *is* the liked list), top lists ≤ 50, subscriptions ≤ 100.
+playlist, which *is* the liked list), top lists ≤ 50, subscriptions ≤ 100,
+followed accounts ≤ 50 per order (recently followed, most visited).
 Digest ≤ 1500 chars (§2.3). A snapshot file over 1 MB is a bug.
 
 ### 3.6 Privacy and the dev log
