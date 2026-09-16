@@ -66,7 +66,7 @@ export function backInline(kind: AskKind, lines: readonly CardLine[], options: r
 export type CardLine = { text: string; role: 'main' | 'ready' | 'gap' | 'note' | 'option' }
 
 // Card hierarchy from the ask text alone (zero wire additions): the first
-// line is the sentence being asked, checklist rows carry ASCII role markers
+// plain line is the sentence being asked, checklist rows carry ASCII role markers
 // ('ok ' ready / '-- ' gap / '>> ' option — one choice per line, so the
 // answer keys read as choices) the renderer colors and drops, and everything
 // else is a quieter note.
@@ -77,7 +77,10 @@ export function cardLines(text: string): CardLine[] {
     if (raw.startsWith('ok ')) lines.push({ text: raw.slice(3), role: 'ready' })
     else if (raw.startsWith('-- ')) lines.push({ text: raw.slice(3), role: 'gap' })
     else if (raw.startsWith('>> ')) lines.push({ text: raw.slice(3), role: 'option' })
-    else if (lines.length === 0) {
+    // The main line is the card's first plain sentence, wherever it sits: the
+    // /sources sign-in card leads with the results of the mounts already run
+    // (spec 14 §3.1), and its question still carries the light.
+    else if (!lines.some((l) => l.role === 'main')) {
       // The opening line splits at its first question mark (ref B1): the lead
       // sentence carries the light, the detail after it steps back.
       const cut = raw.indexOf('? ')

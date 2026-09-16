@@ -203,6 +203,14 @@ describe('cardLines', () => {
     expect(lines[2]!.text).toBe('voice - silent')
   })
 
+  // The /sources sign-in card leads with what the submit already did (spec 14
+  // §3.1), so the question is no longer the card's first line — and a card
+  // whose only question renders as a dim note inverts its own hierarchy.
+  it('the question is the main line even when result rows lead the card', () => {
+    const lines = cardLines('ok connected YouTube — signed in as Zach G · 312 liked\nHow should I sign in to NetEase?\nsigned in to the wrong account there?\n>> 1) [x] scan with the NetEase Cloud Music app')
+    expect(lines.map((l) => l.role)).toEqual(['ready', 'main', 'note', 'option'])
+  })
+
   it('blank lines vanish instead of rendering empty card rows', () => {
     expect(cardLines('a\n\nb').map((l) => l.text)).toEqual(['a', 'b'])
   })

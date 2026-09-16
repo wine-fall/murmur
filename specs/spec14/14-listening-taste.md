@@ -877,7 +877,9 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   changed + Enter = done.**
   Esc on the menu leaves without touching anything; so does a front-end
   going away (the reader's EOF `''`) — neither is an empty selection.
-- **Every result lands IN the next card** as a ready/gap row that leads
+- **Every result lands IN the next card** — the menu when the submit is over,
+  and the **sign-in card of the next source when it is not** (*added
+  2026-09-16*; see "How do I sign in?" below) — as a ready/gap row that leads
   with what happened — `connected` / `could not connect` / `disconnected` /
   `refreshed` / `could not refresh` — then the mount flow's own words:
   `ok connected NetEase — signed in as Chen X · 312 liked`, `-- could not
@@ -899,12 +901,23 @@ submit but Soda Music's, one single-select card comes first (`ask` with
 `options`, `multi: false` — 10 §3.2-B), and its answer picks the road:
 
 ```
+ok connected YouTube — signed in as Zach G · 312 liked, 4 playlists
 How should I sign in to NetEase?
 signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.
 >> 1) [x] scan with the NetEase Cloud Music app
 >> 2) [ ] Chrome — Work (zach.guo@opus.pro)
 >> 3) [ ] Chrome — Personal (fawinell@gmail.com)
 ```
+
+- **What this submit has already done leads the card** — *added 2026-09-16*.
+  The rows accumulated so far (unmounts, refreshes, the mounts already run)
+  ride above the question, merged by the same rule the menu uses, ready rows
+  and gap rows on one road. A submit that connects two sources used to show
+  the first one's result only when the menu came back: while the second
+  source's card filled the screen, `ok connected YouTube …` sat in the log the
+  card floats over, dimmed and covered — the #231 failure mode again, one card
+  further in (user report, 2026-09-16). The menu keeps its own behaviour: the
+  last source's result still lands there.
 
 - **QQ Music's card says what it can play**, before either road runs, so the
   line frames the result whichever way the listener signs in: *"QQ Music plays

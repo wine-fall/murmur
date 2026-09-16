@@ -321,10 +321,15 @@ export function signInRows(id: SourceId, list: readonly ChromeProfileInfo[], pre
   return rows
 }
 
-// The card's text, for a front-end with no list surface: the question, the
-// note, and the same rows numbered — the shape every other menu here uses.
-export function signInText(id: SourceId, rows: readonly SignInRow[]): string {
+// The card's text, for a front-end with no list surface: what this submit
+// has done so far, the question, the note, and the same rows numbered — the
+// shape every other menu here uses. The results lead, because this card fills
+// the screen and the TUI floats it over the log: a YouTube mount that landed
+// while the Bilibili card was up was only ever visible in the dimmed log
+// underneath it (user report, 2026-09-16).
+export function signInText(id: SourceId, rows: readonly SignInRow[], done: readonly string[] = []): string {
   return [
+    ...mergeRows(done),
     `How should I sign in to ${SOURCE_NAMES[id]}?`,
     SIGN_IN_NOTE,
     ...rows.map((row, i) => `>> ${i + 1}) [${row.checked === true ? 'x' : ' '}] ${row.label}`),
@@ -346,7 +351,14 @@ function parseSignIn(line: string, rows: readonly SignInRow[]): SignInRow | stri
 // Ask, and re-ask a line that names no row. Null = the listener stopped
 // (Esc, a front-end that left, or /quit): nothing is mounted and nothing is
 // written, exactly as an Esc on the menu behind it.
-async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, previous: string | undefined, cancelled: () => boolean): Promise<SignIn | null> {
+async function askSignIn(
+  deps: SourcesFlowDeps,
+  read: () => Promise<string>,
+  id: SourceId,
+  previous: string | undefined,
+  cancelled: () => boolean,
+  done: readonly string[],
+): Promise<SignIn | null> {
   const { host } = deps
   const pinned = (deps.store.read()[id] as { profile?: string } | undefined)?.profile
   // A source that can scan and carries no browser pin opens on its scan row;
@@ -356,7 +368,7 @@ async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id:
   // The row's own road stays here; the wire carries the option alone.
   const options: AskOption[] = rows.map(({ choice: _choice, ...option }) => option)
   for (;;) {
-    ask(host, signInText(id, rows), 'question', { options, multi: false })
+    ask(host, signInText(id, rows, done), 'question', { options, multi: false })
     const picked = parseSignIn(await read(), rows)
     if (cancelled() || deps.quit.requested) return null
     if (typeof picked !== 'string') return picked.choice
@@ -484,12 +496,12 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       const chosen: Chosen = {}
       for (const id of toRenew) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen, results))
       }
       if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
       for (const id of toMount) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen, results))
       }
     }
   } finally {
@@ -509,6 +521,7 @@ async function mountOne(
   cancelled: () => boolean,
   step: Step,
   chosen: Chosen,
+  done: readonly string[],
 ): Promise<string> {
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
@@ -519,7 +532,7 @@ async function mountOne(
   if (id === 'qqmusic') recorded.host.info(QQMUSIC_VIP_NOTE)
   if (id === 'qishui') await mountQrFlow(recorded, id, cancelled, step)
   else {
-    const how = await askSignIn(recorded, read, id, chosen.profile, cancelled)
+    const how = await askSignIn(recorded, read, id, chosen.profile, cancelled, done)
     if (how === null) return stoppedRow(id)
     if (how.kind === 'chrome') chosen.profile = how.profile
     if (how.kind === 'scan') await mountQrFlow(recorded, id as QrSource, cancelled, step)
