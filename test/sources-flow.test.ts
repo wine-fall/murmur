@@ -91,6 +91,7 @@ function build(
       }
       return spotifyOutcome === 'timeout' ? { ok: false, reason: 'timeout' } : { ok: true, who: 'Listener', entry: { clientId, refreshToken: 'r', accessToken: 'a', expiresAt: 'x' } }
     },
+    qqmusic: async (show) => (show('https://open.weixin.qq.com/connect/confirm?uuid=u'), mounted.push('qqmusic:qr'), { ok: true, who: 'Wine', entry: { auth: 'qr', cookie: 'uin=1; qm_keyst=<redacted>; euin=e' } }),
     qishui: async (show, cancelled) => {
       show('https://example.com/qr')
       mounted.push('qishui')

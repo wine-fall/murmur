@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError } from '../src/music/sources/auth.ts'
-import { credentialFrom, mountQQMusic, QQMusicClient, type QQMusicFetch, QQMusicSource } from '../src/music/sources/qqmusic.ts'
+import { credentialFrom, mountQQMusic, mountQQMusicQr, QQMusicClient, type QQMusicFetch, QQMusicSource } from '../src/music/sources/qqmusic.ts'
 
 type Call = { url: string; body: { comm: Record<string, unknown>; req: { module: string; method: string; param: Record<string, unknown> } }; headers: Record<string, string> }
 
@@ -179,18 +179,25 @@ describe('QQMusicClient', () => {
 
   // The timeout has to cover the BODY: fetch resolves on the headers, so a
   // response that stalls mid-body would hang the foreground mount and leave
-  // the background refresh unable to finish (codex review).
-  it('times out a response whose body never arrives, not just its headers', async () => {
-    const stalled: QQMusicFetch = async (_url, init) =>
-      new Response(
+  // the background refresh unable to finish (codex review). And rejecting is
+  // not enough — the request itself must be ABORTED, or every stalled read
+  // leaks its connection while the scan loop keeps polling (codex review).
+  it('times out a response whose body never arrives, and aborts the request with it', async () => {
+    const signals: AbortSignal[] = []
+    const stalled: QQMusicFetch = async (_url, init) => {
+      if (init?.signal != null) signals.push(init.signal)
+      return new Response(
         new ReadableStream({
           start(controller) {
             init?.signal?.addEventListener('abort', () => controller.error(new Error('aborted')))
           },
         }),
       )
+    }
     const c = new QQMusicClient({ cookie: async () => COOKIE, fetch: stalled, timeoutMs: 20 })
     await expect(c.account()).rejects.toThrow()
+    expect(signals.length).toBeGreaterThan(0)
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
   })
 
   it('retries a network error once, never an auth answer', async () => {
@@ -250,5 +257,153 @@ describe('QQMusicSource', () => {
   it('verify reports the lost login rather than throwing', async () => {
     const { fetch } = fakeFetch({ ...ALL, 'music.UserInfo.userInfoServer.GetLoginUserInfo': { code: 1000, data: {} } })
     expect(await new QQMusicSource({ cookie: async () => COOKIE, fetch }).verify()).toEqual({ ok: false, reason: 'login-required' })
+  })
+})
+
+// The WeChat scan road (spec 14 §2.10): shapes captured from a real scan on
+// 2026-09-16 against the live endpoints, values redacted.
+describe('the WeChat scan', () => {
+  const PAGE = '<html>…<img class="qrcode lightBorder" src="/connect/qrcode/041Fea9a2Wq1ll2U">…uuid=041Fea9a2Wq1ll2U"…</html>'
+  const body = (errcode: number, code = ''): string => `window.wx_errcode=${errcode};window.wx_code='${code}';`
+
+  // The exchange's answer, as the live service spells it: ~36 keys, of which
+  // five matter. `musicid` is the trap — see the test below.
+  const LOGIN = {
+    code: 0,
+    data: {
+      errMsg: 'OK',
+      musicid: 1152921504873944000,
+      str_musicid: '1152921504873943987',
+      musickey: '<redacted-key>',
+      encryptUin: '<redacted-euin>',
+      // Blank on the live service — the name comes from the credential's own
+      // first read, not from the exchange (see the mount tests below).
+      nick: '',
+      openid: '<redacted-openid>',
+      refresh_token: '<redacted-refresh>',
+      refresh_key: '',
+      expired_at: 1789550390,
+    },
+  }
+
+  // A fetch that answers each of the three hosts the scan talks to.
+  function scanFetch(over: { poll?: string[]; login?: unknown; reads?: Record<string, unknown> } = {}): { fetch: QQMusicFetch; urls: string[] } {
+    const urls: string[] = []
+    const polls = [...(over.poll ?? [body(405, '<redacted-wx-code>')])]
+    const fetch: QQMusicFetch = async (url: string, init?: RequestInit) => {
+      urls.push(String(url))
+      if (String(url).includes('/connect/qrconnect')) return new Response(PAGE)
+      if (String(url).includes('/connect/l/qrconnect')) return new Response(polls.length > 1 ? polls.shift()! : polls[0]!)
+      const posted = JSON.parse(String(init?.body ?? '{}')) as { req?: { module?: string; method?: string } }
+      const which = `${posted.req?.module}.${posted.req?.method}`
+      if (which === 'music.login.LoginServer.Login') return new Response(JSON.stringify({ code: 0, req: over.login ?? LOGIN }))
+      const reads: Record<string, unknown> = { ...ALL, ...over.reads }
+      return new Response(JSON.stringify({ code: 0, req: reads[which] ?? { code: 2000, data: {} } }))
+    }
+    return { fetch, urls }
+  }
+
+  it('issues a code whose URL is the confirm page the QR image encodes', async () => {
+    const { fetch, urls } = scanFetch()
+    const issued = await new QQMusicClient({ cookie: async () => '', fetch }).wxQrCode()
+    // Decoded from the real image with CoreImage — murmur draws this string
+    // itself rather than showing the JPEG the platform serves.
+    expect(issued).toEqual({ uuid: '041Fea9a2Wq1ll2U', url: 'https://open.weixin.qq.com/connect/confirm?uuid=041Fea9a2Wq1ll2U' })
+    expect(urls[0]).toContain('appid=wx48db31d50e334801')
+    expect(urls[0]).toContain('scope=snsapi_login')
+  })
+
+  it('reads the poll codes: 408 waiting, 404 scanned, 405 confirmed with the code', async () => {
+    const poll = async (answer: string) => {
+      const { fetch } = scanFetch({ poll: [answer] })
+      return new QQMusicClient({ cookie: async () => '', fetch }).wxQrPoll('u')
+    }
+    expect(await poll(body(408))).toEqual({ status: 'waiting' })
+    expect(await poll(body(404))).toEqual({ status: 'scanned' })
+    expect(await poll(body(405, '<redacted-wx-code>'))).toEqual({ status: 'confirmed', value: '<redacted-wx-code>' })
+    // 402 / 403 were never reached in the capture, so they are not claimed:
+    // an unknown code reads as waiting and the loop's deadline ends it.
+    expect(await poll(body(402))).toEqual({ status: 'waiting' })
+    // A confirmation with no code is not a sign-in.
+    expect(await poll(body(405))).toEqual({ status: 'waiting' })
+  })
+
+  // A rate limit is not a quiet wait: swallowed as one, the loop would keep
+  // hammering a service that just said to stop, for three minutes, and then
+  // tell the listener the code expired (codex review).
+  it('a rate-limited poll is the typed failure, not another silent wait', async () => {
+    const limited: QQMusicFetch = async () => new Response('', { status: 429 })
+    await expect(new QQMusicClient({ cookie: async () => '', fetch: limited }).wxQrPoll('u')).rejects.toMatchObject({
+      source: 'qqmusic',
+      reason: 'rate-limited',
+    })
+  })
+
+  it('a poll the service answers with a server error is raised, not read as waiting', async () => {
+    const broken: QQMusicFetch = async () => new Response('', { status: 503 })
+    await expect(new QQMusicClient({ cookie: async () => '', fetch: broken }).wxQrPoll('u')).rejects.toThrow(/503/)
+  })
+
+  it('a long poll that times out reads as waiting, so an Esc is not held for it', async () => {
+    const stalled: QQMusicFetch = async (_url, init) =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(new Error('aborted')))
+          },
+        }),
+      )
+    expect(await new QQMusicClient({ cookie: async () => '', fetch: stalled, timeoutMs: 20 }).wxQrPoll('u')).toEqual({ status: 'waiting' })
+  })
+
+  // The account number is 19 digits; JSON.parse rounds it through a double,
+  // so `musicid` comes back as ...944000 for a real uin of ...943987. Reads
+  // addressed with that number target an account that does not exist.
+  it('takes the account number from str_musicid, never from the rounded musicid', async () => {
+    const { fetch } = scanFetch()
+    const signedIn = await new QQMusicClient({ cookie: async () => '', fetch }).wxLogin('<redacted-wx-code>')
+    const jar = credentialFrom(signedIn.cookie)
+    expect(jar).toEqual({ uin: '1152921504873943987', euin: '<redacted-euin>', key: '<redacted-key>' })
+    expect(signedIn.cookie).not.toContain('1152921504873944000')
+  })
+
+  it('the exchange fails as a login failure, not a plain error, when the code is spent', async () => {
+    const { fetch } = scanFetch({ login: { code: 1000, data: {} } })
+    await expect(new QQMusicClient({ cookie: async () => '', fetch }).wxLogin('spent')).rejects.toMatchObject({ source: 'qqmusic', reason: 'login-required' })
+  })
+
+  it('mounts the scanned account into the credential-bearing arm, and nothing else', async () => {
+    const { fetch } = scanFetch()
+    const shown: string[] = []
+    const result = await mountQQMusicQr({ fetch }, { show: (url) => shown.push(url), sleep: async () => {} })
+    // The exchange's own `nick` is blank on the live service, so the name
+    // comes from reading the account with the credential just minted — which
+    // also proves that credential signs in before anything is mounted.
+    expect(result).toMatchObject({ ok: true, who: 'Wine' })
+    expect(shown).toEqual(['https://open.weixin.qq.com/connect/confirm?uuid=041Fea9a2Wq1ll2U'])
+    const entry = (result as { entry: { auth: string; cookie: string } }).entry
+    expect(entry.auth).toBe('qr')
+    // The whole entry is the credential: no browser, no profile to read.
+    expect(Object.keys(entry).sort()).toEqual(['auth', 'cookie'])
+    expect(credentialFrom(entry.cookie)?.uin).toBe('1152921504873943987')
+  })
+
+  it('a scanned mount reads the same lists as a browser one, through the same client', async () => {
+    const { fetch } = scanFetch()
+    const mounted = await mountQQMusicQr({ fetch }, { show: () => {}, sleep: async () => {} })
+    const cookie = (mounted as { entry: { cookie: string } }).entry.cookie
+    const source = new QQMusicSource({ cookie: async () => cookie, fetch: fakeFetch(ALL).fetch, now: () => new Date('2026-09-16T10:00:00Z') })
+    const snapshot = await source.snapshot()
+    expect(snapshot.items.filter((i) => i.kind === 'liked').map((i) => i.title)).toEqual(['Hua', 'What You Made Me'])
+  })
+
+  it('a minted credential that does not sign in is refused, not mounted blank', async () => {
+    const { fetch } = scanFetch({ reads: { 'music.UserInfo.userInfoServer.GetLoginUserInfo': { code: 1000, data: {} } } })
+    expect(await mountQQMusicQr({ fetch }, { show: () => {}, sleep: async () => {} })).toEqual({ ok: false, reason: 'login-required' })
+  })
+
+  it('a listener who never scans gets a timeout, and nothing is mounted', async () => {
+    const { fetch } = scanFetch({ poll: [body(408)] })
+    expect(await mountQQMusicQr({ fetch }, { show: () => {}, sleep: async () => {}, timeoutMs: 0 })).toEqual({ ok: false, reason: 'timeout' })
   })
 })

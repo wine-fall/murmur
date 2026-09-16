@@ -45,8 +45,8 @@ export type SpotifyHooks = { onRedirect: (uri: string) => void; onUrl: (url: str
 
 // The four sources that can be read out of a browser's cookie store.
 // NetEase and Bilibili can also be scanned; YouTube cannot (issue #221) and
-// QQ Music has no scan road in this build (spec 14 §2.10), so for those two
-// this is the only road.
+// QQ Music can also be scanned, with WeChat (spec 14 §2.10); YouTube cannot
+// (issue #221), so for it this is the only road.
 export type BrowserMounts = {
   youtube(b: BrowserPick): Promise<MountResult<YouTubeEntry>>
   netease(b: BrowserPick): Promise<MountResult<NeteaseEntry>>
@@ -62,6 +62,7 @@ export type SourceMounts = {
   netease(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<NeteaseEntry>>
   spotify(clientId: string, hooks: SpotifyHooks): Promise<SpotifyMountResult>
   qishui(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QishuiMountResult>
+  qqmusic(show: QrShow, cancelled: () => boolean, onStatus: QrOnStatus): Promise<QrMountResult<QQMusicEntry>>
 }
 
 // Where the code's URL goes (the flow draws it), and what the wait is
@@ -97,12 +98,12 @@ export type SourcesFlowDeps = {
 // The sources a browser's cookie store can mount.
 type CookieSource = keyof BrowserMounts
 // The three that sign in by scanning a code with the platform's own app.
-const QR_SOURCES = ['netease', 'bilibili', 'qishui'] as const
+const QR_SOURCES = ['netease', 'bilibili', 'qishui', 'qqmusic'] as const
 type QrSource = (typeof QR_SOURCES)[number]
-// The two that can go either way, and so are the ones the card is a real
+// The three that can go either way, and so are the ones the card is a real
 // question for. Soda Music has no browser road at all (its entry is minted by
 // the scan itself), so it is never asked; YouTube has no scan.
-const BOTH_ROADS = ['netease', 'bilibili'] as const
+const BOTH_ROADS = ['netease', 'bilibili', 'qqmusic'] as const
 
 // What a plain-host listener may type for a row, besides its number.
 const NAMES: Record<string, MenuKey> = {
@@ -283,6 +284,9 @@ const SCAN_ROWS: Record<QrSource, string> = {
   netease: 'scan with the NetEase Cloud Music app',
   bilibili: 'scan with the Bilibili app',
   qishui: 'scan with the Douyin app',
+  // WeChat, not QQ: the code is issued on the WeChat open platform, and a QQ
+  // app pointed at it simply will not take.
+  qqmusic: 'scan with WeChat',
 }
 
 // The rows: the scan first where there is one — it is the road that needs no
@@ -361,6 +365,8 @@ const QR_LINES: Record<QrSource, string> = {
   bilibili: "Bilibili signs in with a scan: open the Bilibili app, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
   qishui:
     "Soda Music signs in with a Douyin scan: open the Douyin app, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
+  qqmusic:
+    "QQ Music signs in with a WeChat scan: open WeChat, scan the code on screen, and confirm there. I'll wait up to three minutes (Esc cancels).",
 }
 
 // Which app the card's title names — a code with the wrong app pointed at it
@@ -369,6 +375,7 @@ const QR_APPS: Record<QrSource, string> = {
   netease: 'the NetEase Cloud Music app',
   bilibili: 'the Bilibili app',
   qishui: 'Douyin',
+  qqmusic: 'WeChat',
 }
 
 // The notice card's footer: what is being waited on, then the way out.
@@ -497,6 +504,9 @@ async function mountOne(
   const recorded = { ...deps, host: recording(deps.host, notes) }
   // Soda Music has one road and is asked nothing: its entry is minted by the
   // scan itself, so there is no browser to offer and a one-row card is noise.
+  // Said before either road runs, so it frames the result whichever way the
+  // listener signs in.
+  if (id === 'qqmusic') recorded.host.info(QQMUSIC_TASTE_ONLY)
   if (id === 'qishui') await mountQrFlow(recorded, id, cancelled, step)
   else {
     const how = await askSignIn(recorded, read, id, chosen.profile, cancelled)
@@ -553,7 +563,6 @@ async function mountCookieFlow(
   // The profile the listener picked on the card, pinned into the entry by the
   // mount and read by every refresh after it — never resolved a second time.
   const pick = { browser: CHROME, profile }
-  if (id === 'qqmusic') host.info(QQMUSIC_TASTE_ONLY)
   host.info(`checking ${site} in Chrome...`)
   type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry | QQMusicEntry>
   const attempt = async (): Promise<CookieMount | null> => {
@@ -666,7 +675,7 @@ async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () =>
   const title = `${step.of > 1 ? `${step.at}/${step.of} ` : ''}${name} — scan with ${QR_APPS[id]}`
   // Kept so the status change can redraw the same code under a new footer.
   let code: readonly string[] = []
-  let result: QrMountResult<NeteaseEntry> | QrMountResult<BilibiliEntry> | QishuiMountResult
+  let result: QrMountResult<NeteaseEntry> | QrMountResult<BilibiliEntry> | QrMountResult<QQMusicEntry> | QishuiMountResult
   try {
     result = await deps.mounts[id](
       (url) => {
@@ -702,6 +711,7 @@ async function mountQrFlow(deps: SourcesFlowDeps, id: QrSource, cancelled: () =>
   if (cancelled() || deps.quit.requested) return
   if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
   else if (id === 'bilibili') await finishMount(deps, 'bilibili', result.who, result.entry as BilibiliEntry)
+  else if (id === 'qqmusic') await finishMount(deps, 'qqmusic', result.who, result.entry as QQMusicEntry)
   else await finishMount(deps, 'qishui', result.who, result.entry as QishuiEntry)
 }
 

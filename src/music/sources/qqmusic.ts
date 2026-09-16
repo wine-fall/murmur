@@ -19,6 +19,7 @@
 import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
+import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
 import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
@@ -34,6 +35,28 @@ const LIKED_DIR_ID = 201
 // The codes a lost login answers with, and the one for "slow down".
 const LOGIN_CODES = new Set([1000, 104401, 104400])
 const RATE_LIMITED_CODE = 104604
+
+// The WeChat scan (spec 14 §2.10). QQ Music's own app id on the WeChat open
+// platform, and the page that hands out a code for it.
+const WX_APPID = 'wx48db31d50e334801'
+const WX_REDIRECT = 'https://y.qq.com/portal/wx_redirect.html?login_type=2&surl=https://y.qq.com/'
+const WX_QRCONNECT = 'https://open.weixin.qq.com/connect/qrconnect'
+// What the code image encodes — decoded from the served JPEG, so murmur draws
+// the string itself and never has to show a fetched picture.
+const WX_CONFIRM = 'https://open.weixin.qq.com/connect/confirm?uuid='
+const WX_POLL = 'https://lp.open.weixin.qq.com/connect/l/qrconnect'
+// The poll is a long one — the platform holds it ~15 s. It gets its own,
+// shorter patience: the scan loop only hears a stop between polls, so a
+// listener pressing Esc must not wait out the platform's hold. A poll that
+// times out reads as waiting, which is what it was.
+const WX_POLL_MS = 12_000
+// The poll's own answers: waiting, the phone has it, and confirmed. 402 and
+// 403 (expired, refused) were never reached in the capture, so they are not
+// claimed here — an unknown code reads as waiting, and the scan loop's own
+// deadline is what ends it.
+const WX_WAITING = 408
+const WX_SCANNED = 404
+const WX_CONFIRMED = 405
 
 export type QQMusicFetch = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -89,6 +112,16 @@ const SongSchema = z.object({
   album: z.object({ name: z.string().optional() }).nullish(),
 })
 const FavouritesSchema = z.object({ v_list: z.array(z.object({ name: z.string() })).nullish() })
+// The scan's exchange answers with some three dozen keys; these five are the
+// whole of what a mount needs. `str_musicid` is NOT interchangeable with
+// `musicid`: the account number is 19 digits, and JSON.parse rounds it
+// through a double (a real uin of ...943987 comes back as ...944000), so
+// reads addressed with the number would target an account that is not there.
+const LoginSchema = z.object({
+  str_musicid: z.string(),
+  musickey: z.string(),
+  encryptUin: z.string(),
+})
 
 export type QQMusicPlaylist = { id: string; name: string; songCount: number; liked: boolean }
 
@@ -180,6 +213,76 @@ export class QQMusicClient {
     return (FavouritesSchema.parse(data).v_list ?? []).map((list) => list.name.trim()).filter((name) => name !== '')
   }
 
+  // The code to draw (spec 14 §2.10): the platform serves a JPEG, but what
+  // matters is the string inside it, which the confirm URL reproduces.
+  async wxQrCode(): Promise<{ uuid: string; url: string }> {
+    const query = new URLSearchParams({
+      appid: WX_APPID,
+      redirect_uri: WX_REDIRECT,
+      response_type: 'code',
+      scope: 'snsapi_login',
+      state: 'state',
+      login_type: 'jssdk',
+      self_redirect: 'default',
+    })
+    const page = await this.text(`${WX_QRCONNECT}?${query}`, WX_QRCONNECT)
+    if (page.text === undefined) throw new Error(`qqmusic wechat qrconnect: HTTP ${page.status}`)
+    const uuid = /uuid=([A-Za-z0-9_-]+)/.exec(page.text)?.[1]
+    if (uuid === undefined) throw new Error('qqmusic wechat qrconnect: no uuid in the page')
+    return { uuid, url: `${WX_CONFIRM}${uuid}` }
+  }
+
+  // One long poll. Its whole answer is a pair of assignments in a script body.
+  async wxQrPoll(uuid: string): Promise<QrPoll<string>> {
+    let answer: { status: number; text?: string }
+    try {
+      answer = await this.text(`${WX_POLL}?uuid=${encodeURIComponent(uuid)}&_=${Date.now()}`, 'https://open.weixin.qq.com/', this.deps.timeoutMs ?? WX_POLL_MS, false)
+    } catch {
+      // Aborted at our own patience, or the network blinked: still waiting,
+      // which is what it was. Only THIS is read as a quiet wait.
+      return { status: 'waiting' }
+    }
+    // A refusal from the service is not a quiet wait. Swallowed as one, the
+    // loop would keep asking a service that just said to stop for the whole
+    // three minutes, and then report the code as expired.
+    if (answer.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', 'HTTP 429 on the WeChat poll')
+    if (answer.text === undefined) throw new Error(`qqmusic wechat poll: HTTP ${answer.status}`)
+    const seen = /window\.wx_errcode=(\d+);window\.wx_code='([^']*)'/.exec(answer.text)
+    if (seen === null) return { status: 'waiting' }
+    const [, code, granted] = seen as unknown as [string, string, string]
+    if (Number(code) === WX_SCANNED) return { status: 'scanned' }
+    // A confirmation carrying no code is not a sign-in; it waits out the
+    // deadline rather than mounting an account with no credential.
+    if (Number(code) === WX_CONFIRMED && granted !== '') return { status: 'confirmed', value: granted }
+    if (Number(code) === WX_WAITING) return { status: 'waiting' }
+    return { status: 'waiting' }
+  }
+
+  // The scanned code becomes the account's credential, written as the very
+  // cookie header a browser jar would have carried — so nothing downstream
+  // learns which road the mount came down. The exchange also answers with a
+  // `nick`, but it is blank on a returning account, so the name is not taken
+  // from here (see mountQQMusicQr).
+  async wxLogin(code: string): Promise<{ cookie: string }> {
+    const answer = await this.post(
+      JSON.stringify({
+        comm: { ct: 24, cv: 4747474, platform: 'yqq.json', tmeLoginType: 1 },
+        req: { module: 'music.login.LoginServer', method: 'Login', param: { code, strAppid: WX_APPID } },
+      }),
+      '',
+    )
+    const data = LoginSchema.parse(this.unwrap(answer, 'music.login.LoginServer.Login'))
+    return {
+      cookie: [
+        `uin=${data.str_musicid}`,
+        `wxuin=${data.str_musicid}`,
+        `qm_keyst=${data.musickey}`,
+        `qqmusic_key=${data.musickey}`,
+        `euin=${data.encryptUin}`,
+      ].join('; '),
+    }
+  }
+
   // One round trip with a timeout, one retry on a network error and none on
   // an auth answer. The envelope is always HTTP 200 with an outer code 0 —
   // the inner `req.code` is the real one, so it is what gets classified.
@@ -205,53 +308,76 @@ export class QQMusicClient {
       },
       req: { module, method, param },
     })
-    const answer = await this.send(cookie, body)
-    if (answer.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', `HTTP 429 on ${module}.${method}`)
-    if (answer.json === undefined) throw new Error(`qqmusic ${module}.${method}: HTTP ${answer.status}`)
+    return this.unwrap(await this.post(body, cookie), `${module}.${method}`)
+  }
+
+  // The envelope's inner code is the real one; the outer is always 0. The
+  // codes a lost login answers with become the typed failure, so the
+  // expired/reconnect road works the same whichever call raised it.
+  private unwrap(answer: { status: number; json?: unknown }, what: string): unknown {
+    if (answer.status === 429) throw new SourceAuthError('qqmusic', 'rate-limited', `HTTP 429 on ${what}`)
+    if (answer.json === undefined) throw new Error(`qqmusic ${what}: HTTP ${answer.status}`)
     const { req } = EnvelopeSchema.parse(answer.json)
-    if (LOGIN_CODES.has(req.code)) throw new SourceAuthError('qqmusic', 'login-required', `code ${req.code} on ${module}.${method}`)
-    if (req.code === RATE_LIMITED_CODE) throw new SourceAuthError('qqmusic', 'rate-limited', `code ${req.code} on ${module}.${method}`)
-    if (req.code !== 0) throw new Error(`qqmusic ${module}.${method}: code ${req.code}`)
+    if (LOGIN_CODES.has(req.code)) throw new SourceAuthError('qqmusic', 'login-required', `code ${req.code} on ${what}`)
+    if (req.code === RATE_LIMITED_CODE) throw new SourceAuthError('qqmusic', 'rate-limited', `code ${req.code} on ${what}`)
+    if (req.code !== 0) throw new Error(`qqmusic ${what}: code ${req.code}`)
     return req.data
   }
 
-  // The status, and the parsed body for an answer that has one. The body is
-  // read INSIDE the timeout: fetch resolves on the headers alone, so a
-  // response that stalls mid-body would hang the mount the listener is
-  // waiting on and leave a background refresh unable to finish.
-  private async send(cookie: string, body: string): Promise<{ status: number; json?: unknown }> {
+  private post(body: string, cookie: string): Promise<{ status: number; json?: unknown }> {
     const init: RequestInit = {
       method: 'POST',
       headers: { 'User-Agent': USER_AGENT, Referer: 'https://y.qq.com/', 'Content-Type': 'application/json', ...(cookie !== '' && { Cookie: cookie }) },
       body,
     }
+    return this.retried(() => this.round(API, init, (r) => r.json(), 'json'))
+  }
+
+  // A plain GET whose body is text: the two scan calls, neither of which
+  // carries a cookie — there is not one yet.
+  private text(url: string, referer: string, timeoutMs?: number, retry = true): Promise<{ status: number; text?: string }> {
+    const init: RequestInit = { method: 'GET', headers: { 'User-Agent': USER_AGENT, Referer: referer } }
+    const read = (): Promise<{ status: number; text?: string }> => this.round(url, init, (r) => r.text(), 'text', timeoutMs)
+    return retry ? this.retried(read) : read()
+  }
+
+  private async retried<T>(work: () => Promise<T>): Promise<T> {
     try {
-      return await this.once(init)
+      return await work()
     } catch {
-      return await this.once(init)
+      return await work()
     }
   }
 
-  private async once(init: RequestInit): Promise<{ status: number; json?: unknown }> {
+  // ONE round trip under ONE deadline. The timer is cleared only once the
+  // body has been read, so the abort it fires covers the whole request:
+  // fetch resolves on the headers alone, and a body that then stalls must be
+  // ABORTED, not merely stopped being waited for — otherwise every stalled
+  // read leaks its connection while the scan loop keeps polling.
+  private async round(
+    url: string,
+    init: RequestInit,
+    read: (r: Response) => Promise<unknown>,
+    key: 'json' | 'text',
+    timeoutMs?: number,
+  ): Promise<{ status: number; json?: unknown; text?: string }> {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+    const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.deps.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     try {
-      const response = await this.fetch(API, { ...init, signal: controller.signal })
+      const response = await this.fetch(url, { ...init, signal: controller.signal })
       // A body that is not going to be read is not waited for either.
       if (!response.ok) return { status: response.status }
-      return { status: response.status, json: await response.json() }
+      return { status: response.status, [key]: await read(response) }
     } finally {
       clearTimeout(timer)
     }
   }
 }
 
-// A QQ Music mount is a browser mount and nothing else (spec 14 §3.1): there
-// is no scan road in this build, so the entry is the Chrome pin alone — the
-// account's own identifiers ride in the cookie, which is re-exported per read.
-// The `auth` key is written for symmetry with the other cookie sources and to
-// leave the scanned arm free if a scan road is ever added.
-export type QQMusicEntry = { auth?: 'browser' | undefined; browser: BrowserName; profile?: string | undefined }
+// A mount made by scanning holds the credential itself, written as the very
+// cookie header a browser jar would have carried; a browser mount holds the
+// Chrome pin and re-exports that jar per read.
+export type QQMusicEntry = { auth: 'qr'; cookie: string } | { auth?: 'browser' | undefined; browser: BrowserName; profile?: string | undefined }
 
 export type QQMusicMountResult = { ok: true; who: string; entry: QQMusicEntry } | { ok: false; reason: 'login-required' }
 
@@ -301,4 +427,30 @@ export class QQMusicSource implements TasteSource {
       .map((title): TasteItem => ({ kind: 'playlist', title }))
     return { source: 'qqmusic', takenAt: this.now().toISOString(), items: [...liked, ...names] }
   }
+}
+
+// The scan mount (spec 14 §2.10): show the code, wait for WeChat to confirm
+// it, keep the credential the exchange hands back. No browser is read, so
+// nothing needs to be installed, unlocked or permitted.
+export async function mountQQMusicQr(deps: Omit<QQMusicClientDeps, 'cookie'>, opts: QrMountOptions): Promise<QrMountResult<QQMusicEntry>> {
+  const anonymous = new QQMusicClient({ ...deps, cookie: async () => '' })
+  let uuid = ''
+  const scan = await scanToSignIn<string>({
+    ...opts,
+    issue: async () => {
+      const issued = await anonymous.wxQrCode()
+      uuid = issued.uuid
+      return { url: issued.url }
+    },
+    poll: () => anonymous.wxQrPoll(uuid),
+  })
+  if (!scan.ok) return scan
+  const { cookie } = await anonymous.wxLogin(scan.value)
+  // The credential is read back before it is mounted. It names the account —
+  // the exchange's own `nick` comes back blank for a returning listener — and
+  // it proves the minted cookie actually signs in, so a mount is never made
+  // on a credential that does not work.
+  const account = await new QQMusicClient({ ...deps, cookie: async () => cookie }).account()
+  if (account === null) return { ok: false, reason: 'login-required' }
+  return { ok: true, who: account.who, entry: { auth: 'qr', cookie } }
 }
