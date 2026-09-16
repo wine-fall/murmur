@@ -80,6 +80,8 @@ export class FakeMusicProvider implements MusicProvider {
   broken = new Set<string>()
   // A typed failure every resolve throws (spec 14 §2.6: the expired cookie).
   failWith: Error | null = null
+  // The headers the resolved stream needs (spec 03-01 §2.2), when it needs any.
+  headers: Record<string, string> | null = null
 
   async search(query: string, limit?: number, catalogue?: Catalogue): Promise<TrackCandidate[]> {
     this.searches.push({ query, limit, catalogue })
@@ -89,7 +91,7 @@ export class FakeMusicProvider implements MusicProvider {
   async resolve(ref: string): Promise<AudioClip> {
     if (this.failWith !== null) throw this.failWith
     if (this.broken.has(ref)) throw new Error(`cannot resolve ${ref}`)
-    return { source: `https://stream/${ref}`, kind: 'music' }
+    return { source: `https://stream/${ref}`, kind: 'music', ...(this.headers !== null && { headers: this.headers }) }
   }
 }
 

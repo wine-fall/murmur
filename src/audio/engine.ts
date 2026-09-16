@@ -52,7 +52,12 @@ const VIZ_SMOOTHING = 0.5
 
 // `startS` asks the decoder to begin that many seconds in (the bed resume);
 // implementations without a seek are free to ignore it.
-export type Decode = (source: string, signal: AbortSignal, startS?: number) => AsyncIterable<Float32Array>
+export type Decode = (
+  source: string,
+  signal: AbortSignal,
+  startS?: number,
+  headers?: Readonly<Record<string, string>>,
+) => AsyncIterable<Float32Array>
 
 function sleepUnref(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms).unref())
@@ -402,7 +407,7 @@ export class AudioEngine implements MixingPlayer {
     const gain = this.ctx.createGain()
     gain.connect(this.bus)
     const abort = new AbortController()
-    const stream = scheduleStream(this.ctx, gain, this.decode(clip.source, abort.signal), {
+    const stream = scheduleStream(this.ctx, gain, this.decode(clip.source, abort.signal, undefined, clip.headers), {
       leadS: this.leadS,
     })
     const handle = new MixedHandle({

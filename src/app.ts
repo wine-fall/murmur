@@ -332,14 +332,14 @@ function buildMusic(
     brain: harness,
     provider,
     model: config.musicModel,
-    probe: (s) => probeStream(s, config.ffmpegCmd),
+    probe: (s, headers) => probeStream(s, config.ffmpegCmd, undefined, headers),
     // The taste paragraph rides the instruction only while a digest exists.
     instruction: () => buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath), { taste: taste !== undefined && taste.reader.digest() !== '' }),
     ...(taste !== undefined && {
       taste: {
         catalogues: taste.catalogues,
         onAuthFailure: (err) => taste.watch.note(err),
-        probeDurationS: (s) => probeDurationS(s),
+        probeDurationS: (s, headers) => probeDurationS(s, undefined, undefined, headers),
       },
     }),
     // Discovery stage timings land in the dev log (issue #76).
@@ -648,12 +648,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   if (context.sampleRate !== MIX_RATE) host.info(`audio: output runs at ${context.sampleRate} Hz`)
   const engine = new AudioEngine({
     context,
-    decode: (source, signal, startS) =>
+    decode: (source, signal, startS, headers) =>
       ffmpegDecode(source, {
         ffmpegCmd: config.ffmpegCmd,
         signal,
         rate: context.sampleRate,
         ...(startS !== undefined && { startS }),
+        ...(headers !== undefined && { headers }),
       }),
     log: (m) => host.info(m),
   })

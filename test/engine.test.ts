@@ -89,6 +89,24 @@ const settle = async () => {
 
 const MUSIC = { source: 'fake://music', kind: 'music' } as const
 
+describe('stream headers', () => {
+  // A Bilibili CDN answers 403 to a request with no browser User-Agent: the
+  // headers the clip resolved with must reach the decoder that opens the url.
+  it('hands the decoder the headers the clip carries, and nothing when it carries none', async () => {
+    const seen: (Readonly<Record<string, string>> | undefined)[] = []
+    const decode: Decode = (source, signal, _startS, headers) => {
+      seen.push(headers)
+      return dcChunks(0.4, 0.5)(source, signal)
+    }
+    const { engine } = build(1, decode)
+    const headers = { 'User-Agent': 'Mozilla/5.0 Chrome/145' }
+    await engine.playMusic({ source: 'fake://bili', kind: 'music', headers })
+    await engine.playMusic(MUSIC)
+    await settle()
+    expect(seen).toEqual([headers, undefined])
+  })
+})
+
 describe('voice channel', () => {
   it('plays a clip through to the output', async () => {
     const { context, engine } = build(1, dcChunks(0, 0))

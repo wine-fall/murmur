@@ -63,19 +63,19 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const { cookies, released } = jars()
     const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n'), cookies })
     await provider.resolve('https://music.163.com/#/song?id=5')
-    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies', '/jar/netease', 'https://music.163.com/#/song?id=5'])
+    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', '--cookies', '/jar/netease', 'https://music.163.com/#/song?id=5'])
     expect(released).toEqual(['netease'])
     await provider.resolve('https://www.bilibili.com/video/BV1')
-    expect(calls[1]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--cookies', '/jar/bilibili', 'https://www.bilibili.com/video/BV1'])
+    expect(calls[1]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', '--cookies', '/jar/bilibili', 'https://www.bilibili.com/video/BV1'])
     // YouTube plays anonymously even with the jar mounted: a signed-in web
     // client gets SABR-only formats whose URL answers 403 to ffmpeg.
     await provider.resolve('https://youtube.com/watch?v=a')
-    expect(calls[2]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://youtube.com/watch?v=a'])
+    expect(calls[2]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', 'https://youtube.com/watch?v=a'])
     expect(released).toEqual(['netease', 'bilibili'])
     // No cookie seam at all = the pre-spec-14 provider, byte for byte.
     const plain = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n') })
     await plain.resolve('https://music.163.com/#/song?id=5')
-    expect(calls[3]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', 'https://music.163.com/#/song?id=5'])
+    expect(calls[3]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', 'https://music.163.com/#/song?id=5'])
   })
 
   // Anonymous is the rule, not the only attempt: an age-restricted or private
@@ -242,6 +242,33 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     const played = await callTool(full.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
     expect(played.ok).toBe(true)
     expect(full.picks).toHaveLength(1)
+  })
+
+  it('probes the stream the way the player will open it — same headers for the pick probe and the preview trap', async () => {
+    const headers = { 'User-Agent': 'Mozilla/5.0 Chrome/145' }
+    const provider = new FakeMusicProvider()
+    provider.headers = headers
+    provider.candidates = [{ ref: 'https://music.163.com/#/song?id=5', title: 'Song', uploader: 'Artist', durationS: 240, extra: {} }]
+    const seen: (Readonly<Record<string, string>> | undefined)[] = []
+    const tools = musicTools(
+      provider,
+      () => {},
+      async (_source, h) => {
+        seen.push(h)
+        return true
+      },
+      {
+        catalogues: () => ['netease'],
+        probeDurationS: async (_source, h) => {
+          seen.push(h)
+          return 240
+        },
+      },
+    )
+    await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    expect(result.ok).toBe(true)
+    expect(seen).toEqual([headers, headers])
   })
 
   it('never probes a non-netease ref for the trap', async () => {
