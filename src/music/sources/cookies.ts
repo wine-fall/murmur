@@ -12,15 +12,17 @@ import { basename, dirname, join } from 'node:path'
 
 import { z } from 'zod'
 
-import type { YtDlpRunner } from '../music.ts'
+import { YtDlpTimeoutError, type YtDlpRunner } from '../music.ts'
 import { browserArgs, type BrowserName } from './store.ts'
 
 // Why a cookie store could not be read. yt-dlp says which in its stderr, and
 // each is answered with a different thing: install the browser, open the
 // named profile once (or unset the knob that named it), grant the terminal
 // access, install yt-dlp. An export that succeeds but holds no row for the
-// site is NOT one of these — that is simply a missing login.
-export type CookieFailure = 'no-browser' | 'no-profile' | 'no-permission' | 'no-ytdlp' | 'unreadable'
+// site is NOT one of these — that is simply a missing login. A read that
+// never came back is its own case: nothing is wrong with the store, the
+// spawn simply outlived its ceiling and was killed.
+export type CookieFailure = 'no-browser' | 'no-profile' | 'no-permission' | 'no-ytdlp' | 'timed-out' | 'unreadable'
 
 export class BrowserCookieError extends Error {
   readonly source: BrowserName
@@ -47,6 +49,9 @@ export function classifyCookieFailure(
   err: unknown,
   { profile, exists = existsSync }: { profile?: string | undefined; exists?: (path: string) => boolean } = {},
 ): { reason: CookieFailure; detail: string; profile?: string } {
+  // A killed spawn wrote no jar and no stderr worth quoting; its own words
+  // are the only ones that help.
+  if (err instanceof YtDlpTimeoutError) return { reason: 'timed-out', detail: err.message }
   const parsed = SpawnFailure.safeParse(err)
   const fields = parsed.success ? parsed.data : {}
   const detail = (fields.stderr ?? '').trim() !== '' ? fields.stderr!.trim() : (fields.message ?? String(err)).trim()
@@ -134,7 +139,10 @@ export async function exportCookieJar(
     // written by yt-dlp's exit regardless. A run that wrote no jar at all is
     // a real failure, and its own words say which one.
     let failure: unknown = null
-    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL]).catch((err: unknown) => {
+    // The child scratches in this directory too: reading a cookie store
+    // copies the whole database, and a spawn killed at its ceiling never
+    // deletes that copy. Here, the `finally` below does.
+    await run([...browserArgs(entry), '--cookies', path, '--simulate', '--no-warnings', '--ignore-errors', NO_URL], { tmpdir: dir }).catch((err: unknown) => {
       failure = err
       return ''
     })

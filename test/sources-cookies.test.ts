@@ -11,7 +11,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { classifyCookieFailure, cookieHeader, exportCookieJar, parseNetscapeJar, siteRows, writeJar } from '../src/music/sources/cookies.ts'
-import type { YtDlpRunner } from '../src/music/music.ts'
+import { YtDlpTimeoutError, type YtDlpRunner } from '../src/music/music.ts'
 
 // A Netscape jar as yt-dlp writes it, values redacted.
 const JAR = [
@@ -141,6 +141,36 @@ describe('exportCookieJar', () => {
       reason: 'no-profile',
       profile: "Murmur's Fresh",
     })
+  })
+
+  // A killed yt-dlp writes no jar and says nothing usable on stderr, so the
+  // export reads as "unreadable" and quotes the kill at the listener. The
+  // timeout carries its own reason instead (user report: an indefinite hang
+  // behind "checking YouTube in Chrome...").
+  it('reads a timed-out export as its own obstacle, not an unreadable store', async () => {
+    expect(classifyCookieFailure(new YtDlpTimeoutError(90_000))).toMatchObject({ reason: 'timed-out' })
+    await expect(
+      exportCookieJar({ browser: 'chrome' }, () => Promise.reject(new YtDlpTimeoutError(90_000))),
+    ).rejects.toMatchObject({ name: 'BrowserCookieError', reason: 'timed-out' })
+  })
+
+  // A killed yt-dlp never runs its own cleanup, and the cookie read had by
+  // then copied the browser's whole cookie database into a temp dir of its
+  // own. The child's TMPDIR is murmur's throwaway dir, so that copy goes
+  // when the jar does rather than outliving the run in /tmp.
+  it('keeps the child\'s temp files inside the directory it deletes', async () => {
+    let seen: { tmpdir?: string } | undefined
+    let copy = ''
+    const rows = await exportCookieJar({ browser: 'chrome' }, async (args, opts) => {
+      seen = opts
+      copy = join(opts!.tmpdir!, 'temporary.sqlite')
+      writeFileSync(copy, 'the browser\'s cookie database')
+      writeFileSync(args[args.indexOf('--cookies') + 1]!, JAR)
+      return ''
+    })
+    expect(rows.length).toBeGreaterThan(0)
+    expect(seen?.tmpdir).toBeDefined()
+    expect(existsSync(copy)).toBe(false)
   })
 
   it('an export that worked but holds no row for the site is not a failure — it is a missing login', async () => {
