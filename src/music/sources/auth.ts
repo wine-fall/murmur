@@ -27,7 +27,7 @@ export class SourceAuthError extends Error {
 const EXPIRED = /cookies are no longer valid|cookies? (?:has|have) expired|session (?:has )?expired/i
 const RATE_LIMITED = /\b429\b|too many requests|rate.?limit/i
 const GEO = /geo.?restrict|not available from your location|not available in your (?:country|region)/i
-const LOGIN = /login required|requires? (?:a )?login|only available for registered users|sign in to confirm|\bcode"?\s*:\s*-462\b|\b-462\b|not logged in|need login|please log ?in/i
+const LOGIN = /login required|requires? (?:a )?login|only available for registered users|sign in to confirm|sign in if you|\bcode"?\s*:\s*-462\b|\b-462\b|not logged in|need login|please log ?in/i
 
 export function classifyAuthFailure(text: string): AuthFailure | null {
   if (EXPIRED.test(text)) return 'expired'

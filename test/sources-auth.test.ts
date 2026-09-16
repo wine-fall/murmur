@@ -18,6 +18,8 @@ const FIXTURES: [string, ReturnType<typeof classifyAuthFailure>][] = [
   ['{"code":-462,"message":"<redacted>"}', 'login-required'],
   ['ERROR: [youtube] x: Sign in to confirm you\'re not a bot. Use --cookies-from-browser or --cookies for the authentication.', 'login-required'],
   ['ERROR: [youtube:tab] :ytfav: This video is only available for registered users. Use --cookies-from-browser', 'login-required'],
+  // The one YouTube shape the anonymous-playback fallback turns on (spec 14 §2.5).
+  ["ERROR: [youtube] x: Private video. Sign in if you've been granted access to this video", 'login-required'],
   ['WARNING: [youtube] The provided YouTube account cookies are no longer valid. They have likely been rotated in the browser as a security measure.', 'expired'],
   ['ERROR: [netease:song] 1: No media links found; possibly due to geo restriction. You might want to use a VPN or a proxy server (with --proxy) to try again', 'geo'],
   ['ERROR: [youtube] x: This video is not available from your location due to geo restriction', 'geo'],
