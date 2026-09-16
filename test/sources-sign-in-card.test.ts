@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest'
 
 import { SourceAuthError, SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { CHROME_PROFILE_ENV, type ChromeDeps } from '../src/music/sources/chrome.ts'
-import { runSources, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
+import { QQMUSIC_TASTE_ONLY, runSources, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
@@ -71,6 +71,10 @@ function build(lines: string[], over: Partial<SourcesFlowDeps> & { mounts?: Part
       bilibili: async (b) => (
         took.push(`bilibili:browser:${b.profile ?? ''}`),
         { ok: true, who: 'Bili Me', entry: { auth: 'browser', browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }), mid: '9' } }
+      ),
+      qqmusic: async (b) => (
+        took.push(`qqmusic:browser:${b.profile ?? ''}`),
+        { ok: true, who: 'Wine', entry: { auth: 'browser', browser: b.browser, ...(b.profile !== undefined && { profile: b.profile }) } }
       ),
     },
     netease: async (show) => (
@@ -193,6 +197,33 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     const { host, deps } = build(['youtube', '', 'youtube'])
     await runSources(deps)
     expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
+  // QQ Music is a taste-only source read out of Chrome (spec 14 §2.9): there
+  // is no scan road in this build, so its card is the profile list alone.
+  it('offers QQ Music Chrome profiles only — it has no scan row to lead with', async () => {
+    const { host, deps } = build(['qqmusic', '', 'qqmusic'])
+    await runSources(deps)
+    expect(card(host).choices?.options?.map((o) => o.key)).toEqual(['chrome:Default', 'chrome:Profile 3'])
+    expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('chrome:Profile 3')
+  })
+
+  // A listener who connects QQ Music and sees "1 liked" has no way to know
+  // its audio is not reachable — the mount has to say so itself, not only
+  // the spec (codex review).
+  it('says QQ Music is read for taste only, before anything is read', async () => {
+    const { host, deps } = build(['qqmusic', 'chrome:Default', 'qqmusic'])
+    await runSources(deps)
+    expect(host.infos).toContain(QQMUSIC_TASTE_ONLY)
+    // Said before the mount's own progress lines, so it frames the result.
+    expect(host.infos.indexOf(QQMUSIC_TASTE_ONLY)).toBeLessThan(host.infos.findIndex((l) => l.startsWith('signed in as')))
+  })
+
+  it('sends QQ Music down the cookie road, with the chosen profile pinned into the entry', async () => {
+    const { store, deps, took } = build(['qqmusic', 'chrome:Default', 'qqmusic'])
+    await runSources(deps)
+    expect(took).toEqual(['qqmusic:browser:Default'])
+    expect(store.read().qqmusic).toMatchObject({ auth: 'browser', browser: 'chrome', profile: 'Default' })
   })
 
   it('sends a picked scan down the scan road, unchanged: the code on the notice card, the cookie kept here', async () => {

@@ -11,7 +11,7 @@ import { z } from 'zod'
 
 import type { AuthFailure } from './auth.ts'
 
-export const SOURCE_IDS = ['youtube', 'bilibili', 'netease', 'spotify', 'qishui'] as const
+export const SOURCE_IDS = ['youtube', 'bilibili', 'netease', 'spotify', 'qishui', 'qqmusic'] as const
 export type SourceId = (typeof SOURCE_IDS)[number]
 
 // How a platform is named on screen and in the digest.
@@ -21,6 +21,7 @@ export const SOURCE_NAMES: Record<SourceId, string> = {
   netease: 'NetEase',
   spotify: 'Spotify',
   qishui: 'Soda Music',
+  qqmusic: 'QQ Music',
 }
 
 const KINDS = ['liked', 'history', 'top-track', 'top-artist', 'playlist', 'favourite', 'subscription', 'daily', 'follows', 'frequents'] as const

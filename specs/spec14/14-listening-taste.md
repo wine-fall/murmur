@@ -51,7 +51,7 @@ importance:
 
 ### Delivers
 
-- **Five sources**, all opt-in, each mounted by its own short conversation:
+- **Six sources**, all opt-in, each mounted by its own short conversation:
 
   | source | taste read | search | play | how the listener mounts it |
   |---|---|---|---|---|
@@ -60,6 +60,7 @@ importance:
   | **NetEase Cloud Music** | liked-songs playlist, own + collected playlists | yes (own client) | yes (yt-dlp with cookie, VIP tiers included) | scans a code with the NetEase Cloud Music app |
   | **Spotify** | top tracks, top artists, liked tracks, playlist names | no | no | OAuth in their browser, free account is enough |
   | **Soda Music (Qishui)** | collection, own playlists, daily mix | no | no | scans a QR with Douyin |
+  | **QQ Music** | liked songs, own + favourited playlist names | no | no | signs in to Chrome — no scan road in this build (§2.10) |
 
 - **`$MURMUR_HOME/sources.json`** — the mounted sources and their credentials
   (§2.1). Secret-bearing; guarded like `voice.json` (03-03 §3).
@@ -87,6 +88,16 @@ importance:
   these two sources are complete as **read-only** taste sources. A listener
   who wants to *hear* a Spotify or Soda track gets it via catalogue search on
   YouTube / Bilibili / NetEase, which is the whole point of §2.4.
+- **Playback from QQ Music, and searching it.** QQ Music is a **taste-only**
+  source (§2.10). yt-dlp ships a `qqmusic` extractor, but its song extractor
+  is broken today — `WARNING: [qqmusic] unable to extract init data` then
+  `ERROR: This video is only available for registered users`, with and
+  without `--cookies-from-browser` (verified 2026-09-16) — and there is no
+  `qqmusicsearch:` prefix, so a search would need a second HTTP client of
+  murmur's own, the way NetEase's is. Neither is in this build. QQ Music
+  behaves exactly like a NetEase whose playback is failing: the digest shapes
+  what murmur searches for on YouTube, Bilibili and NetEase, and the listener
+  is told so on the card rather than left expecting QQ Music audio.
 - **A brain-written taste summary.** The digest is deterministic (§2.3). The
   brain forms its own picture inside the pick task; whether a distilled
   paragraph would pick better is an eval question (#98), not a build item.
@@ -526,6 +537,59 @@ Every client: timeouts, one retry on network error, no retry on auth error,
 rate-limit → `rate-limited`. Every response parsed with zod at the boundary
 (trust boundary — CLAUDE.md types rule).
 
+### 2.10 The QQ Music client — taste only
+
+**`qqmusic.ts`** — one endpoint does all of it: `POST
+https://u.y.qq.com/cgi-bin/musicu.fcg`, whose body names a `module` and a
+`method` and whose answer is `{code, req:{code, data}}`. The **inner**
+`req.code` is the real one; the envelope is always HTTP 200 with an outer
+`code: 0`. Nothing is played and nothing is searched here (§1, out of scope):
+this client identifies the account and reads what it keeps, and the digest
+does the rest.
+
+**Credential — the browser's own.** A signed-in `y.qq.com` jar carries
+`qm_keyst` (the key, also spelled `qqmusic_key`), the account number as `uin`
+(a QQ sign-in) or `wxuin` (a WeChat one), and `euin`, its encrypted form —
+the lists are addressed by the encrypted one. Every signed-in read carries
+those cookies plus `g_tk = hash33(key, 5381)` in the `comm` block
+(`ct:24, cv:4747474, platform:'yqq.json'`). yt-dlp exports one row per
+domain, so a name can appear twice (`.qq.com` and `.y.qq.com` both carry
+`qm_keyst`); the first non-empty one wins. A jar with no key or no uin holds
+no login, and is answered **without a round trip**.
+
+Modules, verified against the live service 2026-09-16:
+
+| what | module.method | param |
+|---|---|---|
+| who am I | `music.UserInfo.userInfoServer.GetLoginUserInfo` | `{}` → `data.info.nick` |
+| created lists | `music.musicasset.PlaylistBaseRead.GetPlaylistByUin` | `{uin}` → `data.v_playlist[]` (`dirId`, `dirName`, `tid`, `songNum`) |
+| liked songs | `music.srfDissInfo.DissInfo.CgiGetDiss` | `{dirid:201, song_begin:0, song_num:<§3.5 cap>, enc_host_uin:<euin>, …}` → `data.songlist[]` |
+| favourited lists | `music.musicasset.PlaylistFavRead.CgiGetPlaylistFavInfo` | `{uin:<euin>, offset:0, size:<§3.5 cap>}` → `data.v_list[].name` |
+
+- **`dirid` 201 is the liked list**, fixed across accounts — its *name* is
+  localised, its dir id is not. It is one of the created lists, so it never
+  also contributes a playlist name.
+- **One read, no paging.** `song_num` at the §3.5 cap returns the whole list
+  (verified against a 167-song list). A song carries `mid`, `name`,
+  `singer[].name`, `album.name` and `interval`, but **no kept-at date** —
+  `time_public` is the release date, not when the listener kept it — so the
+  liked items carry no `at`, and the digest orders them as the platform did.
+- **The login is checked first, every snapshot.** With the key flipped,
+  `GetLoginUserInfo` answers `code 1000` but `GetPlaylistByUin` **still
+  returns the account's lists** — it authenticates on the `uin` alone. A
+  snapshot that skipped the check would read a signed-out account as healthy
+  and never say "expired". The who-am-I answer is also what the reads are
+  addressed with, so the check costs nothing extra.
+- **Auth failures**: inner `1000` / `104401` / `104400` → `login-required`;
+  inner `104604` and HTTP 429 → `rate-limited` (§2.6). The existing
+  expired/reconnect road then works unchanged.
+- **Sign-in**: the Chrome cookie road only, exactly as YouTube's (§3.1). A
+  QR road exists on the platform — a QQ one (`ptqrshow` / `ptqrlogin`, then
+  a five-step `check_sig` → `graph.qq.com/oauth2.0/authorize` → `QQLogin`
+  exchange) and a cheaper WeChat one (`open.weixin.qq.com/connect/qrconnect`,
+  a long poll, then one `music.login.LoginServer.Login`) — but neither is
+  built here.
+
 ---
 
 ### 2.9 Curated music channels — a place to LOOK, never taste
@@ -638,7 +702,8 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
 >> 3) [x] NetEase - 312 liked · read just now
 >> 4) [x] Spotify - expired — untick to forget it, tick refresh to sign in again
 >> 5) [ ] Soda Music - not connected
->> 6) [ ] refresh - re-read every connected account now   ← only once something is mounted
+>> 6) [ ] QQ Music - not connected
+>> 7) [ ] refresh - re-read every connected account now   ← only once something is mounted
 ```
 
 - **Ticked = mounted**, an expired login included: unticking it is how it
@@ -692,7 +757,8 @@ signed in to the wrong account there? sign out on the site in that Chrome window
 ```
 
 - **The scan row** leads, and only for NetEase and Bilibili — the two that
-  can go either way. It names the app in the platform's own terms (*the
+  can go either way. **YouTube and QQ Music have no scan row**, so their card
+  is the profile list alone (§2.10; issue #221). It names the app in the platform's own terms (*the
   NetEase Cloud Music app*, *the Bilibili app*), and picking it is the scan
   mount below, unchanged.
 - **One row per Chrome profile**, named as Chrome's own profile menu names
@@ -943,9 +1009,11 @@ where a pick came from only when it is theirs ("one you've kept").
 ### 3.5 Bounds
 
 Per source per snapshot: liked/collection ≤ 500 newest, history ≤ 200,
-playlists ≤ 50 names (contents are not snapshotted except NetEase's liked
-playlist, which *is* the liked list), top lists ≤ 50, subscriptions ≤ 100,
-followed accounts ≤ 50 per order (recently followed, most visited).
+playlists ≤ 50 names (contents are not snapshotted except the liked list
+itself — NetEase's liked playlist and QQ Music's dir 201, which *are* the
+liked list; QQ Music's created and favourited names share the one 50 bound),
+top lists ≤ 50, subscriptions ≤ 100, followed accounts ≤ 50 per order
+(recently followed, most visited).
 Digest ≤ 1500 chars (§2.3). A snapshot file over 1 MB is a bug.
 
 ### 3.6 Privacy and the dev log
@@ -1018,7 +1086,7 @@ shape as `BOOTSTRAP_OFFER` (the question leads, two quiet notes ride as card
 lines):
 
 > `Connect the music you already keep? [y/N]`
-> `NetEase, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.`
+> `NetEase, QQ Music, Spotify, YouTube, Bilibili or Soda Music - murmur reads your likes there, so what it plays fits you.`
 > `Nothing is read until you say yes; /sources any time later.`
 
 - **Yes** → `await` the `/sources` conversation (§3.1) itself, through the
@@ -1068,6 +1136,13 @@ byte-identical in their yt-dlp arguments to today's (dev-log diff).
 - **YouTube**: `/sources`, tick the row; signed in to Chrome → mounts and
   names who. Not signed in → the sign-in page opens in the named Chrome
   profile and the wait resumes on Enter (§3.1).
+- **QQ Music**: `/sources`, tick the row; its card offers Chrome profiles
+  only. Signed in to that profile → mounts, names who, and the first snapshot
+  holds the liked songs plus the created and favourited playlist names. Not
+  signed in → `https://y.qq.com/` opens in the named profile and the wait
+  resumes on Enter, exactly as YouTube's does. Nothing is ever played from
+  QQ Music (§1, out of scope). Verified 2026-09-16: mount → verify →
+  snapshot against the live service, and the snapshot carries no cookie.
 - An older browser mount of NetEase or Bilibili keeps reading and refreshing
   untouched; unticking it is how it goes.
 
