@@ -34,3 +34,6 @@ https://www.youtube.com/@LofiGirl/videos
 https://space.bilibili.com/607217518/video
 https://space.bilibili.com/1745584728/video
 https://space.bilibili.com/669334488/video
+
+# -- Bilibili: studio playbacks of single songs, one track per upload (JLRS-LeoFM)
+https://space.bilibili.com/3493093607213343/video
