@@ -141,8 +141,11 @@ export function parseSegmentRef(ref: string): { url: string; segment?: { startS:
 }
 
 // Injectable so the unit layer covers argument construction without the binary
-// or the network; the real runner is the yt-dlp subprocess.
-export type YtDlpRunner = (args: string[]) => Promise<string>
+// or the network; the real runner is the yt-dlp subprocess. `tmpdir` becomes
+// the child's TMPDIR: a caller that owns a throwaway directory can keep
+// yt-dlp's own scratch inside it, which matters when the spawn is killed and
+// never gets to clean up after itself (spec 14 §2.8).
+export type YtDlpRunner = (args: string[], opts?: { tmpdir?: string }) => Promise<string>
 
 // What a failed runner said. execFile's rejection carries stderr; an injected
 // runner's plain Error carries only its message.
@@ -170,13 +173,44 @@ export type YtDlpMusicProviderOptions = {
   qqmusic?: ClientCatalogue
 }
 
-// The real runner: one yt-dlp subprocess per call. Shared with the taste
-// sources (spec 14 §2.8), which read the same binary.
-export function ytdlpRunner(binary = 'yt-dlp'): YtDlpRunner {
-  return async (args) => {
+// The ceiling on one yt-dlp spawn. Generous on purpose: a cold network, a
+// slow extractor, or a macOS keychain prompt waiting behind another window
+// each take tens of seconds on a call that then succeeds, and killing those
+// costs the listener the thing they asked for. It exists to end a HANG, not
+// to police slowness — raise it only if a healthy call is ever measured past
+// it (the cookie export measures 0.75s, the account read 1.9s).
+export const YTDLP_TIMEOUT_MS = 90_000
+
+// A spawn that outlived the ceiling and was killed. Its own class because the
+// kill leaves no stderr worth quoting: every layer above reads it to say the
+// two things a listener can act on instead (spec 14 §2.8).
+export class YtDlpTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`yt-dlp did not answer in ${Math.max(1, Math.round(timeoutMs / 1000))}s — the network may be slow, or your system may be asking permission to read the browser's keychain in a window behind this one.`)
+    this.name = 'YtDlpTimeoutError'
+  }
+}
+
+// The real runner: one yt-dlp subprocess per call, under the ceiling above.
+// Shared with the taste sources (spec 14 §2.8), which read the same binary.
+export function ytdlpRunner(binary = 'yt-dlp', timeoutMs = YTDLP_TIMEOUT_MS): YtDlpRunner {
+  return async (args, opts) => {
     debug('music.ytdlp %s', args.join(' '))
-    const { stdout } = await run(binary, args, { maxBuffer: MAX_OUTPUT_BYTES })
-    return stdout
+    try {
+      // SIGKILL, not the default SIGTERM: a yt-dlp stuck inside the browser's
+      // cookie store (the keychain prompt) is exactly the case that ignores a
+      // polite signal, and a timeout nobody can enforce is no timeout.
+      const { stdout } = await run(binary, args, {
+        maxBuffer: MAX_OUTPUT_BYTES,
+        timeout: timeoutMs,
+        killSignal: 'SIGKILL',
+        ...(opts?.tmpdir !== undefined && { env: { ...process.env, TMPDIR: opts.tmpdir } }),
+      })
+      return stdout
+    } catch (err) {
+      if (typeof err === 'object' && err !== null && 'killed' in err && err.killed === true) throw new YtDlpTimeoutError(timeoutMs)
+      throw err
+    }
   }
 }
 

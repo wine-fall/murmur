@@ -10,7 +10,7 @@
 import { z } from 'zod'
 
 import type { YtDlpRunner } from '../music.ts'
-import { ytdlpFailureText } from '../music.ts'
+import { ytdlpFailureText, YtDlpTimeoutError } from '../music.ts'
 import { classifyAuthFailure, SourceAuthError } from './auth.ts'
 import { BrowserCookieError } from './cookies.ts'
 import type { CookieLease } from './cookies.ts'
@@ -49,7 +49,10 @@ async function who(entry: YouTubeEntry, deps: YouTubeDeps): Promise<string | nul
     // A cookie store that could not be read at all is not an answer about
     // the login: swallowed as one, it sends a listener with no yt-dlp to a
     // sign-in page that cannot help them.
-    if (err instanceof BrowserCookieError) throw err
+    // Nor is a read that never came back: reported as "not signed in", it
+    // opens a sign-in page that cannot fix a slow network or a keychain
+    // prompt waiting behind another window (codex review).
+    if (err instanceof BrowserCookieError || err instanceof YtDlpTimeoutError) throw err
     const reason = classifyAuthFailure(ytdlpFailureText(err))
     if (reason !== null && reason !== 'login-required') throw new SourceAuthError('youtube', reason, ytdlpFailureText(err).slice(0, 200))
     return null
