@@ -424,6 +424,10 @@ export class Director {
   // and whether the latest pick came back empty — together with the segment
   // and the pick slot they derive the pack's real music status.
   private lastTrack: string | null = null
+  // The pick taken from the queue and not yet ledgered: it belongs on the
+  // avoid-list of anything the queue fills while it spins up. Overwritten by
+  // the next take and cleared once the ledger has it.
+  private airing: TrackPick | null = null
   private pickFailed = false
   // A dropped pick's promise cannot be cancelled (the switch_music re-prime);
   // the epoch keeps its late resolution from repainting pickFailed after a
@@ -884,7 +888,11 @@ export class Director {
     if (head !== undefined && !head.done()) {
       return this.switchDue ? { kind: 'switching' } : { kind: 'picking' }
     }
-    if (this.pickFailed) return { kind: 'pickFailed' }
+    // A pick standing by is not a failed search, however the slot behind it
+    // fared (codex review): pickFailed is the NEWEST search's verdict, and at
+    // depth 2 that is often a spare nobody is waiting on.
+    const ready = head !== undefined && head.value() !== null
+    if (!ready && this.pickFailed) return { kind: 'pickFailed' }
     return { kind: 'quiet', ...(this.lastTrack !== null && { lastTrack: this.lastTrack }) }
   }
 
@@ -1108,10 +1116,15 @@ export class Director {
   // that `recentSongs` builds — and the slot behind it would be free to choose
   // the very same track.
   private queuedLabels(): string[] {
-    return this.pickQueue.flatMap((slot) => {
+    const queued = this.pickQueue.flatMap((slot) => {
       const pick = slot.value()
       return pick === undefined || pick === null ? [] : [trackLabel(pick)]
     })
+    // The pick that has left the queue and not yet reached the ledger — it is
+    // on neither list for as long as its stream takes to confirm audio, and a
+    // fill landing in that window could choose the very song spinning up
+    // (codex review).
+    return this.airing === null ? queued : [trackLabel(this.airing), ...queued]
   }
 
   // `extraLine` is a pre-rendered situation line (the airing beat, or a
@@ -1161,7 +1174,7 @@ export class Director {
     // epoch means this slot was discarded while it resolved — the search that
     // replaced it owns the top-up.
     void slot.promise.then((pick) => {
-      if (pick !== null && epoch === this.pickEpoch) this.prefetchMusic()
+      if (pick !== null && epoch === this.pickEpoch && !this.quit) this.prefetchMusic()
     })
   }
 
@@ -1188,8 +1201,11 @@ export class Director {
   // the refill's avoid-list already carries the song it is standing behind.
   private takePick(): Promise<TrackPick | null> {
     const head = this.pickQueue.shift()
-    if (head !== undefined) return head.promise
-    return this.deps.music!.source.nextTrack(this.musicContext())
+    const pick = head === undefined ? this.deps.music!.source.nextTrack(this.musicContext()) : head.promise
+    return pick.then((taken) => {
+      this.airing = taken
+      return taken
+    })
   }
 
   // Find, confirm, announce, and air one track. False = nothing aired (the
@@ -1306,6 +1322,7 @@ export class Director {
     // Ledger the song at air time (spec 05 §3.5): a confirmed, playing song
     // only — not a dropped candidate. Feeds the music avoid-list.
     this.deps.memory.recordEvent('song', label)
+    this.airing = null // the ledger has it now; queuedLabels reads it from there
     let voice: OnAir | null = null
     const announceClip = announced === null ? null : await announced
     if (pick.announce !== undefined && announceClip !== null) {

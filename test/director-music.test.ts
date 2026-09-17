@@ -113,6 +113,57 @@ describe('music scheduling (cadence at the boundary)', () => {
     await run
   })
 
+  // codex review: the queue tops itself up by chaining off a landed search, and
+  // a search that lands after the radio is off the air must not buy another one
+  // — the listener has gone and nobody will ever hear it.
+  it('a quit stops the queue from buying another pick', async () => {
+    const { director, host, source } = build()
+    let release!: (pick: ReturnType<typeof pickOf> | null) => void
+    const gated = new Promise<ReturnType<typeof pickOf> | null>((r) => (release = r))
+    source.nextTrack = async (ctx) => {
+      source.calls++
+      source.contexts.push(ctx)
+      return source.calls === 1 ? gated : null
+    }
+    const run = director.run(3)
+    await until(() => source.calls === 1, 'the startup prime is in flight')
+    host.type('/quit')
+    await run
+    release(pickOf('https://stream/late', { title: 'Late' }))
+    await sleep(20)
+    expect(source.calls).toBe(1)
+  })
+
+  // codex review: between leaving the queue and reaching the ledger a pick is on
+  // neither list, so a chained fill landing in that window could choose the very
+  // song that is at this moment spinning up.
+  it('the song being started is still avoided, though no ledger knows it yet', async () => {
+    const { director, player, source } = build()
+    const aired = pickOf('https://stream/1', { title: 'Aired', artist: 'A' })
+    const queued = pickOf('https://stream/2', { title: 'Queued', artist: 'B' })
+    // The second pick lands WHILE the first is confirming audio, so its chained
+    // fill runs before the first has been ledgered.
+    source.nextTrack = async (ctx) => {
+      source.calls++
+      source.contexts.push(ctx)
+      if (source.calls === 1) return aired
+      if (source.calls === 2) {
+        await sleep(20)
+        return queued
+      }
+      return null
+    }
+    const slow = new FakeMusicHandle()
+    slow.startDelayMs = 150
+    player.nextHandles = [slow]
+    const run = director.run(2)
+    await until(() => source.calls >= 3, 'the queue refilled during the spin-up')
+    expect(source.contexts[2]!.situation).toContain('- Aired — A')
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+  })
+
   it('stops at depth 2 — a filled queue fires no further search', async () => {
     const { director, player, source } = build()
     source.picks = [
@@ -751,14 +802,12 @@ describe('the talk context carries the real music state (spec 04 bugfix)', () =>
 
   it('after the song ends the context names the last track, nothing playing', async () => {
     const { director, knobs, player, brain, source } = build()
-    // Enough picks to keep the depth-2 queue full throughout: a slot that came
-    // back empty would stamp pickFailed and the state would read that instead
-    // of quiet.
+    // Two picks: the second answers the prime the first one's air time fires,
+    // so a pick is standing by and the state reads quiet. The spare search
+    // behind it finds nothing, which must not repaint that (codex review).
     source.picks = [
       pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' }),
       pickOf('https://stream/r2', { title: 'Spare', artist: 'Artist' }),
-      pickOf('https://stream/r3', { title: 'Spare Two', artist: 'Artist' }),
-      pickOf('https://stream/r4', { title: 'Spare Three', artist: 'Artist' }),
     ]
     // Four segments, not three: the coda occupies the first post-song boundary
     // and leaves the look-ahead full, so the refill that reads the post-song
@@ -775,11 +824,8 @@ describe('the talk context carries the real music state (spec 04 bugfix)', () =>
 
   it('a pick ready but not yet aired still grounds the beat: quiet, nothing playing (codex review)', async () => {
     const { deps, brain, source } = build()
-    deps.music!.cadence = new EveryNCadence(99) // music never due; the primed picks just wait
-    source.picks = [
-      pickOf('https://stream/ready', { title: 'Ready' }),
-      pickOf('https://stream/behind', { title: 'Behind' }),
-    ]
+    deps.music!.cadence = new EveryNCadence(99) // music never due; the primed pick just waits
+    source.picks = [pickOf('https://stream/ready', { title: 'Ready' })]
     await new Director(deps).run(2)
     expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'quiet' })
   })
