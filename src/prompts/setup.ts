@@ -109,6 +109,7 @@ export type SetupCurrentState = {
   readonly ttsUrl?: string
   readonly model?: string
   readonly referenceId?: string
+  readonly seed?: number
   readonly speed?: number
   readonly language?: string
 }
@@ -123,9 +124,11 @@ function currentStateBlock(current: SetupCurrentState | undefined): string {
   const lines: string[] = []
   if (current.ttsUrl !== undefined && current.ttsUrl !== '') {
     lines.push(`  - Voice endpoint: ${current.ttsUrl}${current.model === undefined ? '' : ` (model \`${current.model}\`)`}`)
+    // Stated, never diagnosed: a self-hosted run holds its timbre with a fixed
+    // seed and no id at all, so "no id" is a fact and "it drifts" is a guess.
     lines.push(
       current.referenceId === undefined
-        ? '  - Voice: none pinned — the timbre drifts from line to line until one is picked'
+        ? `  - Voice id: none pinned${current.seed === undefined ? '' : ` (the endpoint is given a fixed seed, ${String(current.seed)})`}`
         : `  - Voice id: \`${current.referenceId}\``,
     )
     lines.push(

@@ -532,6 +532,7 @@ function currentState(targets: SetupTargets, settings?: SteerSettingsActions): S
       ttsUrl: voice.ttsUrl,
       ...(voice.model !== undefined && { model: voice.model }),
       ...(voice.referenceId !== undefined && { referenceId: voice.referenceId }),
+      ...(voice.seed !== undefined && { seed: voice.seed }),
       ...(voice.speed !== undefined && { speed: voice.speed }),
     }),
     ...(language !== undefined && { language }),

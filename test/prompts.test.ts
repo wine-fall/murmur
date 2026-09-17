@@ -877,6 +877,17 @@ describe('the current-state block (spec 03-03 §7.2)', () => {
     expect(text).toMatch(/speed[^\n]*(unset|its own|as recorded)/i)
   })
 
+  // Peer review (codex): a self-hosted run pins its timbre with a fixed seed
+  // and no reference id — HostedVoice passes it on every synth — so calling
+  // that setup "drifting" sends the guide to repair a working machine.
+  it('reports a missing voice id without diagnosing a drift it cannot see', () => {
+    const { referenceId: _id, ...seeded } = current
+    const text = buildSetupPrompt({ gaps: [], ...base, current: { ...seeded, seed: 42 } })
+    expect(text).toMatch(/no voice id|none pinned/i)
+    expect(text).toContain('42')
+    expect(text).not.toMatch(/drifts/i)
+  })
+
   it('rides a gap conversation too — the same knobs are reachable there', () => {
     const text = buildSetupPrompt({
       gaps: [{ kind: 'music', reason: 'yt-dlp missing' }],
