@@ -889,7 +889,19 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   through `info`. The verb is what tells a reopened card apart from the same
   menu again (user report, 2026-09-14). Rows that end the same way share one
   (`-- could not connect Bilibili, NetEase — the code timed out — …`): three
-  failures behind one cause must still fit an 80x24 card (verified: 22 rows). The TUI floats the card
+  failures behind one cause must still fit an 80x24 card. **The card fitting
+  the screen is the client's invariant, not a row budget this copy has to
+  guess at** — *revised 2026-09-17, issue #264*. `mergeRows` bounds the row
+  COUNT, not the row HEIGHT: at 80 columns the card's inner width is 38, so
+  the Full Disk Access obstacle alone wraps to six rows and two merged gap
+  rows put this card on 25 rows against a 24-row screen — it drew past the top
+  edge and lost its own border. The old note here ("verified: 22 rows") held
+  only for short obstacle tails. What guarantees the fit now is spec 10 §3.2-B:
+  the client folds the notes, then the results, then windows the option rows
+  until the card fits, whatever the copy says. Keeping an obstacle line short
+  is still worth doing — a folded result is a result the listener has to go to
+  the log for — but it is no longer what stands between the card and the
+  screen edge. The TUI floats the card
   over the log (10 §3.3), so a result printed *under* it was the failure
   mode this replaces: the card closed and reopened and the listener saw
   nothing happen (#231).

@@ -408,7 +408,26 @@ The synthesized row is a real cursor stop, so the pick model's indices count
 the drawn rows, not the wire's options. A single-pick card gets no apply row:
 there Enter IS "take this row". Result rows from the previous submit (`ok ` / `-- `)
 sit above the divider, so a mount's outcome is read in the card, never under
-it. Kind picks the frame: warm/ember for a question (titled `· at/of` when the
+it. **The card is fitted to the screen before it is drawn (2026-09-17, issue
+#264).** It floats with a content-sized height and nothing clamped it, so a
+card taller than the terminal simply drew past the top edge — measured under
+the pty harness at 80x24, a sign-in card leading with two long obstacle rows
+stood on 25 rows and lost its border, its title and the results it leads
+with. `cardShape()` in `dock.ts` now cuts the content to what the height can
+hold, in a fixed order: the **notes** fold away first (detail that steps
+back), then the **results**, oldest first, into one line that counts them
+(`3 more above — the log has them`), then the **option rows** narrow to a
+window around the cursor with `↑ N more` / `↓ N more` counters. The question,
+the rows being answered and the action row are never sacrificed, and a card
+that already fits is untouched. The renderer draws exactly what the fit
+returned — one function, so the geometry the raster layer reads
+(`cardRows` / `cardTopRow`) and the rows actually drawn cannot disagree.
+Heights are measured the way the renderer wraps, on words (`wrapRows`);
+counting `ceil(length / inner)` under-counts every line that cannot break on
+a column boundary, which is how a card that had just been fitted still drew
+one row past the top. Below about 14 rows the terminal is shorter than the
+smallest honest card — frame, question, one row to answer with — and there is
+nothing left to cut. Kind picks the frame: warm/ember for a question (titled `· at/of` when the
 engine gave the ask a place in a run, plain when it did not), periwinkle for a consent (` · optional` in the title)
 — the listener's color, because the decision is theirs; a consent card
 closes with a two-option row of PEERS (`y - go ahead   ·   Enter - not now`,

@@ -5,12 +5,15 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { COMMANDS } from '../src/host/ipc.ts'
+import { COMMANDS, type AskOption } from '../src/host/ipc.ts'
 import {
   BACK_CMD,
   BACK_HINT,
   BACK_WHY,
   cardLines,
+  cardShape,
+  foldLabel,
+  wrapRows,
   actionRow,
   CONSENT_ACTIONS,
   backInline,
@@ -220,14 +223,129 @@ describe('cardLines', () => {
 // cells, so while the card is up the sky's images keep the stage (dimmed)
 // only where the card cannot reach. This is the renderer's own width/height
 // math replayed as a number.
+// The card floats at the bottom with a content-sized height, and nothing
+// clamped it: a card taller than the terminal lost its TOP rows — the border,
+// the title, and the result rows the sign-in card leads with. Measured at
+// 80x24 under the pty harness before the fix (issue #264). The cut is now
+// made here, in the card's own geometry, in a fixed order: notes fold away
+// first, then the results; the question, the answer rows and the action row
+// are never sacrificed.
+describe('fitCard (issue #264)', () => {
+  const OBSTACLE =
+    '-- could not connect YouTube — Chrome is here, but I am not allowed to read its cookie store — give this terminal Full Disk Access (System Settings → Privacy & Security), then /sources again.'
+  const TIMED_OUT = '-- could not connect Bilibili, QQ Music — the code timed out — /sources to get a fresh one.'
+  const SIGN_IN = [
+    OBSTACLE,
+    TIMED_OUT,
+    'How should I sign in to NetEase?',
+    'signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.',
+    '>> 1) [x] scan with the NetEase Cloud Music app',
+    '>> 2) [ ] Chrome — Work (zach.guo@opus.pro)',
+    '>> 3) [ ] Chrome — Personal (fawinell@gmail.com)',
+  ].join('\n')
+  const SIGN_IN_OPTIONS: AskOption[] = [
+    { key: 'scan', label: 'scan with the NetEase Cloud Music app', checked: true },
+    { key: 'chrome:Default', label: 'Chrome — Work (zach.guo@opus.pro)' },
+    { key: 'chrome:Profile 3', label: 'Chrome — Personal (fawinell@gmail.com)' },
+  ]
+  const MENU = [
+    'which accounts should I read? Enter with nothing changed leaves',
+    OBSTACLE,
+    TIMED_OUT,
+  ].join('\n')
+  const MENU_OPTIONS: AskOption[] = ['YouTube', 'Bilibili', 'NetEase', 'Spotify', 'Soda Music', 'QQ Music'].map((label) => ({
+    key: label,
+    label,
+    note: 'not connected',
+  }))
+
+  // The renderer word-wraps; counting ceil(length / inner) under-counts every
+  // line that cannot break on a column boundary, which is how a card that had
+  // just been fitted still drew one row past the top. These four numbers are
+  // read off the real 80x24 frame (pty harness, inner 38).
+  it('measures a line the way the renderer wraps it — on words, not on columns', () => {
+    expect(wrapRows(`--  ${OBSTACLE.slice(3)}`, 38)).toBe(6)
+    expect(wrapRows(`--  ${TIMED_OUT.slice(3)}`, 38)).toBe(3)
+    expect(wrapRows('How should I sign in to NetEase?', 38)).toBe(1)
+    expect(wrapRows('signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.', 38)).toBe(3)
+    // A word longer than the card still breaks mid-word rather than running off it.
+    expect(wrapRows('x'.repeat(100), 38)).toBe(3)
+  })
+
+  it('the sign-in card fits an 80x24 terminal — the case measured at 27 rows', () => {
+    expect(cardRows(SIGN_IN, 80, 'question', SIGN_IN_OPTIONS, false, false)).toBeGreaterThan(24)
+    expect(cardRows(SIGN_IN, 80, 'question', SIGN_IN_OPTIONS, false, false, 24)).toBeLessThanOrEqual(24)
+  })
+
+  it('the /sources menu card fits too — the overflow it carried before the sign-in card existed', () => {
+    expect(cardRows(MENU, 80, 'question', MENU_OPTIONS, false, true)).toBeGreaterThan(24)
+    expect(cardRows(MENU, 80, 'question', MENU_OPTIONS, false, true, 24)).toBeLessThanOrEqual(24)
+  })
+
+  // The smallest honest card is its frame, its question, one row to answer
+  // with and the counters for the rows out of view; a terminal shorter than
+  // that has no card to show. Everything at or above it fits, at every height.
+  it('fits every terminal height that can hold the smallest honest card', () => {
+    for (const [text, options, multi] of [
+      [SIGN_IN, SIGN_IN_OPTIONS, false],
+      [MENU, MENU_OPTIONS, true],
+    ] as const) {
+      const floor = cardRows(text, 80, 'question', options, false, multi, 1)
+      expect(floor).toBeLessThanOrEqual(14)
+      for (let height = floor; height <= 60; height++) {
+        expect(cardRows(text, 80, 'question', options, false, multi, height)).toBeLessThanOrEqual(height)
+      }
+    }
+  })
+
+  it('folds the notes first: the question and every option row stay', () => {
+    const fit = cardShape({ text: SIGN_IN, cols: 80, height: 24, kind: 'question', options: SIGN_IN_OPTIONS })
+    expect(fit.lines.some((l) => l.role === 'note')).toBe(false)
+    expect(fit.lines.find((l) => l.role === 'main')?.text).toBe('How should I sign in to NetEase?')
+    // Nothing was cut from the answer: all three roads are still on the card.
+    expect([fit.from, fit.to]).toEqual([0, 3])
+    // The results survived this one — only the note had to go.
+    expect(fit.lines.filter((l) => l.role === 'gap')).toHaveLength(2)
+  })
+
+  it('folds the results next, and says how many it folded rather than dropping them silently', () => {
+    const fit = cardShape({ text: MENU, cols: 80, height: 24, kind: 'question', options: MENU_OPTIONS, multi: true })
+    expect(fit.lines.find((l) => l.role === 'main')?.text).toBe('which accounts should I read?')
+    expect(fit.folded).toBeGreaterThan(0)
+    expect(fit.lines.some((l) => l.text === foldLabel(fit.folded))).toBe(true)
+    // Every row that can be ticked is still there — the answer is never folded.
+    expect([fit.from, fit.to]).toEqual([0, MENU_OPTIONS.length + 1])
+  })
+
+  it('windows the option rows around the cursor when the rows alone cannot fit, and never hides the row being answered', () => {
+    const many: AskOption[] = Array.from({ length: 30 }, (_, i) => ({ key: `k${String(i)}`, label: `source ${String(i)}` }))
+    const fit = cardShape({ text: 'which accounts should I read?', cols: 80, height: 20, kind: 'question', options: many, at: 22 })
+    expect(fit.to - fit.from).toBeLessThan(30)
+    expect(fit.from).toBeLessThanOrEqual(22)
+    expect(fit.to).toBeGreaterThan(22)
+    // What is off the window is counted, not silently gone.
+    expect(fit.above).toBe(fit.from)
+    expect(fit.below).toBe(30 - fit.to)
+    expect(cardRows('which accounts should I read?', 80, 'question', many, false, false, 20)).toBeLessThanOrEqual(20)
+  })
+
+  it('leaves a card that already fits exactly as it was', () => {
+    const seed = 'what do you want from the radio?'
+    expect(cardRows(seed, 120, 'question', undefined, false, false, 40)).toBe(cardRows(seed, 120, 'question'))
+    const fit = cardShape({ text: SIGN_IN, cols: 80, height: 60, kind: 'question', options: SIGN_IN_OPTIONS })
+    expect(fit.folded).toBe(0)
+    expect(fit.lines.some((l) => l.role === 'note')).toBe(true)
+  })
+})
+
 describe('cardRows / cardTopRow', () => {
   const CONSENT =
     'setup assistant wants to run [Bash]: brew outdated yt-dlp; echo "---"\nallow? [y/N]'
 
   it('counts content, chrome, and the in-card answer field', () => {
     // 2 unwrapped content rows + action row (2) + answer field (2)
-    // + border and padding (4) + the bottom margin (1).
-    expect(cardRows(CONSENT, 200, 'consent')).toBe(11)
+    // + border and padding (4) + the two rows it floats above (2).
+    expect(cardRows(CONSENT, 200, 'consent')).toBe(12)
   })
 
   it('wrapped lines take their real height, so a long command still clears the card', () => {
@@ -262,7 +380,7 @@ describe('cardRows / cardTopRow', () => {
     // A 128-column terminal's card is 64 inner columns — the peer row fits
     // there with the hint beside it, where the old chip row did not.
     expect(cardRows(CONSENT, 128, 'consent', undefined, true)).toBe(cardRows(CONSENT, 128, 'consent'))
-    expect(cardRows(CONSENT, 200, 'consent', undefined, true)).toBe(11)
+    expect(cardRows(CONSENT, 200, 'consent', undefined, true)).toBe(12)
     expect(cardRows(CONSENT, 120, 'consent', undefined, true)).toBe(cardRows(CONSENT, 120, 'consent') + 1)
     expect(cardRows(CONSENT, 80, 'consent', undefined, true)).toBe(cardRows(CONSENT, 80, 'consent') + 1)
     // The seed row, 39 columns with the hint joined: one row at
@@ -276,16 +394,16 @@ describe('cardRows / cardTopRow', () => {
     const checklist =
       'summary.\nok brain - on the air\n-- voice - silent\n>> y - fix them now\n>> Enter - not now'
     // 5 content rows (options included) + the divider + field (2) + chrome (4)
-    // + margin (1) — a checklist card carries no separate action row.
-    expect(cardRows(checklist, 200, 'consent')).toBe(13)
+    // + the inset (2) — a checklist card carries no separate action row.
+    expect(cardRows(checklist, 200, 'consent')).toBe(14)
   })
 
   it('a question menu keeps its action row even above status rows — only a consent checklist drops it', () => {
     const menu = 'what would you like to do? mount <name> | done\nok YouTube - 1 liked\n>> mount netease - NetEase'
     // 4 content rows (the lead splits at '? ') + divider + action row (2)
     // + field (2) + chrome (4) + margin (1).
-    expect(cardRows(menu, 200, 'question')).toBe(14)
-    expect(cardRows(menu, 200, 'consent')).toBe(12)
+    expect(cardRows(menu, 200, 'question')).toBe(15)
+    expect(cardRows(menu, 200, 'consent')).toBe(13)
   })
 
   it('a list card stands on its rows, not the text\'s >> lines, and has no answer field', () => {
@@ -296,15 +414,15 @@ describe('cardRows / cardTopRow', () => {
     ]
     // 1 lead row + 2 list rows + action row (2) + chrome (4) + margin (1); no
     // divider (no facts), no field — the list IS the answer.
-    expect(cardRows(text, 200, 'question', options)).toBe(10)
+    expect(cardRows(text, 200, 'question', options)).toBe(11)
     // A multi list also stands on the apply row the client synthesizes.
-    expect(cardRows(text, 200, 'question', options, false, true)).toBe(11)
+    expect(cardRows(text, 200, 'question', options, false, true)).toBe(12)
     // A result row above the list brings the divider back.
-    expect(cardRows(`which accounts should I read?\nok NetEase - signed in\n${text.split('\n').slice(1).join('\n')}`, 200, 'question', options)).toBe(12)
+    expect(cardRows(`which accounts should I read?\nok NetEase - signed in\n${text.split('\n').slice(1).join('\n')}`, 200, 'question', options)).toBe(13)
   })
 
   it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
-    expect(cardTopRow(CONSENT, 200, 50, 'consent')).toBe(50 - 1 - cardRows(CONSENT, 200, 'consent'))
+    expect(cardTopRow(CONSENT, 200, 50, 'consent')).toBe(50 - cardRows(CONSENT, 200, 'consent'))
     expect(cardTopRow(CONSENT, 200, 8, 'consent')).toBe(1)
   })
 })
