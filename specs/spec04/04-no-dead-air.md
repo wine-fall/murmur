@@ -82,13 +82,42 @@ local clock, so the bucketing is unit-testable without `datetime.now()`.
 ## 3. Design
 
 ### 3.1 Music-pick prefetch (slice 1)
-A **single-slot** prefetch buffer in the Director holds an in-flight (or
-finished) `next_track` task:
+A **queue** in the Director, `PICK_LOOKAHEAD = 2` picks deep, holds in-flight
+(or finished) `next_track` tasks head-first — index 0 is the next to air:
 
 - **Fire:** once a talk segment's text exists (so `MusicContext.situation` has
-  real mood), if music is wired and the slot is empty, start
-  `asyncio.create_task(music.next_track(ctx))` and park it in the slot. The talk
-  segment then airs as normal — the pick resolves in the background.
+  real mood), if music is wired and the queue is short, start
+  `music.nextTrack(ctx)` and push it. The talk segment then airs as normal — the
+  pick resolves in the background.
+- **Fire at air time:** a track going on air primes the slot its own
+  consumption freed, **after** it is ledgered (spec 05 §3.5) so it is on its own
+  avoid-list. Without this the queue sat empty for a whole song and every
+  post-song pick paid a cold discovery — the measured 2.5-minute hole between
+  songs, and the reason a switch asked for mid-song could not land before the
+  song ended on its own.
+- **Depth by chaining:** the queue reaches its depth by topping up when a search
+  lands, not from a second ignition point — nothing else fires between a song's
+  air time and the next boundary. **One search at a time:** the next slot's
+  avoid-list is built from the labels of the slots in front of it, which only
+  exist once those searches have landed.
+- **Queued picks are on the avoid-list:** the ledger only hears about a song at
+  air time, so a queued pick is invisible to `recentSongs`. `MusicContext`
+  carries the labels of the picks already in the queue alongside it, or the
+  slots behind the head would be free to choose the same track.
+- **An empty result is not a queued pick:** a search that returned nothing is
+  dropped from the queue before the next one is fired, so it can never sit in
+  front of a real pick where the boundary and the switch handover both read the
+  head. It is dropped *there* and not at resolution, so a due switch still has
+  something to race and can report the failure at once instead of waiting out
+  the song.
+- **Depth is 2, not more:** two covers a switch asked for right after a song
+  started, and a second switch straight after the first. A third pick would be
+  chosen two songs' worth of mood ahead of the moment it airs, for a case
+  nothing has measured.
+- **What the depth costs:** nothing per song at steady state — one played song
+  is still one search. The cost is on *discard*: a hinted `switch_music` throws
+  away two picks instead of one (spec 11 §2.1), and a session ending with a full
+  queue wastes two searches instead of one.
 - **Startup prime (issue #76):** the very first pick is fired at the top of
   `Director.run`, before the cold talk batch — discovery is the measured
   dominant first-music term (§3.3) and is independent of talk generation, so
@@ -105,22 +134,22 @@ finished) `next_track` task:
   `music.probe` / `music.pick done`, each with elapsed ms) — the deterministic
   seam for attributing where a slow pick's wall-clock goes.
 - **Consume:** when the music branch fires, the slot must hold a **resolved**
-  pick to air a song. If it holds a task that is *already done*, `await` it
-  (near-instant) instead of a cold `next_track`, clear the slot, and air the
-  song; the next talk segment refills it. So the Director always runs **one pick
-  ahead**.
-- **Never block on a resolving pick (dead-air fix):** if the slot holds a task
-  that is **still in flight** when music is due, the branch does **not** await it
+  pick to air a song. If the **head** is *already done*, `await` it
+  (near-instant) instead of a cold `next_track`, shift it off, and air the song;
+  the queue moves up behind it and the air-time fire refills the free slot. So
+  the Director runs up to `PICK_LOOKAHEAD` picks ahead.
+- **Never block on a resolving pick (dead-air fix):** if the **head** is
+  **still in flight** when music is due, the branch does **not** await it
   — it returns to talk and airs a buffered look-ahead beat, then re-attempts
   music at the next boundary. The in-flight pick keeps resolving in the
-  background (the slot is *not* cleared, so no duplicate prefetch fires), and the
+  background (the slot is *not* dropped, so no duplicate prefetch fires), and the
   depth-2 talk look-ahead (§3.3) covers the search **adaptively** — however long
   the resolve takes — with no dead air and no hardcoded "talk for N" duration.
   (Observed live before this fix: a long-playlist resolve blocked the music
   branch ~56s — `music.pick prefetched=True elapsed_s=56.52` — while a warm talk
   beat sat buffered.)
-- **Cold fallback:** if the slot is empty when the music branch fires (e.g. the
-  very first segment, or a pick just consumed), do a cold `next_track` exactly as
+- **Cold fallback:** if the queue is empty when the music branch fires (e.g. the
+  very first segment, or a pick just consumed), do a cold `nextTrack` exactly as
   before — correctness never depends on the buffer being warm.
 - **Staleness (accepted):** the pick is chosen on the mood at *fire* time and may
   air a segment or two later. Songs are long and background; a slightly older
@@ -447,11 +476,14 @@ Listed beside the ducking knobs in spec 03-02 §6.1; the homes are here.
 
 | Constant | Home | Value | What it sets |
 |---|---|---|---|
+| `PICK_LOOKAHEAD` | `src/director/director.ts` | 2 | How many picks deep the music queue runs (§3.1). |
 | `CODA_RIDE_P` | `src/director/director.ts` | 0.5 | How often the coda rides the outro instead of waiting for silence. |
 | `CODA_LEAD_MIN_S` / `CODA_LEAD_MAX_S` | `src/director/director.ts` | 8 s / 12 s | How long before the end the ride starts (uniform in range). |
 
-- **Buffer depth:** single-slot (one pick / one segment ahead) vs N-deep. Slice 1
-  starts single-slot; deepen only if measurement shows a remaining gap.
+- **Buffer depth:** slice 1 started single-slot and the measurement asked for
+  (see §3.1's air-time fire): at depth 1 the queue was empty for a song's whole
+  length. It is **2** now. Deeper is still open, and still wants a measurement
+  first — the cost of depth is paid on discard, not per song.
 - **Continuous vs cold-start-only prefetch:** slice 1 prefetches continuously
   (one pick ahead, every music cycle); if the mood-staleness ever reads wrong,
   restrict to the first cold-start pick.

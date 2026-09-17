@@ -313,14 +313,15 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     const { director, host, player, source } = build(steer)
     source.picks = [
       pickOf('https://stream/a', { title: 'First' }),
-      // Spent by the prime the first song's air time fires (spec 04 §3.1); the
-      // hint discards it, because it was chosen before the listener spoke.
-      pickOf('https://stream/discarded', { title: 'Discarded' }),
+      // The two the depth-2 queue is holding when the listener speaks (spec 04
+      // §3.1). The hint discards both: each was chosen before they spoke.
+      pickOf('https://stream/stale-1', { title: 'Stale One' }),
+      pickOf('https://stream/stale-2', { title: 'Stale Two' }),
       pickOf('https://stream/b', { title: 'Second', announce: 'here is something softer' }),
     ]
     const run = director.run(2) // talk, then music
     await until(() => player.handles.length === 1, 'first song on air')
-    await until(() => source.calls === 2, 'the next pick is primed during the song')
+    await until(() => source.calls >= 3, 'the queue is full behind the song')
     source.delayMs = 60 // the fresh pick takes a moment: reply must not wait for it
     host.type('change the music')
     await until(() => host.radio.includes('on it, hang tight.'), 'reply aired')
@@ -473,15 +474,15 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     const { director, host, player, source } = build(steer)
     const first = pickOf('https://stream/a', { title: 'First' })
     const second = pickOf('https://stream/b', { title: 'Second' })
-    // Call 1 airs the first song; call 2 is the air-time prime and fails; call
-    // 3 is the search the listener's request has to buy.
+    // Only the first and the last search find anything, so the queue standing
+    // behind the song is an empty slot when the listener asks.
     source.nextTrack = async () => {
       source.calls++
-      return source.calls === 1 ? first : source.calls === 2 ? null : second
+      return source.calls === 1 ? first : source.calls === 4 ? second : null
     }
     const run = director.run(2)
     await until(() => player.handles.length === 1, 'first song on air')
-    await until(() => source.calls === 2, 'the air-time prime came back empty')
+    await until(() => source.calls >= 3, 'the queue behind the song came back empty')
     host.type('next song')
     await until(() => player.handles.length === 2, 'the switch found a track of its own')
     expect(host.infos.some((m) => m.includes('now playing: Second'))).toBe(true)
@@ -511,6 +512,61 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     const coda = brain.talkContexts.find((c) => c.cue === CODA_CUE)!
     expect(coda.music).toEqual({ kind: 'playing', track: 'Forced' })
     player.handles[0]!.end()
+    await run
+  })
+
+  // spec 11 §2.1 at depth 2: a hinted request re-aims the WHOLE queue, not just
+  // its head — every pick in it was chosen before the listener spoke.
+  it('a hinted switch discards the whole queue and airs the pick made for the request', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack('rainy jazz')
+      return 'good call.'
+    })
+    const { director, host, player, source } = build(steer)
+    source.picks = [
+      pickOf('https://stream/1', { title: 'Aired' }),
+      pickOf('https://stream/2', { title: 'Stale One' }),
+      pickOf('https://stream/3', { title: 'Stale Two' }),
+      pickOf('https://stream/4', { title: 'Rainy' }),
+    ]
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => source.calls === 3, 'the queue filled to depth 2')
+    host.type('put on some rainy jazz')
+    await until(() => player.handles.length === 2, 'handover')
+    expect(host.infos.some((m) => m.includes('now playing: Rainy'))).toBe(true)
+    expect(source.contexts[3]!.situation).toContain('- listener request: rainy jazz')
+    player.handles[1]!.end()
+    await run
+  })
+
+  // The other half of §2.1: nothing was re-aimed, so the queue keeps its shape
+  // — the head airs and the pick behind it moves up rather than being thrown away.
+  it('a hintless switch takes the head and the queue moves up behind it', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'on it.'
+    })
+    const { director, host, player, source } = build(steer)
+    source.picks = [
+      pickOf('https://stream/1', { title: 'Aired' }),
+      pickOf('https://stream/2', { title: 'Head' }),
+      pickOf('https://stream/3', { title: 'Behind' }),
+    ]
+    // Nothing past the three scripted picks: a queue that threw its tail away
+    // would have to search for the boundary after the handover, and hang.
+    const real = source.nextTrack.bind(source)
+    source.nextTrack = (ctx) => (source.calls >= 3 ? new Promise<never>(() => {}) : real(ctx))
+    const run = director.run(4) // talk, music (+ handover), talk, music
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => source.calls >= 3, 'the queue filled to depth 2')
+    host.type('next song')
+    await until(() => player.handles.length === 2, 'handover to the head of the queue')
+    expect(host.infos.some((m) => m.includes('now playing: Head'))).toBe(true)
+    player.handles[1]!.end()
+    await until(() => player.handles.length === 3, 'the pick behind it airs at the next boundary')
+    expect(host.infos.some((m) => m.includes('now playing: Behind'))).toBe(true)
+    player.handles[2]!.end()
     await run
   })
 

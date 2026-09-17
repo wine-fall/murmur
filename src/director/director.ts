@@ -142,6 +142,13 @@ const RECALL_LIMIT = 5
 // keeps far more than this, and the list costs one prompt line per song.
 const AVOID_DEPTH = 32
 
+// spec 04 §3.1: how many picks the music look-ahead holds. Two, so the pick
+// behind the one on air is also standing by — which is what makes a second
+// switch in a row, or a switch right after a song started, instant instead of
+// a fresh ~90 s search. Deeper buys nothing: a third pick would be chosen two
+// songs' worth of mood ahead of the moment it airs.
+const PICK_LOOKAHEAD = 2
+
 // How many recent turns the music situation carries (issue #76): choosing a
 // track needs the current mood, not the full talk window, and the discovery
 // prompt growing with memory was the measured hot-slower-than-cold term.
@@ -207,11 +214,33 @@ export function steerFromLine(line: string): Steer {
 // A promise with a synchronously readable settled flag: barge-in tells "still
 // on air" from "already ended"; the music boundary tells "pick ready" from
 // "pick still resolving" (never block the air on it).
-type Pending<T> = { promise: Promise<T>; done: () => boolean }
+// `value` is what a settled promise resolved to — the music queue needs to read
+// a pick it has not aired yet (§3.1), which a bare promise cannot tell it
+// without awaiting. Undefined while in flight, and after a rejection.
+type Pending<T> = { promise: Promise<T>; done: () => boolean; value: () => T | undefined }
 
 function pending<T>(promise: Promise<T>): Pending<T> {
   let settled = false
-  return { promise: promise.finally(() => (settled = true)), done: () => settled }
+  let resolved: T | undefined
+  const tracked = promise.then(
+    (v) => {
+      settled = true
+      resolved = v
+      return v
+    },
+    (err: unknown) => {
+      settled = true
+      throw err
+    },
+  )
+  return { promise: tracked, done: () => settled, value: () => resolved }
+}
+
+// The label the program announces a pick under, and the one the ledger and the
+// avoid-list carry — one spelling, so a queued pick and an aired one are the
+// same string.
+function trackLabel(pick: TrackPick): string {
+  return pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
 }
 
 type OnAir = Pending<void>
@@ -344,9 +373,9 @@ export class Director {
   // TALK_LOOKAHEAD so the next talk airs warm — even across music. Discarded
   // on a talkback steer (they predate the user's turn).
   private talkAhead: BufferedBeat[] = []
-  // The single in-flight refill topping the buffer back up (mirrors the
-  // single-slot pendingPick). Promises cannot be cancelled, so a discarded
-  // refill keeps running and the epoch guard drops its stale result.
+  // The single in-flight refill topping the buffer back up (mirrors the music
+  // queue). Promises cannot be cancelled, so a discarded refill keeps running
+  // and the epoch guard drops its stale result.
   private talkFill: Pending<void> | null = null
   private talkEpoch = 0
   // spec 04 §3.3: the beat that answers the song currently on air, generated at
@@ -365,12 +394,13 @@ export class Director {
   // segment carries the track's length and the moment it went on air, which is
   // what makes the strip's progress bar the front-end's own arithmetic.
   private segment: ProgramState = { kind: 'gap' }
-  // Single-slot music prefetch (spec 04 slice 1): the next pick resolves in the
-  // background so its find-and-pull latency overlaps talk, never the boundary.
-  private pendingPick: Pending<TrackPick | null> | null = null
+  // The music look-ahead (spec 04 §3.1), up to PICK_LOOKAHEAD deep: picks
+  // resolve in the background so their find-and-pull latency overlaps talk and
+  // airtime, never the boundary. Head-first — index 0 is the next to air.
+  private pickQueue: Pending<TrackPick | null>[] = []
   // The steer-task state (spec 11): a due switch hands the air over when the
   // fresh pick resolves (or owns the next boundary when no track is live);
-  // pickPredatesTurn tells a hinted switch whether the primed pick is stale.
+  // pickPredatesTurn tells a hinted switch whether the queue is stale.
   private switchDue = false
   private pickPredatesTurn = false
   // Two-phase shutdown (spec 11 §2.1): armed survives across steer tasks;
@@ -850,7 +880,8 @@ export class Director {
       const track = this.segment.nowPlaying
       return this.switchDue ? { kind: 'switching', track } : { kind: 'playing', track }
     }
-    if (this.pendingPick !== null && !this.pendingPick.done()) {
+    const head = this.pickQueue[0]
+    if (head !== undefined && !head.done()) {
       return this.switchDue ? { kind: 'switching' } : { kind: 'picking' }
     }
     if (this.pickFailed) return { kind: 'pickFailed' }
@@ -1066,17 +1097,39 @@ export class Director {
       persona: this.persona(),
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
-        this.deps.memory.recentSongs(AVOID_DEPTH),
+        [...this.deps.memory.recentSongs(AVOID_DEPTH), ...this.queuedLabels()],
         this.tasteDigest(),
       ),
     }
+  }
+
+  // The songs the queue is already holding. The ledger only hears about a song
+  // at AIR time (spec 05 §3.5), so a queued pick is invisible to the avoid-list
+  // that `recentSongs` builds — and the slot behind it would be free to choose
+  // the very same track.
+  private queuedLabels(): string[] {
+    return this.pickQueue.flatMap((slot) => {
+      const pick = slot.value()
+      return pick === undefined || pick === null ? [] : [trackLabel(pick)]
+    })
   }
 
   // `extraLine` is a pre-rendered situation line (the airing beat, or a
   // listener request from switch_music).
   private prefetchMusic(extraLine?: string): void {
     const music = this.deps.music
-    if (music === undefined || this.pendingPick !== null) return
+    if (music === undefined) return
+    // A search that came back empty is not a queued pick, and must never sit in
+    // front of a real one — the boundary and the switch handover both read the
+    // head. Compacted here rather than at resolution: a due switch still needs
+    // an empty result to race, so it can say so instead of waiting out the song.
+    this.pickQueue = this.pickQueue.filter((slot) => !slot.done() || slot.value() !== null)
+    if (this.pickQueue.length >= PICK_LOOKAHEAD) return
+    // One search at a time: the next slot's avoid-list is built from the labels
+    // of the slots in front of it (queuedLabels), and a pick still in flight
+    // has no label yet. Serializing them is also what keeps the queue from
+    // paying two searches at once for two songs nobody has asked for.
+    if (this.pickQueue.some((slot) => !slot.done())) return
     // The live off switch gates the SPEND, not just the airtime (spec 12 §3.2):
     // a disabled session must not pay discovery calls it will never play.
     if (!this.deps.settings().musicEnabled) return
@@ -1089,7 +1142,7 @@ export class Director {
     // (spec 04 bugfix) without deepening the chain the boundary races against.
     // Epoch-guarded: only the newest search may write.
     const epoch = ++this.pickEpoch
-    this.pendingPick = pending(
+    const slot = pending(
       music.source.nextTrack(ctx).then(
         (pick) => {
           if (epoch === this.pickEpoch) this.pickFailed = pick === null
@@ -1101,6 +1154,15 @@ export class Director {
         },
       ),
     )
+    this.pickQueue.push(slot)
+    // The depth is reached by chaining, not by a second ignition point: between
+    // a song's air time and the next boundary nothing else fires. A search that
+    // came back empty does not chain (there is nothing to deepen), and a stale
+    // epoch means this slot was discarded while it resolved — the search that
+    // replaced it owns the top-up.
+    void slot.promise.then((pick) => {
+      if (pick !== null && epoch === this.pickEpoch) this.prefetchMusic()
+    })
   }
 
   // spec 11 §2.1: the listener asked for different music. A hinted request must
@@ -1109,22 +1171,24 @@ export class Director {
   // the situation. The due switch then hands the air over on resolve, or owns
   // the next boundary when no track is live.
   private switchMusic(hint?: string): void {
-    if (hint !== undefined && this.pickPredatesTurn) this.pendingPick = null
-    // A slot that already came back empty is not an answer to anything (codex
-    // review): left in place it would be handed straight to handoverTrack,
-    // which would report the switch failed without ever having searched for it.
-    if (this.pendingPick?.done() === true && this.pickFailed) this.pendingPick = null
+    // A hint re-aims the WHOLE queue: every pick in it was chosen before the
+    // listener spoke, so none of them is what was asked for.
+    if (hint !== undefined && this.pickPredatesTurn) this.pickQueue = []
+    // prefetchMusic drops the spent slots first, so a search that already came
+    // back empty is never handed to handoverTrack as this request's answer
+    // (codex review) — the request buys a real search of its own.
     this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`)
     this.switchDue = true
     this.deps.host.debug?.('music.switch due')
   }
 
-  // The pick for the boundary: the prefetched one if primed (near-instant when
-  // already resolved), else a cold fetch. Clears the slot; later talk refills it.
+  // The pick for the boundary: the head of the queue if there is one
+  // (near-instant when already resolved), else a cold fetch. The queue moves up
+  // behind it; startTrack refills the freed slot once this track is on air, so
+  // the refill's avoid-list already carries the song it is standing behind.
   private takePick(): Promise<TrackPick | null> {
-    const primed = this.pendingPick
-    this.pendingPick = null
-    if (primed !== null) return primed.promise
+    const head = this.pickQueue.shift()
+    if (head !== undefined) return head.promise
     return this.deps.music!.source.nextTrack(this.musicContext())
   }
 
@@ -1133,7 +1197,8 @@ export class Director {
   private async musicSegment(): Promise<boolean> {
     // Never block the air on a pick still resolving: air talk instead and
     // re-attempt music at the next boundary while it keeps resolving.
-    if (this.pendingPick !== null && !this.pendingPick.done()) return false
+    const head = this.pickQueue[0]
+    if (head !== undefined && !head.done()) return false
     try {
       // A song is going on air: the talk look-ahead SURVIVES it and is topped
       // up during it (spec 04 §3.3) — the song's whole duration overlaps the
@@ -1225,7 +1290,7 @@ export class Director {
       await handle.stop()
       return null
     }
-    const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
+    const label = trackLabel(pick)
     this.pickFailed = false
     // The switch is delivered the instant this track is confirmed on air, and
     // the coda written at the bottom of this method must be told so (codex
@@ -1402,8 +1467,8 @@ export class Director {
           // A due switch races its fresh pick too (spec 11 §2.3): the handover
           // must wait for neither the song's end nor the listener's next line.
           const pickReady =
-            track !== undefined && this.switchDue && this.pendingPick !== null
-              ? this.pendingPick.promise.then(() => 'pick' as const)
+            track !== undefined && this.switchDue && this.pickQueue[0] !== undefined
+              ? this.pickQueue[0].promise.then(() => 'pick' as const)
               : null
           // Only while the voice channel is free: the ride is a beat, and one
           // voice clip at a time still holds.
@@ -1547,7 +1612,7 @@ export class Director {
     // The user's turn is fresh mood signal: prime the next pick around it. A
     // pick already in flight predates this turn — a hinted switch_music uses
     // that to decide whether it must re-prime (spec 11 §2.1).
-    this.pickPredatesTurn = this.pendingPick !== null
+    this.pickPredatesTurn = this.pickQueue.length > 0
     this.prefetchMusic()
     while (true) {
       const prep = this.prepareReply(texts)
