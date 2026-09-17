@@ -12,6 +12,7 @@ import {
   probeArgs,
   probeDurationArgs,
   probeDurationS,
+  probePlayableDurationS,
   probeStream,
 } from '../src/audio/ffmpeg.ts'
 
@@ -94,6 +95,41 @@ describe('probeStream', () => {
 
   it('reports false for a probe binary that cannot spawn', async () => {
     expect(await probeStream('src', '/nonexistent/ffmpeg-binary')).toBe(false)
+  })
+})
+
+// The netease trap and the playability probe used to be two separate opens of
+// the same slow CDN url (issue #164). One open answers both: ffmpeg decodes
+// half a second AND says how long the input is, so a duration coming back is
+// proof the stream really plays — which a container-only ffprobe read is not.
+describe('probePlayableDurationS', () => {
+  async function stubFfmpeg(script: string): Promise<string> {
+    const dir = await mkdtemp(join(tmpdir(), 'murmur-ffmpeg-'))
+    const stub = join(dir, 'ffmpeg-stub')
+    await writeFile(stub, script, { mode: 0o755 })
+    return stub
+  }
+
+  it('reads the length off a probe that decoded, and subtracts the offset', async () => {
+    const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 02:05:06.50, start: 0.000000, bitrate: 128 kb/s" >&2\nexit 0\n')
+    expect(await probePlayableDurationS('src', stub)).toBe(7506.5)
+    expect(await probePlayableDurationS('src', stub, undefined, undefined, 7000)).toBe(506.5)
+    expect(await probePlayableDurationS('src', stub, undefined, undefined, 9000)).toBeNull()
+  })
+
+  // The finding this function exists for: intact metadata over frames that do
+  // not decode. ffmpeg prints the duration and THEN fails, so the exit code is
+  // what decides — null, and the caller proves the stream some other way.
+  it('is null when the probe printed a length but did not decode', async () => {
+    const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 00:01:00.00, bitrate: 128 kb/s" >&2\nexit 69\n')
+    expect(await probePlayableDurationS('src', stub)).toBeNull()
+  })
+
+  it('is null for a stream with no stated duration, a hung probe, and a binary that cannot spawn', async () => {
+    const live = await stubFfmpeg('#!/bin/sh\necho "  Duration: N/A, bitrate: N/A" >&2\nexit 0\n')
+    expect(await probePlayableDurationS('src', live)).toBeNull()
+    expect(await probePlayableDurationS('src', 'yes', 300)).toBeNull()
+    expect(await probePlayableDurationS('src', '/nonexistent/ffmpeg-binary')).toBeNull()
   })
 })
 

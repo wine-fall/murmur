@@ -217,6 +217,54 @@ export function probeArgs(source: string, headers?: StreamHeaders, startS?: numb
   return ['-nostdin', ...headerArgs(headers), ...(startS ? ['-ss', String(startS)] : []), '-i', source, '-t', '0.5', '-f', 'null', '-']
 }
 
+// What ffmpeg says about every input it opens, before it decodes a frame:
+// `  Duration: 02:05:06.50, start: ...`. `N/A` (a live stream) is no duration.
+const FFMPEG_DURATION = /^\s*Duration:\s*(\d+):(\d\d):(\d\d(?:\.\d+)?)/m
+
+export function parseFfmpegDuration(stderr: string): number | null {
+  const m = FFMPEG_DURATION.exec(stderr)
+  if (m === null) return null
+  const seconds = Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3])
+  return Number.isFinite(seconds) && seconds > 0 ? seconds : null
+}
+
+// The preview trap's length and the playability proof from ONE open of the
+// stream (spec 14 §2.6, issue #164). Two opens of a slow NetEase CDN cost
+// 13-15 s each and the second one lands on the probe's own ceiling often
+// enough to call a live stream dead; and a container read alone is not the
+// proof — metadata survives frames that will not decode. So: decode the half
+// second probeStream decodes, and take the length off the same run.
+// Null = no length to compare, for any reason including a stream that did not
+// play. The caller reads it as "unproven" and probes properly.
+export function probePlayableDurationS(
+  source: string,
+  ffmpegCmd = 'ffmpeg',
+  timeoutMs = 15_000,
+  headers?: StreamHeaders,
+  startS?: number,
+): Promise<number | null> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegCmd, probeArgs(source, headers, startS), { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    proc.stderr.setEncoding('utf-8')
+    proc.stderr.on('data', (chunk: string) => (stderr += chunk))
+    const deadline = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
+    deadline.unref()
+    proc.on('exit', (code) => {
+      clearTimeout(deadline)
+      if (code !== 0) return resolve(null)
+      const total = parseFfmpegDuration(stderr)
+      if (total === null) return resolve(null)
+      const remaining = total - (startS ?? 0)
+      resolve(remaining > 0 ? remaining : null)
+    })
+    proc.on('error', () => {
+      clearTimeout(deadline)
+      resolve(null)
+    })
+  })
+}
+
 export function probeStream(
   source: string,
   ffmpegCmd = 'ffmpeg',
