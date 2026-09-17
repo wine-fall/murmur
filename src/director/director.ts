@@ -840,13 +840,19 @@ export class Director {
 
   // The pack's real music status (spec 04 bugfix), most-live fact first: a
   // track on air, a pick still resolving, the last pick's empty result, the
-  // last track that aired. Undefined when music is not wired (renders nothing).
+  // last track that aired. A due switch (spec 11 §2.3) qualifies both of the
+  // live states — the listener asked and the engine has not delivered yet, and
+  // a beat written from a plain 'playing' claims the song was changed when it
+  // was not. Undefined when music is not wired (renders nothing).
   private musicState(): MusicState | undefined {
     if (this.deps.music === undefined) return undefined
     if (this.segment.kind === 'music' && this.segment.nowPlaying !== undefined) {
-      return { kind: 'playing', track: this.segment.nowPlaying }
+      const track = this.segment.nowPlaying
+      return this.switchDue ? { kind: 'switching', track } : { kind: 'playing', track }
     }
-    if (this.pendingPick !== null && !this.pendingPick.done()) return { kind: 'picking' }
+    if (this.pendingPick !== null && !this.pendingPick.done()) {
+      return this.switchDue ? { kind: 'switching' } : { kind: 'picking' }
+    }
     if (this.pickFailed) return { kind: 'pickFailed' }
     return { kind: 'quiet', ...(this.lastTrack !== null && { lastTrack: this.lastTrack }) }
   }
@@ -1104,6 +1110,10 @@ export class Director {
   // the next boundary when no track is live.
   private switchMusic(hint?: string): void {
     if (hint !== undefined && this.pickPredatesTurn) this.pendingPick = null
+    // A slot that already came back empty is not an answer to anything (codex
+    // review): left in place it would be handed straight to handoverTrack,
+    // which would report the switch failed without ever having searched for it.
+    if (this.pendingPick?.done() === true && this.pickFailed) this.pendingPick = null
     this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`)
     this.switchDue = true
     this.deps.host.debug?.('music.switch due')
@@ -1144,7 +1154,6 @@ export class Director {
         const started = await this.steerableStart(pick)
         if (this.quit) return false
         if (started === null) continue
-        this.switchDue = false
         await this.runVoice(started.voice, started.handle)
         this.noteTrackEnd()
         return true
@@ -1218,6 +1227,12 @@ export class Director {
     }
     const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
     this.pickFailed = false
+    // The switch is delivered the instant this track is confirmed on air, and
+    // the coda written at the bottom of this method must be told so (codex
+    // review) — a beat still hearing 'switching' would keep promising a song
+    // the listener is already hearing. Cleared here and not at the caller,
+    // because a start that never produced audio returns above, still due.
+    this.switchDue = false
     this.deps.host.info(`now playing: ${label}`)
     this.emitState('music', {
       label,
@@ -1241,6 +1256,12 @@ export class Director {
     // The way out of this song is written now, while it plays: the beat that
     // airs after it (or over its outro) is the one that knows it happened.
     this.prefetchCoda()
+    // And so is the way into the next one (spec 04 §3.1): takePick emptied the
+    // slot to air this track, so without this the pick after it would pay a
+    // full cold discovery at the boundary — the dead air between songs. Fired
+    // AFTER the ledger entry above, so this song is on its own avoid-list. No
+    // extra spend: the same pick, bought a song earlier.
+    this.prefetchMusic()
     return { handle, voice }
   }
 

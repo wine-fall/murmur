@@ -302,6 +302,20 @@ describe('music state + clock grounding (spec 04 bugfix)', () => {
     expect(p).toContain('came up empty')
   })
 
+  it('renders a due switch over the track that is still on air', () => {
+    const p = buildNextTalkPrompt({ ...base, music: { kind: 'switching', track: 'Song — Artist' } })
+    expect(p).toContain('"Song — Artist" is still playing')
+    expect(p).toContain('The listener asked for a different song')
+    expect(p).toContain('has not been found yet')
+  })
+
+  it('renders a due switch with nothing on air', () => {
+    const p = buildNextTalksPrompt({ ...base, music: { kind: 'switching' } }, 2)
+    expect(p).toContain('No music is playing')
+    expect(p).toContain('the listener asked for a different song')
+    expect(p).not.toContain('is still playing')
+  })
+
   it('an absent music state renders nothing about music', () => {
     const p = buildNextTalkPrompt(base)
     expect(p).not.toContain('No music')
