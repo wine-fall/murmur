@@ -118,13 +118,19 @@ const NAMES: Record<string, MenuKey> = {
   qqmusic: 'qqmusic',
   qq: 'qqmusic',
   refresh: 'refresh',
+  // The row is drawn as a button — `( refresh now )` — so that is what gets
+  // typed, and one word the flow cannot place fails the whole line.
+  now: 'refresh',
 }
 
 type MenuKey = SourceId | 'refresh'
 type MenuRow = AskOption & { key: MenuKey; note: string; checked: boolean }
 
 const QUESTION = 'which accounts should I read? Enter with nothing changed leaves'
-const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh', note: 're-read every connected account now', checked: false }
+// An ACTION, not a state (spec 14 §3.1): re-reading is something you do
+// now, not something you are connected to, so the row carries `action` and
+// is drawn as a button — on the card and in the numbered rows alike.
+const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh now', note: 're-read every connected account now', checked: false, action: true }
 
 function ago(iso: string | undefined, now: Date): string {
   if (iso === undefined) return 'never read'
@@ -178,7 +184,7 @@ function menuRows(store: SourcesStore, now: Date): MenuRow[] {
 // (#231) — and the rows numbered, so a host without a list surface reads
 // the same menu and answers with numbers or names.
 function menuText(rows: readonly MenuRow[], results: readonly string[]): string {
-  const numbered = rows.map((row, i) => `>> ${i + 1}) [${row.checked ? 'x' : ' '}] ${row.label} - ${row.note}`)
+  const numbered = rows.map((row, i) => `>> ${i + 1}) ${row.action === true ? `( ${row.label} )` : `[${row.checked ? 'x' : ' '}] ${row.label}`} - ${row.note}`)
   return [QUESTION, ...mergeRows(results), ...numbered].join('\n')
 }
 
@@ -315,10 +321,15 @@ export function signInRows(id: SourceId, list: readonly ChromeProfileInfo[], pre
   return rows
 }
 
-// The card's text, for a front-end with no list surface: the question, the
-// note, and the same rows numbered — the shape every other menu here uses.
-export function signInText(id: SourceId, rows: readonly SignInRow[]): string {
+// The card's text, for a front-end with no list surface: what this submit
+// has done so far, the question, the note, and the same rows numbered — the
+// shape every other menu here uses. The results lead, because this card fills
+// the screen and the TUI floats it over the log: a YouTube mount that landed
+// while the Bilibili card was up was only ever visible in the dimmed log
+// underneath it (user report, 2026-09-16).
+export function signInText(id: SourceId, rows: readonly SignInRow[], done: readonly string[] = []): string {
   return [
+    ...mergeRows(done),
     `How should I sign in to ${SOURCE_NAMES[id]}?`,
     SIGN_IN_NOTE,
     ...rows.map((row, i) => `>> ${i + 1}) [${row.checked === true ? 'x' : ' '}] ${row.label}`),
@@ -340,7 +351,14 @@ function parseSignIn(line: string, rows: readonly SignInRow[]): SignInRow | stri
 // Ask, and re-ask a line that names no row. Null = the listener stopped
 // (Esc, a front-end that left, or /quit): nothing is mounted and nothing is
 // written, exactly as an Esc on the menu behind it.
-async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id: SourceId, previous: string | undefined, cancelled: () => boolean): Promise<SignIn | null> {
+async function askSignIn(
+  deps: SourcesFlowDeps,
+  read: () => Promise<string>,
+  id: SourceId,
+  previous: string | undefined,
+  cancelled: () => boolean,
+  done: readonly string[],
+): Promise<SignIn | null> {
   const { host } = deps
   const pinned = (deps.store.read()[id] as { profile?: string } | undefined)?.profile
   // A source that can scan and carries no browser pin opens on its scan row;
@@ -350,7 +368,7 @@ async function askSignIn(deps: SourcesFlowDeps, read: () => Promise<string>, id:
   // The row's own road stays here; the wire carries the option alone.
   const options: AskOption[] = rows.map(({ choice: _choice, ...option }) => option)
   for (;;) {
-    ask(host, signInText(id, rows), 'question', { options, multi: false })
+    ask(host, signInText(id, rows, done), 'question', { options, multi: false })
     const picked = parseSignIn(await read(), rows)
     if (cancelled() || deps.quit.requested) return null
     if (typeof picked !== 'string') return picked.choice
@@ -403,6 +421,9 @@ function stoppedRow(id: SourceId): string {
 function obstacleLine(reason: CookieFailure, detail: string, platform: NodeJS.Platform): string {
   if (reason === 'no-ytdlp') return 'I need yt-dlp to read a browser login, and I cannot find it — `brew install yt-dlp`, then /sources again.'
   if (reason === 'no-browser') return 'I could not find Chrome on this machine — the taste sources read your Chrome login, so they need it installed.'
+  // The read was killed at its ceiling: the store is fine, something in
+  // front of it is not, and `detail` already says what to look at.
+  if (reason === 'timed-out') return `${detail} Either way, /sources again once it is moving.`
   if (reason === 'unreadable') return `I could not read Chrome's cookie store, and yt-dlp did not say why in a way I know: ${detail}`
   return platform === 'darwin'
     ? 'Chrome is here, but I am not allowed to read its cookie store — give this terminal Full Disk Access (System Settings → Privacy & Security), then /sources again.'
@@ -475,12 +496,12 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       const chosen: Chosen = {}
       for (const id of toRenew) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen, results))
       }
       if (doRefresh && !stopped()) results.push(...(await refresh(deps)))
       for (const id of toMount) {
         if (stopped()) break
-        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen))
+        results.push(await mountOne(deps, read, id, platform, stopped, { at: ++at, of }, chosen, results))
       }
     }
   } finally {
@@ -500,6 +521,7 @@ async function mountOne(
   cancelled: () => boolean,
   step: Step,
   chosen: Chosen,
+  done: readonly string[],
 ): Promise<string> {
   const notes: string[] = []
   const recorded = { ...deps, host: recording(deps.host, notes) }
@@ -510,7 +532,7 @@ async function mountOne(
   if (id === 'qqmusic') recorded.host.info(QQMUSIC_VIP_NOTE)
   if (id === 'qishui') await mountQrFlow(recorded, id, cancelled, step)
   else {
-    const how = await askSignIn(recorded, read, id, chosen.profile, cancelled)
+    const how = await askSignIn(recorded, read, id, chosen.profile, cancelled, done)
     if (how === null) return stoppedRow(id)
     if (how.kind === 'chrome') chosen.profile = how.profile
     if (how.kind === 'scan') await mountQrFlow(recorded, id as QrSource, cancelled, step)
@@ -551,6 +573,33 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
   }
 }
 
+// How often a wait on a subprocess looks at the stop latch. `cancelled` is a
+// latch rather than an event, so the only way to hear an Esc mid-await is to
+// ask — 100ms is under what a keypress reads as instant, at no measurable
+// cost against a call that takes seconds.
+const STOP_POLL_MS = 100
+const STOPPED = Symbol('stopped')
+
+// `work`, unless the listener stops first. The work is not cancelled — a
+// yt-dlp spawn has its own ceiling (YTDLP_TIMEOUT_MS) and ends there — it is
+// simply no longer waited on, and its result is dropped.
+async function untilStopped<T>(work: Promise<T>, stopped: () => boolean): Promise<T | typeof STOPPED> {
+  if (stopped()) return STOPPED
+  let timer: ReturnType<typeof setInterval> | undefined
+  const watch = new Promise<typeof STOPPED>((resolve) => {
+    timer = setInterval(() => {
+      if (stopped()) resolve(STOPPED)
+    }, STOP_POLL_MS)
+    // Never a reason for the process to stay up.
+    timer.unref?.()
+  })
+  try {
+    return await Promise.race([work, watch])
+  } finally {
+    clearInterval(timer)
+  }
+}
+
 async function mountCookieFlow(
   deps: SourcesFlowDeps,
   read: () => Promise<string>,
@@ -566,9 +615,14 @@ async function mountCookieFlow(
   const pick = { browser: CHROME, profile }
   host.info(`checking ${site} in Chrome...`)
   type CookieMount = MountResult<YouTubeEntry | NeteaseEntry | BilibiliEntry | QQMusicEntry>
-  const attempt = async (): Promise<CookieMount | null> => {
+  const stopped = (): boolean => cancelled() || deps.quit.requested
+  const attempt = async (): Promise<CookieMount | typeof STOPPED | null> => {
     try {
-      return await deps.mounts.browser[id](pick)
+      // The mount spawns yt-dlp, and a slow one can sit here for its whole
+      // ceiling; the wait watches the latch so an Esc lands NOW rather than
+      // whenever the subprocess happens to come back. What was started is
+      // left to its own timeout — nothing of it is written (§3.1).
+      return await untilStopped<CookieMount>(deps.mounts.browser[id](pick), stopped)
     } catch (err) {
       // NetEase answers an expired cookie with `code: 301`, which the client
       // raises rather than returns. It is the same "no login here" the
@@ -589,7 +643,7 @@ async function mountCookieFlow(
     }
   }
   let result = await attempt()
-  if (result === null) return
+  if (result === null || result === STOPPED) return
   if (!result.ok) {
     // Not a dead end: open the page they sign in on, in the browser that
     // will then be read, and wait — rather than sending them back through
@@ -601,11 +655,11 @@ async function mountCookieFlow(
     // Esc answers the read with '' exactly as Enter does, so the latch is
     // what separates "I have signed in" from "stop" — without it an Esc
     // would go on to mount the account anyway.
-    if (cancelled() || deps.quit.requested) return
+    if (stopped()) return
     // The cached export answers from before they signed in; drop it first.
     deps.forgetCookies?.()
     result = await attempt()
-    if (result === null) return
+    if (result === null || result === STOPPED) return
     if (!result.ok) {
       host.info(`still no ${site} login in Chrome — /sources when you have signed in.`)
       return
@@ -615,7 +669,7 @@ async function mountCookieFlow(
   // the read succeeded, but the listener asked to stop, and "stopped —
   // nothing was written" has to mean it — as it already does on the scan
   // road (codex review).
-  if (cancelled() || deps.quit.requested) return
+  if (stopped()) return
   if (id === 'youtube') await finishMount(deps, 'youtube', result.who, result.entry as YouTubeEntry)
   else if (id === 'netease') await finishMount(deps, 'netease', result.who, result.entry as NeteaseEntry)
   else if (id === 'qqmusic') await finishMount(deps, 'qqmusic', result.who, result.entry as QQMusicEntry)

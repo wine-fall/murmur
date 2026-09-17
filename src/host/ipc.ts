@@ -159,6 +159,12 @@ export const AskOptionSchema = z.object({
   label: z.string(),
   note: z.string().optional(),
   checked: z.boolean().optional(),
+  // A BUTTON, not a state (spec 10 §3.2-D): the /sources refresh row is
+  // "re-read them now", which a tick box cannot say — `[ ] refresh` leaves
+  // the listener guessing whether unticking it turns something off. A client
+  // draws it without a box, never ticks it, and Space or Enter on it submits
+  // at once. Additive: an older client just sees the row it always saw.
+  action: z.boolean().optional(),
 })
 
 export type AskOption = z.infer<typeof AskOptionSchema>

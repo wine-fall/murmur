@@ -119,7 +119,7 @@ function build(lines: string[], over: Partial<SourcesFlowDeps> & { mounts?: Part
 // Esc while the card's read is pending: the flow is mid-await, so the press
 // waits for the card to actually be up rather than racing it.
 async function escWhenAsked(host: FakeHost): Promise<void> {
-  for (let i = 0; i < 200 && !host.asks.some((a) => a.text.startsWith('How should I sign in')); i++) {
+  for (let i = 0; i < 200 && !host.asks.some((a) => isSignIn(a.text)); i++) {
     await new Promise((resolve) => setTimeout(resolve, 1))
   }
   host.pressEsc()
@@ -130,10 +130,22 @@ async function escWhenAsked(host: FakeHost): Promise<void> {
   host.type('')
 }
 
+// A sign-in card, whatever rides above its question: the results of the
+// mounts this submit already ran sit on top of it (spec 14 §3.1).
+function isSignIn(text: string): boolean {
+  return text.includes('How should I sign in')
+}
+
 // The card a mount pops, as a test reads it: its text and its rows.
 function card(host: FakeHost, n = 0) {
-  const asks = host.asks.filter((a) => a.text.startsWith('How should I sign in'))
+  const asks = host.asks.filter((a) => isSignIn(a.text))
   return asks[n]!
+}
+
+// The card's own lines, with the result rows above the question stripped off.
+function question(host: FakeHost, n = 0): string[] {
+  const lines = card(host, n).text.split('\n')
+  return lines.slice(lines.findIndex((line) => line.startsWith('How should I sign in')))
 }
 
 describe('the sign-in card (spec 14 §3.1)', () => {
@@ -142,7 +154,7 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     await runSources(deps)
     const asked = card(host)
     expect(asked.kind).toBe('question')
-    expect(asked.text.split('\n')).toEqual([
+    expect(question(host)).toEqual([
       'How should I sign in to YouTube?',
       'signed in to the wrong account there? sign out on the site in that Chrome window, then pick it again.',
       '>> 1) [ ] Chrome — Work (zach.guo@opus.pro)',
@@ -187,7 +199,7 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     await runSources(deps)
     expect(card(host).choices?.options?.find((o) => o.checked === true)?.key).toBe('scan')
     // Enter with nothing changed takes it.
-    expect(card(host).text.split('\n')[2]).toBe('>> 1) [x] scan with the NetEase Cloud Music app')
+    expect(question(host)[2]).toBe('>> 1) [x] scan with the NetEase Cloud Music app')
   })
 
   it('opens a reconnect on the Chrome profile it was pinned to — that mount already answered the question', async () => {
@@ -324,7 +336,7 @@ describe('the sign-in card (spec 14 §3.1)', () => {
   it('never asks Soda Music: it has no browser road at all, and a one-row card is noise', async () => {
     const { host, deps, took } = build(['soda', 'soda'])
     await runSources(deps)
-    expect(host.asks.some((a) => a.text.startsWith('How should I sign in'))).toBe(false)
+    expect(host.asks.some((a) => isSignIn(a.text))).toBe(false)
     expect(took).toEqual(['qishui:qr'])
   })
 
@@ -336,7 +348,7 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     await Promise.all([
       runSources(deps),
       (async () => {
-        for (let i = 0; i < 200 && !host.asks.some((a) => a.text.startsWith('How should I sign in')); i++) {
+        for (let i = 0; i < 200 && !host.asks.some((a) => isSignIn(a.text)); i++) {
           await new Promise((resolve) => setTimeout(resolve, 1))
         }
         host.endInput()
@@ -383,5 +395,28 @@ describe('the sign-in card (spec 14 §3.1)', () => {
     expect(card(host).choices?.options?.map((o) => o.key)).toEqual(['chrome:Default', 'chrome:Profile 3'])
     expect(took).toEqual(['spotify'])
     expect(opened).toEqual([['https://accounts.spotify.com/authorize?client_id=x', 'Profile 3']])
+  })
+
+  // The mount before this one landed while this card was covering the whole
+  // screen — and its result row lived only in the log the card floats over,
+  // dimmed and hidden (user report, 2026-09-16). The card carries it.
+  it('leads with what the sources already mounted this submit did — the result no longer hides under the card', async () => {
+    const { host, deps } = build(['youtube netease', 'chrome:Profile 3', 'scan', 'youtube netease'])
+    await runSources(deps)
+    // The first card has nothing behind it yet.
+    expect(card(host).text.split('\n')[0]).toBe('How should I sign in to YouTube?')
+    // The second leads with the first mount's result, then asks its own question.
+    expect(card(host, 1).text.split('\n').slice(0, 2)).toEqual([
+      'ok connected YouTube — signed in as Zach G · 1 liked',
+      'How should I sign in to NetEase?',
+    ])
+  })
+
+  it('carries a failure up the same road — a mount that could not connect is the row the next card leads with', async () => {
+    // Bilibili's scan is the fake that fails; NetEase's card comes after it.
+    const { host, deps } = build(['bilibili netease', 'scan', 'scan', 'netease'])
+    await runSources(deps)
+    expect(card(host, 1).text.split('\n')[0]!.startsWith('-- could not connect Bilibili — ')).toBe(true)
+    expect(card(host, 1).text.split('\n')[1]).toBe('How should I sign in to NetEase?')
   })
 })

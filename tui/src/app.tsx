@@ -36,6 +36,7 @@ import {
   noticeWidth,
   outbound,
   logScrollDelta,
+  listRows,
   pickAnswer,
   pickMove,
   pickStart,
@@ -543,16 +544,25 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     // is no input to submit through. Esc falls through to the interrupt.
     const head = asksRef.current[0]
     if (!pane.current.open && head?.options !== undefined && head.pick !== undefined) {
-      const { options, pick } = head
+      const { pick } = head
+      // The drawn rows, not the wire's: a multi card closes on the apply row
+      // the client synthesizes, and that row is a cursor stop like any other.
+      const rows = listRows(head.options, head.multi === true, pick)
       const repick = (next: Pick): void => setAsks((queue) => [{ ...queue[0]!, pick: next }, ...queue.slice(1)])
-      if (key.name === 'up') return repick(pickMove(pick, -1, options.length))
-      if (key.name === 'down') return repick(pickMove(pick, 1, options.length))
-      if (key.name === 'space') return repick(pickToggle(pick, options, head.multi === true))
-      if (key.name === 'return') {
+      const submit = (): void => {
         settleLog()
         setAsks((queue) => queue.slice(1))
-        return wire.line(pickAnswer(pick, options))
+        wire.line(pickAnswer(pick, rows))
       }
+      if (key.name === 'up') return repick(pickMove(pick, -1, rows.length))
+      if (key.name === 'down') return repick(pickMove(pick, 1, rows.length))
+      // An action row is a button: Space on it presses it, which IS the
+      // submit — the ticks and that key together.
+      if (key.name === 'space') {
+        if (rows[pick.at]?.action === true) return submit()
+        return repick(pickToggle(pick, rows, head.multi === true))
+      }
+      if (key.name === 'return') return submit()
     }
     // The command menu takes the arrows while it is up (the single-line input
     // has no use for them); Enter stays with the input's own submit, which
@@ -694,7 +704,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // the input row) must be clear of rasters too.
   const cardTop =
     asks.length > 0
-      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true)
+      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true, asks[0]!.multi === true)
       : notice !== null
         ? noticeTopRow(notice, cols, dims.height, rows)
         : menuOpen
@@ -1383,12 +1393,16 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
               {list !== undefined && head.pick !== undefined && (
                 <box style={{ flexDirection: 'column' }}>
                   {facts && <text style={{ fg: hush(INK.dim) }}>{'─'.repeat(Math.max(width - 6, 1))}</text>}
-                  {list.map((option, at) => {
+                  {listRows(list, head.multi === true, head.pick).map((option, at) => {
                     const on = head.pick!.checked.includes(option.key)
                     const here = at === head.pick!.at
+                    // State wears a tick box; an action wears a button —
+                    // `[ ] refresh` could not say "re-read them now" and read
+                    // as one more thing to be connected to (user report).
+                    const face = option.action === true ? `( ${option.label} )` : `[${on ? 'x' : ' '}] ${option.label}`
                     return (
                       <text key={option.key} style={{ bg: here ? CHIP : CARD }}>
-                        <span fg={here ? EMBER : on ? INK.text : CARD_INK.option}>{`${here ? '>' : ' '} [${on ? 'x' : ' '}] ${option.label}`}</span>
+                        <span fg={here ? EMBER : on ? INK.text : CARD_INK.option}>{`${here ? '>' : ' '} ${face}`}</span>
                         {option.note !== undefined && <span fg={here ? INK.text : INK.notice}>{`  ${option.note}`}</span>}
                       </text>
                     )
