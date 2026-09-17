@@ -238,6 +238,35 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     return { provider, tools, auth, picks }
   }
 
+  const NETEASE_REF = 'https://music.163.com/#/song?id=5'
+
+  // Who opened the stream, in order: the preview trap's ffprobe, the
+  // playability probe, or both.
+  function openings(opts: {
+    headers?: Record<string, string>
+    trapDurationS?: number | null
+    plays?: boolean
+    ref?: string
+  }) {
+    const provider = new FakeMusicProvider()
+    const ref = opts.ref ?? NETEASE_REF
+    if (opts.headers !== undefined) provider.headers = opts.headers
+    provider.candidates = [{ ref, title: 'Song', uploader: 'Artist', durationS: 240, extra: {} }]
+    const opened: string[] = []
+    const seen: (Readonly<Record<string, string>> | undefined)[] = []
+    const picks: unknown[] = []
+    const tools = musicTools(
+      provider,
+      (pick) => picks.push(pick),
+      async (_source, h) => (opened.push('probe'), seen.push(h), opts.plays ?? true),
+      {
+        catalogues: () => ['netease'],
+        probeDurationS: async (_source, h) => (opened.push('trap'), seen.push(h), opts.trapDurationS ?? null),
+      },
+    )
+    return { tools, opened, seen, picks }
+  }
+
   it('lists only youtube when nothing is mounted, and the mounted catalogues otherwise', () => {
     expect(build().tools.find((t) => t.name === 'search_music')!.description).toMatch(/available now: youtube\b(?!, )/)
     const desc = build({ mounted: ['bilibili', 'netease'] }).tools.find((t) => t.name === 'search_music')!.description
@@ -330,31 +359,43 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     expect(full.picks).toHaveLength(1)
   })
 
-  it('probes the stream the way the player will open it — same headers for the pick probe and the preview trap', async () => {
+  it('probes the stream the way the player will open it — with the headers the player uses', async () => {
     const headers = { 'User-Agent': 'Mozilla/5.0 Chrome/145' }
-    const provider = new FakeMusicProvider()
-    provider.headers = headers
-    provider.candidates = [{ ref: 'https://music.163.com/#/song?id=5', title: 'Song', uploader: 'Artist', durationS: 240, extra: {} }]
-    const seen: (Readonly<Record<string, string>> | undefined)[] = []
-    const tools = musicTools(
-      provider,
-      () => {},
-      async (_source, h) => {
-        seen.push(h)
-        return true
-      },
-      {
-        catalogues: () => ['netease'],
-        probeDurationS: async (_source, h) => {
-          seen.push(h)
-          return 240
-        },
-      },
-    )
-    await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
-    expect(result.ok).toBe(true)
-    expect(seen).toEqual([headers, headers])
+    const trap = openings({ headers, trapDurationS: 240 })
+    await callTool(trap.tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect((await callTool(trap.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect(trap.seen).toEqual([headers])
+
+    const plain = openings({ headers, ref: 'https://youtube.com/watch?v=a' })
+    await callTool(plain.tools, 'search_music', { query: 'q' })
+    expect((await callTool(plain.tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })).ok).toBe(true)
+    expect(plain.seen).toEqual([headers])
+  })
+
+  // issue #164: the trap's ffprobe already opened this stream and read a real
+  // duration off it — proof enough that it decodes. A second open buys nothing
+  // and costs another 13-15 s against a slow NetEase CDN, where the playability
+  // probe's own 15 s ceiling then reports a live stream dead and throws away
+  // the ~46 s resolve behind it.
+  it('does not open a netease stream twice: the trap is the playability proof', async () => {
+    const both = openings({ trapDurationS: 240 })
+    await callTool(both.tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect((await callTool(both.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect(both.opened).toEqual(['trap'])
+  })
+
+  // ...unless the trap could not read one. ffprobe answering null is the shape
+  // a 403 wears, so the pick still has to be proven before it is committed.
+  it('falls back to the playability probe when the trap reads no duration', async () => {
+    const unread = openings({ trapDurationS: null })
+    await callTool(unread.tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect((await callTool(unread.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect(unread.opened).toEqual(['trap', 'probe'])
+
+    const dead = openings({ trapDurationS: null, plays: false })
+    await callTool(dead.tools, 'search_music', { query: 'q', catalogue: 'netease' })
+    expect(await callTool(dead.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).toMatchObject({ ok: false })
+    expect(dead.picks).toHaveLength(0)
   })
 
   it('never probes a non-netease ref for the trap', async () => {
