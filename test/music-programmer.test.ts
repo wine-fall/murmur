@@ -79,6 +79,16 @@ describe('MusicProgrammer.nextTrack', () => {
     expect(task.maxTurns).toBeGreaterThanOrEqual(8)
   })
 
+  // issue #164: the pick is a bounded search-and-commit, and the SDK's default
+  // extended thinking costs it tens of seconds per model turn (measured: ~45 s
+  // before the first search, a 4.6k-char thinking block) for a judgment the
+  // policy already spells out. The task asks for it off.
+  it('asks for no extended thinking — the pick is a bounded judgment, not an essay', async () => {
+    const harness = new FakeHarness()
+    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
+    expect(harness.lastTask!.thinking).toBe('disabled')
+  })
+
   // spec 03-01 §2.3: the instruction is re-read per pick, so an edit to the
   // policy file lands on the next song without a restart.
   it('re-reads the instruction on every pick', async () => {
@@ -193,6 +203,28 @@ describe('discovery instrumentation', () => {
     expect(lines).toContainEqual(expect.stringMatching(/^music\.resolve \d+ms ok$/))
     expect(lines).toContainEqual(expect.stringMatching(/^music\.probe \d+ms ok$/))
     expect(lines.at(-1)).toMatch(/^music\.pick done \d+ms picked=yes$/)
+  })
+
+  // A chapter clip (spec 14 §2.9) plays one slice of a long upload, so the
+  // probe has to open THAT slice. Timing it must not cost the offset: with the
+  // dev log wired — which is every dev run — the head of a two-hour upload
+  // would be probed instead of the song half an hour in.
+  it('hands the probe its segment offset even with the timing wrapper in the way', async () => {
+    const offsets: (number | undefined)[] = []
+    const music = provider()
+    music.candidates = [{ ref: 'https://youtube.com/watch?v=a#t=612,868', title: 'S', uploader: 'U', durationS: 7_200, extra: {} }]
+    const harness = new FakeHarness(async (tools) => {
+      await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a#t=612,868', why: 'fits' })
+    })
+    await new MusicProgrammer({
+      brain: harness,
+      provider: music,
+      model: 'haiku',
+      probe: async (_source, _headers, startS) => (offsets.push(startS), true),
+      debug: () => {},
+    }).nextTrack(ctx)
+
+    expect(offsets).toEqual([612])
   })
 
   it('times the failure paths too — a dead resolve and a dead probe are stages, not gaps', async () => {
