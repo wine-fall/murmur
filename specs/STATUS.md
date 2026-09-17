@@ -33,6 +33,8 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#272** (bug, eng) A NetEase resolve costs 15-55 s — yt-dlp walks its quality levels one request at a time.
+- **#273** (bug, eng) Brain cadence never beats its own 8 s deadline, so every boundary falls back silently.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
 - **#44** (eng) Cold-start talk repeats the same cozy imagery — absorbed by spec 13; closes on #202's first box.
 - **#79** (by-ear) The art-direction session for the TUI and the pet — spec 10 §6.1.
