@@ -52,7 +52,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#213** (by-ear) Listening-taste on the listener's own accounts: NetEase, Spotify, Soda, the expired line, the evening, and the sign-in card's road + profile — spec 14 §5.12, §3.1.
 - **#153** (bug, eng) First-run onboarding keeps asking after /quit and never says the answers were dropped.
 - **#163** (enhancement, eng) The director never interjects a talk beat over a ducked song — the engine seam is already there.
-- **#164** (watch, bug) Music picks failing and running long in one real session — dead probes, source health suspected.
+- **#164** (eng, bug) A single music pick costs ~80-155 s, ~90% of it agentic model turns, not tool I/O.
 
 ## Pinned — do not relitigate
 

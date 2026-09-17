@@ -1256,11 +1256,11 @@ export class Director {
     // The way out of this song is written now, while it plays: the beat that
     // airs after it (or over its outro) is the one that knows it happened.
     this.prefetchCoda()
-    // And so is the way into the next one (spec 04 §3.1). takePick emptied the
-    // slot to air this track, and nothing but a talk beat used to refill it —
-    // so the pick after a song always paid a full cold discovery, which is the
-    // dead air between songs. Fired AFTER the ledger entry above, so this song
-    // is on its own avoid-list. No extra spend: the same pick, earlier.
+    // And so is the way into the next one (spec 04 §3.1): takePick emptied the
+    // slot to air this track, so without this the pick after it would pay a
+    // full cold discovery at the boundary — the dead air between songs. Fired
+    // AFTER the ledger entry above, so this song is on its own avoid-list. No
+    // extra spend: the same pick, bought a song earlier.
     this.prefetchMusic()
     return { handle, voice }
   }
