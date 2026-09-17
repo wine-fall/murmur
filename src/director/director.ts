@@ -1110,6 +1110,10 @@ export class Director {
   // the next boundary when no track is live.
   private switchMusic(hint?: string): void {
     if (hint !== undefined && this.pickPredatesTurn) this.pendingPick = null
+    // A slot that already came back empty is not an answer to anything (codex
+    // review): left in place it would be handed straight to handoverTrack,
+    // which would report the switch failed without ever having searched for it.
+    if (this.pendingPick?.done() === true && this.pickFailed) this.pendingPick = null
     this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`)
     this.switchDue = true
     this.deps.host.debug?.('music.switch due')
@@ -1150,7 +1154,6 @@ export class Director {
         const started = await this.steerableStart(pick)
         if (this.quit) return false
         if (started === null) continue
-        this.switchDue = false
         await this.runVoice(started.voice, started.handle)
         this.noteTrackEnd()
         return true
@@ -1224,6 +1227,12 @@ export class Director {
     }
     const label = pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
     this.pickFailed = false
+    // The switch is delivered the instant this track is confirmed on air, and
+    // the coda written at the bottom of this method must be told so (codex
+    // review) — a beat still hearing 'switching' would keep promising a song
+    // the listener is already hearing. Cleared here and not at the caller,
+    // because a start that never produced audio returns above, still due.
+    this.switchDue = false
     this.deps.host.info(`now playing: ${label}`)
     this.emitState('music', {
       label,

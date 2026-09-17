@@ -9,6 +9,7 @@ import type { ContextPack, SteerActions, SteerBrain } from '../src/contracts.ts'
 import { Director, type DirectorDeps, steerFromLine } from '../src/director/director.ts'
 import { escPulse, lineReader, quitLatch } from '../src/setup/guide.ts'
 import { COMMANDS } from '../src/host/ipc.ts'
+import { CODA_CUE } from '../src/prompts/talk.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import {
   directorSettings,
@@ -459,6 +460,58 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     // The latest real search failed; the abandoned prime's late success must
     // not repaint the prompt's music status.
     expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'pickFailed' })
+  })
+
+  // codex review: the prime taken at air time can come back empty, and a
+  // hintless switch used to consume that stale failure as its answer — the
+  // listener's request vanished without a search. An empty slot is not a pick.
+  it('a hintless switch re-searches when the primed slot already came back empty', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'on it.'
+    })
+    const { director, host, player, source } = build(steer)
+    const first = pickOf('https://stream/a', { title: 'First' })
+    const second = pickOf('https://stream/b', { title: 'Second' })
+    // Call 1 airs the first song; call 2 is the air-time prime and fails; call
+    // 3 is the search the listener's request has to buy.
+    source.nextTrack = async () => {
+      source.calls++
+      return source.calls === 1 ? first : source.calls === 2 ? null : second
+    }
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'first song on air')
+    await until(() => source.calls === 2, 'the air-time prime came back empty')
+    host.type('next song')
+    await until(() => player.handles.length === 2, 'the switch found a track of its own')
+    expect(host.infos.some((m) => m.includes('now playing: Second'))).toBe(true)
+    player.handles[1]!.end()
+    await run
+  })
+
+  // codex review: switchDue used to survive until musicSegment returned, so the
+  // coda written at the new track's air time was told the switch was still
+  // outstanding — the same "narrating what the engine did not do" the state was
+  // added to prevent, with the sign reversed.
+  it('a switch honoured at a boundary is no longer due by the time the coda is written', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'coming up.'
+    })
+    const { director, brain, deps, host, player, source } = build(steer)
+    deps.music!.cadence = new EveryNCadence(99) // music only ever airs because of the switch
+    source.picks = [pickOf('https://stream/c', { title: 'Forced' })]
+    host.type('play something')
+    const run = director.run(3)
+    await until(() => player.handles.length === 1, 'forced music boundary aired')
+    await until(
+      () => brain.talkContexts.some((c) => c.cue === CODA_CUE),
+      'the coda for the new track was written',
+    )
+    const coda = brain.talkContexts.find((c) => c.cue === CODA_CUE)!
+    expect(coda.music).toEqual({ kind: 'playing', track: 'Forced' })
+    player.handles[0]!.end()
+    await run
   })
 
   it('with no track playing, the switch forces the next boundary to music past the cadence', async () => {
