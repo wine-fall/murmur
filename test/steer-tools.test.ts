@@ -223,3 +223,39 @@ describe('recall_memory / forget_memory', () => {
     expect(none.removed).toBe(0)
   })
 })
+
+// The switch cuts the current song the moment the fresh pick lands (spec 11
+// §2.3 handover-on-resolve). The status is the ONLY thing telling the model
+// that, and a status that said the track "keeps playing" had the host
+// promising "once this song finishes, I'll change it" over a swap that
+// happened mid-verse (user report 2026-09-17).
+describe('switch_music tells the truth about when the cut lands (spec 11 §2.1)', () => {
+  const switchTool = (playing: boolean) =>
+    steerTools(
+      {
+        shutdown: { armed: () => false, arm: () => {}, confirm: () => {} },
+        music: { playing: () => playing, switchTrack: () => {} },
+      },
+      () => {},
+    )
+
+  it('says the cut is mid-song, and never that the current track plays on', async () => {
+    const res = (await callTool(switchTool(true), 'switch_music', {})) as {
+      ok: boolean
+      status: string
+    }
+    expect(res.ok).toBe(true)
+    expect(res.status).toMatch(/mid-song|part-way|before it ends/i)
+    // The two things the misleading wording made the host say out loud.
+    expect(res.status).not.toMatch(/keeps playing/i)
+    expect(res.status).toMatch(/do not promise|never promise/i)
+    // Still no naming the next track — it introduces itself when it airs.
+    expect(res.status).toMatch(/name/i)
+  })
+
+  it('keeps the no-track-playing branch about the next break', async () => {
+    const res = (await callTool(switchTool(false), 'switch_music', {})) as { status: string }
+    expect(res.status).toContain('no track playing')
+    expect(res.status).not.toMatch(/mid-song/i)
+  })
+})

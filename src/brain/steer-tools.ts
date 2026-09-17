@@ -77,9 +77,10 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
           const wasPlaying = music.playing()
           music.switchTrack(args.hint)
           const status = wasPlaying
-            ? 'switching; the current track keeps playing while the next one is ' +
-              'picked — tell the listener you are on it, ask them to hang on, ' +
-              'and do NOT name or promise a specific song'
+            ? 'switching; the current track covers the search, then the new one ' +
+              'cuts in mid-song the moment it is found — tell the listener you ' +
+              'are on it and to hang on, and do NOT promise to finish this song ' +
+              'or name the one coming'
             : 'no track playing; a fresh pick is being prepared and will air at ' +
               'the next break — do NOT name or promise a specific song'
           return reply({ ok: true, status })
