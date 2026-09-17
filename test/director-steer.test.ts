@@ -312,10 +312,14 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     const { director, host, player, source } = build(steer)
     source.picks = [
       pickOf('https://stream/a', { title: 'First' }),
+      // Spent by the prime the first song's air time fires (spec 04 §3.1); the
+      // hint discards it, because it was chosen before the listener spoke.
+      pickOf('https://stream/discarded', { title: 'Discarded' }),
       pickOf('https://stream/b', { title: 'Second', announce: 'here is something softer' }),
     ]
     const run = director.run(2) // talk, then music
     await until(() => player.handles.length === 1, 'first song on air')
+    await until(() => source.calls === 2, 'the next pick is primed during the song')
     source.delayMs = 60 // the fresh pick takes a moment: reply must not wait for it
     host.type('change the music')
     await until(() => host.radio.includes('on it, hang tight.'), 'reply aired')
@@ -329,6 +333,74 @@ describe('switch_music: handover on resolve (spec 11 §2.3)', () => {
     expect(host.debugs).toContain('music.switch handover')
     player.handles[1]!.end()
     await run
+  })
+
+  // The measured "the switch was slow" case: a hintless switch 44s into a song used to
+  // start a cold search and hand over only after the song had finished on its
+  // own. With the pick primed at air time (spec 04 §3.1) the slot is already
+  // resolved, so the pickReady race swaps at once and pays no new search.
+  it('a hintless switch hands over from the pick primed at the song start, with no fresh search', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'on it.'
+    })
+    const { director, host, player, source } = build(steer)
+    source.picks = [
+      pickOf('https://stream/a', { title: 'First' }),
+      pickOf('https://stream/b', { title: 'Second' }),
+    ]
+    // Anything past the two scripted picks hangs: a handover that needed a cold
+    // search would never land, so the assertion below cannot pass by accident.
+    const real = source.nextTrack.bind(source)
+    source.nextTrack = (ctx) => (source.calls >= 2 ? new Promise<never>(() => {}) : real(ctx))
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'first song on air')
+    await until(() => source.calls === 2, 'the next pick is primed during the song')
+    host.type('next song')
+    await until(() => player.handles.length === 2, 'handover to the primed pick')
+    expect(host.infos.some((m) => m.includes('now playing: Second'))).toBe(true)
+    expect(host.debugs).toContain('music.switch handover')
+    player.handles[1]!.end()
+    await run
+  })
+
+  // "Prompt green is not engine delivers": the talk refill fired right after the
+  // reply used to read `playing`, so the model narrated a switch that had not
+  // happened. A due switch is its own state (spec 11 §2.3).
+  it('the refill after a switch request is told the song has NOT changed yet', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'on it.'
+    })
+    const { director, brain, host, player, source } = build(steer)
+    source.picks = [pickOf('https://stream/a', { title: 'First' })]
+    // The prime taken at air time never resolves: the switch stays due and the
+    // old track stays on air, which is exactly the moment the refill lands in.
+    const real = source.nextTrack.bind(source)
+    source.nextTrack = (ctx) => (source.calls >= 1 ? new Promise<never>(() => {}) : real(ctx))
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'song on air')
+    host.type('next song')
+    await until(
+      () => brain.talkContexts.some((c) => c.music?.kind === 'switching'),
+      'the refill saw the due switch',
+    )
+    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'switching', track: 'First' })
+    player.handles[0]!.end()
+    await run
+  })
+
+  it('a due switch with nothing on air reads as switching, not a plain search', async () => {
+    const steer = new FakeSteer((_text, actions) => {
+      actions.music!.switchTrack()
+      return 'coming up.'
+    })
+    const { director, brain, deps, host, source } = build(steer)
+    deps.music!.cadence = new EveryNCadence(99) // music only ever airs because of the switch
+    source.nextTrack = () => new Promise<never>(() => {}) // the search never lands
+    host.type('put something else on')
+    await director.run(3)
+    expect(brain.talkContexts.at(-1)!.music).toEqual({ kind: 'switching' })
   })
 
   it('keeps the old track playing when the switch pick comes back empty', async () => {

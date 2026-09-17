@@ -48,6 +48,13 @@ function musicLine(ctx: ContextPack): string {
   switch (music.kind) {
     case 'playing':
       return `\n(On the air: "${music.track}" is playing right now.)`
+    case 'switching':
+      return music.track === undefined
+        ? '\n(No music is playing; the listener asked for a different song and the ' +
+            'next one has not been found yet — do not say it has been changed.)'
+        : `\n(On the air: "${music.track}" is still playing. The listener asked for a ` +
+            'different song and the next one has not been found yet — do not say it has ' +
+            'been changed; if it comes up at all, you are still looking.)'
     case 'quiet':
       return music.lastTrack === undefined
         ? '\n(No music is playing right now.)'

@@ -840,13 +840,19 @@ export class Director {
 
   // The pack's real music status (spec 04 bugfix), most-live fact first: a
   // track on air, a pick still resolving, the last pick's empty result, the
-  // last track that aired. Undefined when music is not wired (renders nothing).
+  // last track that aired. A due switch (spec 11 §2.3) qualifies both of the
+  // live states — the listener asked and the engine has not delivered yet, and
+  // a beat written from a plain 'playing' claims the song was changed when it
+  // was not. Undefined when music is not wired (renders nothing).
   private musicState(): MusicState | undefined {
     if (this.deps.music === undefined) return undefined
     if (this.segment.kind === 'music' && this.segment.nowPlaying !== undefined) {
-      return { kind: 'playing', track: this.segment.nowPlaying }
+      const track = this.segment.nowPlaying
+      return this.switchDue ? { kind: 'switching', track } : { kind: 'playing', track }
     }
-    if (this.pendingPick !== null && !this.pendingPick.done()) return { kind: 'picking' }
+    if (this.pendingPick !== null && !this.pendingPick.done()) {
+      return this.switchDue ? { kind: 'switching' } : { kind: 'picking' }
+    }
     if (this.pickFailed) return { kind: 'pickFailed' }
     return { kind: 'quiet', ...(this.lastTrack !== null && { lastTrack: this.lastTrack }) }
   }
@@ -1241,6 +1247,12 @@ export class Director {
     // The way out of this song is written now, while it plays: the beat that
     // airs after it (or over its outro) is the one that knows it happened.
     this.prefetchCoda()
+    // And so is the way into the next one (spec 04 §3.1). takePick emptied the
+    // slot to air this track, and nothing but a talk beat used to refill it —
+    // so the pick after a song always paid a full cold discovery, which is the
+    // dead air between songs. Fired AFTER the ledger entry above, so this song
+    // is on its own avoid-list. No extra spend: the same pick, earlier.
+    this.prefetchMusic()
     return { handle, voice }
   }
 
