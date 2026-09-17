@@ -19,7 +19,6 @@ import {
   backInline,
   cardRows,
   cardTitle,
-  cardTopRow,
   commandMatches,
   menuIsOpen,
   NOTICE_CANCEL,
@@ -329,6 +328,45 @@ describe('fitCard (issue #264)', () => {
     expect(cardRows('which accounts should I read?', 80, 'question', many, false, false, 20)).toBeLessThanOrEqual(20)
   })
 
+
+  // Findings from the closing review of this change, each one a way the fit
+  // could take back something the listener needs.
+  it('never folds away what a consent card discloses — the scope of the yes is not a note', () => {
+    const offer = [
+      'Read your local Claude Code history to get a first sense of you? [y/N]',
+      'Why murmur dares to ask - the transcripts stay on this machine; the excerpts it chooses to read are sent to Claude as part of the analysis, the same hop every beat of the program already uses; it runs once, in the background.',
+      'Skipping is completely fine: murmur just gets to know you as it goes.',
+    ].join('\n')
+    const fit = cardShape({ text: offer, cols: 80, height: 18, kind: 'consent' })
+    expect(fit.lines.filter((l) => l.role === 'note')).toHaveLength(cardLines(offer).filter((l) => l.role === 'note').length)
+    expect(fit.lines.some((l) => l.text.includes('sent to Claude'))).toBe(true)
+  })
+
+  it('never drops a row the listener answers with, even when the rows live in the card text', () => {
+    // The pre-broadcast check carries its own '>> ' rows: no wire options, so
+    // the window never applies and the last cut could reach them.
+    const check = [
+      'two gaps stand between you and the air.',
+      '-- music - yt-dlp is missing, so nothing can be fetched or played right now',
+      '-- voice - no endpoint configured, so the radio would run silent all evening',
+      '>> y - fix them now',
+      '>> Enter - not now',
+    ].join('\n')
+    for (let height = 12; height <= 24; height++) {
+      const fit = cardShape({ text: check, cols: 80, height, kind: 'consent' })
+      expect(fit.lines.filter((l) => l.role === 'option').map((l) => l.text)).toEqual(['y - fix them now', 'Enter - not now'])
+    }
+  })
+
+  it('reserves the apply row at its longest, not at the width of the state it happens to be in', () => {
+    const options: AskOption[] = [
+      { key: 'youtube', label: 'YouTube', note: '312 liked · read just now', checked: true },
+      { key: 'netease', label: 'NetEase', note: 'not connected' },
+    ]
+    const fit = cardShape({ text: 'which accounts should I read?', cols: 80, height: 24, kind: 'question', options, multi: true })
+    expect(fit.drawn.at(-1)?.note).toBe(APPLY_NOTHING)
+  })
+
   it('leaves a card that already fits exactly as it was', () => {
     const seed = 'what do you want from the radio?'
     expect(cardRows(seed, 120, 'question', undefined, false, false, 40)).toBe(cardRows(seed, 120, 'question'))
@@ -421,9 +459,9 @@ describe('cardRows / cardTopRow', () => {
     expect(cardRows(`which accounts should I read?\nok NetEase - signed in\n${text.split('\n').slice(1).join('\n')}`, 200, 'question', options)).toBe(13)
   })
 
-  it('cardTopRow anchors the card above the bottom row, and never above the screen', () => {
-    expect(cardTopRow(CONSENT, 200, 50, 'consent')).toBe(50 - cardRows(CONSENT, 200, 'consent'))
-    expect(cardTopRow(CONSENT, 200, 8, 'consent')).toBe(1)
+  it('the fit anchors the card above the bottom row, and never above the screen', () => {
+    expect(cardShape({ text: CONSENT, cols: 200, height: 50, kind: 'consent' }).top).toBe(50 - cardRows(CONSENT, 200, 'consent'))
+    expect(cardShape({ text: CONSENT, cols: 200, height: 8, kind: 'consent' }).top).toBe(1)
   })
 })
 

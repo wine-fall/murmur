@@ -103,7 +103,9 @@ export function cardLines(text: string): CardLine[] {
 // words, breaking mid-word only for a word wider than the card. Counting
 // ceil(length / inner) instead under-counts every line that cannot break on a
 // column boundary — which is how a card that had just been fitted to the
-// screen still drew one row past the top of it.
+// screen still drew one row past the top of it. A run of words each wider
+// than the card can come out one row high; the error is on the safe side —
+// the card is fitted smaller than it had to be, never larger.
 export function wrapRows(text: string, inner: number): number {
   let rows = 1
   let used = 0
@@ -174,6 +176,7 @@ export type CardShape = {
   below: number
   folded: number
   rows: number
+  top: number
   inner: number
   facts: boolean
 }
@@ -189,7 +192,10 @@ export function cardShape(ask: CardAsk): CardShape {
   // the same rows for a client without a list surface, so they are skipped.
   const all = cardLines(text).filter((line) => options === undefined || line.role !== 'option')
   const facts = all.some((line) => line.role === 'ready' || line.role === 'gap')
-  const drawn = options === undefined ? [] : listRows(options, multi, { at, checked: [] })
+  // The apply row is measured at its longest: its note is the state of the
+  // card, and a fit that measured the short one ('2 changes') while the card
+  // drew the long one ('nothing changed — Enter leaves') came up a row short.
+  const drawn = options === undefined ? [] : listRows(options, multi, { at, checked: options.filter((o) => o.checked === true).map((o) => o.key) })
   // The furniture, measured off the card as it came in: a fit that drops rows
   // can only make these smaller, and reserving a row too many shrinks the
   // card rather than letting it run off the screen.
@@ -215,10 +221,15 @@ export function cardShape(ask: CardAsk): CardShape {
   const over = (from: number, to: number): number =>
     measure(lines) + listHeight(from, to) + (from > 0 ? 1 : 0) + (to < drawn.length ? 1 : 0) - budget
 
+  // A consent card's notes are the scope of the yes — what is read, where it
+  // is sent, what it costs (`BOOTSTRAP_OFFER`). Folding those away would ask
+  // for a yes to something the card no longer says (codex review), so on a
+  // consent they are as protected as the question itself.
+  const disclosure = kind === 'consent'
   // 1. The notes, last first: detail that steps back is the first thing a
   //    short screen can do without.
   for (let i = lines.length - 1; i >= 0 && over(0, drawn.length) > 0; i--) {
-    if (lines[i]!.role === 'note') lines.splice(i, 1)
+    if (lines[i]!.role === 'note' && !disclosure) lines.splice(i, 1)
   }
   // 2. The results, oldest first, into one line that counts them.
   let fold: CardLine | null = null
@@ -252,13 +263,31 @@ export function cardShape(ask: CardAsk): CardShape {
     }
   }
   // 4. Whatever is left over on a terminal too short for the question itself:
-  //    the top rows go, the question and the answer stay.
-  while (over(from, to) > 0 && lines.length > 1) lines.splice(lines[0]!.role === 'main' ? 1 : 0, 1)
+  //    the top rows go. What can never go is the question, the rows the
+  //    listener answers with — a card whose choices live in its own text has
+  //    no list to window, and dropping one there deletes an answer the input
+  //    still accepts but nothing on screen offers (codex review) — and, on a
+  //    consent, the disclosure. A card with nothing left to cut is drawn as
+  //    it is: a terminal this short cannot hold it either way.
+  const cuttable = (line: CardLine): boolean =>
+    line.role === 'ready' || line.role === 'gap' || (line.role === 'note' && !disclosure)
+  for (;;) {
+    if (over(from, to) <= 0) break
+    const i = lines.findIndex(cuttable)
+    if (i === -1) break
+    lines.splice(i, 1)
+  }
 
   const above = from
   const below = drawn.length - to
   const rows = chrome + measure(lines) + listHeight(from, to) + (above > 0 ? 1 : 0) + (below > 0 ? 1 : 0)
-  return { lines, drawn, from, to, above, below, folded, rows, inner, facts }
+  // Where the card begins, for the raster layer: a kitty image composites
+  // ABOVE text cells, so while the card is up the sky keeps the stage only
+  // where the card cannot reach. It rides on the fit rather than on a second
+  // measurement — the two disagreed as soon as the option window started
+  // moving with the cursor (codex review).
+  const top = Math.max(1, height - rows)
+  return { lines, drawn, from, to, above, below, folded, rows, inner, facts, top }
 }
 
 // How many terminal rows the spotlight card stands on — the renderer's own
@@ -268,14 +297,6 @@ export function cardShape(ask: CardAsk): CardShape {
 // `height` it measures the card unbounded — what it WANTS, not what it gets.
 export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false, height = Infinity): number {
   return cardShape({ text, cols, height, kind, options, back, multi }).rows
-}
-
-// The first terminal row the card can touch: the card floats anchored above
-// the window's bottom rule (the quiet line that keeps the frame closed), so
-// its top is the window height minus its own rows, inset included. Rasters
-// end above this. A card fitted to the screen never pushes this below 0.
-export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false): number {
-  return Math.max(1, height - cardRows(text, cols, kind, options, back, multi, height))
 }
 
 // One list row as the renderer lays it out: the cursor slot, the tick box —

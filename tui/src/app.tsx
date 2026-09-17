@@ -21,7 +21,6 @@ import {
   cardShape,
   cardWidth,
   cardTitle,
-  cardTopRow,
   commandMatches,
   heldAwayFromTail,
   HINT_ROTATE_MS,
@@ -703,9 +702,28 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // command menu borrows the same yield — a kitty image composites above text
   // cells, so its rows (matches + border + footer, anchored a gap row above
   // the input row) must be clear of rasters too.
-  const cardTop =
+  // The card cut to what this terminal can hold (issue #264): notes fold away
+  // first, then the results, then the option rows narrow to a window around
+  // the cursor. The card floats with a content-sized height, so without this
+  // it drew past the top of the screen. ONE fit — the rows the renderer draws
+  // below and the ceiling the raster layer reads here are the same shape, or
+  // moving the cursor would slide one and not the other.
+  const cardFit =
     asks.length > 0
-      ? cardTopRow(asks[0]!.text, cols, dims.height, asks[0]!.kind, asks[0]!.options, asks[0]!.back === true, asks[0]!.multi === true)
+      ? cardShape({
+          text: asks[0]!.text,
+          cols,
+          height: dims.height,
+          kind: asks[0]!.kind,
+          options: asks[0]!.options,
+          back: asks[0]!.back === true,
+          multi: asks[0]!.multi === true,
+          at: asks[0]!.pick?.at ?? 0,
+        })
+      : null
+  const cardTop =
+    cardFit !== null
+      ? cardFit.top
       : notice !== null
         ? noticeTopRow(notice, cols, dims.height, rows)
         : menuOpen
@@ -1324,20 +1342,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // A list card draws its rows from the wire's options; the text's
           // own '>> ' rows are the same rows for a client without a list.
           const list = head.options
-          // The card cut to what this terminal can hold (issue #264): notes
-          // fold away first, then the results, then the option rows narrow to
-          // a window around the cursor. The card floats with a content-sized
-          // height, so without this it simply drew past the top of the screen.
-          const fit = cardShape({
-            text: head.text,
-            cols,
-            height: dims.height,
-            kind: head.kind,
-            options: list,
-            back: head.back === true,
-            multi: head.multi === true,
-            at: head.pick?.at ?? 0,
-          })
+          const fit = cardFit!
           const lines = fit.lines
           const facts = fit.facts
           const width = cardWidth(cols)
