@@ -99,50 +99,204 @@ export function cardLines(text: string): CardLine[] {
   return lines
 }
 
-// How many terminal rows the spotlight card stands on — the renderer's own
-// width and chrome math replayed as a number. The raster layer needs it: a
-// kitty image sits ABOVE text cells, so while the card is up the sky's images
-// may keep the stage (dimmed) only where the card cannot reach.
-export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false): number {
-  const width = Math.min(Math.floor(cols * 0.55), cols - 4)
-  const inner = Math.max(width - 6, 1) // border (2) + horizontal padding (4)
-  // A list card draws its rows from `options`; the text's own '>> ' rows are
-  // the same rows for a client without a list surface, so they are skipped.
-  const lines = cardLines(text).filter((line) => options === undefined || line.role !== 'option')
-  const facts = lines.some((line) => line.role === 'ready' || line.role === 'gap')
-  let rows = 0
-  for (const line of lines) {
-    const marker =
-      line.role === 'ready' || line.role === 'gap' ? 4 : line.role === 'option' ? 3 : 0
-    rows += Math.max(1, Math.ceil((line.text.length + marker) / inner))
+// How many rows a line stands on, wrapped the way the renderer wraps it: on
+// words, breaking mid-word only for a word wider than the card. Counting
+// ceil(length / inner) instead under-counts every line that cannot break on a
+// column boundary — which is how a card that had just been fitted to the
+// screen still drew one row past the top of it. A run of words each wider
+// than the card can come out one row high; the error is on the safe side —
+// the card is fitted smaller than it had to be, never larger.
+export function wrapRows(text: string, inner: number): number {
+  let rows = 1
+  let used = 0
+  let first = true
+  for (const word of text.split(' ')) {
+    let width = word.length
+    while (width > inner) {
+      rows += 1
+      width -= inner
+    }
+    // The indent a list row leads with is width like any other, so the count
+    // cannot start fresh at the first non-empty word.
+    const need = first ? width : used + 1 + width
+    if (need <= inner) used = need
+    else {
+      rows += 1
+      used = width
+    }
+    first = false
   }
-  // A multi list stands on the apply row too, measured at its longest note:
-  // over-reserving a row only lifts the raster ceiling, under-reserving it
-  // would let an image sit on the card.
-  const drawn = options === undefined ? [] : listRows(options, multi, pickStart(options))
-  for (const option of drawn) rows += Math.max(1, Math.ceil(listRow(option).length / inner))
-  if (facts) rows += 1 // the divider above the options
-  // A consent checklist's choices are its own option rows; every other card
-  // keeps the renderer's action row (a question's Enter hint stays even
-  // above status rows — the /sources menu).
-  // The action row: its top margin + the line, + the /back hint's own row
-  // when it does not share the line.
-  if (!(facts && kind === 'consent')) {
-    const inline = back && backInline(kind, lines, options, inner)
-    rows += 1 + Math.ceil(actionRow(kind, lines, options, inline).length / inner) + (back && !inline ? 1 : 0)
-  }
-  // The list IS the answer: no field under it.
-  if (options === undefined) rows += 2 // the in-card answer field (its top margin + the input)
-  rows += 4 // border (2) + vertical padding (2)
-  rows += 1 // the gap row between the floating card and the bottom rule
   return rows
 }
 
-// The first terminal row the card can touch: the card floats anchored to the
-// window's bottom rule (the quiet line that keeps the frame closed), so its
-// top is the window height minus its own rows. Rasters end above this.
-export function cardTopRow(text: string, cols: number, height: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false): number {
-  return Math.max(1, height - 1 - cardRows(text, cols, kind, options, back, multi))
+// One content line's height at the card's inner width — the marker the
+// renderer prefixes ('ok  ' / '--  ' / the key chip) rides on its first row.
+function lineRows(line: CardLine, inner: number): number {
+  const marker = line.role === 'ready' ? 'ok  ' : line.role === 'gap' ? '--  ' : line.role === 'option' ? '   ' : ''
+  return wrapRows(marker + line.text, inner)
+}
+
+function optionRows(option: AskOption, inner: number): number {
+  return wrapRows(listRow(option), inner)
+}
+
+// What the card says in place of the result rows it had to fold away, so a
+// listener reads "there were more" instead of a card that quietly lost them.
+export function foldLabel(folded: number): string {
+  return `${String(folded)} more above — the log has them`
+}
+
+// The card, cut to what the screen can hold (issue #264). The card floats at
+// the bottom of the window with a content-sized height, so before this the
+// renderer simply drew past the top of the terminal: measured at 80x24, a
+// sign-in card leading with two long obstacle rows stood on 27 rows and lost
+// its border, its title and the results it leads with off the top edge.
+//
+// The cut is made here rather than in the copy, in a fixed order: the notes
+// go first, then the results (folded into one line that counts them), then
+// the option rows narrow to a window around the cursor. The question, the
+// rows being answered and the action row are never sacrificed.
+export type CardAsk = {
+  text: string
+  cols: number
+  height: number
+  kind: AskKind
+  options?: readonly AskOption[] | undefined
+  back?: boolean
+  multi?: boolean
+  at?: number
+}
+
+export type CardShape = {
+  lines: CardLine[]
+  drawn: readonly AskOption[]
+  from: number
+  to: number
+  above: number
+  below: number
+  folded: number
+  rows: number
+  top: number
+  inner: number
+  facts: boolean
+}
+
+export function cardWidth(cols: number): number {
+  return Math.min(Math.floor(cols * 0.55), cols - 4)
+}
+
+export function cardShape(ask: CardAsk): CardShape {
+  const { text, cols, height, kind, options, back = false, multi = false, at = 0 } = ask
+  const inner = Math.max(cardWidth(cols) - 6, 1) // border (2) + horizontal padding (4)
+  // A list card draws its rows from `options`; the text's own '>> ' rows are
+  // the same rows for a client without a list surface, so they are skipped.
+  const all = cardLines(text).filter((line) => options === undefined || line.role !== 'option')
+  const facts = all.some((line) => line.role === 'ready' || line.role === 'gap')
+  // The apply row is measured at its longest: its note is the state of the
+  // card, and a fit that measured the short one ('2 changes') while the card
+  // drew the long one ('nothing changed — Enter leaves') came up a row short.
+  const drawn = options === undefined ? [] : listRows(options, multi, { at, checked: options.filter((o) => o.checked === true).map((o) => o.key) })
+  // The furniture, measured off the card as it came in: a fit that drops rows
+  // can only make these smaller, and reserving a row too many shrinks the
+  // card rather than letting it run off the screen.
+  let chrome = 4 // border (2) + vertical padding (2)
+  chrome += 2 // the card floats at `bottom: 2` — two rows under its border
+  if (facts) chrome += 1 // the divider above the choices
+  if (!(facts && kind === 'consent')) {
+    const inline = back && backInline(kind, all, options, inner)
+    chrome += 1 + wrapRows(actionRow(kind, all, options, inline), inner) + (back && !inline ? 1 : 0)
+  }
+  // The list IS the answer: no field under it.
+  if (options === undefined) chrome += 2 // the in-card answer field (its top margin + the input)
+
+  const budget = Math.max(1, height - chrome)
+  const measure = (lines: readonly CardLine[]): number => lines.reduce((n, line) => n + lineRows(line, inner), 0)
+  const listHeight = (from: number, to: number): number => drawn.slice(from, to).reduce((n, o) => n + optionRows(o, inner), 0)
+
+  let lines = [...all]
+  let folded = 0
+  // The counters that stand in for the option rows out of view are content
+  // too: a fit that forgot them is how the card got one row taller than the
+  // budget it had just satisfied.
+  const over = (from: number, to: number): number =>
+    measure(lines) + listHeight(from, to) + (from > 0 ? 1 : 0) + (to < drawn.length ? 1 : 0) - budget
+
+  // A consent card's notes are the scope of the yes — what is read, where it
+  // is sent, what it costs (`BOOTSTRAP_OFFER`). Folding those away would ask
+  // for a yes to something the card no longer says (codex review), so on a
+  // consent they are as protected as the question itself.
+  const disclosure = kind === 'consent'
+  // 1. The notes, last first: detail that steps back is the first thing a
+  //    short screen can do without.
+  for (let i = lines.length - 1; i >= 0 && over(0, drawn.length) > 0; i--) {
+    if (lines[i]!.role === 'note' && !disclosure) lines.splice(i, 1)
+  }
+  // 2. The results, oldest first, into one line that counts them.
+  let fold: CardLine | null = null
+  while (over(0, drawn.length) > 0) {
+    const i = lines.findIndex((l) => l !== fold && (l.role === 'ready' || l.role === 'gap'))
+    if (i === -1) break
+    lines.splice(i, 1)
+    folded += 1
+    if (fold === null) {
+      fold = { text: '', role: 'gap' }
+      lines.splice(i, 0, fold)
+    }
+    fold.text = foldLabel(folded)
+  }
+  // 3. The option rows, to a window around the row being answered. The two
+  //    counters ride above and below it, so what is out of view is counted.
+  let from = 0
+  let to = drawn.length
+  if (over(from, to) > 0 && drawn.length > 1) {
+    const room = Math.max(1, budget - measure(lines) - 2) // the two counters
+    from = Math.min(Math.max(at, 0), drawn.length - 1)
+    to = from + 1
+    let used = optionRows(drawn[from]!, inner)
+    for (;;) {
+      const down = to < drawn.length ? optionRows(drawn[to]!, inner) : Infinity
+      const up = from > 0 ? optionRows(drawn[from - 1]!, inner) : Infinity
+      const next = Math.min(down, up)
+      if (next === Infinity || used + next > room) break
+      if (down <= up) used += down, to++
+      else used += up, from--
+    }
+  }
+  // 4. Whatever is left over on a terminal too short for the question itself:
+  //    the top rows go. What can never go is the question, the rows the
+  //    listener answers with — a card whose choices live in its own text has
+  //    no list to window, and dropping one there deletes an answer the input
+  //    still accepts but nothing on screen offers (codex review) — and, on a
+  //    consent, the disclosure. A card with nothing left to cut is drawn as
+  //    it is: a terminal this short cannot hold it either way.
+  const cuttable = (line: CardLine): boolean =>
+    line.role === 'ready' || line.role === 'gap' || (line.role === 'note' && !disclosure)
+  for (;;) {
+    if (over(from, to) <= 0) break
+    const i = lines.findIndex(cuttable)
+    if (i === -1) break
+    lines.splice(i, 1)
+  }
+
+  const above = from
+  const below = drawn.length - to
+  const rows = chrome + measure(lines) + listHeight(from, to) + (above > 0 ? 1 : 0) + (below > 0 ? 1 : 0)
+  // Where the card begins, for the raster layer: a kitty image composites
+  // ABOVE text cells, so while the card is up the sky keeps the stage only
+  // where the card cannot reach. It rides on the fit rather than on a second
+  // measurement — the two disagreed as soon as the option window started
+  // moving with the cursor (codex review).
+  const top = Math.max(1, height - rows)
+  return { lines, drawn, from, to, above, below, folded, rows, inner, facts, top }
+}
+
+// How many terminal rows the spotlight card stands on — the renderer's own
+// width and chrome math replayed as a number. The raster layer needs it: a
+// kitty image sits ABOVE text cells, so while the card is up the sky's images
+// may keep the stage (dimmed) only where the card cannot reach. Without a
+// `height` it measures the card unbounded — what it WANTS, not what it gets.
+export function cardRows(text: string, cols: number, kind: AskKind, options?: readonly AskOption[], back = false, multi = false, height = Infinity): number {
+  return cardShape({ text, cols, height, kind, options, back, multi }).rows
 }
 
 // One list row as the renderer lays it out: the cursor slot, the tick box —
