@@ -73,6 +73,25 @@ describe('music scheduling (cadence at the boundary)', () => {
     expect(player.music[0]!.source).toBe('https://stream/song1')
   })
 
+  // The between-songs gap was 2.5 minutes because nothing primed the next pick
+  // while a song played: takePick empties the slot at air time and only a talk
+  // beat refilled it, so every post-song pick paid a cold discovery. The prime
+  // fires at air time now, AFTER the ledger entry, so the song on air is on its
+  // own avoid-list (spec 04 §3.1).
+  it('primes the next pick as soon as a song goes on air, with that song already avoided', async () => {
+    const { director, player, source } = build()
+    source.picks = [
+      pickOf('https://stream/song1', { title: 'Song', artist: 'Artist' }),
+      pickOf('https://stream/song2', { title: 'Next', artist: 'Other' }),
+    ]
+    const run = director.run(2) // talk, then music
+    await until(() => player.handles.length === 1, 'song on air')
+    await until(() => source.contexts.length >= 2, 'the next pick is primed during the song')
+    expect(source.contexts.at(-1)!.situation).toContain('- Song — Artist')
+    player.handles[0]!.end()
+    await run
+  })
+
   it('a pick without an announce plays the track directly', async () => {
     const { director, player, source } = build()
     source.picks = [pickOf('https://stream/plain')]
@@ -187,26 +206,27 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     await until(() => player.handles.length === 1, 'music aired once the pick resolved')
     player.handles[0]!.end()
     await run
-    expect(source.calls).toBe(1) // single-slot: one prefetch, consumed at the boundary
+    // Two: the boundary consumed the prefetch, and the track going on air
+    // immediately primed the one after it (spec 04 §3.1).
+    expect(source.calls).toBe(2)
   })
 
-  // spec 03-02 §1 #6: the announce is asked to pick up whatever thread the
-  // line before the song left, so that line has to arrive labeled as such.
-  it('labels the airing line in the situation of the pick that actually airs', async () => {
+  // spec 03-02 §1 #6: a pick primed around an airing beat arrives labeled with
+  // that line, so the announce can pick its thread up. Priming the next song at
+  // the current one's air time (spec 04 §3.1) means a song-to-song pick is
+  // chosen before that line exists — the label survives only where the slot is
+  // genuinely empty when a beat airs, and a pick is never fed raw transcript.
+  it('labels the airing line in the situation of a pick primed around a beat', async () => {
     const { director, player, source } = build()
-    source.picks = [
-      pickOf('https://stream/song1', { announce: 'first' }),
-      pickOf('https://stream/song2', { announce: 'second' }),
-    ]
+    source.picks = [pickOf('https://stream/song1', { announce: 'first' })]
     const run = director.run(4) // talk, music, talk, music
     await until(() => player.handles.length === 1, 'first song on air')
     player.handles[0]!.end()
-    await until(() => player.handles.length === 2, 'second song on air')
-    player.handles[1]!.end()
     await run
-    // The startup-primed pick airs first and predates every beat, so it has no
-    // line to name; the pick the SECOND song airs on was primed by one.
-    expect(source.contexts[1]!.situation).toMatch(/The line on air as this song was chosen: "talk /)
+    // Slot 0 is the startup prime (predates every beat) and slot 1 the air-time
+    // prime; that one came back empty, so the next beat's prime is the labeled one.
+    expect(source.contexts[1]!.situation).not.toMatch(/The line on air as this song was chosen/)
+    expect(source.contexts[2]!.situation).toMatch(/The line on air as this song was chosen: "talk /)
     expect(source.contexts.every((c) => !c.situation.includes('- radio: '))).toBe(true)
   })
 
@@ -692,7 +712,12 @@ describe('the talk context carries the real music state (spec 04 bugfix)', () =>
 
   it('after the song ends the context names the last track, nothing playing', async () => {
     const { director, knobs, player, brain, source } = build()
-    source.picks = [pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' })]
+    // Two picks: the second answers the prime the first one's air time fires,
+    // so the slot holds a real pick and the state reads quiet, not pickFailed.
+    source.picks = [
+      pickOf('https://stream/r1', { title: 'Song', artist: 'Artist' }),
+      pickOf('https://stream/r2', { title: 'Spare', artist: 'Artist' }),
+    ]
     // Four segments, not three: the coda occupies the first post-song boundary
     // and leaves the look-ahead full, so the refill that reads the post-song
     // music state fires at the boundary after it.

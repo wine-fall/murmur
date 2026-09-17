@@ -59,14 +59,19 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
     tools.push(
       tool(
         'switch_music',
-        'The listener asked for different music (skip this, next song, or a ' +
-          'specific style/artist/mood — put that in `hint`). Re-aims the next ' +
-          'pick; the air hands over once it is found.',
+        'The listener asked for different music. Re-aims the next pick; the air ' +
+          'hands over once it is found. Pass `hint` ONLY when they named ' +
+          'something to aim at — a style, an artist, a mood. A bare "skip this" ' +
+          'or "next song" names nothing, and a hint invented for it throws away ' +
+          'the track already standing by and makes them wait out a fresh search.',
         {
           hint: z
             .string()
             .optional()
-            .describe("the requested style, artist, or mood, in the listener's words"),
+            .describe(
+              "the style, artist, or mood the listener named, in their own words; " +
+                'omit it entirely when they named none',
+            ),
         },
         async (args) => {
           const wasPlaying = music.playing()

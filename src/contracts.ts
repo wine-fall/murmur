@@ -56,8 +56,13 @@ export type TalkBeat = {
 // 'quiet' is every nothing-on-air moment — before the first song (lastTrack
 // absent) and between songs (lastTrack names what just ended) — so a wired
 // radio always states a music fact, never silence the model can fill in.
+// 'switching' outranks both 'playing' and 'picking': the listener asked for a
+// different song and the search has not landed, so the model must not narrate a
+// change the engine has not made (spec 11 §2.3). `track` is the song still on
+// air, absent when the switch was asked for in a gap.
 export type MusicState =
   | { readonly kind: 'playing'; readonly track: string }
+  | { readonly kind: 'switching'; readonly track?: string }
   | { readonly kind: 'quiet'; readonly lastTrack?: string }
   | { readonly kind: 'picking' }
   | { readonly kind: 'pickFailed' }
