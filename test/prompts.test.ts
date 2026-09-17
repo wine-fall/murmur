@@ -801,6 +801,26 @@ describe('the recall block and its grounding (spec 05-01 §3.6)', () => {
   })
 })
 
+// The switch cuts mid-song (spec 11 §2.3), so the reply rule must not let the
+// host cover the wait by promising the current song will finish first.
+describe('the steer prompt covers the wait without promising this song out', () => {
+  const ctx = { persona: 'p', recent: [] }
+  const steer = (): string =>
+    buildSteerPrompt('put on something Japanese', ctx, {
+      musicWired: true,
+      shutdownArmed: false,
+      settingsWired: false,
+      memoryWired: false,
+    })
+
+  it('forbids promising the current track finishes before the change', () => {
+    const p = steer()
+    expect(p).toMatch(/switch_music/)
+    expect(p).toMatch(/cuts in|mid-song|does not wait/i)
+    expect(p).toMatch(/never promise|do not promise/i)
+  })
+})
+
 describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
   const ctx = { persona: 'p', recent: [] }
 
@@ -824,6 +844,52 @@ describe('the steer prompt authorizes change_settings (spec 12 §2.6)', () => {
       memoryWired: false,
     })
     expect(p).not.toMatch(/change_settings/)
+  })
+})
+
+// The guide's tools only WRITE (write_voice_config / create_voice /
+// set_voice_speed / set_language), so without this block the conversation
+// cannot answer "how fast is it reading now?" — it said, truthfully, that it
+// could only set the pace and not read it (user report 2026-09-17). The knobs
+// it can change are stated as facts in the prompt; the key never is.
+describe('the current-state block (spec 03-03 §7.2)', () => {
+  const base = { ytdlp: 'yt-dlp', ffmpeg: 'ffmpeg', bunCmd: 'bun' } as const
+  const current = {
+    ttsUrl: 'https://api.fish.audio/v1/tts',
+    model: 's2.1-pro',
+    referenceId: 'abc123',
+    speed: 0.9,
+    language: 'Chinese',
+  }
+
+  it('states every knob the guide can turn, on a healthy machine', () => {
+    const text = buildSetupPrompt({ gaps: [], ...base, current })
+    expect(text).toContain('0.9')
+    expect(text).toContain('abc123')
+    expect(text).toContain('https://api.fish.audio/v1/tts')
+    expect(text).toContain('s2.1-pro')
+    expect(text).toContain('Chinese')
+  })
+
+  it("names an unset speed as the voice's own pace rather than leaving it blank", () => {
+    const { speed: _speed, ...paceless } = current
+    const text = buildSetupPrompt({ gaps: [], ...base, current: paceless })
+    expect(text).toMatch(/speed[^\n]*(unset|its own|as recorded)/i)
+  })
+
+  it('rides a gap conversation too — the same knobs are reachable there', () => {
+    const text = buildSetupPrompt({
+      gaps: [{ kind: 'music', reason: 'yt-dlp missing' }],
+      ...base,
+      current,
+    })
+    expect(text).toContain('0.9')
+    expect(text).toContain('abc123')
+  })
+
+  it('says nothing at all when the run has no state to report', () => {
+    const text = buildSetupPrompt({ gaps: [], ...base })
+    expect(text).not.toMatch(/right now, on this machine/i)
   })
 })
 

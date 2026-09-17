@@ -426,6 +426,43 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(prompt.toLowerCase()).toContain('voice')
   })
 
+  it('hands the conversation the knobs it can only WRITE, so it can answer about them', async () => {
+    // The guide's voice tools set a speed, an id and an endpoint; none of them
+    // reads one back, so a listener asking "how fast is it reading now?" was
+    // told the guide cannot see it (user report 2026-09-17). The live endpoint
+    // is the one that answers — env and flags over the file.
+    const { host } = fakeHost(['y'])
+    const { guide, requests } = fakeGuide()
+    await runSetup({
+      host,
+      guide,
+      targets: targets({
+        wantsMusic: false,
+        wantsBun: false,
+        voiceUrl: () => 'https://tts.example',
+        voiceConfig: () => ({ ttsUrl: 'https://saved.example', speed: 1.2 }),
+        effectiveVoice: () => ({
+          ttsUrl: 'https://tts.example',
+          model: 's2.1-pro',
+          referenceId: 'abc123',
+          speed: 0.9,
+          apiKey: 'sk-do-not-leak',
+        }),
+      }),
+      ledger: fakeLedger(),
+      probes,
+      explicit: true,
+    })
+    const prompt = requests[0]!.prompt
+    expect(prompt).toContain('0.9')
+    expect(prompt).toContain('abc123')
+    expect(prompt).toContain('https://tts.example')
+    // The live endpoint answers, not the file behind it.
+    expect(prompt).not.toContain('1.2')
+    // The credential never enters the conversation (§7.2's whole point).
+    expect(prompt).not.toContain('sk-do-not-leak')
+  })
+
   it('prefers Homebrew for yt-dlp, with uv/pipx only as the fallback', async () => {
     const { host } = fakeHost(['y'])
     const { guide, requests } = fakeGuide()

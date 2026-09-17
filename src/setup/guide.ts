@@ -29,7 +29,7 @@ import { ask, type Host, QUIT } from '../host/host.ts'
 import { LANGUAGE_MAX } from '../host/ipc.ts'
 import { expandUser } from '../paths.ts'
 import { HostedVoice } from '../voice/hosted-voice.ts'
-import { buildSetupPrompt, GUIDE_PERSONA, VISIT_PERSONA } from '../prompts/setup.ts'
+import { buildSetupPrompt, GUIDE_PERSONA, VISIT_PERSONA, type SetupCurrentState } from '../prompts/setup.ts'
 import {
   preflightBun,
   preflightMusic,
@@ -519,6 +519,25 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
 // opens a real conversation — the guide investigates, narrates, applies, and
 // verifies, asking only at substantive forks. Declining is the only thing that makes later boots
 // quiet, and it costs exactly one info line thereafter.
+
+// What the guide can say about the knobs it can otherwise only set. The LIVE
+// endpoint answers, not the saved file, because that is what this run speaks
+// through — and the key is picked around by hand: everything here is sent to
+// the model (spec 03-03 §7.2).
+function currentState(targets: SetupTargets, settings?: SteerSettingsActions): SetupCurrentState {
+  const voice = targets.effectiveVoice?.() ?? targets.voiceConfig()
+  const language = settings?.current().language
+  return {
+    ...(voice !== null && {
+      ttsUrl: voice.ttsUrl,
+      ...(voice.model !== undefined && { model: voice.model }),
+      ...(voice.referenceId !== undefined && { referenceId: voice.referenceId }),
+      ...(voice.speed !== undefined && { speed: voice.speed }),
+    }),
+    ...(language !== undefined && { language }),
+  }
+}
+
 export async function runSetup(run: SetupRun): Promise<SetupOutcome> {
   const { host, targets } = run
   // A caller without a latch (the explicit CLI entries) still gets one: a
@@ -754,6 +773,7 @@ async function runSetupFlow(
       ytdlp: targets.ytdlp,
       ffmpeg: targets.ffmpeg,
       bunCmd: targets.bunCmd,
+      current: currentState(targets, run.settings),
     }),
     model: GUIDE_MODEL,
     maxTurns: GUIDE_MAX_TURNS,
