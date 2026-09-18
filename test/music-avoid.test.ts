@@ -67,6 +67,16 @@ describe('submit_pick refuses a track on the avoid-list', () => {
     expect(picks).toHaveLength(0)
   })
 
+  // A pick that names no title is labelled 'music', which is an absence of
+  // identity, not a song. Reading it as one would refuse every metadata-less
+  // pick after the first (codex review).
+  it('never reads the placeholder label as a song identity', async () => {
+    const { tools, picks } = build(['music'])
+    const result = await callTool(tools, 'submit_pick', { ref: 'https://youtu.be/1', why: 'w' })
+    expect(result.ok).toBe(true)
+    expect(picks).toHaveLength(1)
+  })
+
   // ponytail: trim + collapsed whitespace + case is the whole normalisation.
   // The ledger holds a band under both its simplified and its traditional
   // spelling, and those are NOT folded together here -- a script-conversion

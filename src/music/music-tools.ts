@@ -176,8 +176,11 @@ export function musicTools(
       const title = trimmed(args.title)
       const artist = trimmed(args.artist)
       // Before the resolve: a repeat costs a tool turn, never a network round.
+      // Only a pick that names itself can be recognised as one — a submission
+      // with no title carries the placeholder label, which is an absence of
+      // identity and not a song to match on.
       const label = trackLabel({ ...(title !== undefined && { title }), ...(artist !== undefined && { artist }) })
-      if (avoided.has(folded(label))) {
+      if (title !== undefined && avoided.has(folded(label))) {
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
       }
 

@@ -43,6 +43,12 @@ track and a short reason.
 // than a list of bans: the failure it exists to prevent is not picking a BAD
 // song, it is picking the same handful of obvious ones forever, and a ban list
 // cannot say what to do instead.
+// The anti-repeat half of policy rule 8, named because code reads it: the
+// deterministic refusal in submit_pick is armed only while this sentence is
+// still in the policy in force (spec 03-01 §2.3). A listener who rewrites
+// the policy without it welcomes repeats, and the code must not overrule them.
+export const NO_REPEATS_RULE = 'never play something the context lists as recently played'
+
 export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The persona and the turns above say more
    than any genre label does: the hour, what the listener keeps circling back
    to, whether they want company or cover.
@@ -76,7 +82,7 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
    in it is the whole point of a radio.
 
 8. Stay inside the listener's language and taste as the persona describes
-   them, and never play something the context lists as recently played.`
+   them, and ${NO_REPEATS_RULE}.`
 
 export const MUSIC_POLICY_HEADER = 'Policy:'
 
