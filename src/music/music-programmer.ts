@@ -134,7 +134,7 @@ export class MusicProgrammer implements TrackSource {
       // states, and nothing reads its reasoning back. The SDK's default extended
       // thinking spent ~45 s of a ~100 s pick writing it (issue #164).
       thinking: 'disabled',
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste, this.deps.channels),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste, this.deps.channels, ctx.avoid),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

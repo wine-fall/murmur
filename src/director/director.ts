@@ -42,6 +42,7 @@ import type {
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
+import { trackLabel } from '../music/music-tools.ts'
 import { chromeProfile } from '../music/sources/chrome.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
@@ -135,12 +136,17 @@ const MUSIC_START_ATTEMPTS = 2
 // a transcript dump.
 const RECALL_LIMIT = 5
 
-// Anti-repeat depth for the music avoid-list, read from the tier-③ ledger
-// (spec 05 §3.5) — cross-session on the persistent store. Deep enough to cover
-// more than one evening: at eight, a favourite came back every other session,
-// and the model's own taste already narrows hard without help. The ledger
-// keeps far more than this, and the list costs one prompt line per song.
-const AVOID_DEPTH = 32
+// Anti-repeat window for the music avoid-list, read from the tier-③ ledger
+// (spec 05 §3.5) — cross-session on the persistent store. A listener hears
+// repetition in time, not in track counts: an afternoon that ran long is still
+// one afternoon, and the song it opened with is a repeat tomorrow however many
+// tracks followed it.
+const AVOID_WINDOW_DAYS = 7
+
+// Ceiling on that window, and a prompt-length fuse only: the list costs one
+// line per song in the pick prompt. It is not an anti-repeat depth — set it
+// small and the time rule collapses back into the count rule it replaced.
+const AVOID_CAP = 256
 
 // spec 04 §3.1: how many picks the music look-ahead holds. Two, so the pick
 // behind the one on air is also standing by — which is what makes a second
@@ -234,13 +240,6 @@ function pending<T>(promise: Promise<T>): Pending<T> {
     },
   )
   return { promise: tracked, done: () => settled, value: () => resolved }
-}
-
-// The label the program announces a pick under, and the one the ledger and the
-// avoid-list carry — one spelling, so a queued pick and an aired one are the
-// same string.
-function trackLabel(pick: TrackPick): string {
-  return pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
 }
 
 type OnAir = Pending<void>
@@ -1101,13 +1100,18 @@ export class Director {
   }
 
   private musicContext(): MusicContext {
+    const since = Date.now() / 1000 - AVOID_WINDOW_DAYS * 24 * 3600
+    const avoid = [...this.deps.memory.recentSongsSince(since, AVOID_CAP), ...this.queuedLabels()]
     return {
       persona: this.persona(),
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
-        [...this.deps.memory.recentSongs(AVOID_DEPTH), ...this.queuedLabels()],
+        avoid,
         this.tasteDigest(),
       ),
+      // The same list as data, so submit_pick can refuse a repeat instead of
+      // only asking for none: the prompt rule alone let one through.
+      avoid,
     }
   }
 

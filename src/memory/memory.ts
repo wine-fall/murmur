@@ -19,15 +19,33 @@ import {
 } from '../prompts/profile.ts'
 import { type IndexRow, RecallIndex, queryTokens } from './recall.ts'
 
+// A ledger row as the in-memory tail holds it: the key plus when it happened,
+// because the avoid-list is read by age (spec 05 §3.5).
+type LedgerEntry = { key: string; ts: number }
+
+// The last n keys of a ledger tail, oldest-first.
+function keys(entries: readonly LedgerEntry[], n: number): string[] {
+  return n > 0 ? entries.slice(-n).map((e) => e.key) : []
+}
+
+// The songs aired at or after `sinceTs`, newest-last, capped.
+function songsSince(songs: readonly LedgerEntry[], sinceTs: number, cap: number): string[] {
+  if (cap <= 0) return []
+  return songs
+    .filter((e) => e.ts >= sinceTs)
+    .slice(-cap)
+    .map((e) => e.key)
+}
+
 export class InProcessMemoryStore implements MemoryStore {
   private turns: { ts: number; turn: Turn }[] = []
   private profileText = ''
-  private topics: string[] = []
-  private songs: string[] = []
-  private anchors: string[] = []
-  private setup: string[] = []
-  private forgets: string[] = []
-  private rwt: string[] = []
+  private topics: LedgerEntry[] = []
+  private songs: LedgerEntry[] = []
+  private anchors: LedgerEntry[] = []
+  private setup: LedgerEntry[] = []
+  private forgets: LedgerEntry[] = []
+  private rwt: LedgerEntry[] = []
 
   private maxlen: number
 
@@ -69,37 +87,41 @@ export class InProcessMemoryStore implements MemoryStore {
     const kept = this.profileText.split('\n').filter((l) => !l.toLowerCase().includes(needle))
     let lines = this.profileText.split('\n').length - kept.length
     this.profileText = kept.join('\n')
-    const topics = this.topics.filter((key) => !key.toLowerCase().includes(needle))
+    const topics = this.topics.filter((e) => !e.key.toLowerCase().includes(needle))
     lines += this.topics.length - topics.length
     this.topics = topics
     return { rows: before - this.turns.length, lines }
   }
 
   recordEvent(kind: LedgerKind, key: string): void {
-    this.ledger(kind).push(key)
+    this.ledger(kind).push({ key, ts: Date.now() / 1000 })
   }
 
   recentTopics(n: number): string[] {
-    return n > 0 ? this.topics.slice(-n) : []
+    return keys(this.topics, n)
   }
 
   recentSongs(n: number): string[] {
-    return n > 0 ? this.songs.slice(-n) : []
+    return keys(this.songs, n)
+  }
+
+  recentSongsSince(sinceTs: number, cap: number): string[] {
+    return songsSince(this.songs, sinceTs, cap)
   }
 
   recentAnchors(n: number): string[] {
-    return n > 0 ? this.anchors.slice(-n) : []
+    return keys(this.anchors, n)
   }
 
   recentRwt(n: number): string[] {
-    return n > 0 ? this.rwt.slice(-n) : []
+    return keys(this.rwt, n)
   }
 
   recentEvents(kind: LedgerKind, n: number): string[] {
-    return n > 0 ? this.ledger(kind).slice(-n) : []
+    return keys(this.ledger(kind), n)
   }
 
-  private ledger(kind: LedgerKind): string[] {
+  private ledger(kind: LedgerKind): LedgerEntry[] {
     switch (kind) {
       case 'topic':
         return this.topics
@@ -438,8 +460,9 @@ export function fadeFacts(profile: string, nowSeconds: number): { live: string; 
   return { live: live.join('\n'), faded }
 }
 
-// In-memory ledger tail kept per kind — bounds boot memory, far above any
-// realistic recentTopics/recentSongs(n).
+// In-memory ledger tail kept per kind — bounds boot memory. It is also the
+// hard ceiling on the avoid-list: a week with more songs than this in it is
+// read back from its newest 256.
 const LEDGER_TAIL = 256
 
 // The file-persistence boundary is untrusted (issue #54 rule): every row read
@@ -457,6 +480,10 @@ const historyRowSchema = z.object({
 const ledgerRowSchema = z.object({
   kind: z.string(),
   key: z.string(),
+  // Optional because the Python-era store this dir can carry over from wrote
+  // rows without one. A row with no time is read as ancient, so it never
+  // occupies the avoid window.
+  ts: z.number().optional(),
 })
 
 // On-disk snake_case matches the Python store — the same memory dir carries
@@ -504,12 +531,12 @@ export class PersistentMemoryStore implements MemoryStore {
 
   private maxlen: number
   private turns: { ts: number; turn: Turn }[] = []
-  private topics: string[] = []
-  private songs: string[] = []
-  private anchors: string[] = []
-  private setup: string[] = []
-  private forgets: string[] = []
-  private rwt: string[] = []
+  private topics: LedgerEntry[] = []
+  private songs: LedgerEntry[] = []
+  private anchors: LedgerEntry[] = []
+  private setup: LedgerEntry[] = []
+  private forgets: LedgerEntry[] = []
+  private rwt: LedgerEntry[] = []
   private profileText = ''
   // Built on first recall/forget, not at boot (spec 05-01 §3.4).
   private recallIndex: RecallIndex | null = null
@@ -639,7 +666,7 @@ export class PersistentMemoryStore implements MemoryStore {
     if (dropped === 0 && lines === 0) return { rows: 0, lines: 0 }
 
     this.profileText = this.readText(this.profilePath)
-    this.topics = this.topics.filter((key) => !hit(key))
+    this.topics = this.topics.filter((e) => !hit(e.key))
     this.turns = this.turns.filter((t) => !hit(t.turn.text))
     this.backlog = this.backlog.filter((b) => !hit(b.turn.text))
     // The index holds every row's text verbatim, so a stale index.db is a copy
@@ -658,44 +685,48 @@ export class PersistentMemoryStore implements MemoryStore {
   }
 
   recordEvent(kind: LedgerKind, key: string): void {
-    this.append(this.ledgerPath, { ts: this.stamp(), session: this.session, kind, key })
-    this.rememberEvent(kind, key)
+    const ts = this.stamp()
+    this.append(this.ledgerPath, { ts, session: this.session, kind, key })
+    this.rememberEvent(kind, key, ts)
   }
 
   recentTopics(n: number): string[] {
-    return n > 0 ? this.topics.slice(-n) : []
+    return keys(this.topics, n)
   }
 
   recentSongs(n: number): string[] {
-    return n > 0 ? this.songs.slice(-n) : []
+    return keys(this.songs, n)
+  }
+
+  recentSongsSince(sinceTs: number, cap: number): string[] {
+    return songsSince(this.songs, sinceTs, cap)
   }
 
   recentAnchors(n: number): string[] {
-    return n > 0 ? this.anchors.slice(-n) : []
+    return keys(this.anchors, n)
   }
 
   recentRwt(n: number): string[] {
-    return n > 0 ? this.rwt.slice(-n) : []
+    return keys(this.rwt, n)
   }
 
   // Any ledger kind, by name. Impl-level and deliberately NOT on the MemoryStore
   // contract: the setup offer reads its own standing answer (spec 03-03 §7.1),
   // and the Director has no business in that tier.
   recentEvents(kind: LedgerKind, n: number): string[] {
-    if (n <= 0) return []
     switch (kind) {
       case 'topic':
-        return this.topics.slice(-n)
+        return keys(this.topics, n)
       case 'song':
-        return this.songs.slice(-n)
+        return keys(this.songs, n)
       case 'anchor':
-        return this.anchors.slice(-n)
+        return keys(this.anchors, n)
       case 'setup':
-        return this.setup.slice(-n)
+        return keys(this.setup, n)
       case 'forget':
-        return this.forgets.slice(-n)
+        return keys(this.forgets, n)
       case 'rwt':
-        return this.rwt.slice(-n)
+        return keys(this.rwt, n)
     }
   }
 
@@ -1013,7 +1044,7 @@ export class PersistentMemoryStore implements MemoryStore {
   }
 
   // An unknown kind (a newer murmur's ledger) is skipped, not crashed on.
-  private rememberEvent(kind: string, key: string): void {
+  private rememberEvent(kind: string, key: string, ts: number): void {
     const target =
       kind === 'topic'
         ? this.topics
@@ -1029,7 +1060,7 @@ export class PersistentMemoryStore implements MemoryStore {
                   ? this.rwt
                   : null
     if (target === null) return
-    target.push(key)
+    target.push({ key, ts })
     if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)
   }
 
@@ -1104,7 +1135,7 @@ export class PersistentMemoryStore implements MemoryStore {
     if (this.lastTs > 0) this.away = Math.max(0, Math.round(this.now() - this.lastTs))
 
     for (const row of this.readJsonl(this.ledgerPath, ledgerRowSchema)) {
-      this.rememberEvent(row.kind, row.key)
+      this.rememberEvent(row.kind, row.key, row.ts ?? 0)
     }
   }
 }

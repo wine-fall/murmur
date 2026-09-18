@@ -361,6 +361,9 @@ describe('prefetch (spec 04 slice: never block the air)', () => {
     await run
     const lastCtx = source.contexts.at(-1)!
     expect(lastCtx.situation).toContain('First Song')
+    // The same list rides as data, not only as prompt text: submit_pick checks
+    // it deterministically, and text in a situation block is unparseable.
+    expect(lastCtx.avoid).toContain('First Song \u2014 A')
   })
 })
 
