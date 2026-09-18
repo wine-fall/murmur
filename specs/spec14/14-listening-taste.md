@@ -278,9 +278,14 @@ an artist match — so they leave rather than being ranked last.
   default 1500.** (A fraction rather than a constant, so a caller asking for
   a different budget gets the same proportions.) These three are the listener's
   shape rather than their moment: they say who this person is in the fewest
-  words and read the same on every pick of the day. Inside the 300 each line
-  takes an equal share of what is left when its turn comes and rolls the rest
-  forward; whatever the half leaves unspent rolls into the flexible half.
+  words and read the same on every pick of the day. `Sources` is served
+  first, out of **half** the half: it is one phrase per mounted source and
+  cannot be shortened by dropping items, so an equal third starves it, while
+  the whole half starves the other two (measured in review: six verbose
+  summaries with staleness stamps took all 300 and `Artists they return to`
+  vanished). `Artists they return to` and `Playlists` split what it leaves,
+  equally, rolling forward. Whatever the half leaves unspent rolls into the
+  flexible half.
 - **Flexible half — the rest of `budget`**, claimed by weight, in this order,
   the first line rolling what it does not use forward to the second:
 
@@ -288,6 +293,12 @@ an artist match — so they leave rather than being ranked last.
   |---|---|---|
   | `Songs they keep` | 3 | 40 |
   | `Lately they have been listening to` | 1 | 8 |
+  | `<platform> says (top, medium term)` | 1 per source | 10 each |
+  | `<platform> suggests today` | 1 per source | 10 |
+
+  The platform lines take a **share**, they are not appended after the budget
+  is spent: appended, the widened song layer pushed them off the block whole
+  while the `Sources` line went on counting them (codex review).
 
   A line's share is `left * weight / (sum of the weights not yet served)`.
   Equal shares are the special case where every weight is 1. A line that runs

@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { renderTasteDigest, TasteReader, TasteSnapshotSchema, type SourceId, type TasteSnapshot } from '../src/music/sources/taste.ts'
+import { renderTasteDigest, TasteReader, TasteSnapshotSchema, type SourceId, type TasteKind, type TasteSnapshot } from '../src/music/sources/taste.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 
@@ -266,6 +266,44 @@ describe('renderTasteDigest', () => {
     const digest = renderTasteDigest([crowded, netease, spotify], NOW)
     expect(digest.length).toBeLessThanOrEqual(1500)
     expect(digest.split('\n')[0]).toBe('## What the listener keeps (as of 2026-09-06)')
+  })
+
+  // codex review: Sources was served first and alone out of the whole fixed
+  // half, so three verbose source summaries (198 characters with their
+  // staleness stamps) spent all of it and 'Artists they return to' vanished
+  // outright. It gets half the half now; the shape lines get the other half.
+  it('a long Sources line cannot eat the artists and the playlists', () => {
+    // Three sources, all stale enough to carry their date, and Spotify's
+    // summary naming four kinds: 198 characters of Sources on its own.
+    const verbose = (source: SourceId, kinds: readonly TasteKind[]): TasteSnapshot => ({
+      source,
+      takenAt: '2026-06-01T00:00:00.000Z',
+      items: kinds.flatMap((kind) => Array.from({ length: kind === 'liked' ? 500 : 50 }, (_, i) => ({ kind, title: kind === 'playlist' ? `mood ${i}` : `song ${i}`, artist: 'Ryuichi Sakamoto' }))),
+    })
+    const digest = renderTasteDigest(
+      [verbose('netease', ['liked', 'playlist']), verbose('spotify', ['liked', 'playlist', 'top-artist', 'top-track']), verbose('qqmusic', ['liked', 'playlist'])],
+      NOW,
+    )
+    expect(digest).toContain('Artists they return to: ')
+    expect(digest).toContain('Playlists: ')
+    expect(digest).toContain('Songs they keep: ')
+  })
+
+  // codex review: the platform top lists were appended after the budget was
+  // spent, so widening the song layer pushed them off the block entirely
+  // while the Sources line went on counting them. They take a share now.
+  it('a platform top list keeps its share beside a long liked list', () => {
+    const snapshot: TasteSnapshot = {
+      source: 'spotify',
+      takenAt: '2026-09-06T10:00:00.000Z',
+      items: [
+        ...Array.from({ length: 60 }, (_, i) => ({ kind: 'liked' as const, title: `a rather long favourite track title ${i}`, artist: `Artist ${i % 4}` })),
+        { kind: 'top-track', title: 'Merry Christmas Mr. Lawrence', artist: 'Ryuichi Sakamoto' },
+      ],
+    }
+    const digest = renderTasteDigest([snapshot], NOW)
+    expect(digest).toContain('Spotify says (top, medium term):')
+    expect(digest).toContain('Merry Christmas Mr. Lawrence')
   })
 
   it('a stale snapshot still renders, stamped with its date', () => {

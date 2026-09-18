@@ -211,6 +211,34 @@ function emit(lines: string[], layers: readonly Layer[], budget: number): number
   return used
 }
 
+// The platforms' own rankings, kept apart from the merged view: a top list
+// is the platform's word, not a count of anything. They ride the flexible
+// half's budget like every other line -- appended after it was spent, they
+// were dropped whole by the block-level cut while the Sources line went on
+// counting them (codex review).
+function platformLayers(kept: readonly { snapshot: TasteSnapshot; items: readonly TasteItem[] }[]): Layer[] {
+  const layers: Layer[] = []
+  for (const { snapshot, items } of kept) {
+    const top = (kind: TasteKind): TasteItem[] => items.filter((i) => i.kind === kind).slice(0, PLATFORM_LIST)
+    const topArtists = top('top-artist')
+    const topTracks = top('top-track')
+    if (topArtists.length + topTracks.length > 0) {
+      layers.push({
+        lead: `${SOURCE_NAMES[snapshot.source]} says (top, medium term)`,
+        parts: [
+          ...(topArtists.length > 0 ? [`artists \u2014 ${topArtists.map((i) => i.title.trim()).join(', ')}`] : []),
+          ...(topTracks.length > 0 ? [`tracks \u2014 ${topTracks.map(quoted).join(', ')}`] : []),
+        ],
+        sep: '; ',
+        weight: 1,
+      })
+    }
+    const daily = top('daily')
+    if (daily.length > 0) layers.push({ lead: `${SOURCE_NAMES[snapshot.source]} suggests today`, parts: daily.map(quoted), sep: ', ', weight: 1 })
+  }
+  return layers
+}
+
 export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date, budget = DIGEST_BUDGET): string {
   if (snapshots.length === 0) return ''
   // The render holds the invariant on ANY snapshot, not only a freshly read
@@ -255,10 +283,10 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
   lately.sort(byDate)
   songs.sort(byDate)
   // The fixed half: who this listener is, in the fewest words, the same on
-  // every pick of the day. Sources is served first and alone -- it is one
-  // short phrase per mounted source, the cheapest line in the block, and an
-  // equal third of the half would starve it. Artists and Playlists, the two
-  // that can genuinely run long, split what it leaves.
+  // every pick of the day. Sources is served first, out of half the half --
+  // an equal third would starve it (it is one phrase per mounted source and
+  // cannot be shortened by dropping items), and the whole half would starve
+  // the other two, which is what six verbose summaries did in review.
   const sources: Layer[] = [{ lead: 'Sources', parts: kept.map((k) => sourceSummary(k.snapshot, k.items, now)), sep: ', ', weight: 1 }]
   const shape: Layer[] = [
     { lead: 'Artists they return to', parts: [...artists.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0])).slice(0, TOP_ARTISTS).map(([name, n]) => `${name} (${n})`), sep: ', ', weight: 1 },
@@ -273,25 +301,9 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
   ]
   let used = lines[0]!.length
   const fixedBudget = Math.max(Math.min(Math.floor(budget * FIXED_SHARE), budget - used), 0)
-  const onSources = emit(lines, sources, fixedBudget)
+  const onSources = emit(lines, sources, Math.floor(fixedBudget / 2))
   used += onSources + emit(lines, shape, Math.max(fixedBudget - onSources, 0))
-  used += emit(lines, flexible, Math.max(budget - used, 0))
-
-  // The platforms' own rankings, kept apart from the merged view: a top list
-  // is the platform's word, not a count of anything.
-  for (const { snapshot, items } of kept) {
-    const topArtists = items.filter((i) => i.kind === 'top-artist').slice(0, PLATFORM_LIST)
-    const topTracks = items.filter((i) => i.kind === 'top-track').slice(0, PLATFORM_LIST)
-    if (topArtists.length + topTracks.length > 0) {
-      const parts = [
-        ...(topArtists.length > 0 ? [`artists \u2014 ${topArtists.map((i) => i.title.trim()).join(', ')}`] : []),
-        ...(topTracks.length > 0 ? [`tracks \u2014 ${topTracks.map(quoted).join(', ')}`] : []),
-      ]
-      lines.push(`${SOURCE_NAMES[snapshot.source]} says (top, medium term): ${parts.join('; ')}`)
-    }
-    const daily = items.filter((i) => i.kind === 'daily').slice(0, PLATFORM_LIST)
-    if (daily.length > 0) lines.push(`${SOURCE_NAMES[snapshot.source]} suggests today: ${daily.map(quoted).join(', ')}`)
-  }
+  used += emit(lines, [...flexible, ...platformLayers(kept)], Math.max(budget - used, 0))
 
   // Cut at a line boundary with a trailing ellipsis (spec 14 §2.3).
   let out = ''
