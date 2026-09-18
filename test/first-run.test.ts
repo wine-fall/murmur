@@ -507,9 +507,9 @@ describe('slice B execution (criteria 8 and 9)', () => {
 
   it('runs the task bounded, on the configured model, with the sandboxed reader tools', async () => {
     const harness = new FakeHarness()
-    await runProfileBootstrap(bootstrapDeps({ harness, model: 'claude-opus-4-8' }))
+    await runProfileBootstrap(bootstrapDeps({ harness, model: 'claude-opus-5' }))
     const task = harness.lastTask as Task<ProfileBootstrap>
-    expect(task.model).toBe('claude-opus-4-8')
+    expect(task.model).toBe('claude-opus-5')
     expect(task.maxTurns).toBeGreaterThan(0)
     expect(task.maxTurns).toBeLessThanOrEqual(12)
     expect(task.tools(() => {}).map((t) => t.name)).toEqual([

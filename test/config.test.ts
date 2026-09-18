@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion, parseCli } from '../src/config.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
+import { GUIDE_MODEL } from '../src/setup/guide.ts'
 
 // Every test states the env it means, and its home is a directory with nothing
 // in it — so a real ~/.murmur/{voice,settings}.json on the developer's machine
@@ -39,7 +40,7 @@ describe('parseCli', () => {
     expect(config.cadenceMode).toBe('every_n')
     expect(config.musicEveryN).toBe(2)
     expect(config.ytdlpCmd).toBe('yt-dlp')
-    expect(config.musicModel).toBe('claude-haiku-4-5-20251001')
+    expect(config.musicModel).toBe('claude-opus-5')
   })
 
   it('layers flags over defaults and coerces numbers', () => {
@@ -273,11 +274,23 @@ describe('memory config', () => {
     expect(config.memoryDir).toBe('/tmp/mh/data/memory')
   })
 
-  // The profile is the one artefact a model writes and the code believes
-  // verbatim, forever — so the fold does not run on the cheap tier.
-  it('defaults compactModel to the capable tier, not the cheap one', () => {
+  it('defaults compactModel to the capable tier, not a cheap one', () => {
     const { config } = parseCli([], NO_ENV)
     expect(config.compactModel).toBe('claude-opus-5')
+  })
+})
+
+// Every Claude tier runs the same capable model (spec 08). A cheap tier buys
+// nothing the listener can hear and costs judgement in the places judgement is
+// the whole job: what to play, what is worth talking about, and what becomes a
+// permanent fact about them.
+describe('Claude model tiers', () => {
+  it('defaults every tier to the same capable model', () => {
+    const { config } = parseCli([], NO_ENV)
+    for (const tier of [config.model, config.musicModel, config.rwtModel, config.compactModel])
+      expect(tier).toBe('claude-opus-5')
+    // The guide is not a config knob, and it is held to the same floor.
+    expect(GUIDE_MODEL).toBe('claude-opus-5')
   })
 })
 

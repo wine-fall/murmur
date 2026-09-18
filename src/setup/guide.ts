@@ -45,8 +45,9 @@ import {
 } from '../voice/voice-config.ts'
 
 // Repair is judgment-heavy and occasional; the token cost amortizes (spec
-// 03-03 §3). Not a config knob until someone needs one.
-const GUIDE_MODEL = 'claude-opus-4-8'
+// 03-03 §3). Not a config knob until someone needs one — exported so the
+// tier floor every Claude call shares can be asserted in one place.
+export const GUIDE_MODEL = 'claude-opus-5'
 const GUIDE_MAX_TURNS = 30
 
 // Consent parsing hears the listener's own language: this radio converses in
