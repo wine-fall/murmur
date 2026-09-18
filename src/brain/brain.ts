@@ -115,6 +115,8 @@ export function isolatedOptions(systemPrompt: string, model: string): Options {
 // `builtins` (spec 13 §2.2) are the SDK's own tools a task may use beside
 // murmur's: on `tools` so they are the whole built-in surface, and on
 // `allowedTools` so the run never stops to ask. Default none.
+// `thinking` is the task's own call (Task.thinking): omitted, the SDK default
+// stands.
 export function agenticOptions(
   systemPrompt: string,
   model: string,
@@ -122,6 +124,7 @@ export function agenticOptions(
   toolNames: string[],
   maxTurns: number,
   builtins: readonly string[] = [],
+  thinking?: 'disabled',
 ): Options {
   return {
     systemPrompt,
@@ -133,6 +136,7 @@ export function agenticOptions(
     mcpServers: { murmur: server },
     skills: [],
     maxTurns,
+    ...(thinking === 'disabled' && { thinking: { type: 'disabled' as const } }),
     extraArgs: { 'disable-slash-commands': null },
   }
 }
@@ -366,7 +370,7 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     const allowed = tools.map((t) => `mcp__murmur__${t.name}`)
     const q = query({
       prompt: task.prompt,
-      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins),
+      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins, task.thinking),
     })
     for await (const _message of q) {
       if (captured !== null) break

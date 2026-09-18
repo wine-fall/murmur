@@ -299,6 +299,11 @@ export type Task<T> = {
   // Bounded AND pre-approved by the harness. Default none: the pick and the
   // steer task stay tool-less underneath.
   readonly builtins?: readonly string[]
+  // Extended thinking, which the SDK leaves on by default. 'disabled' is for a
+  // task whose judgment the instruction already spells out and whose reasoning
+  // nothing reads back — it buys tens of seconds per model turn (issue #164).
+  // Absent = the default, which is what a task that WRITES wants.
+  readonly thinking?: 'disabled'
 }
 
 // The agentic capability, separate from the tool-less Brain so talk-only brains

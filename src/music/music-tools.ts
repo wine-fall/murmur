@@ -162,19 +162,27 @@ export function musicTools(
       // The preview trap (spec 14 §2.6): NetEase hands a rights-less request a
       // 30 s clip with no error, so the decoded length is checked against the
       // length the candidate claimed.
+      // The length the trap read off the stream, null when it never ran or read
+      // nothing — the playability probe below reads it.
+      let trapRead: number | null = null
       if (taste?.probeDurationS !== undefined && sourceOfRef(ref) === 'netease') {
-        const probed = await taste.probeDurationS(clip.source, clip.headers, clip.segment?.startS)
+        trapRead = await taste.probeDurationS(clip.source, clip.headers, clip.segment?.startS)
         // A segment clip is meant to be its chapter's length; a whole track is
         // meant to be the length its candidate claimed.
         const expected = clip.segment === undefined ? (stated.get(ref) ?? 0) : clip.segment.endS - clip.segment.startS
-        if (previewTrap(expected, probed)) {
-          return authResult(new SourceAuthError('netease', 'login-required', `preview clip of ${String(probed)}s`))
+        if (previewTrap(expected, trapRead)) {
+          return authResult(new SourceAuthError('netease', 'login-required', `preview clip of ${String(trapRead)}s`))
         }
       }
       // A resolved stream URL can still 403 in the decoder and never produce a
       // frame. Reject it now, during talk, so the announce never claims a track
       // that turns out silent.
-      if (probe !== undefined && !(await probe(clip.source, clip.headers, clip.segment?.startS))) {
+      // Unless the trap above just opened this very stream and read a real
+      // length off it — that IS the proof, and opening it twice costs another
+      // 13-15 s against a slow NetEase CDN, where the probe's own 15 s ceiling
+      // then calls a live stream dead and the whole pick starts over (issue
+      // #164). A trap that read nothing proves nothing, so the probe still runs.
+      if (trapRead === null && probe !== undefined && !(await probe(clip.source, clip.headers, clip.segment?.startS))) {
         return reply({ ok: false, error: `${ref} resolved but the stream did not play; pick another` })
       }
 

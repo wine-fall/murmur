@@ -98,9 +98,9 @@ function timedProvider(provider: MusicProvider, debug: (message: string) => void
 }
 
 function timedProbe(probe: StreamProbe, debug: (message: string) => void): StreamProbe {
-  return async (source, headers) => {
+  return async (source, headers, startS) => {
     const t = performance.now()
-    const ok = await probe(source, headers)
+    const ok = await probe(source, headers, startS)
     debug(`music.probe ${elapsed(t)} ${ok ? 'ok' : 'dead'}`)
     return ok
   }
@@ -130,6 +130,10 @@ export class MusicProgrammer implements TrackSource {
       prompt: `${this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION}\n\n${situationBlock}`,
       model: this.deps.model,
       maxTurns: this.deps.maxTurns ?? DEFAULT_MAX_TURNS,
+      // The pick is a bounded search-and-commit whose method the policy already
+      // states, and nothing reads its reasoning back. The SDK's default extended
+      // thinking spent ~45 s of a ~100 s pick writing it (issue #164).
+      thinking: 'disabled',
       tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste, this.deps.channels),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)

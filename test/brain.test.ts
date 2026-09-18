@@ -81,6 +81,17 @@ describe('agenticOptions', () => {
     expect(o.skills).toEqual([])
   })
 
+  // The pick task's latency lever (issue #164): extended thinking is the SDK's
+  // default, and a bounded tool-use task pays tens of seconds for an essay it
+  // never reads back. A task that asks for it off gets it off; every other task
+  // keeps the default, so nothing says `thinking` unless it was asked for.
+  it('a task that asks for no extended thinking gets it disabled; the rest keep the default', () => {
+    const server = { type: 'sdk', name: 'murmur' } as never
+    const off = agenticOptions('sys', 'model-x', server, ['mcp__murmur__submit_pick'], 8, [], 'disabled')
+    expect(off.thinking).toEqual({ type: 'disabled' })
+    expect(agenticOptions('sys', 'model-x', server, ['mcp__murmur__submit_pick'], 8)).not.toHaveProperty('thinking')
+  })
+
   // spec 13 §2.2: a task may name built-ins; they are bounded (tools) AND
   // pre-approved (allowedTools), and nothing else appears.
   it('a task with builtins gets exactly those, bounded and pre-approved', () => {

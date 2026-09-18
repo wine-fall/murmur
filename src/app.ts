@@ -37,7 +37,7 @@ import {
 import { Director, openInBrowser, openInChrome, type MusicWiring, type PacingWiring } from './director/director.ts'
 import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './support/update.ts'
 import { AudioEngine } from './audio/engine.ts'
-import { ffmpegDecode, MIX_RATE, probeDurationS, probeStream } from './audio/ffmpeg.ts'
+import { ffmpegDecode, MIX_RATE, probeDurationS, probePlayableDurationS, probeStream } from './audio/ffmpeg.ts'
 import { isFirstRun, runFirstRun, runProfileBootstrap } from './setup/first-run.ts'
 import { prepareDevLog } from './support/dev-log.ts'
 import { CliHost, type Host } from './host/host.ts'
@@ -359,7 +359,7 @@ function buildMusic(
       taste: {
         catalogues: taste.catalogues,
         onAuthFailure: (err) => taste.watch.note(err),
-        probeDurationS: (s, headers, startS) => probeDurationS(s, undefined, undefined, headers, startS),
+        probeDurationS: (s, headers, startS) => probePlayableDurationS(s, config.ffmpegCmd, undefined, headers, startS),
       },
     }),
     // Discovery stage timings land in the dev log (issue #76).
