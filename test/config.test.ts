@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { packageVersion, parseCli } from '../src/config.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
+import { GUIDE_MODEL } from '../src/setup/guide.ts'
 
 // Every test states the env it means, and its home is a directory with nothing
 // in it — so a real ~/.murmur/{voice,settings}.json on the developer's machine
@@ -39,7 +40,7 @@ describe('parseCli', () => {
     expect(config.cadenceMode).toBe('every_n')
     expect(config.musicEveryN).toBe(2)
     expect(config.ytdlpCmd).toBe('yt-dlp')
-    expect(config.musicModel).toBe('claude-haiku-4-5-20251001')
+    expect(config.musicModel).toBe('claude-sonnet-5')
   })
 
   it('layers flags over defaults and coerces numbers', () => {
@@ -273,9 +274,29 @@ describe('memory config', () => {
     expect(config.memoryDir).toBe('/tmp/mh/data/memory')
   })
 
-  it('defaults compactModel to the cheap tier', () => {
+  it('defaults compactModel to the capable tier, not a cheap one', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.compactModel).toBe('claude-haiku-4-5-20251001')
+    expect(config.compactModel).toBe('claude-opus-5')
+  })
+})
+
+// Two tiers, split by what a mistake costs (spec 08). What the listener hears
+// in the host's own voice, or keeps forever, runs on opus; the high-frequency
+// background work whose misses are reversible runs on sonnet. Nothing runs
+// below sonnet.
+describe('Claude model tiers', () => {
+  it('runs the heard and the permanent on opus', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect(config.model).toBe('claude-opus-5')
+    expect(config.compactModel).toBe('claude-opus-5')
+    // The guide is not a config knob, and it is held to the same tier.
+    expect(GUIDE_MODEL).toBe('claude-opus-5')
+  })
+
+  it('runs the reversible background picks on sonnet', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect(config.musicModel).toBe('claude-sonnet-5')
+    expect(config.rwtModel).toBe('claude-sonnet-5')
   })
 })
 

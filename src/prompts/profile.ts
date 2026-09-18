@@ -69,7 +69,14 @@ Rules for the lines:
   citation; a date you write is discarded.
 - A newer statement that contradicts an older fact REPLACES it — keep the newer
   line, drop the old one; never keep both.
-- A one-off request ("play something else") is not a preference unless it recurs.
+- A request scoped by a time qualifier holds only for that window, and its
+  content never enters (About the listener), however it is worded. The
+  qualifier counts whether the listener writes it in English — today, tonight,
+  this afternoon, this week, right now — or in their own language, Chinese
+  included.
+- A request that appears ONCE is never promoted to an (About the listener) fact
+  ("play something else" is not a preference); a request earns that section
+  only by recurring across separate exchanges.
 - Mark identity facts — name, language, where they live, what they do — [stable].
 - Keep a line to ${PROFILE_LINE_CAP} characters or fewer.
 
