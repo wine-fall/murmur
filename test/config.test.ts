@@ -273,9 +273,11 @@ describe('memory config', () => {
     expect(config.memoryDir).toBe('/tmp/mh/data/memory')
   })
 
-  it('defaults compactModel to the cheap tier', () => {
+  // The profile is the one artefact a model writes and the code believes
+  // verbatim, forever — so the fold does not run on the cheap tier.
+  it('defaults compactModel to the capable tier, not the cheap one', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.compactModel).toBe('claude-haiku-4-5-20251001')
+    expect(config.compactModel).toBe('claude-opus-5')
   })
 })
 

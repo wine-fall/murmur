@@ -481,6 +481,54 @@ describe('compaction prompt', () => {
   })
 })
 
+// A real fold promoted "interested in Japanese and Korean songs" into (About
+// the listener) from a single line that scoped itself to one afternoon
+// (2026-09-17). Both halves of that defect - the time qualifier and the single
+// occurrence - are the fold's own judgement, so the prompt has to state them as
+// hard rules, not as advice (spec 05-01 §3.3).
+describe('compaction prompt refuses one-off and time-scoped requests', () => {
+  it('scopes a time-qualified request out of About, in any language', () => {
+    const p = buildCompactionPrompt('x', [])
+    expect(p).toMatch(/time qualifier/i)
+    for (const q of ['today', 'tonight', 'this afternoon', 'this week', 'right now'])
+      expect(p).toContain(q)
+    // The listener speaks Chinese; the qualifier itself cannot be spelled here
+    // (scripts/check-source-language.ts bars CJK from sources), so the rule
+    // names the category and the listener's own language instead.
+    expect(p).toMatch(/listener's own language/i)
+    expect(p).toMatch(/Chinese/)
+    expect(p).toMatch(/never enters \(About the listener\)/i)
+  })
+
+  it('states the single-occurrence bar as a rule, not as advice', () => {
+    const p = buildCompactionPrompt('x', [])
+    // "is not a preference unless it recurs" was too soft to bind the fold.
+    expect(p).toMatch(/appears ONCE is never promoted/)
+    expect(p).toMatch(/recurring across separate exchanges/i)
+    // Both rules ride in the list the whole-fold penalty is attached to.
+    const rules = p.slice(p.indexOf('Rules for the lines:'), p.indexOf('A line that breaks'))
+    expect(rules).toMatch(/time qualifier/i)
+    expect(rules).toMatch(/appears ONCE is never promoted/)
+  })
+
+  // The corpus that caused the defect, verbatim from the listener's history:
+  // "find some Japanese songs next; I want Japanese and Korean songs this
+  // afternoon". Escaped because sources may hold no CJK.
+  it('carries the rules that cover the line that caused the defect', () => {
+    const line =
+      '\u4e0b\u4e00\u9996\u53bb\u627e\u4e00\u4e9b\u65e5\u6587\u6b4c\u5427\uff0c' +
+      '\u4eca\u5929\u4e0b\u5348\u60f3\u542c\u4e00\u4e9b\u65e5\u97e9\u7684\u6b4c\u66f2'
+    const p = buildCompactionPrompt('- slow jazz and piano [src 1780000000000]', [
+      { role: 'user', text: line, cite: 1789625151700 },
+    ])
+    expect(p).toContain(`listener [1789625151700]: ${line}`)
+    // One occurrence, and scoped to one afternoon: two independent reasons the
+    // fold may not write it into About.
+    expect(p).toMatch(/never enters \(About the listener\)/i)
+    expect(p).toMatch(/appears ONCE is never promoted/)
+  })
+})
+
 // --- spec 06 ---------------------------------------------------------------- //
 
 describe('seed-persona prompt (spec 06 §2.2/§3.3)', () => {

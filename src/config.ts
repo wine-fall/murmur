@@ -172,8 +172,11 @@ export const ConfigSchema = z.object({
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
   // home, relocatable via MURMUR_HOME.
   memoryDir: z.string().default(() => join(dataRoot(), 'memory')),
-  // Cheap tier for the background profile compaction (master §7 pillar 3).
-  compactModel: z.string().default('claude-haiku-4-5-20251001'),
+  // The profile is the one artefact a model writes and the code stores
+  // verbatim to outlive every session, so the fold is not where a cheap tier
+  // pays: it runs in the background, off the live loop, and a fact it gets
+  // wrong is read back into every pack until the listener notices it.
+  compactModel: z.string().default('claude-opus-5'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
