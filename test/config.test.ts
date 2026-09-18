@@ -40,7 +40,7 @@ describe('parseCli', () => {
     expect(config.cadenceMode).toBe('every_n')
     expect(config.musicEveryN).toBe(2)
     expect(config.ytdlpCmd).toBe('yt-dlp')
-    expect(config.musicModel).toBe('claude-opus-5')
+    expect(config.musicModel).toBe('claude-sonnet-5')
   })
 
   it('layers flags over defaults and coerces numbers', () => {
@@ -280,17 +280,23 @@ describe('memory config', () => {
   })
 })
 
-// Every Claude tier runs the same capable model (spec 08). A cheap tier buys
-// nothing the listener can hear and costs judgement in the places judgement is
-// the whole job: what to play, what is worth talking about, and what becomes a
-// permanent fact about them.
+// Two tiers, split by what a mistake costs (spec 08). What the listener hears
+// in the host's own voice, or keeps forever, runs on opus; the high-frequency
+// background work whose misses are reversible runs on sonnet. Nothing runs
+// below sonnet.
 describe('Claude model tiers', () => {
-  it('defaults every tier to the same capable model', () => {
+  it('runs the heard and the permanent on opus', () => {
     const { config } = parseCli([], NO_ENV)
-    for (const tier of [config.model, config.musicModel, config.rwtModel, config.compactModel])
-      expect(tier).toBe('claude-opus-5')
-    // The guide is not a config knob, and it is held to the same floor.
+    expect(config.model).toBe('claude-opus-5')
+    expect(config.compactModel).toBe('claude-opus-5')
+    // The guide is not a config knob, and it is held to the same tier.
     expect(GUIDE_MODEL).toBe('claude-opus-5')
+  })
+
+  it('runs the reversible background picks on sonnet', () => {
+    const { config } = parseCli([], NO_ENV)
+    expect(config.musicModel).toBe('claude-sonnet-5')
+    expect(config.rwtModel).toBe('claude-sonnet-5')
   })
 })
 
