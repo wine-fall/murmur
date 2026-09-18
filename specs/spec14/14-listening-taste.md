@@ -225,31 +225,99 @@ A pure function; same inputs, same output; unit-tested on fixtures. Shape
 
 ```
 ## What the listener keeps (as of 2026-09-06)
-Sources: NetEase (312 liked, 9 playlists), Bilibili (history 200, 50 recently followed, 50 they go back to)
-Lately they have been listening to / watching: "..." Night Tape (<music sub-zone>) - "..." Chef Wang (<cooking sub-zone>) - ...
-Recently followed: Night Tape, Chef Wang, ...                            <- names only, <= 12
-Who they keep going back to: Midnight Haven Jazz, ...                    <- names only, <= 12
-Artists they return to: Cheer Chen (41), Bon Iver (27), ...              <- top 25 by count across sources
+Sources: NetEase (312 liked, 9 playlists), QQ Music (40 liked, 6 playlists)
+Artists they return to: Cheer Chen (41), Bon Iver (27), ...              <- top 25 by count; with the two lines above, <= 300 chars
 Playlists: late drive, deep focus, Liked from Radio, ...                 <- names only, <= 12
-Songs they keep: "Travel Is Meaningful" Cheer Chen - "Holocene" Bon Iver <- 20 newest by `at`, then by source order
+Songs they keep: "Travel Is Meaningful" Cheer Chen - "Holocene" Bon Iver <- the long tail, weight 3, <= 40
+Lately they have been listening to: "..." Night Tape - ...               <- songs-only sources, weight 1, <= 8
 Spotify says (top, medium term): artists - ...; tracks - ...             <- Spotify's own ranking, <= 10 each
 ```
 
-The layering is by what the signal IS, and its order is its priority: what
-the listener has been **watching** leads, then who they **recently
-followed**, then who they **keep going back to**, then the musical rows
-(artists, the playlist names they keep, the songs). Inside the watch layer a
-row whose category is one of the platform's music sub-zones sorts above one
-that is not, so a music-zone row outranks a cooking one; within each of those
-two ranks it is newest first.
+**The invariant** (*added 2026-09-18*, the listener's own rule on their own
+rendered digest): **every row in the block traces either to a source that
+carries nothing but songs, or to an artist name that matched.** Nothing
+reaches the brain because a video platform said it was music.
+
+That splits the mounted sources in two, and the split is the rule — not a
+per-row guess:
+
+- **Songs-only sources** — NetEase, QQ Music, Spotify, Soda Music. Their
+  catalogue *is* songs, so every row they return is music by construction.
+- **Video platforms** — YouTube, Bilibili. Their rows are music only when
+  something says so, and nothing they offer says so reliably (below). Their
+  `history`, `follows` and `frequents` rows **never reach the rendered
+  block**, counts included. They still go into the ledger (§2.11) and are
+  still searchable by the moment-matched half (§2.12), where a hit on an
+  artist or playlist name is the guarantee this rule asks for.
+- A video platform's `liked` rows are the exception the rule already covers:
+  Bilibili's are the account's own **audio** uploads, which are songs.
+
+**Why the platform's own category is not enough** (measured 2026-09-18 on the
+listener's snapshots): of 200 Bilibili history rows, 4 carry a music
+sub-zone, and 3 of those 4 are gossip clips their uploader filed under
+`yin yue zong he` or `guo chan yuan chuang xiang guan`. The tag is the only
+category Bilibili's API offers and it is wrong at the source, so a
+`isMusicCategory` gate would trade 196 rows of noise for 3 more. YouTube's
+history carries no `category` field at all (97 rows of 97), so there is
+nothing to gate on there. `isMusicCategory` therefore **stays in the code as
+a scoring signal inside §2.12's pool** — a cheap prior among many, where
+being wrong costs a rank — and is no longer a ticket into the block.
+
+**What this deletes.** `Recently followed` and `Who they keep going back to`
+are gone from the digest. They were 12 Bilibili channel names each and, on
+the real snapshot, they were stock-market, DOTA and bar-exam channels
+spending about 200 characters to say nothing about music. They can never
+satisfy the invariant — a followed account is neither a songs-only source nor
+an artist match — so they leave rather than being ranked last.
+
+**The two halves.** Under the heading the block is a **fixed half** and a
+**flexible half**:
+
+- **Fixed half — `Sources`, `Artists they return to`, `Playlists`, together
+  at most `FIXED_SHARE` = a fifth of the budget, so 300 characters of the
+  default 1500.** (A fraction rather than a constant, so a caller asking for
+  a different budget gets the same proportions.) These three are the listener's
+  shape rather than their moment: they say who this person is in the fewest
+  words and read the same on every pick of the day. Inside the 300 each line
+  takes an equal share of what is left when its turn comes and rolls the rest
+  forward; whatever the half leaves unspent rolls into the flexible half.
+- **Flexible half — the rest of `budget`**, claimed by weight, in this order,
+  the first line rolling what it does not use forward to the second:
+
+  | line | weight | item cap |
+  |---|---|---|
+  | `Songs they keep` | 3 | 40 |
+  | `Lately they have been listening to` | 1 | 8 |
+
+  A line's share is `left * weight / (sum of the weights not yet served)`.
+  Equal shares are the special case where every weight is 1. A line that runs
+  out of room ends at an item boundary with a trailing `...`.
+
+Why the order is this one: the first build led with what the listener
+**watched** and gave the musical rows whatever was left. Measured on the
+listener's own snapshots (2026-09-18: four mounted sources, 125 KB, a 1462
+character digest over 8 lines), that put three Bilibili gossip clips on the
+first content line, spent about 200 characters on followed accounts, and left
+`Songs they keep` **14 of 186 liked songs** before the ellipsis — the other
+172 were never visible to the brain at all. For choosing a song the kept
+songs *are* the signal, so the budget runs in that order. The bound the old
+equal-share rule existed for still holds: no one layer may eat the block,
+because every layer has a ceiling before the next one is asked.
+
+**The `Sources` line counts only what the block can show**, so it no longer
+claims a Bilibili history of 200 next to a block that carries none of it.
+A source left with nothing countable drops out of the line entirely, which is
+the rule §2.3 already applies to a snapshot with nothing to say.
 
 **Nothing collected is taste** (the listener's decision, 2026-09-16, taken on
 their own rendered digest): a Bilibili favourites folder is where a Java
 course, a recipe and an audiobook are filed, and it drowned everything
 musical in the block. So Bilibili's favourites folders, their contents and
 watch-later are not read at all, and YouTube's liked list is read only to
-name the account (its uploader), never for its items. What they watched and
-who they follow is the signal.
+name the account (its uploader), never for its items. *Superseded in part
+2026-09-18*: what they watched and who they follow is no longer the block's
+signal either — it is retrieval material (the invariant above). The reads
+themselves stay, because the ledger and §2.12 use them.
 
 The render enforces this on **any** snapshot, not only a freshly read one: a
 returning listener keeps yesterday's `bilibili.json` until the next refresh,
@@ -259,17 +327,13 @@ kinds stay in the union so an old file still parses; nothing produces them
 any more. A snapshot left with nothing to say drops out of the `Sources`
 line rather than standing there as an empty pair of brackets.
 
-**No one layer may eat the block**: each layer gets an equal share of what is
-left of the budget when its turn comes, and whatever it does not use rolls
-forward to the next. A layer that runs out of room ends at an item boundary
-with a trailing `...`. Without this, 200 watched rows with long titles filled
-all 1500 characters by themselves and the musical source beside them never
-reached the page (measured on the real snapshot, 2026-09-16).
-
 **Artist counts come from the musical rows alone** (`liked`, `favourite`,
 `top-artist`, `top-track`, `daily`): a watched video's uploader is not an
 artist and neither is a followed channel, or a Java course channel outranks
-every musician in "artists they return to".
+every musician in "artists they return to". *Amended 2026-09-18*: when a
+ledger exists the count is the **ledger's** count of that artist's distinct
+musical entries (§2.11), not the current snapshot's — that is what makes
+"they return to" a long-term claim rather than a claim about this week.
 
 (The example above is romanised only because committed sources are
 English-only; the real digest keeps every value verbatim in its own script.)
@@ -812,6 +876,144 @@ recent uploads from a curated list of music channels — good for something new,
 a cover, or a recent release a plain search would bury. That sentence is about
 **where to look**. It must not describe the listener.
 
+### 2.11 The ledger — what accumulates, next to the snapshot that does not
+
+*Added 2026-09-18.* A snapshot is the **latest read**: `refreshOne` overwrites
+the whole file, and `BOUNDS.history` = 200 is a rolling window, so three
+months of listening leaves murmur knowing the last 200 plays and nothing
+else. The ledger is the other half of that: one **append-only** file per
+source, beside the snapshot, that only ever grows.
+
+```ts
+const LedgerEntrySchema = TasteItemSchema.extend({
+  key: z.string(),        // the dedup key, below
+  firstSeen: z.string(),  // ISO, the takenAt of the read that first saw it
+  lastSeen: z.string(),   // ISO, the takenAt of the most recent read that saw it
+  seen: z.number().int(), // how many reads saw it — a refresh count, never a play count
+})
+const TasteLedgerSchema = z.object({
+  source: z.enum(SOURCE_IDS),
+  updatedAt: z.string(),
+  entries: z.array(LedgerEntrySchema),
+})
+```
+
+- **Path**: `data/taste/<source>.ledger.json`, written by the same atomic
+  `tmp + rename` at mode `0600` the snapshot uses. It is listener data by the
+  same definition; `unmount` deletes it with the snapshot (§3.1), and
+  `dropSnapshot` drops it too — a remount of a different account must not
+  inherit the old one's history.
+- **Dedup key**: `ref` when the item has one, otherwise
+  `<kind>|<title trimmed>|<artist trimmed>`. Same key = same entry.
+- **The merge**, on every read that returned a snapshot: for each item, an
+  unseen key is appended with `firstSeen = lastSeen = snapshot.takenAt` and
+  `seen = 1`; a known key keeps its `firstSeen`, takes the new `lastSeen`,
+  increments `seen`, and takes the newest reading of `title`, `artist`,
+  `album`, `category` and `ref`. **Nothing is removed by a read** — an item
+  that fell out of the 200-row window stays in the ledger. A **partial**
+  refresh (§3.4) merges only the kinds it read; the kinds it did not read are
+  untouched.
+- **The byte cap**: `LEDGER_MAX_BYTES` = 4 MB, four times the snapshot cap
+  because a ledger is meant to accumulate. Past it, entries are dropped
+  **oldest `lastSeen` first** until the file fits, and the drop is logged as a
+  count only (`sources.ledger <source> dropped=<n>`, §3.6 — never a title).
+  A ledger file that fails to parse is renamed aside once and started fresh
+  rather than blocking the refresh.
+- **`seen` is a refresh count.** A liked song is seen by every read that
+  reaches it, so `seen` says how long murmur has known about the item, not
+  how often the listener played it. Nothing may present it as a play count.
+- **The read clock rides here, not in `sources.json`.** The ledger file
+  carries `lastRead: { [kind]: iso }` — when each of this source's lists was
+  last asked for (§3.4). `sources.json` is the secret-bearing file (a Spotify
+  refresh token, a scanned cookie) and a three-hour clock would rewrite it
+  eight times a day to record something that is rebuildable bookkeeping, not
+  a credential. A missing or unparsable `lastRead` means every kind is due,
+  which is one full read and then the new clock.
+- **What reads it**: the `Artists they return to` count (§2.3) and the
+  moment-matched half (§2.12). The digest's other lines still come from the
+  snapshots, which keep meaning exactly what they mean today.
+
+### 2.12 The moment-matched half — chosen in code, before the prompt
+
+*Added 2026-09-18.* The flexible half of §2.3 renders the same rows on every
+pick of the day. This section replaces **what goes into** `Songs they keep`
+and `Lately ...` with a selection made against the ledger for the moment the
+pick is happening in. The fixed half, the budget and the line shapes are
+unchanged.
+
+**Scope: the pick, not the pack.** `TasteReader` keeps today's no-argument
+`digest()` — memoised on the snapshot files' mtimes — and that is what the
+context pack (05 §2.2) hands talk and steer. The Director's
+`buildMusicSituation` call gets `digest(moment)` instead. Talk needs to know
+who the listener is, not which songs match this minute; a conversation prompt
+whose song list moved every beat would only tempt the host into reciting it,
+and the pack's memoisation would be gone for nothing.
+
+**Red lines** (the reason this is a section and not a tool):
+
+- It runs **in code, before the situation string is assembled**. No new tool
+  is offered to the brain, and no extra model call is made. A pick's median
+  is already 142 s (measured 2026-09-18); this step may not add to it.
+- Its budget is **5 ms**, asserted in its own test. It is a local scan and a
+  local index, nothing more.
+- With no ledger, no musical entries, or no usable signal, it returns exactly
+  what §2.3 renders today. Degrading is silent and is the default.
+
+**Inputs** — all four are already in the Director's hand at pick time:
+
+| signal | where it comes from | how it is used |
+|---|---|---|
+| the local hour | the Director's clock | a bucket word (`morning`, `afternoon`, `evening`, `night`, `late night`) joined to the query terms |
+| the persona's key | the persona line the Director already holds | its content words joined to the query terms |
+| the last three songs' artists | the pick's own avoid-list (03-01 §2.3) | an **exclusion**: no entry by those artists is chosen |
+| the last talk beat | the transcript the pack already carries | its content words, tokenised, are the query terms |
+
+**Tokenising**: latin words lowercased and split on non-word characters,
+minimum length 2; CJK runs split into overlapping bigrams (the same treatment
+`src/memory/recall.ts` gives its own text). A small stop list drops the
+function words. Terms are capped at 24 — a long talk beat does not become a
+long query.
+
+**Matching and score** — per ledger entry of a musical kind, highest wins:
+
+| rule | score |
+|---|---|
+| a query term equals the entry's artist or playlist name (trimmed, case-folded) | 3 |
+| a query term is a prefix of it, or it is a prefix of a query term | 2 |
+| a query term appears among the entry's title / artist / album tokens | 1 |
+| the entry came from a music sub-zone (`isMusicCategory`) | `+0.5` |
+| **gone-quiet penalty** | `-1` when `lastSeen` is older than the source's most recent read |
+| the entry's artist is in the last-three-played set | the entry is dropped |
+
+The **gone-quiet penalty** is how an unliked song fades. The ledger never
+deletes (§2.11), so a song removed from the collection a year ago is still
+there — but the next full read of that list does not touch its `lastSeen`,
+so it falls behind everything still in the collection. It can still surface
+when the moment matches it strongly, which is the intent: un-liking is
+usually tidying, not distaste. No `retired` flag, no distinction between a
+complete read and a bounded one.
+
+Ties break by `lastSeen` newest first, then by the ledger's own order, so the
+selection is deterministic for a given ledger and moment.
+
+**No index.** The scan is a loop over the ledger's entries in memory. The
+listener's four mounted sources hold about 790 rows today and a year of
+accumulation is a few thousand; a few thousand rows against at most 24 terms
+is microseconds, well inside the 5 ms budget. What is reused from
+`src/memory/recall.ts` is its **tokenising** — the exported `shingle()` and
+`queryTokens()`, which already handle the CJK bigram problem — and nothing
+else. No `taste.db`, no second FTS table, no index to keep in step with the
+ledger, and no `node:sqlite` load on the pick path.
+*The upgrade path, if the timing assertion ever fails*: an FTS5 table in its
+own file `data/taste/taste.db`, built the way `recall.ts` builds its index and
+sharing none of its tables — a kept song is not a memory, and the
+conversation's recall must never start returning song titles.
+
+**What is selected**: the top 10-15 `liked` entries and the top 3-5 watch
+rows by score, then the §2.3 line caps and the flexible half's weights cut
+them to the budget. Fewer matches than that is not a failure — an unmatched
+pick falls back to the newest rows, which is today's behaviour.
+
 ---
 
 ## 3. Design
@@ -1182,12 +1384,47 @@ where a pick came from only when it is theirs ("one you've kept").
 
 - The curated-channel pool (§2.9) rides this same clock and the same shape —
   stale past 24 h, single-flight, never awaited by the loop.
-- Boot: read `sources.json`; **never block the broadcast**. If any snapshot is
-  older than **24 h**, schedule a background refresh after the second beat
-  airs (the same "after boot settles" point the bed uses, 03-04). Failures log
-  and keep the old snapshot; auth failures flip `status` and surface once
-  (§2.6).
+- Boot: read `sources.json`; **never block the broadcast**. If any list is
+  stale on the clock below, schedule a background refresh after the second
+  beat airs (the same "after boot settles" point the bed uses, 03-04).
+  Failures log and keep the old snapshot; auth failures flip `status` and
+  surface once (§2.6).
 - No refresh while a `/sources` conversation is open (single writer).
+
+**The clock is per kind** (*amended 2026-09-18*). One 24 h clock for every
+list of every source re-read the liked collection — which changes a few times
+a month — as often as the watch history, which is the only list that answers
+"what are they on right now". The clock is now a map from `TasteKind` to an
+age:
+
+| kinds | stale after | why |
+|---|---|---|
+| `history`, `subscription`, `daily` | **3 h** | what they are listening to and watching *now*; an afternoon's listening should reach the evening's picks |
+| `liked`, `playlist`, `favourite`, `top-track`, `top-artist`, `follows`, `frequents` | **24 h** | a collection and a follow list move on the scale of days |
+
+- **Only the due lists are read.** `TasteSource.snapshot` takes an optional
+  `kinds: readonly TasteKind[]`; a source that can split its reads reads only
+  those (YouTube's history and subscriptions are already two separate yt-dlp
+  calls, and Bilibili's four lists are four API calls). A source that cannot
+  split ignores the argument and returns everything — correct, just not
+  cheaper. This is what makes 3 h affordable: the due list is `history`
+  alone, which is one yt-dlp call for YouTube and the cursor pages for
+  Bilibili — not the liked collection, the playlists and the follow lists
+  beside it.
+- **A partial read merges into the stored snapshot**: the returned kinds
+  replace their rows, every other kind keeps the rows it had. The snapshot
+  still means "the latest read of each list".
+- **What is marked read** is the set of kinds that were **requested** (every
+  kind, when none was), not the set that came back. A list that is genuinely
+  empty must not be re-read every three hours.
+- **`lastRead` lives in the ledger file, not in `sources.json`** (§2.11):
+  it is rebuildable bookkeeping and the sources file is the one that holds
+  credentials. `lastRefresh` in `sources.json` keeps its meaning — the last
+  read of any kind — and is still what `/sources` shows.
+- **Unchanged**: `RETRY_MS` (a failed source is not retried for an hour,
+  whatever the kind), the single-flight, the `expired` rule — an expired
+  login is renewed only by `/sources` and is never re-read on any clock — and
+  "never awaited by the loop".
 
 ### 3.5 Bounds
 
@@ -1197,7 +1434,9 @@ itself — NetEase's liked playlist and QQ Music's dir 201, which *are* the
 liked list; QQ Music's created and favourited names share the one 50 bound),
 top lists ≤ 50, subscriptions ≤ 100, followed accounts ≤ 50 per order
 (recently followed, most visited).
-Digest ≤ 1500 chars (§2.3). A snapshot file over 1 MB is a bug.
+Digest ≤ 1500 chars (§2.3), of which the fixed half is ≤ a fifth (300).
+A snapshot file over 1 MB is a bug. A ledger file (§2.11) is capped at 4 MB
+and sheds its oldest entries rather than growing past it.
 
 ### 3.6 Privacy and the dev log
 
@@ -1440,6 +1679,39 @@ resolve through the unchanged path; a Bilibili resolve was 412 from the same
 rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
 ---
 
+### 5.14 The digest spends its budget on music (unit) — *added 2026-09-18*
+On a de-identified copy of the listener's real snapshots as a fixture:
+`Songs they keep` holds **at least 30 songs**; no `history`, `follows` or
+`frequents` row from a video platform (YouTube, Bilibili) appears anywhere in
+the block, nor in the `Sources` counts; `Recently followed` and `Who they
+keep going back to` are absent entirely; every remaining row traces to a
+songs-only source (§2.3's invariant); the fixed half
+(`Sources` + `Artists they return to` + `Playlists`) is at most 300
+characters; the whole block is at most 1500. A golden render of the fixture
+is committed, and the before/after pair is in the PR body.
+
+### 5.15 The ledger only grows, and the clock is per kind (unit) — *added 2026-09-18*
+Two reads of the same source whose second read shares some refs with the
+first: the ledger holds the union, every shared entry keeps its `firstSeen`
+and takes the new `lastSeen` with `seen = 2`, and nothing the first read saw
+is gone. A third read that returns only `history` leaves every `liked` entry
+untouched, and the stored snapshot still carries the `liked` rows the second
+read wrote. Table-driven over the kind clock: with `history` last read 4 h ago
+and `liked` 4 h ago, only `history` is due; at 25 h both are; a source whose
+status is `expired` is due on neither. A ledger past `LEDGER_MAX_BYTES` sheds
+its oldest `lastSeen` entries and logs a count with no title in it.
+
+### 5.16 The moment picks the rows (unit + timing) — *added 2026-09-18*
+Given the real-snapshot fixture and the situation "the last song was
+`yorushika`, late afternoon": the selected rows include entries by
+`zutomayo` / `Ikuta Lilas` and from the `city pop` playlist, and include
+nothing by `yorushika` itself. The selection runs in **under 5 ms** on the
+fixture, asserted. With the ledger removed, the selection equals the §2.3
+render of the same snapshots, byte for byte. The context pack's `taste` is
+the no-argument render in every case (§2.12's scope), and two pack reads
+across a changed moment render **once** — `TasteReader.renders` proves the
+memoisation still holds.
+
 ## 6. Resolved decisions
 
 - **Taste over transport** (2026-09-06, user). The requirement is
@@ -1466,6 +1738,21 @@ rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
   durability: these endpoints are undocumented and being tightened
   (`/api/search/get/web` already answers empty), where eapi is the live path
   the platform's own clients use.
+- **Nothing reaches the block because a video platform called it music**
+  (2026-09-18, user, on their own rendered digest). Bilibili's sub-zone tag
+  mislabels gossip clips as music at the source and YouTube gives no category
+  at all, so the digest's rows come from songs-only sources or from an artist
+  match, and the video platforms' watch and follow rows are retrieval
+  material instead (§2.3, §2.12).
+- **The moment-matched half serves the pick only** (2026-09-18) — the context
+  pack keeps the static, mtime-memoised render; a talk prompt whose song list
+  moves every beat invites recitation and buys nothing.
+- **A linear scan, not a second FTS index** (2026-09-18) — a few thousand
+  ledger rows do not need sqlite; `recall.ts`'s tokenising is reused, its
+  storage is not. §2.12 names the upgrade path if the timing ever fails.
+- **The ledger never deletes; `lastSeen` is what fades an unliked song**
+  (2026-09-18) — un-liking is usually tidying, so the row loses rank rather
+  than the right to exist.
 - **One new dependency (`qrcode-generator`)**, named in §2.8 with the rung it clears.
 - **Login is never required; the nudge is an invitation** (2026-09-06, user).
   One light form for `/sources`, `/bug`, `/feature-request`; kept in the
