@@ -394,3 +394,11 @@ the full real-SDK conversation is a user/dispatcher run (§5.3's posture).
 - **Config precedence is per knob**: `voice.json` < env < flags. Unset env
   variables are omitted rather than blanked, so `.env` overrides only what it
   actually states — and the app never writes `.env`.
+- **The guide's tools only write, so the prompt carries the read side.** The
+  opening prompt states the knobs the tools can turn as facts — the LIVE
+  endpoint's URL and model, the pinned voice id, the reading speed (named as
+  the voice's own pace when unset), and the spoken language. Without it a
+  listener asking "how fast is it reading now?" is told, truthfully, that the
+  guide can only set the pace and not see it. The API key is never in that
+  block: everything in the prompt is sent to the model and kept in the session
+  transcript (§7.2's credential rule).

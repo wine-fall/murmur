@@ -98,9 +98,13 @@ call what the program cannot do.
      current interjection behavior). The handover happens when the fresh pick
      *resolves* (§2.3) — the listener is never dropped into silence while the
      pick is still searching.
-  Result truthfully reports state: `{ok: true, status: "switching; the current
-  track keeps playing while the next one is picked — tell the listener you're
-  on it, ask them to hang on, and do NOT name or promise a specific song"}` or
+  Result truthfully reports state — including **when** the cut lands, because a
+  status that only said the current track "keeps playing" had the host
+  promising to let this song finish over a swap that happens mid-verse:
+  `{ok: true, status: "switching; the current track covers the search, then the
+  new one cuts in mid-song the moment it is found — tell the listener you are
+  on it and to hang on, and do NOT promise to finish this song or name the one
+  coming"}` or
   `{ok: true, status: "no track playing; a pick is being prepared"}`. Never an
   error for "nothing playing" — the brain adjusts its reply, the task goes on.
 - `end_broadcast() -> {ok, status}` — orderly shutdown, **two-phase by

@@ -26,8 +26,10 @@ export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
 const STEER_SWITCH_RULE =
   '- Different or next music, skip this song, or a specific style/artist/mood ' +
   'request -> call switch_music FIRST (put the stated style, artist, or mood ' +
-  'in `hint`). In the reply: acknowledge, cover the wait, and never name or ' +
-  'promise a specific track — the next one introduces itself when it airs.\n'
+  'in `hint`). In the reply: acknowledge and cover the search, but never name ' +
+  'or promise a specific track — the next one introduces itself when it airs — ' +
+  'and never promise this song will finish first: the new one cuts in mid-song ' +
+  'as soon as it is found.\n'
 
 const STEER_END_RULE =
   '- An explicit ask to stop or close the radio -> call end_broadcast and ' +

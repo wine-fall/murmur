@@ -495,14 +495,31 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     // a .env-configured listener has no voice.json at all.
     effectiveVoice: (): VoiceConfig | null => {
       const file = saved()
-      if (config.ttsUrl === '') return file
+      // The merged boot config cannot answer this: it was layered once, so a
+      // voice.json the conversation rewrites mid-session stays shadowed by what
+      // the run started with — and a second /setup would read the old pace and
+      // the old voice. The file is re-read and laid under exactly what env and
+      // flags stated for THIS run, which is voiceAfterSetup's rule and what the
+      // run itself re-resolves to.
+      const stated = config.ttsOverrides
+      const ttsUrl = (stated.ttsUrl ?? file?.ttsUrl ?? '').trim()
+      if (ttsUrl === '') return null
+      // A saved key is bound to the saved endpoint (spec 03-03 §7.2): pointing
+      // the run elsewhere leaves the credential behind rather than handing it
+      // to another host.
+      const fileKey = file !== null && file.ttsUrl.trim() === ttsUrl ? file.apiKey : undefined
+      const apiKey = stated.ttsApiKey ?? fileKey
+      const model = stated.ttsModel ?? file?.model
+      const referenceId = stated.ttsReferenceId ?? file?.referenceId
+      const seed = stated.ttsSeed ?? file?.seed
+      const speed = stated.ttsSpeed ?? file?.speed
       return {
-        ttsUrl: config.ttsUrl,
-        ...(config.ttsModel !== '' && { model: config.ttsModel }),
-        ...(config.ttsReferenceId !== '' && { referenceId: config.ttsReferenceId }),
-        ...(config.ttsApiKey !== '' && { apiKey: config.ttsApiKey }),
-        ...(config.ttsSeed !== undefined && { seed: config.ttsSeed }),
-        ...(config.ttsSpeed !== undefined && { speed: config.ttsSpeed }),
+        ttsUrl,
+        ...(model !== undefined && model !== '' && { model }),
+        ...(referenceId !== undefined && referenceId !== '' && { referenceId }),
+        ...(apiKey !== undefined && apiKey !== '' && { apiKey }),
+        ...(seed !== undefined && { seed }),
+        ...(speed !== undefined && { speed }),
       }
     },
     ...over,

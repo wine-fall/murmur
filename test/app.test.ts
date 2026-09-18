@@ -338,6 +338,40 @@ describe('setup targets', () => {
     expect(targets.voiceUrl()).toBe('https://written.example')
   })
 
+  // Peer review (codex): the boot config was merged once, so a second /setup in
+  // the same process read the pace and voice the run STARTED with — the guide
+  // stating a stale number as fact is worse than the missing fact it replaced.
+  it('follows a rewritten file across two setups, while a stated knob stands', () => {
+    const home = emptyHome()
+    writeFileSync(
+      join(home, 'voice.json'),
+      JSON.stringify({ ttsUrl: 'https://tts.example', referenceId: 'first', speed: 1.2 }),
+    )
+    const targets = setupTargets(config([], { MURMUR_HOME: home }))
+    expect(targets.effectiveVoice?.()).toMatchObject({ referenceId: 'first', speed: 1.2 })
+    // What a set_voice_speed / create_voice call leaves behind mid-session.
+    writeFileSync(
+      join(home, 'voice.json'),
+      JSON.stringify({ ttsUrl: 'https://tts.example', referenceId: 'second', speed: 0.85 }),
+    )
+    expect(targets.effectiveVoice?.()).toMatchObject({ referenceId: 'second', speed: 0.85 })
+
+    // A knob the environment stated for this run still stands over the file.
+    const stated = setupTargets(config([], { MURMUR_HOME: home, MURMUR_TTS_SPEED: '1.1' }))
+    expect(stated.effectiveVoice?.()).toMatchObject({ referenceId: 'second', speed: 1.1 })
+  })
+
+  it('leaves a saved key behind when the run points somewhere else', () => {
+    const home = emptyHome()
+    writeFileSync(
+      join(home, 'voice.json'),
+      JSON.stringify({ ttsUrl: 'https://saved.example', apiKey: 'sk-not-a-real-key' }),
+    )
+    const elsewhere = setupTargets(config([], { MURMUR_HOME: home, MURMUR_TTS_URL: 'https://other.example' }))
+    expect(elsewhere.effectiveVoice?.()).toMatchObject({ ttsUrl: 'https://other.example' })
+    expect(elsewhere.effectiveVoice?.()?.apiKey).toBeUndefined()
+  })
+
   it('hands back the whole written config, so a captured key is live this boot', () => {
     const home = emptyHome()
     const targets = setupTargets(config([], { MURMUR_HOME: home }))

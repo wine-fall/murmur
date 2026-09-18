@@ -95,6 +95,57 @@ export type SetupPromptInput = {
   readonly ytdlp: string
   readonly ffmpeg: string
   readonly bunCmd: string
+  // What the run's knobs are set to right now (§7.2). Optional: a caller with
+  // nothing configured has nothing to report.
+  readonly current?: SetupCurrentState
+}
+
+// The read side of the knobs the guide can write. Its tools only SET things —
+// so with no state in the prompt the conversation cannot answer "how fast is
+// it reading now?", and says so, truthfully and uselessly. NO API KEY LIVES
+// HERE: everything in this type is sent to the model and kept in the session
+// transcript (§7.2's credential rule).
+export type SetupCurrentState = {
+  readonly ttsUrl?: string
+  readonly model?: string
+  readonly referenceId?: string
+  readonly seed?: number
+  readonly speed?: number
+  readonly language?: string
+}
+
+// An optional section renders with its own blank lines or not at all.
+const block = (text: string): string => (text === '' ? '' : `\n${text}\n`)
+
+// Stated as facts, not as an inventory to read back: the guide should use these
+// to answer a question or to pick the next value, never to recite the config.
+function currentStateBlock(current: SetupCurrentState | undefined): string {
+  if (current === undefined) return ''
+  const lines: string[] = []
+  if (current.ttsUrl !== undefined && current.ttsUrl !== '') {
+    lines.push(`  - Voice endpoint: ${current.ttsUrl}${current.model === undefined ? '' : ` (model \`${current.model}\`)`}`)
+    // Stated, never diagnosed: a self-hosted run holds its timbre with a fixed
+    // seed and no id at all, so "no id" is a fact and "it drifts" is a guess.
+    lines.push(
+      current.referenceId === undefined
+        ? `  - Voice id: none pinned${current.seed === undefined ? '' : ` (the endpoint is given a fixed seed, ${String(current.seed)})`}`
+        : `  - Voice id: \`${current.referenceId}\``,
+    )
+    lines.push(
+      current.speed === undefined
+        ? '  - Reading speed: unset, so it reads at the voice\'s own recorded pace (1.0)'
+        : `  - Reading speed: ${String(current.speed)} (1.0 = the voice as recorded)`,
+    )
+  }
+  if (current.language !== undefined && current.language !== '') {
+    lines.push(`  - Language it speaks: ${current.language}`)
+  }
+  if (lines.length === 0) return ''
+  return `Right now, on this machine:
+${lines.join('\n')}
+
+These are facts you already have — answer from them instead of saying you
+cannot read a setting, and do not recite them unasked.`
 }
 
 // A stale yt-dlp is a different task from a broken install: the binary is
@@ -233,7 +284,7 @@ plainly to rotate it on the provider's key page.`
 // nothing. There is no repair task to hand over — handing one over anyway is
 // how a guide talks itself into "fixing" something that works — so the prompt
 // is an open door and an inventory of what can be changed from here.
-function healthyMachinePrompt(): string {
+function healthyMachinePrompt(current: SetupCurrentState | undefined): string {
   return `murmur is running and nothing is broken: the probes found no gaps.
 The user opened this conversation themselves, so they came to CHANGE something
 rather than to have something repaired. Ask them what they want, in one short
@@ -266,13 +317,13 @@ What you can actually change from here:
 ${VOICE_SECRECY}
 
 ${LANGUAGE_RULE}
-
+${block(currentStateBlock(current))}
 When they are done, say so in one short sentence and stop.
 `
 }
 
-export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd }: SetupPromptInput): string {
-  if (gaps.length === 0) return healthyMachinePrompt()
+export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd, current }: SetupPromptInput): string {
+  if (gaps.length === 0) return healthyMachinePrompt(current)
   const sections = gaps.map((gap) => {
     switch (gap.kind) {
       case 'music':
@@ -298,7 +349,7 @@ may also tell you to skip any individual piece; if they do, move on to the
 next without arguing.
 
 ${sections.join('\n\n---\n\n')}
-${gaps.some((gap) => gap.kind === 'voice') ? '' : `\n---\n\n${LANGUAGE_RULE}\n`}
+${gaps.some((gap) => gap.kind === 'voice') ? '' : `\n---\n\n${LANGUAGE_RULE}\n`}${block(currentStateBlock(current))}
 When every piece is either fixed or explicitly skipped, say so in one short
 sentence and stop.
 `
