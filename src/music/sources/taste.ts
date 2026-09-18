@@ -66,14 +66,16 @@ export const BOUNDS = { liked: 500, history: 200, playlist: 50, top: 50, subscri
 // and is skipped rather than fed to a prompt.
 export const SNAPSHOT_MAX_BYTES = 1024 * 1024
 export const DIGEST_BUDGET = 1500
+// Sources + Artists + Playlists together: the listener's shape, the same on
+// every pick of the day, held to a fifth of the block so the songs get the
+// rest (spec 14 §2.3) -- 300 characters of the default 1500. A fraction
+// rather than a constant, so a caller that asks for a different budget gets
+// the same proportions. What the half does not spend rolls forward.
+export const FIXED_SHARE = 0.2
 const TOP_ARTISTS = 25
-const RECENT_ITEMS = 20
-const CHANNEL_NAMES = 12
+const SONG_ITEMS = 40
+const WATCH_ITEMS = 8
 const PLAYLIST_NAMES = 12
-// Every layer gets an equal share of what is left when its turn comes, and
-// whatever it does not use rolls forward to the next. Found on a real
-// snapshot: 200 watched rows with long titles filled the whole block by
-// themselves and the musical source beside them never reached the page.
 const PLATFORM_LIST = 10
 const STALE_DAYS = 30
 
@@ -160,34 +162,101 @@ export function isMusicCategory(category: string | undefined): boolean {
 // artist, and neither is a channel the listener follows (spec 14 §2.3).
 const MUSICAL: readonly TasteKind[] = ['liked', 'top-artist', 'top-track', 'daily']
 
+// Platforms whose catalogue is songs: every row they return is music by
+// construction, which is the guarantee spec 14 §2.3's invariant asks for.
+// YouTube and Bilibili are video platforms and carry no such guarantee.
+const SONGS_ONLY: readonly SourceId[] = ['netease', 'qqmusic', 'spotify', 'qishui']
+
+// The only kinds a line of the block is ever built from. Everything else --
+// a followed account, a subscription, a favourites folder's contents -- is
+// retrieval material, and is not counted on the Sources line either: that
+// line must not claim what the block cannot show.
+const SHOWN: readonly TasteKind[] = ['liked', 'history', 'playlist', 'top-artist', 'top-track', 'daily']
+
+// Every row in the block traces to a songs-only source or to an artist name
+// (spec 14 §2.3). Measured on the listener's own snapshot: of 200 Bilibili
+// history rows, 4 carried a music sub-zone and 3 of those were gossip clips
+// their uploader had filed there, so the platform's own tag is not a
+// guarantee. It survives as a scoring signal for the retrieval pool.
+function shown(source: SourceId, item: TasteItem): boolean {
+  if (item.title.trim() === '' || !SHOWN.includes(item.kind)) return false
+  // A Bilibili playlist is a favourites folder, and YouTube's liked list is
+  // collected rather than kept (the listener's decision, 2026-09-16).
+  if (source === 'bilibili' && item.kind === 'playlist') return false
+  if (source === 'youtube' && item.kind === 'liked') return false
+  return item.kind !== 'history' || SONGS_ONLY.includes(source)
+}
+
+// One line of the block. `weight` is its claim on what is left of the half's
+// budget when its turn comes; whatever it does not spend rolls to the next.
+type Layer = { lead: string; parts: readonly string[]; sep: string; weight: number }
+
+// Render the layers that have something to say, and answer with what they
+// spent. Equal shares are the case where every weight is 1.
+function emit(lines: string[], layers: readonly Layer[], budget: number): number {
+  const pending = layers.filter((l) => l.parts.length > 0)
+  let weightLeft = pending.reduce((n, l) => n + l.weight, 0)
+  let used = 0
+  for (const { lead, parts, sep, weight } of pending) {
+    // lead + ': ' + the newline this line adds + the two the block-level cut
+    // keeps for its own trailing ellipsis (codex review).
+    const share = Math.floor(((budget - used) * weight) / weightLeft) - lead.length - 5
+    weightLeft -= weight
+    const text = joinCapped(parts, sep, Math.max(share, 0))
+    if (text === '') continue
+    const line = `${lead}: ${text}`
+    lines.push(line)
+    used += line.length + 1
+  }
+  return used
+}
+
+// The platforms' own rankings, kept apart from the merged view: a top list
+// is the platform's word, not a count of anything. They ride the flexible
+// half's budget like every other line -- appended after it was spent, they
+// were dropped whole by the block-level cut while the Sources line went on
+// counting them (codex review).
+function platformLayers(kept: readonly { snapshot: TasteSnapshot; items: readonly TasteItem[] }[]): Layer[] {
+  const layers: Layer[] = []
+  for (const { snapshot, items } of kept) {
+    const top = (kind: TasteKind): TasteItem[] => items.filter((i) => i.kind === kind).slice(0, PLATFORM_LIST)
+    const topArtists = top('top-artist')
+    const topTracks = top('top-track')
+    if (topArtists.length + topTracks.length > 0) {
+      layers.push({
+        lead: `${SOURCE_NAMES[snapshot.source]} says (top, medium term)`,
+        parts: [
+          ...(topArtists.length > 0 ? [`artists \u2014 ${topArtists.map((i) => i.title.trim()).join(', ')}`] : []),
+          ...(topTracks.length > 0 ? [`tracks \u2014 ${topTracks.map(quoted).join(', ')}`] : []),
+        ],
+        sep: '; ',
+        weight: 1,
+      })
+    }
+    const daily = top('daily')
+    if (daily.length > 0) layers.push({ lead: `${SOURCE_NAMES[snapshot.source]} suggests today`, parts: daily.map(quoted), sep: ', ', weight: 1 })
+  }
+  return layers
+}
+
 export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date, budget = DIGEST_BUDGET): string {
   if (snapshots.length === 0) return ''
-  // Items whose title is empty are dropped everywhere, counts included — and
-  // so is everything the listener merely collected (spec 14 §2.3): any
-  // 'favourite' row, a Bilibili 'playlist' (which is a favourites folder) and
-  // YouTube's liked list. No source produces those any more, but a returning
-  // listener keeps yesterday's snapshot until the next refresh, and that file
-  // must not paint what it painted yesterday.
-  const collected = (source: SourceId, item: TasteItem): boolean =>
-    item.kind === 'favourite' || (source === 'bilibili' && item.kind === 'playlist') || (source === 'youtube' && item.kind === 'liked')
+  // The render holds the invariant on ANY snapshot, not only a freshly read
+  // one: a returning listener keeps yesterday's file until the next refresh,
+  // and that file must not paint what it painted yesterday.
   const kept = snapshots
-    .map((s) => ({ snapshot: s, items: s.items.filter((i) => i.title.trim() !== '' && !collected(s.source, i)) }))
+    .map((s) => ({ snapshot: s, items: s.items.filter((i) => shown(s.source, i)) }))
     // A snapshot left with nothing to say is not a source line.
     .filter((k) => k.items.length > 0)
   if (kept.length === 0) return ''
   const newest = kept.map((k) => k.snapshot.takenAt).sort().at(-1)!
-  const lines: string[] = [
-    `## What the listener keeps (as of ${day(newest)})`,
-    `Sources: ${kept.map((k) => sourceSummary(k.snapshot, k.items, now)).join(', ')}`,
-  ]
+  const lines: string[] = [`## What the listener keeps (as of ${day(newest)})`]
 
   // Artists merge across sources by exact string after trim; a top-artist row
   // names the artist in its title.
   const artists = new Map<string, number>()
   const lately: { item: TasteItem; order: number }[] = []
   const songs: { item: TasteItem; order: number }[] = []
-  const follows: { item: TasteItem; order: number }[] = []
-  const frequents: string[] = []
   const playlists: string[] = []
   let order = 0
   for (const { items } of kept) {
@@ -199,8 +268,6 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
       }
       if (item.kind === 'history') lately.push({ item, order })
       if (item.kind === 'liked') songs.push({ item, order })
-      if (item.kind === 'follows') follows.push({ item, order })
-      if (item.kind === 'frequents') frequents.push(item.title.trim())
       if (item.kind === 'playlist') playlists.push(item.title.trim())
     }
   }
@@ -213,53 +280,30 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
     return a.order - b.order
   }
 
-  // What they have been listening to and watching leads the digest, and a
-  // music-zone row outranks a cooking one inside it (spec 14 §2.3).
-  lately.sort((a, b) => {
-    const rank = (x: { item: TasteItem }): number => (isMusicCategory(x.item.category) ? 0 : 1)
-    return rank(a) - rank(b) || byDate(a, b)
-  })
-  follows.sort(byDate)
+  lately.sort(byDate)
   songs.sort(byDate)
-  const layers: [string, readonly string[], string][] = [
-    ['Lately they have been listening to / watching', lately.slice(0, RECENT_ITEMS).map((r) => watched(r.item)), ' \u00b7 '],
-    ['Recently followed', follows.slice(0, CHANNEL_NAMES).map((f) => f.item.title.trim()), ', '],
-    ['Who they keep going back to', frequents.slice(0, CHANNEL_NAMES), ', '],
-    ['Artists they return to', [...artists.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0])).slice(0, TOP_ARTISTS).map(([name, n]) => `${name} (${n})`), ', '],
-    // The playlist names are short and are the listener's own words for a
-    // mood; the song list is the long tail, so it speaks last and takes the
-    // room the others left.
-    ['Playlists', playlists.slice(0, PLAYLIST_NAMES), ', '],
-    ['Songs they keep', songs.slice(0, RECENT_ITEMS).map((r) => quoted(r.item)), ' \u00b7 '],
+  // The fixed half: who this listener is, in the fewest words, the same on
+  // every pick of the day. Sources is served first, out of half the half --
+  // an equal third would starve it (it is one phrase per mounted source and
+  // cannot be shortened by dropping items), and the whole half would starve
+  // the other two, which is what six verbose summaries did in review.
+  const sources: Layer[] = [{ lead: 'Sources', parts: kept.map((k) => sourceSummary(k.snapshot, k.items, now)), sep: ', ', weight: 1 }]
+  const shape: Layer[] = [
+    { lead: 'Artists they return to', parts: [...artists.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0])).slice(0, TOP_ARTISTS).map(([name, n]) => `${name} (${n})`), sep: ', ', weight: 1 },
+    { lead: 'Playlists', parts: playlists.slice(0, PLAYLIST_NAMES), sep: ', ', weight: 1 },
   ]
-  const pending = layers.filter(([, parts]) => parts.length > 0)
-  let used = lines.join('\n').length
-  pending.forEach(([lead, parts, sep], i) => {
-    // lead + ': ' + the newline this line adds + the two the block-level cut
-    // keeps for its own trailing ellipsis (codex review).
-    const share = Math.floor((budget - used) / (pending.length - i)) - lead.length - 5
-    const text = joinCapped(parts, sep, Math.max(share, 0))
-    if (text === '') return
-    const line = `${lead}: ${text}`
-    lines.push(line)
-    used += line.length + 1
-  })
-
-  // The platforms' own rankings, kept apart from the merged view: a top list
-  // is the platform's word, not a count of anything.
-  for (const { snapshot, items } of kept) {
-    const topArtists = items.filter((i) => i.kind === 'top-artist').slice(0, PLATFORM_LIST)
-    const topTracks = items.filter((i) => i.kind === 'top-track').slice(0, PLATFORM_LIST)
-    if (topArtists.length + topTracks.length > 0) {
-      const parts = [
-        ...(topArtists.length > 0 ? [`artists \u2014 ${topArtists.map((i) => i.title.trim()).join(', ')}`] : []),
-        ...(topTracks.length > 0 ? [`tracks \u2014 ${topTracks.map(quoted).join(', ')}`] : []),
-      ]
-      lines.push(`${SOURCE_NAMES[snapshot.source]} says (top, medium term): ${parts.join('; ')}`)
-    }
-    const daily = items.filter((i) => i.kind === 'daily').slice(0, PLATFORM_LIST)
-    if (daily.length > 0) lines.push(`${SOURCE_NAMES[snapshot.source]} suggests today: ${daily.map(quoted).join(', ')}`)
-  }
+  // The flexible half. For choosing a song the kept songs ARE the signal and
+  // the watch rows are context, so the weights run 3 to 1. Measured with the
+  // watch rows leading instead: 14 of 186 kept songs reached the page.
+  const flexible: Layer[] = [
+    { lead: 'Songs they keep', parts: songs.slice(0, SONG_ITEMS).map((r) => quoted(r.item)), sep: ' \u00b7 ', weight: 3 },
+    { lead: 'Lately they have been listening to', parts: lately.slice(0, WATCH_ITEMS).map((r) => watched(r.item)), sep: ' \u00b7 ', weight: 1 },
+  ]
+  let used = lines[0]!.length
+  const fixedBudget = Math.max(Math.min(Math.floor(budget * FIXED_SHARE), budget - used), 0)
+  const onSources = emit(lines, sources, Math.floor(fixedBudget / 2))
+  used += onSources + emit(lines, shape, Math.max(fixedBudget - onSources, 0))
+  used += emit(lines, [...flexible, ...platformLayers(kept)], Math.max(budget - used, 0))
 
   // Cut at a line boundary with a trailing ellipsis (spec 14 §2.3).
   let out = ''
