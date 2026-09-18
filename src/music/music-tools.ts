@@ -49,6 +49,21 @@ function reply(payload: Record<string, unknown>) {
   return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] }
 }
 
+// The label a pick is announced, ledgered and avoided under — one spelling, so
+// a queued pick, an aired one and a submitted one are the same string.
+export function trackLabel(pick: { readonly title?: string; readonly artist?: string }): string {
+  return pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
+}
+
+// ponytail: trim + collapsed whitespace + case is the whole comparison. The
+// ledger holds a band under both its simplified and its traditional spelling
+// and those do NOT fold together here — a script-conversion table is far
+// bigger than the repeat it would catch. Upgrade path: fold both sides through
+// a converter before comparing.
+function folded(label: string): string {
+  return label.trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
 function trimmed(value: string | undefined): string | undefined {
   const text = value?.trim()
   return text ? text : undefined
@@ -70,7 +85,13 @@ export function musicTools(
   probe?: StreamProbe,
   taste?: TasteToolOptions,
   channels?: ChannelCatalogue,
+  avoid?: readonly string[],
 ): TaskTool[] {
+  // What this task may not submit: the recently-played labels the situation
+  // already names in words. The policy asks the model to skip them and a
+  // prompt rule is advice — a repeat that reaches here is turned back, at the
+  // cost of one tool turn.
+  const avoided = new Set((avoid ?? []).map(folded))
   // What this task may search: youtube always, the rest while mounted and
   // not yet closed by an auth failure in this very task. An empty channel
   // pool is not mounted — there is nothing in it to find.
@@ -152,6 +173,17 @@ export function musicTools(
       const ref = args.ref.trim()
       if (!ref) return reply({ ok: false, error: 'submit_pick requires a ref' })
 
+      const title = trimmed(args.title)
+      const artist = trimmed(args.artist)
+      // Before the resolve: a repeat costs a tool turn, never a network round.
+      // Only a pick that names itself can be recognised as one — a submission
+      // with no title carries the placeholder label, which is an absence of
+      // identity and not a song to match on.
+      const label = trackLabel({ ...(title !== undefined && { title }), ...(artist !== undefined && { artist }) })
+      if (title !== undefined && avoided.has(folded(label))) {
+        return reply({ ok: false, error: `${label} was played recently; pick a different song` })
+      }
+
       let clip
       try {
         clip = await provider.resolve(ref)
@@ -186,8 +218,6 @@ export function musicTools(
         return reply({ ok: false, error: `${ref} resolved but the stream did not play; pick another` })
       }
 
-      const title = trimmed(args.title)
-      const artist = trimmed(args.artist)
       const announce = trimmed(args.announce)
       const pick: TrackPick = {
         clip,

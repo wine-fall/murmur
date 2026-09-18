@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, readFileSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
 
@@ -254,5 +254,67 @@ describe('PersistentMemoryStore.awaySeconds (spec 10 §3.7.3)', () => {
     opened(path, c).record({ role: 'radio', text: 'from the future' })
     c.advance(-5000)
     expect(opened(path, c).awaySeconds()).toBe(0)
+  })
+})
+
+// The avoid-list window (spec 05 §3.5): a listener hears repetition in time,
+// not in track counts, so the ledger is read by age with a cap that only
+// bounds the prompt. Real corpus: a song played on one afternoon came back the
+// next day because 33 songs — one more than the old depth of 32 — sat between.
+describe('recentSongsSince — the time-windowed avoid list', () => {
+  const DAY = 86_400
+
+  it('keeps what is inside the window and drops what fell out of it (in process)', () => {
+    vi.useFakeTimers()
+    try {
+      const store = new InProcessMemoryStore()
+      const now = 1_800_000_000
+      vi.setSystemTime((now - 8 * DAY) * 1000)
+      store.recordEvent('song', 'Eight Days Ago — Someone')
+      vi.setSystemTime((now - 6 * DAY) * 1000)
+      store.recordEvent('song', 'Six Days Ago — Someone')
+      vi.setSystemTime(now * 1000)
+      store.recordEvent('song', 'Today — Someone')
+
+      expect(store.recentSongsSince(now - 7 * DAY, 256)).toEqual(['Six Days Ago — Someone', 'Today — Someone'])
+      expect(store.recentSongs(9)).toHaveLength(3)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('caps the window at the newest entries, and returns nothing for a non-positive cap', () => {
+    vi.useFakeTimers()
+    try {
+      const store = new InProcessMemoryStore()
+      const now = 1_800_000_000
+      vi.setSystemTime((now - DAY) * 1000)
+      for (let i = 0; i < 5; i++) store.recordEvent('song', `Song ${String(i)}`)
+      vi.setSystemTime(now * 1000)
+      expect(store.recentSongsSince(now - 7 * DAY, 2)).toEqual(['Song 3', 'Song 4'])
+      expect(store.recentSongsSince(now - 7 * DAY, 0)).toEqual([])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('reads each row back at the time it was written, across instances', () => {
+    const c = clock(1_800_000_000 - 9 * DAY)
+    const path = dir()
+    const a = opened(path, c)
+    a.recordEvent('song', '\u534a\u58f6\u7eb1 — \u5218\u73c2\u77e3')
+    c.advance(4 * DAY)
+    a.recordEvent('song', 'Five Days Ago — Someone')
+    c.advance(5 * DAY)
+
+    // Reopened: the ages must survive the ledger round-trip, not restart at
+    // load time — otherwise every song looks like it played just now.
+    const b = opened(path, c)
+    const now = c.now()
+    expect(b.recentSongsSince(now - 7 * DAY, 256)).toEqual(['Five Days Ago — Someone'])
+    expect(b.recentSongsSince(now - 10 * DAY, 256)).toEqual([
+      '\u534a\u58f6\u7eb1 — \u5218\u73c2\u77e3',
+      'Five Days Ago — Someone',
+    ])
   })
 })

@@ -207,6 +207,11 @@ export interface MemoryStore {
   recordEvent(kind: LedgerKind, key: string): void
   recentTopics(n: number): string[]
   recentSongs(n: number): string[]
+  // The avoid-list read (spec 05 §3.5): the songs aired at or after `sinceTs`
+  // (unix seconds), newest-last, at most `cap` of them. Repetition is felt in
+  // time, not in track counts, so the window is an age and the cap only bounds
+  // how long the pick prompt can grow.
+  recentSongsSince(sinceTs: number, cap: number): string[]
   recentAnchors(n: number): string[]
   // Real-world items told on air (spec 13 §3.7): the fetch's avoid list
   // past the pool's own 48 h memory.
@@ -268,6 +273,9 @@ export interface TrackSource {
 export type MusicContext = {
   readonly persona: string
   readonly situation: string
+  // The same recently-played labels the situation names, carried as data so
+  // submit_pick can refuse a repeat instead of only asking for none.
+  readonly avoid?: readonly string[]
 }
 
 // --- the brain harness (spec 03-01 §2.1) ---------------------------------- //
