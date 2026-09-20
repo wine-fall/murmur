@@ -8,9 +8,8 @@
 import type { Host } from '../../host/host.ts'
 import { SourceAuthError, SourceAuthWatch } from './auth.ts'
 import { BrowserCookieError } from './cookies.ts'
-import { emptyLedger, mergeLedger } from './ledger.ts'
 import type { SourcesStore } from './store.ts'
-import { mergeSnapshot, SOURCE_NAMES, type SourceId, type TasteKind, type TasteSource } from './taste.ts'
+import { SOURCE_NAMES, type SourceId, type TasteKind, type TasteSource } from './taste.ts'
 
 export const STALE_MS = 24 * 60 * 60_000
 // What the listener is on RIGHT NOW is a different question from what they
@@ -132,18 +131,10 @@ export class TasteRefresher {
     const epoch = store.epoch
     const t = performance.now()
     try {
+      const asked = kinds ?? source.kinds
       const read = await source.snapshot(kinds)
-      // Only the kinds that were asked for. An adapter whose endpoint is
-      // mixed answers with more than it was asked for (Soda's collection
-      // carries kept playlist names beside kept tracks), and mergeSnapshot
-      // would then keep the old rows of that kind beside the new ones.
-      const snapshot = kinds === undefined ? read : { ...read, items: read.items.filter((i) => kinds.includes(i.kind)) }
       if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
-      // The snapshot is the latest read of each list; the ledger is every
-      // read there has ever been (spec 14 §2.11).
-      store.writeSnapshot(mergeSnapshot(store.readSnapshot(id), snapshot, kinds))
-      store.writeLedger(mergeLedger(store.readLedger(id) ?? emptyLedger(id), snapshot, kinds ?? source.kinds))
-      store.markRefreshed(id, this.now())
+      const snapshot = store.recordRead(read, asked, this.now())
       // The read worked, so the profile it used is the one this account lives
       // in: pin it (spec 14 §3.1). A mount made before murmur named profiles
       // gets its pin here; from then on nothing re-guesses.

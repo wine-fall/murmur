@@ -11,8 +11,8 @@ import { dirname, join } from 'node:path'
 import { z } from 'zod'
 
 import { chromeProfile } from './chrome.ts'
-import { capLedger, type TasteLedger, TasteLedgerSchema } from './ledger.ts'
-import { SOURCE_IDS, type SourceId, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
+import { capLedger, emptyLedger, mergeLedger, type TasteLedger, TasteLedgerSchema } from './ledger.ts'
+import { mergeSnapshot, SOURCE_IDS, type SourceId, type TasteKind, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
 
 // yt-dlp's --cookies-from-browser vocabulary, minus whale.
 export const BROWSERS = ['chrome', 'chromium', 'brave', 'edge', 'firefox', 'safari', 'vivaldi', 'opera'] as const
@@ -234,6 +234,26 @@ export class SourcesStore {
 
   writeSnapshot(snapshot: TasteSnapshot): void {
     atomicWrite(this.snapshotPath(snapshot.source), JSON.stringify(snapshot))
+  }
+
+  // Landing a read: the ONE place a read becomes state (spec 14 §2.11).
+  // Both the mount's first read and the background refresh come through
+  // here, because two write paths meant the mount left no read stamp and
+  // the next poke re-read the whole account it had just finished reading.
+  //
+  // `kinds` is what was asked for. A correct adapter answers with nothing
+  // else, so filtering is usually a no-op; it is the guard against one whose
+  // endpoint is mixed (Soda's collection carries playlist names beside kept
+  // tracks) handing back a kind whose old rows the merge is about to keep.
+  recordRead(read: TasteSnapshot, kinds: readonly TasteKind[], now: Date = new Date()): TasteSnapshot {
+    const snapshot = { ...read, items: read.items.filter((i) => kinds.includes(i.kind)) }
+    // The snapshot is the latest read of each list; the ledger is every read
+    // there has ever been.
+    const merged = mergeSnapshot(this.readSnapshot(read.source), snapshot, kinds)
+    this.writeSnapshot(merged)
+    this.writeLedger(mergeLedger(this.readLedger(read.source) ?? emptyLedger(read.source), snapshot, kinds))
+    this.markRefreshed(read.source, now)
+    return merged
   }
 
   ledgerPath(id: SourceId): string {

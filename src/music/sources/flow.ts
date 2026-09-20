@@ -564,9 +564,11 @@ async function finishMount<K extends SourceId>(deps: SourcesFlowDeps, id: K, who
   const source = deps.build(id, store.read()[id] as SourceEntry[K])
   if (source === null) return
   try {
-    const snapshot = await source.snapshot()
-    store.writeSnapshot(snapshot)
-    store.markRefreshed(id, now())
+    // The mount's own read is a read: it lands through the one path that
+    // records one (spec 14 §2.11), so it reaches the ledger and stamps every
+    // list's clock. A first read is the whole account, so the kinds asked
+    // for are all of them.
+    const snapshot = store.recordRead(await source.snapshot(), source.kinds, now())
     host.info(`done — ${snapshot.items.length} items from ${SOURCE_NAMES[id]}; I'll keep it fresh.`)
   } catch (err) {
     host.info(`could not read ${SOURCE_NAMES[id]} right now (${err instanceof Error ? err.message : String(err)}); mounted anyway — I'll try again later.`)
