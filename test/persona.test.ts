@@ -14,6 +14,14 @@ describe('loadPersona', () => {
     expect(persona.startsWith('#')).toBe(true)
   })
 
+  // spec 05 §3.4: the seed carries no moment of its own. It used to open every
+  // beat with "the program has just begun", which contradicts a program that
+  // has been on the air for an hour — the moment is supplied per beat.
+  it('states no moment — the program supplies that per beat', () => {
+    const persona = loadPersona(DEFAULT_PERSONA_PATH, 'English')
+    expect(persona).not.toMatch(/Right now|just begun/i)
+  })
+
   it('rejects a missing file with a clear error', () => {
     expect(() => loadPersona('/no/such/persona.md', 'English')).toThrow(/not found/)
   })

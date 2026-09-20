@@ -90,15 +90,102 @@ describe('PersistentMemoryStore', () => {
     expect(b.recent(10)[1]).toEqual({ role: 'user', text: 'two' })
   })
 
-  it('does not prime turns older than the freshness cutoff', () => {
+  // spec 05 §3.4: a boot inside the same sitting carries on from the turns on
+  // disk; past the sitting gap the program is coming back on and the window
+  // starts empty, so the first line cannot finish the last one's sentence.
+  it('primes the turns on disk when the boot is inside the same sitting', () => {
     const c = clock()
     const path = dir()
     const a = opened(path, c)
-    a.record({ role: 'radio', text: 'stale' })
-    c.advance(49 * 3600)
+    a.record({ role: 'radio', text: 'before' })
+    c.advance(10 * 60)
     const b = opened(path, c)
+    expect(b.recent(10).map((t) => t.text)).toEqual(['before'])
+    expect(b.lastOnAir()).toBeUndefined()
+  })
+
+  it('primes nothing once the sitting gap has passed, and reports the last airing', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.recordEvent('topic', 'the first one')
+    a.recordEvent('topic', 'rain')
+    a.recordEvent('topic', 'night walks')
+    a.recordEvent('topic', 'coffee')
+    a.record({ role: 'radio', text: 'stale' })
+    const lastTs = c.now()
+
+    c.advance(2 * 3600)
+    const b = opened(path, c)
+    expect(b.recent(10)).toEqual([])
+    // The row stamps drift a millisecond apart so each append sorts after the
+    // last; the fact is the moment, not the exact stamp.
+    expect(b.lastOnAir()?.ts).toBeCloseTo(lastTs, 1)
+    expect(b.lastOnAir()?.topics).toEqual(['rain', 'night walks', 'coffee'])
+    // What the session records afterwards does not move the fact it opened with.
     b.record({ role: 'radio', text: 'fresh' })
+    b.recordEvent('topic', 'the new one')
+    expect(b.lastOnAir()?.topics).toEqual(['rain', 'night walks', 'coffee'])
     expect(b.recent(10).map((t) => t.text)).toEqual(['fresh'])
+  })
+
+  // codex review: a boot inside the sitting gap used to prime the WHOLE file.
+  // One line aired after a week away, then a restart ten minutes later, and the
+  // week-old sitting came back as "the program so far" — the bug this change
+  // exists to kill, wearing a short gap.
+  it('primes the last sitting only, never the one before the gap', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.record({ role: 'radio', text: 'a week ago' })
+
+    c.advance(7 * 86_400)
+    const b = opened(path, c)
+    b.record({ role: 'radio', text: 'the one line tonight' })
+
+    c.advance(10 * 60)
+    const back = opened(path, c)
+    expect(back.recent(10).map((t) => t.text)).toEqual(['the one line tonight'])
+    expect(back.lastOnAir()).toBeUndefined()
+  })
+
+  // codex review: the topics are what the LAST sitting touched. A ledger tail
+  // reaching back past the gap would report a month-old topic as yesterday's.
+  it('reports only the topics of the sitting it came back from', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.recordEvent('topic', 'a month ago')
+    a.record({ role: 'radio', text: 'long gone' })
+
+    c.advance(30 * 86_400)
+    const b = opened(path, c)
+    b.recordEvent('topic', 'last night')
+    b.record({ role: 'radio', text: 'yesterday' })
+
+    c.advance(22 * 3600)
+    expect(opened(path, c).lastOnAir()?.topics).toEqual(['last night'])
+  })
+
+  // codex review: the opening fact is a COPY of the ledger keys, so a forget
+  // that cleaned the store alone would hand the deleted words back to the model.
+  it('drops forgotten words from the opening fact it is already holding', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.recordEvent('topic', 'the hospital week')
+    a.recordEvent('topic', 'rain')
+    a.record({ role: 'radio', text: 'about the hospital week' })
+
+    c.advance(2 * 3600)
+    const back = opened(path, c)
+    expect(back.lastOnAir()?.topics).toEqual(['the hospital week', 'rain'])
+    back.forget('hospital')
+    expect(back.lastOnAir()?.topics).toEqual(['rain'])
+  })
+
+  it('has no last airing to report on a memory dir with no history', () => {
+    expect(opened(dir(), clock()).lastOnAir()).toBeUndefined()
   })
 
   it('persists ledger events across instances, tails in order', () => {

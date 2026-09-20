@@ -94,6 +94,10 @@ export type ContextPack = {
   // The taste digest (spec 14 §2.3): what the listener keeps on the platforms
   // they mounted, as background the host knows. '' or absent renders nothing.
   readonly taste?: string
+  // When the program was last on the air, for the beat that opens a session
+  // after a gap (spec 05 §3.4). `when` is a coarse phrase ("yesterday evening")
+  // — never a count of hours. Absent inside one sitting and on a first run.
+  readonly lastOnAir?: { readonly when: string; readonly topics: readonly string[] }
 }
 
 // --- real-world topics (spec 13) ------------------------------------------ //
@@ -207,6 +211,10 @@ export interface MemoryStore {
   recordEvent(kind: LedgerKind, key: string): void
   recentTopics(n: number): string[]
   recentSongs(n: number): string[]
+  // When the program was last on the air BEFORE this boot, with the handful of
+  // topics it touched (spec 05 §3.4). undefined on a first run and inside the
+  // same sitting, where the recent window already carries the continuity.
+  lastOnAir(): { ts: number; topics: readonly string[] } | undefined
   // The avoid-list read (spec 05 §3.5): the songs aired at or after `sinceTs`
   // (unix seconds), newest-last, at most `cap` of them. Repetition is felt in
   // time, not in track counts, so the window is an age and the cap only bounds

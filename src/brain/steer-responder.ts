@@ -7,6 +7,7 @@
 // Brain.respond.
 
 import type { ContextPack, Harness, SteerActions, SteerBrain } from '../contracts.ts'
+import { hostSystemPrompt } from '../prompts/persona.ts'
 import { buildSteerPrompt } from '../prompts/reply.ts'
 import { steerTools } from './steer-tools.ts'
 
@@ -28,7 +29,7 @@ export class SteerResponder implements SteerBrain {
 
   async respond(userText: string, ctx: ContextPack, actions: SteerActions): Promise<string | null> {
     return this.deps.brain.runTask<string>({
-      systemPrompt: ctx.persona,
+      systemPrompt: hostSystemPrompt(ctx.persona),
       prompt: buildSteerPrompt(userText, ctx, {
         musicWired: actions.music !== undefined,
         settingsWired: actions.settings !== undefined,

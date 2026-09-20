@@ -743,6 +743,34 @@ describe('Director — memory wiring (spec 05)', () => {
     expect(SCENES).toContain(ctx.scene)
   })
 
+  // spec 05 §3.4: a store that came back across the sitting gap hands the
+  // Director one fact, rendered coarsely, and every pack of the session carries
+  // the same one — the phrase is the moment of the return, not a live count.
+  it('carries the last airing into every pack, as a phrase and not a number', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-dir-'))
+    const c = { t: 1_000_000 }
+    const first = new PersistentMemoryStore({ dir, now: () => c.t })
+    first.recordEvent('topic', 'night walks')
+    first.record({ role: 'radio', text: 'the last thing said' })
+    c.t += 3 * 86_400
+    const store = new PersistentMemoryStore({ dir, now: () => c.t })
+
+    const { brain, director } = setup({ memory: store })
+    brain.batches = [['a', 'b']]
+    await director.run(2)
+    const ctx = brain.talkContexts.at(-1)!
+    expect(ctx.recent.map((t) => t.text)).not.toContain('the last thing said')
+    expect(ctx.lastOnAir?.topics).toEqual(['night walks'])
+    expect(ctx.lastOnAir?.when).toMatch(/^[a-zA-Z ]+$/)
+
+    // codex review: the phrase is frozen, the topics are not. A forget has to
+    // reach the opening fact too, or the deleted words go back to the model.
+    store.forget('night walks')
+    brain.batches = [['c']]
+    await director.run(1)
+    expect(brain.talkContexts.at(-1)!.lastOnAir?.topics).toEqual([])
+  })
+
   it('ledgers a beat topic at air time; untagged beats ledger nothing', async () => {
     const { brain, memory, director } = setup()
     brain.batches = [[{ text: 'tagged', topic: 'night walks' }, { text: 'plain' }]]

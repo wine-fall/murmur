@@ -45,3 +45,29 @@ export function currentScene(now: Date, env: NodeJS.ProcessEnv = process.env): S
   }
   return sceneFor(now)
 }
+
+// The part of the day a moment fell in, in the words a person uses. The scene
+// buckets already draw these lines; only "late-night" reads wrong in a phrase
+// about the past.
+const PART_OF_DAY: Record<Scene, string> = {
+  morning: 'morning',
+  afternoon: 'afternoon',
+  evening: 'evening',
+  'late-night': 'night',
+}
+
+// How long ago the program was last on the air, as a host would say it (spec 05
+// §3.4). Coarse on purpose and never a count of hours: an exact gap is
+// bookkeeping, and a number in the prompt comes back out as a line about the
+// number. The buckets widen as the gap grows, the way memory does.
+export function lastOnAirPhrase(then: Date, now: Date): string {
+  const midnight = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const days = Math.round((midnight(now) - midnight(then)) / 86_400_000)
+  const part = PART_OF_DAY[sceneFor(then)]
+  if (days <= 0) return 'earlier today'
+  if (days === 1) return `yesterday ${part}`
+  if (days <= 6) return `${WEEKDAYS[then.getDay()]} ${part}`
+  if (days <= 13) return 'last week'
+  if (days <= 59) return 'a few weeks ago'
+  return 'a while ago'
+}

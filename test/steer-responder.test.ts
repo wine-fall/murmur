@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { ContextPack, SteerActions } from '../src/contracts.ts'
 import { SteerResponder } from '../src/brain/steer-responder.ts'
+import { hostSystemPrompt } from '../src/prompts/persona.ts'
 import { FakeHarness, callTool } from './fakes.ts'
 
 const ctx: ContextPack = {
@@ -30,7 +31,7 @@ describe('SteerResponder', () => {
     const responder = new SteerResponder({ brain: harness, model: 'main-model' })
     const reply = await responder.respond('hello?', ctx, actions())
     expect(reply).toBe('right here with you.')
-    expect(harness.lastTask?.systemPrompt).toBe('the persona')
+    expect(harness.lastTask?.systemPrompt).toBe(hostSystemPrompt('the persona'))
     expect(harness.lastTask?.model).toBe('main-model')
     // recall -> act -> reply, plus one slack turn (spec 05-01 §2.2).
     expect(harness.lastTask?.maxTurns).toBe(4)

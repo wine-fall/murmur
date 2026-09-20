@@ -218,13 +218,27 @@ export function renderTranscript(ctx: ContextPack, dropTrailingUser?: string): s
     .join('\n')
 }
 
+// The head of a prompt with no transcript behind it (spec 05 §3.4): a fact
+// about when the program was last on and what it touched. The previous
+// sitting's turns are deliberately NOT here — a transcript says "you were
+// mid-sentence", and the host finishes the sentence. This states the return
+// instead, and says nothing about whether to mention it: the host decides that
+// the way a host does. The hour of the return comes from the clock line every
+// prompt already carries, so there is no second clock here.
+export function openingBlock(ctx: ContextPack): string {
+  const last = ctx.lastOnAir
+  if (last === undefined) return 'The program is starting now.'
+  const topics = last.topics.length === 0 ? '' : ` — the talk touched on ${last.topics.join(', ')}`
+  return `(Last on the air: ${last.when}${topics}.)\nThe program is coming back on now.`
+}
+
 // Prompt for a single self-initiated talk segment (the fallback path when the
 // batched tool call degrades — spec 04 §3.2).
 export function buildNextTalkPrompt(ctx: ContextPack): string {
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
-    : 'The program is just starting. Open naturally with your first beat.'
+    : `${openingBlock(ctx)} Open naturally with your first beat.`
   return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
@@ -235,7 +249,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
-    : `The program is just starting. Open naturally with your first ${count} beats.`
+    : `${openingBlock(ctx)} Open naturally with your first ${count} beats.`
   return (
     `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
     `${groundingRules(ctx)}\n` +

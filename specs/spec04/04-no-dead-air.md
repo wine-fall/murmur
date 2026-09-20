@@ -396,6 +396,32 @@ this makes the host speak to the actual local time.
   morning vs. late-night* is a by-ear / eval concern (DESIGN §10.3), not a unit
   assertion on model text.
 
+### 3.5 The opening of a session (amended 2026-09-20)
+
+A prompt with an empty transcript is the beat that opens a sitting, and every
+persona-voiced builder — `buildNextTalkPrompt`, `buildNextTalksPrompt`,
+`buildRespondPrompt`, `buildSteerPrompt` — renders the same head for it
+(`openingBlock` in `talk.ts`, one function so the four cannot drift).
+
+- No `ctx.lastOnAir` (a first run): "The program is starting now."
+- With it (the program is coming back across a gap — spec 05 §3.4): the last
+  airing as a plain fact — `(Last on the air: <coarse phrase> — the talk touched
+  on <≤3 topics>.)` followed by "The program is coming back on now." The hour of
+  the return is NOT restated here; it comes from the clock line (§3.4) every
+  prompt already carries.
+- With a transcript (the same sitting, or later in this session) the head is the
+  unchanged `(The program so far)` block and the opening fact is not rendered:
+  it is an opening fact, and the session has already opened.
+- **No guidance rides with it.** The prompt carries situation FACTS and, in the
+  system prompt behind the persona, ONE whole-role framing of the host's craft
+  (`HOST_CRAFT`) — never a rule per fact ("that one is reference only, don't say
+  it"), which is how a fact turns into a line about the fact. If a fact leaks
+  into speech, change the fact's shape or placement, never add a don't-mention
+  line.
+- **Stochastic as always:** *that the fact reaches the prompt* is a unit
+  assertion; *whether the first line after a gap sounds like a host coming back
+  on* is by ear (DESIGN §10.3).
+
 ---
 
 ## 4. Dependencies

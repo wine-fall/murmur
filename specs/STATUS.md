@@ -44,6 +44,7 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#284** (eng) `CLOCK_USAGE` is a per-fact "reference only" rule — the one prompt rule spec 04 §3.5 forbids.
 - **#269** (bug, eng) The session-mark invitation test races a 40 ms timer against a 1 s poll budget — four CI occurrences, never reproduced locally.
 - **#272** (bug, eng) A NetEase resolve costs 15-55 s — yt-dlp walks its quality levels one request at a time.
 - **#273** (bug, eng) Brain cadence never beats its own 8 s deadline, so every boundary falls back silently.

@@ -35,7 +35,7 @@ import type {
   Task,
   Turn,
 } from '../contracts.ts'
-import { buildSeedPersonaPrompt, DEFAULT_PERSONA_PATH, SEED_PERSONA_SYSTEM_PROMPT } from '../prompts/persona.ts'
+import { buildSeedPersonaPrompt, DEFAULT_PERSONA_PATH, hostSystemPrompt, SEED_PERSONA_SYSTEM_PROMPT } from '../prompts/persona.ts'
 import { buildCompactionPrompt, COMPACTION_SYSTEM_PROMPT } from '../prompts/profile.ts'
 import { buildRespondPrompt } from '../prompts/reply.ts'
 import { buildNextTalkPrompt, buildNextTalksPrompt } from '../prompts/talk.ts'
@@ -380,7 +380,7 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
 
   async nextTalks(ctx: ContextPack, count: number): Promise<TalkBeat[]> {
     const beats = await this.runTask<TalkBeat[]>({
-      systemPrompt: ctx.persona,
+      systemPrompt: hostSystemPrompt(ctx.persona),
       prompt: buildNextTalksPrompt(ctx, count),
       model: this.model,
       maxTurns: 2,
@@ -389,11 +389,11 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     if (beats !== null) return beats
     // The model never made the terminal call. Degrade to one plain-text beat
     // rather than skip the segment into dead air (spec 04 §3.2).
-    return [{ text: await this.generate(ctx.persona, buildNextTalkPrompt(ctx)) }]
+    return [{ text: await this.generate(hostSystemPrompt(ctx.persona), buildNextTalkPrompt(ctx)) }]
   }
 
   async respond(userText: string, ctx: ContextPack): Promise<string> {
-    return this.generate(ctx.persona, buildRespondPrompt(userText, ctx))
+    return this.generate(hostSystemPrompt(ctx.persona), buildRespondPrompt(userText, ctx))
   }
 
   // The setup/repair capability (spec 03-03): the native Claude Code agent
