@@ -18,6 +18,7 @@ const VALUES: Settings = {
   muted: false,
   tuiPet: true,
   rwtEnabled: true,
+  playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
 }
 
 const snap = (

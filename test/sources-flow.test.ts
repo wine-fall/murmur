@@ -16,7 +16,25 @@ import { CHROME_PROFILE_ENV, type ChromeDeps } from '../src/music/sources/chrome
 import { SourcesStore } from '../src/music/sources/store.ts'
 import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { quitLatch } from '../src/setup/guide.ts'
-import { FakeHost } from './fakes.ts'
+import { PLAY_ORDER, type TrackPick } from '../src/contracts.ts'
+import { musicTools } from '../src/music/music-tools.ts'
+import { readSettingsFile, SETTINGS_FILE, SettingsStore } from '../src/host/settings.ts'
+import { callTool, FakeHost, FakeMusicProvider } from './fakes.ts'
+
+// Everything but the knob under test, so a Settings literal here says what it
+// is about.
+const BASE_SETTINGS = {
+  anchorsEnabled: true,
+  musicEnabled: true,
+  cadenceMode: 'every_n' as const,
+  musicEveryN: 2,
+  gapSeconds: 2,
+  recentWindow: 12,
+  muted: false,
+  tuiPet: true,
+  rwtEnabled: true,
+  playOrder: [...PLAY_ORDER],
+}
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 
@@ -911,5 +929,131 @@ describe('runSources (spec 14 §3.1)', () => {
     expect(SOURCES_OFFER[0]).toMatch(/\? \[y\/N\]$/)
     for (const name of ['NetEase', 'Spotify', 'YouTube', 'Bilibili', 'Soda']) expect(SOURCES_OFFER[1]).toContain(name)
     expect(SOURCES_OFFER[2]).toContain('/sources')
+  })
+})
+
+// Where a found song PLAYS from (spec 14 §2.13, acceptance §5.18): the card is
+// reached from the /sources menu, a pick moves that catalogue to the front, and
+// what it writes is what the next submit_pick reads — no restart in between.
+describe('the play order card (spec 14 §2.13/§5.18)', () => {
+  // The settings authority as the flow sees it, plus a real file behind it so
+  // the test can read what a listener would still have after a restart.
+  function withOrder(lines: string[], onWrite?: (host: FakeHost) => void) {
+    const path = join(mkdtempSync(join(tmpdir(), 'murmur-order-')), SETTINGS_FILE)
+    const settings = new SettingsStore({ path, initial: { ...BASE_SETTINGS }, touched: {} })
+    let written = 0
+    const built = build(lines, {
+      playOrder: {
+        read: () => settings.current().playOrder,
+        write: (order) => {
+          settings.set({ playOrder: [...order] })
+          // After the render this write causes, so an Esc here lands on the
+          // card that is actually up — as a listener's would.
+          if (++written === 1) setTimeout(() => onWrite?.(built.host), 0)
+        },
+      },
+    })
+    return { ...built, settings, path }
+  }
+
+  const options = (host: FakeHost, at: number) => host.asks[at]!.choices!.options!
+
+  it('is an action row on the menu, after refresh', async () => {
+    const { host, deps, store } = withOrder(['youtube'])
+    store.mount('youtube', { browser: 'chrome' })
+    await runSources(deps)
+    expect(options(host, 0).at(-1)).toEqual({
+      key: 'playOrder',
+      label: 'play order',
+      note: 'which catalogue a found song plays from first',
+      checked: false,
+      action: true,
+    })
+    expect(options(host, 0).at(-2)?.key).toBe('refresh')
+  })
+
+  it('moves a pick to the front, re-renders in place, and comes back with the result', async () => {
+    // menu -> play order -> Bilibili -> done -> menu -> leave
+    const { host, deps, store, settings, path } = withOrder(['play order', 'bilibili', 'done', 'bilibili'])
+    store.mount('bilibili', { auth: 'browser', browser: 'chrome', mid: '9' })
+    await runSources(deps)
+
+    // The card opened in the current order, mounted catalogues only, ranked.
+    expect(options(host, 1)).toEqual([
+      { key: 'youtube', label: 'YouTube', note: '1st', checked: true },
+      { key: 'bilibili', label: 'Bilibili', note: '2nd', checked: false },
+      { key: 'done', label: 'done', note: 'keep this order', action: true },
+    ])
+    expect(host.asks[1]!.text).toContain('Play from which first? (a pick moves it to the front)')
+    expect(host.asks[1]!.choices!.multi).toBe(false)
+    // Re-rendered IN PLACE: the same card again, Bilibili now 1st and ticked,
+    // led by what the previous pick did.
+    expect(options(host, 2)).toEqual([
+      { key: 'bilibili', label: 'Bilibili', note: '1st', checked: true },
+      { key: 'youtube', label: 'YouTube', note: '2nd', checked: false },
+      { key: 'done', label: 'done', note: 'keep this order', action: true },
+    ])
+    expect(host.asks[2]!.text).toContain('ok play order: Bilibili > YouTube')
+    // `( done )` returns to the menu, which leads with the result.
+    expect(host.asks[3]!.text).toContain('ok play order: Bilibili > YouTube > QQ Music > NetEase')
+    // Persisted, hot: the store the pick reads already holds it.
+    expect(settings.current().playOrder).toEqual(['bilibili', 'youtube', 'qqmusic', 'netease'])
+    expect(readSettingsFile(path).playOrder).toEqual(['bilibili', 'youtube', 'qqmusic', 'netease'])
+  })
+
+  it('shows only mounted catalogues, and keeps an unmounted one in its stored place', async () => {
+    const { host, deps, store, settings } = withOrder(['play order', 'netease', '', 'netease'])
+    store.mount('netease', { auth: 'browser', browser: 'chrome', userId: '1', likedPlaylistId: '2' })
+    await runSources(deps)
+    // Bilibili and QQ Music are not mounted, so the card never asks about them.
+    expect(options(host, 1).map((o) => o.key)).toEqual(['youtube', 'netease', 'done'])
+    // They keep their stored places behind the promotion all the same.
+    expect(settings.current().playOrder).toEqual(['netease', 'youtube', 'bilibili', 'qqmusic'])
+  })
+
+  it('leaves the order alone when nothing moved', async () => {
+    const { host, deps } = withOrder(['play order', '', ''])
+    await runSources(deps)
+    expect(host.asks[2]!.text).toContain('ok play order unchanged')
+  })
+
+  it('Esc abandons the visit and restores the order it opened on', async () => {
+    // The pick lands, and then the listener presses Esc instead of ( done ).
+    // No line is queued behind the pick: a queued one would answer the read
+    // before the Esc could, which is not what a listener's keyboard does.
+    const { deps, store, settings } = withOrder(['play order', 'bilibili'], (host) => {
+      host.pressEsc()
+      // The menu answer comes after the Esc has been read, not queued behind it.
+      setTimeout(() => host.type('bilibili'), 0)
+    })
+    store.mount('bilibili', { auth: 'browser', browser: 'chrome', mid: '9' })
+    await runSources(deps)
+    expect(settings.current().playOrder).toEqual([...PLAY_ORDER])
+  })
+
+  it('what the card wrote is what the next submit_pick relocates by', async () => {
+    const { deps, store, settings } = withOrder(['play order', 'bilibili', 'done', 'bilibili'])
+    store.mount('bilibili', { auth: 'browser', browser: 'chrome', mid: '9' })
+    // The pick's tools, built BEFORE the card runs and never rebuilt.
+    const provider = new FakeMusicProvider()
+    const hit = (ref: string) => ({ ref, title: 'Kong Kong', uploader: 'Chen Li', durationS: 240, extra: {} })
+    provider.byCatalogue = {
+      youtube: [hit('https://www.youtube.com/watch?v=yt')],
+      bilibili: [hit('https://www.bilibili.com/video/BVb')],
+      netease: [hit('https://music.163.com/#/song?id=5')],
+    }
+    const picks: TrackPick[] = []
+    const tools = musicTools(provider, (p) => picks.push(p), async () => true, {
+      catalogues: () => ['bilibili', 'netease'],
+      playOrder: () => settings.current().playOrder,
+    })
+    const submit = () =>
+      callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Kong Kong', artist: 'Chen Li' })
+
+    await submit()
+    expect(picks.at(-1)?.clip.source).toContain('watch?v=yt')
+    await runSources(deps)
+    await submit()
+    expect(picks.at(-1)?.clip.source).toContain('video/BVb')
   })
 })

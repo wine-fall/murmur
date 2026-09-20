@@ -2,7 +2,7 @@
 // any mounted catalogue is PLAYED from the catalogue highest in the play
 // order. The relocation is code's, never the model's — these tests drive
 // submit_pick directly and read the clip it finishes with.
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { Catalogue, PlayCatalogue, TrackCandidate, TrackPick } from '../src/contracts.ts'
 import { musicTools } from '../src/music/music-tools.ts'
@@ -37,7 +37,7 @@ function build(opts: {
     {
       catalogues: () => opts.mounted ?? ['netease', 'bilibili'],
       onAuthFailure: (err) => auth.push(err),
-      ...(opts.playOrder !== undefined && { playOrder: opts.playOrder }),
+      ...(opts.playOrder !== undefined && { playOrder: () => opts.playOrder as PlayCatalogue[] }),
       debug: (m) => log.push(m),
     },
   )
@@ -137,5 +137,81 @@ describe('play-source preference (spec 14 §2.13)', () => {
     await submit(tools)
     expect(relocations(provider).map((s) => s.catalogue)).toEqual(['bilibili', 'youtube'])
     expect(log).toContain('music.relocate from=netease none reason=no-hit')
+  })
+
+  // Regression, codex review 2026-09-20: a karaoke backing track is the right
+  // length under the right name, and relocating onto one plays the wrong audio
+  // under the model's own announce.
+  it('refuses another recording of the same title', async () => {
+    const { tools, picks } = build({
+      byCatalogue: {
+        youtube: [candidate('https://www.youtube.com/watch?v=abc', { title: 'Kong Kong - Karaoke instrumental', uploader: 'sing along', durationS: 239 })],
+      },
+    })
+    await callTool(tools, 'search_music', { query: 'kong kong', catalogue: 'netease' })
+    await submit(tools)
+    expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
+  })
+
+  // Regression, codex review 2026-09-20: the artist has to show up somewhere in
+  // the hit, or a same-titled song by someone else takes the pick.
+  it('refuses a same-titled hit by someone else', async () => {
+    const { tools, picks } = build({
+      byCatalogue: { youtube: [candidate('https://www.youtube.com/watch?v=abc', { uploader: 'Another Band' })] },
+    })
+    await submit(tools)
+    expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
+    // The same hit, with the artist in its uploader, IS taken.
+    const ok = build({ byCatalogue: { youtube: [candidate('https://www.youtube.com/watch?v=abc', { uploader: 'Chen Li - Topic' })] } })
+    await submit(ok.tools)
+    expect(ok.picks[0]?.clip.source).toBe('https://stream/https://www.youtube.com/watch?v=abc')
+  })
+
+  // Regression, codex review 2026-09-20: a channels pick knows its length, so
+  // the 20 s window must cover that path too — a 3600 s loop version of the
+  // same title is not the song.
+  it("keeps a channels candidate's stated length for the window", async () => {
+    const bili = 'https://www.bilibili.com/video/BV1'
+    const provider = new FakeMusicProvider()
+    provider.byCatalogue = { youtube: [candidate('https://www.youtube.com/watch?v=abc', { durationS: 3600 })] }
+    const picks: TrackPick[] = []
+    const tools = musicTools(
+      provider,
+      (pick) => picks.push(pick),
+      async () => true,
+      { catalogues: () => [], debug: () => {} },
+      { count: () => 1, search: () => [candidate(bili, { durationS: 240 })] },
+    )
+    await callTool(tools, 'search_music', { query: 'kong kong', catalogue: 'channels' })
+    await callTool(tools, 'submit_pick', { ref: bili, why: 'w', title: 'Kong Kong', artist: 'Chen Li' })
+    expect(picks[0]?.clip.source).toBe(`https://stream/${bili}`)
+  })
+
+  // Regression, codex review 2026-09-20: relocation is an optimisation and may
+  // not become the thing the pick waits on.
+  it('gives up on a hung relocation search and plays the original', async () => {
+    const provider = new FakeMusicProvider()
+    provider.candidates = [candidate(NETEASE_REF)]
+    provider.byCatalogue = { bilibili: [], qqmusic: [], netease: [candidate(NETEASE_REF)] }
+    // A search that never settles, exactly as a stuck yt-dlp spawn looks here.
+    const original = provider.search.bind(provider)
+    provider.search = async (query, limit, catalogue) =>
+      catalogue === 'youtube' ? new Promise<TrackCandidate[]>(() => {}) : original(query, limit, catalogue)
+    const picks: TrackPick[] = []
+    const log: string[] = []
+    const tools = musicTools(provider, (p) => picks.push(p), async () => true, {
+      catalogues: () => ['netease', 'bilibili'],
+      debug: (m) => log.push(m),
+    })
+    vi.useFakeTimers()
+    try {
+      const done = callTool(tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Kong Kong', artist: 'Chen Li' })
+      await vi.advanceTimersByTimeAsync(20_000)
+      await done
+    } finally {
+      vi.useRealTimers()
+    }
+    expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
+    expect(log).toContain('music.relocate from=netease none reason=timed-out')
   })
 })

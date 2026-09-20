@@ -24,6 +24,7 @@ const BASE: Settings = {
   muted: false,
   tuiPet: true,
   rwtEnabled: true,
+  playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
 }
 
 function harness(initial: Partial<Settings> = {}, wired: { music?: boolean } = {}) {

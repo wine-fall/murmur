@@ -89,6 +89,10 @@ export const SettingsValuesSchema = z.object({
   tuiPet: z.boolean(),
   // Whether the host is offered real-world material at all (spec 13 §2.6).
   rwtEnabled: z.boolean(),
+  // Where a found song is PLAYED from, best first (spec 14 §2.13). Set from
+  // the /sources play-order card; the ids are spelled out here for the same
+  // reason SourceLine's are — this module ships with the front-end.
+  playOrder: z.array(z.enum(['youtube', 'bilibili', 'qqmusic', 'netease'])),
   // The one OPTIONAL knob (spec 12 §3.9). Absent means the listener never said,
   // and the persona decides; set is an override applied as a directive on top
   // of the persona, never an edit to persona.md. Free text — a language name as
@@ -98,7 +102,7 @@ export const SettingsValuesSchema = z.object({
 
 export type Settings = z.infer<typeof SettingsValuesSchema>
 
-// A mutation (spec 12 §2.4): a partial over the same nine knobs.
+// A mutation (spec 12 §2.4): a partial over the same knobs.
 export const SettingsPatchSchema = z.object({
   anchorsEnabled: z.boolean().optional(),
   musicEnabled: z.boolean().optional(),
@@ -109,6 +113,7 @@ export const SettingsPatchSchema = z.object({
   muted: z.boolean().optional(),
   tuiPet: z.boolean().optional(),
   rwtEnabled: z.boolean().optional(),
+  playOrder: z.array(z.enum(['youtube', 'bilibili', 'qqmusic', 'netease'])).optional(),
   // Empty string is legal HERE and only here: it is how the listener clears the
   // override and hands the language back to the persona (spec 12 §3.9).
   language: z.union([LanguageSchema, z.literal('')]).optional(),

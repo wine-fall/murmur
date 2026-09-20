@@ -246,6 +246,7 @@ export function buildSettingsStore(
       muted: resolved.muted,
       tuiPet: resolved.tuiPet,
       rwtEnabled: resolved.rwtEnabled,
+      playOrder: resolved.playOrder,
     },
     touched: stored,
     log,
@@ -373,8 +374,9 @@ function buildMusic(
         catalogues: taste.catalogues,
         onAuthFailure: (err) => taste.watch.note(err),
         probeDurationS: (s, headers, startS) => probePlayableDurationS(s, config.ffmpegCmd, undefined, headers, startS),
-        // Where a found song plays from (spec 14 §2.13), MURMUR_PLAY_ORDER.
-        playOrder: config.playOrder,
+        // Where a found song plays from (spec 14 §2.13). Read per submit, so
+        // the /sources card lands on the next pick without a restart.
+        playOrder: () => settings.current().playOrder,
       },
     }),
     // Discovery stage timings land in the dev log (issue #76).
@@ -733,6 +735,11 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // The default output language, read once from the machine (spec 06 §3.2).
   // Nothing re-reads it: from here the persona names the language it speaks.
   const language = detectLanguage()
+  // The live settings authority (spec 12 §2.4), seeded from the merged config:
+  // everything below reads it instead of captured scalars. Built BEFORE the
+  // first run and the setup conversation, which turns its language knob (§3.9); the voice knobs
+  // that conversation can change are not settings, so nothing here waits on it.
+  const settings = buildSettingsStore(config, (m) => host.info(m))
   // The listener's taste (spec 14), on a real run only. Built BEFORE the first
   // run: its sources card (§3.9) runs the same /sources conversation the
   // Director later parks on, so the one closure serves both.
@@ -750,6 +757,12 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
             mounts: defaultMounts(taste.build),
             build: (id, entry) => buildSource(id, entry, taste.build),
             forgetCookies: () => taste.build.jars.drop(),
+            // Where a found song plays from (spec 14 §2.13): the card writes
+            // through the same authority the pick reads at submit time.
+            playOrder: {
+              read: () => settings.current().playOrder,
+              write: (order) => void settings.set({ playOrder: [...order] }),
+            },
             openUrl: openInChrome,
           })
   let personaPath = resolvePersonaPath(config, persistent)
@@ -781,11 +794,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // and a successful swap clears it.
   const voiceAuthDown = { current: false }
   const targets = setupTargets(config, { voiceFailing: () => voiceAuthDown.current })
-  // The live settings authority (spec 12 §2.4), seeded from the merged config:
-  // everything below reads it instead of captured scalars. Built BEFORE the
-  // setup conversation, which turns its language knob (§3.9); the voice knobs
-  // that conversation can change are not settings, so nothing here waits on it.
-  const settings = buildSettingsStore(config, (m) => host.info(m))
   let setupMusicOk = false
   if (claude !== null && !quit.requested) {
     const outcome = await runSetup({

@@ -44,9 +44,11 @@ export type TasteToolOptions = {
     headers?: Readonly<Record<string, string>>,
     startS?: number,
   ) => Promise<number | null>
-  // Where a found song is PLAYED from, best first (spec 14 §2.13). Absent =
-  // the default order, so a caller that never heard of the knob still relocates.
-  playOrder?: readonly PlayCatalogue[]
+  // Where a found song is PLAYED from, best first (spec 14 §2.13). Read per
+  // submit like `catalogues`, so the /sources card lands on the next pick
+  // rather than the next boot. Absent = the default order, so a caller that
+  // never heard of the knob still relocates.
+  playOrder?: () => readonly PlayCatalogue[]
   // The dev-log sink MusicProgrammer already feeds; the relocation line joins
   // music.search / music.resolve / music.probe there.
   debug?: (message: string) => void
@@ -93,6 +95,50 @@ const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels'] as 
 // a wrong relocation plays a different song, so the rule fails closed. Upgrade
 // path in spec 14 §2.13.
 const SAME_LENGTH_S = 20
+
+// How long the whole relocation may take before the submit gives up on it and
+// plays what the model picked. Measured: a real YouTube search + resolve +
+// probe is ~5 s, so this leaves room for one miss and still lands well inside
+// the talk that covers a pick.
+const RELOCATE_BUDGET_MS = 15_000
+
+// ponytail: one shared timer, raced against each step — not a per-call
+// AbortSignal. yt-dlp is spawned by the provider and neither it nor ffmpeg
+// takes a signal from here, so the only thing that can be cut short is the
+// waiting; the abandoned spawn ends on its own ceiling.
+function deadlineIn(ms: number): { passed: () => boolean; race: <T>(work: Promise<T>) => Promise<T> } {
+  const until = performance.now() + ms
+  return {
+    passed: () => performance.now() >= until,
+    race: <T,>(work: Promise<T>): Promise<T> =>
+      Promise.race([
+        work,
+        new Promise<T>((_, reject) => {
+          const timer = setTimeout(() => reject(new Error('relocation budget spent')), Math.max(0, until - performance.now()))
+          void work.finally(() => clearTimeout(timer)).catch(() => {})
+        }),
+      ]),
+  }
+}
+
+// A different RECORDING of the same title is a different song to a listener:
+// a karaoke backing track is 240 s of the right length with the right name.
+// A hit whose words say it is one of these, where the submitted title did not,
+// is refused — and refusing costs nothing but the speed-up.
+const OTHER_RECORDING =
+  // The Chinese markers are escaped because committed source is English only
+  // (AGENTS.md): \u4f34\u594f backing track, \u7ffb\u5531 cover,
+  // \u7eaf\u97f3\u4e50 instrumental, \u6296\u97f3\u7248 / dj\u7248 edits.
+  /karaoke|instrumental|cover|remix|nightcore|sped up|slowed|8d audio|\u4f34\u594f|\u7ffb\u5531|\u7eaf\u97f3\u4e50|\u6296\u97f3\u7248|dj\u7248/
+
+// Whoever the model said made it has to show up somewhere in the hit — its
+// title or its uploader — before the pick is moved onto it. A catalogue that
+// spells the artist differently simply keeps the pick where it was.
+function sameArtist(hit: TrackCandidate, artist: string | undefined): boolean {
+  if (artist === undefined) return true
+  const wanted = folded(artist)
+  return folded(hit.title).includes(wanted) || folded(hit.uploader).includes(wanted)
+}
 
 // The curated-channel pool (spec 14 §2.9), read live: a local match over the
 // recent uploads of the channels the listener curated. It is offered only
@@ -197,7 +243,7 @@ export function musicTools(
   const relocate = async (ref: string, title: string, artist: string | undefined): Promise<AudioClip | null> => {
     // A chapter of one specific upload has no equivalent anywhere else.
     if (parseSegmentRef(ref).segment !== undefined) return null
-    const order = taste?.playOrder ?? PLAY_ORDER
+    const order = taste?.playOrder?.() ?? PLAY_ORDER
     // An unknown host is a YouTube ref in everything but spelling — that is
     // where a bare search sends the model, and where `channels` uploads live.
     const own: PlayCatalogue = sourceOfRef(ref) ?? 'youtube'
@@ -208,25 +254,36 @@ export function musicTools(
     const wanted = folded(title)
     const length = stated.get(ref)
     let reason = 'no-hit'
+    // Relocation is an optimisation, and an optimisation may not become the
+    // thing the pick waits on: a single yt-dlp call can sit for 90 s, and the
+    // Director is filling that silence with talk. Past this the original ref
+    // resolves as it always would (codex review).
+    const deadline = deadlineIn(RELOCATE_BUDGET_MS)
     for (const catalogue of better) {
+      if (deadline.passed()) {
+        reason = 'timed-out'
+        break
+      }
       let hits: TrackCandidate[]
       try {
-        hits = await provider.search(`${artist ?? ''} ${title}`.trim(), 5, catalogue)
+        hits = await deadline.race(provider.search(`${artist ?? ''} ${title}`.trim(), 5, catalogue))
       } catch (err) {
         // A lost login here closes that catalogue for the task like any other
         // auth failure, but it must never end a submit that was going fine.
         if (err instanceof SourceAuthError) authResult(err)
-        reason = err instanceof SourceAuthError ? 'auth' : 'search-failed'
+        reason = err instanceof SourceAuthError ? 'auth' : deadline.passed() ? 'timed-out' : 'search-failed'
         continue
       }
       for (const hit of hits) stated.set(hit.ref, hit.durationS)
       const match = hits.find((hit) => {
         const found = folded(hit.title)
         const sameSong = found.includes(wanted) || wanted.includes(found)
-        return sameSong && (length === undefined || Math.abs(hit.durationS - length) <= SAME_LENGTH_S)
+        if (!sameSong || !sameArtist(hit, artist)) return false
+        if (OTHER_RECORDING.test(found) && !OTHER_RECORDING.test(wanted)) return false
+        return length === undefined || Math.abs(hit.durationS - length) <= SAME_LENGTH_S
       })
       if (match === undefined) continue
-      const opened = await openClip(match.ref)
+      const opened = await deadline.race(openClip(match.ref)).catch((): Opened => ({ ok: false, why: 'dead', error: 'timed out' }))
       if (opened.ok) {
         taste?.debug?.(`music.relocate from=${own} to=${catalogue} ok`)
         return opened.clip
@@ -261,7 +318,11 @@ export function musicTools(
       if (closed.has(catalogue ?? 'youtube')) return reply({ ok: false, reason: 'unavailable', mounted: open() })
       // The curated channels are already on disk: matched here, so a search of
       // them costs nothing and cannot fail (spec 14 §2.9).
-      if (catalogue === 'channels') return reply({ candidates: channels?.search(args.query, args.limit) ?? [] })
+      if (catalogue === 'channels') {
+        const found = channels?.search(args.query, args.limit) ?? []
+        for (const c of found) stated.set(c.ref, c.durationS)
+        return reply({ candidates: found })
+      }
       try {
         const candidates = await provider.search(args.query, args.limit, catalogue)
         for (const c of candidates) stated.set(c.ref, c.durationS)
