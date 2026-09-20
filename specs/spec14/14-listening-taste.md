@@ -963,7 +963,11 @@ and the pack's memoisation would be gone for nothing.
 **Red lines** (the reason this is a section and not a tool):
 
 - It runs **in code, before the situation string is assembled**. No new tool
-  is offered to the brain, and no extra model call is made. A pick's median
+  is offered to the brain, and no extra model call is made. The adapter the
+  Director takes is built in `buildTaste` beside the reader, not spelled out
+  at the call site: written out there, `digest` was given no moment
+  parameter and dropped it silently, so every real pick got the static
+  render while the tests were green. A pick's median
   is already 142 s (measured 2026-09-18); this step may not add to it.
 - Its budget is **5 ms**, asserted in its own test as the **median** of
   fifteen warmed runs over a 4000-row ledger. A median, because one
@@ -979,7 +983,7 @@ and the pack's memoisation would be gone for nothing.
 |---|---|---|
 | the local hour | the Director's clock | a bucket word (`morning`, `afternoon`, `evening`, `night`, `late night`) joined to the query terms |
 | the persona's key | the persona line the Director already holds | its content words joined to the query terms |
-| the last three songs' artists | the pick's own avoid-list (03-01 §2.3) | an **exclusion**: no entry by those artists is chosen |
+| the last three songs' artists | the **last three** of the pick's avoid-list (03-01 §2.3) | an **exclusion**: no entry crediting those artists is chosen |
 | the last talk beat | the transcript the pack already carries | its content words, tokenised, are the query terms |
 
 **Tokenising**: the **query** is built with `src/memory/recall.ts`'s exported
@@ -1035,6 +1039,24 @@ ledger, and no `node:sqlite` load on the pick path.
 own file `data/taste/taste.db`, built the way `recall.ts` builds its index and
 sharing none of its tables — a kept song is not a memory, and the
 conversation's recall must never start returning song titles.
+
+**Only the last three.** The pick's avoid-list is up to 256 songs over seven
+days, and handing all of them over as artists deletes a week of a collection
+from the selection -- and costs 10 ms of the 5 ms budget (measured
+2026-09-20). The moment takes the last three of it; the song-level
+avoid-list keeps its own, wider window.
+
+**Per source.** A source with a usable ledger is chosen from it; a source
+whose ledger is missing, unreadable or empty keeps the rows its snapshot
+already has. Pooling from the ledgers alone dropped a whole account from the
+pick while the `Sources` line went on counting it.
+
+**No match, no reordering.** When no term reaches any row the selection
+answers **nothing**, and the render is byte-identical to the one without a
+moment. Ordering the pool by `lastSeen` instead would not be that render:
+`lastSeen` is a READ time, so every row of one refresh shares it and ties
+fall to insertion order. The category bonus and the gone-quiet penalty do
+not count as a match -- they rank rows the terms already reached.
 
 **What is selected**: every musical row, ordered by score, cut by §2.3's own
 line caps (40 songs, 8 watch rows) and the flexible half's weights. So

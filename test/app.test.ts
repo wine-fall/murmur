@@ -84,6 +84,18 @@ describe('app wiring', () => {
     expect(taste.catalogues()).toEqual([])
     expect(taste.lines()).toEqual([])
     expect(taste.reader.digest()).toBe('')
+    // The Director takes this object as it is: assembled at the call site,
+    // `digest` was written without its moment and dropped it silently, so
+    // every pick got the static render (codex review, spec 14 §2.12).
+    const asked: (unknown | undefined)[] = []
+    taste.reader.digest = (moment) => {
+      asked.push(moment)
+      return ''
+    }
+    const moment = { hour: 16, persona: 'p', lastTalk: 't', avoidArtists: [] }
+    taste.forDirector.digest(moment)
+    taste.forDirector.digest()
+    expect(asked).toEqual([moment, undefined])
     taste.store.mount('bilibili', { browser: 'chrome', mid: '1' }, new Date('2026-09-06T10:00:00Z'))
     taste.store.mount('spotify', { clientId: 'c', refreshToken: '<redacted>', accessToken: '<redacted>', expiresAt: 'x' })
     taste.store.markRefreshed('bilibili', new Date('2026-09-06T11:00:00Z'))

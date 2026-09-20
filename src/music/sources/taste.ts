@@ -10,7 +10,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 
 import type { AuthFailure } from './auth.ts'
-import { type Moment, selectForMoment } from './moment.ts'
+import { type Moment, type MomentCandidate, selectForMoment } from './moment.ts'
 
 export const SOURCE_IDS = ['youtube', 'bilibili', 'netease', 'spotify', 'qishui', 'qqmusic'] as const
 export type SourceId = (typeof SOURCE_IDS)[number]
@@ -306,16 +306,16 @@ export function renderTasteDigest(
   // Artists merge across sources by exact string after trim; a top-artist row
   // names the artist in its title.
   const artists = new Map<string, number>()
-  const byLedger = new Map(ledgers.map((l) => [l.source, l.entries]))
+  const byLedger = new Map(ledgers.map((l) => [l.source, l]))
   const countArtist = (item: TasteItem): void => {
     if (!MUSICAL.includes(item.kind)) return
     const name = (item.kind === 'top-artist' ? item.title : (item.artist ?? '')).trim()
     if (name !== '') artists.set(name, (artists.get(name) ?? 0) + 1)
   }
-  for (const [source, entries] of byLedger) {
+  for (const [source, ledger] of byLedger) {
     // The invariant holds over the ledger too: it carries every row that was
     // ever read, including the watch rows the block never shows.
-    for (const item of entries) if (shown(source, item)) countArtist(item)
+    for (const item of ledger.entries) if (shown(source, item)) countArtist(item)
   }
   const lately: { item: TasteItem; order: number }[] = []
   const songs: { item: TasteItem; order: number }[] = []
@@ -343,26 +343,34 @@ export function renderTasteDigest(
 
   lately.sort(byDate)
   songs.sort(byDate)
-  // The moment-matched half. The invariant holds over the ledger exactly as
-  // it holds over a snapshot, and `quiet` is "the last read of this row's
-  // own list did not return it" -- per kind, because a partial refresh
-  // moves one list's clock and not the others'.
+  // The moment-matched half. Per source: a source with a usable ledger is
+  // chosen from it, and a source whose ledger is missing, unreadable or
+  // empty keeps the rows its snapshot already has -- otherwise the pick
+  // silently loses a whole account while the Sources line goes on counting
+  // it. `quiet` is "the last read of this row's own list did not return
+  // it", per kind, because a partial refresh moves one list's clock and not
+  // the others'.
   const matched =
-    moment === undefined || ledgers.length === 0
+    moment === undefined
       ? null
       : selectForMoment(
-          ledgers.flatMap((ledger) =>
-            ledger.entries
-              .filter((item) => shown(ledger.source, item))
+          kept.flatMap(({ snapshot, items }): MomentCandidate[] => {
+            const ledger = byLedger.get(snapshot.source)
+            if (ledger === undefined || ledger.entries.length === 0) {
+              return items.map((item, order) => ({ item, lastSeen: snapshot.takenAt, quiet: false, order }))
+            }
+            return ledger.entries
+              .filter((item) => shown(snapshot.source, item))
               .map((item, order) => ({
                 item,
                 lastSeen: item.lastSeen ?? '',
                 quiet: item.lastSeen !== undefined && (ledger.lastRead?.[item.kind] ?? '') > item.lastSeen,
                 order,
-              })),
-          ),
+              }))
+          }),
           moment,
         )
+
   // The fixed half: who this listener is, in the fewest words, the same on
   // every pick of the day. Sources is served first, out of half the half --
   // an equal third would starve it (it is one phrase per mounted source and

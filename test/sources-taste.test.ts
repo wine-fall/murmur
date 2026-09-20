@@ -491,6 +491,35 @@ describe('the moment-matched half', () => {
     expect(digest).toContain('"whatever the window holds" Low Antenna')
   })
 
+  // codex review: the candidate pool was built from the ledgers alone, so a
+  // source whose ledger is missing, unreadable or empty lost its songs from
+  // the pick entirely -- while the Sources line went on counting them.
+  it('keeps a source whose ledger is missing or empty, per source', () => {
+    const spotify: TasteSnapshot = {
+      source: 'spotify',
+      takenAt: '2026-09-06T10:00:00.000Z',
+      items: [{ kind: 'liked', title: 'only in the snapshot', artist: 'Slow Marina' }],
+    }
+    const empty: TasteLedger = { source: 'spotify', updatedAt: '', entries: [] }
+    for (const ledgers of [[ledger], [ledger, empty]]) {
+      const digest = renderTasteDigest([snapshot, spotify], NOW, DIGEST_BUDGET, ledgers, moment)
+      expect(digest).toContain('"only in the snapshot" Slow Marina')
+      // ...and the source that does have one is still chosen from it.
+      expect(digest).toContain('another harbour song')
+    }
+  })
+
+  // codex review: `lastSeen` is a READ time, so every row of one refresh
+  // shares it and the order falls to insertion -- which is not the newest
+  // first the static render gives. With nothing matched there is no moment
+  // signal, so the render must be the one it would have been.
+  it('is byte-identical to the static render when the moment matches nothing', () => {
+    const silent: Moment = { hour: 16, persona: '', lastTalk: '', avoidArtists: [] }
+    expect(renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], silent)).toBe(
+      renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger]),
+    )
+  })
+
   it('leaves the fixed half and the budget where they were', () => {
     const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], moment)
     const line = (lead: string): string => digest.split('\n').find((l) => l.startsWith(`${lead}: `))!

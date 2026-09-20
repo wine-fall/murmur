@@ -114,12 +114,13 @@ function score(item: TasteItem, terms: readonly Term[], quiet: boolean): number 
 const byRecency = (a: MomentCandidate, b: MomentCandidate): number =>
   a.lastSeen === b.lastSeen ? a.order - b.order : a.lastSeen < b.lastSeen ? 1 : -1
 
-// The songs and the watch rows the moment asks for, each in score order.
-// With no terms every row scores 0 and the order is newest first, which is
-// what the digest rendered before this existed — so an unmatched pick, a
-// ledger-less source and a silent moment all degrade to today by the same
-// path rather than by a special case.
-export function selectForMoment(candidates: readonly MomentCandidate[], moment: Moment): { songs: TasteItem[]; lately: TasteItem[] } {
+// The songs and the watch rows the moment asks for, each in score order —
+// or **null** when the moment matched nothing at all, which is the caller's
+// signal to render what it would have rendered anyway. Null rather than an
+// order of its own: `lastSeen` is a READ time, so every row of one refresh
+// shares it and ties fall to insertion order, which is not the newest-first
+// the static render gives. No signal means no reordering.
+export function selectForMoment(candidates: readonly MomentCandidate[], moment: Moment): { songs: TasteItem[]; lately: TasteItem[] } | null {
   // Classified once, not once per row.
   const terms: Term[] = momentTerms(moment).map((word) => ({ word, loose: CJK.test(word) }))
   // A credit, not a string: "Corin Vanterpool & Static Meadow" IS the band
@@ -130,10 +131,12 @@ export function selectForMoment(candidates: readonly MomentCandidate[], moment: 
     const name = fold(artist)
     return name !== '' && avoid.some(({ word, loose }) => carries(name, word, loose))
   }
-  const scored = candidates
-    .filter((c) => !played(c.item.artist))
-    .map((c) => ({ c, score: score(c.item, terms, c.quiet) }))
-    .sort((a, b) => b.score - a.score || byRecency(a.c, b.c))
+  const scored = candidates.filter((c) => !played(c.item.artist)).map((c) => ({ c, matched: score(c.item, terms, c.quiet) }))
+  // The category bonus and the gone-quiet penalty are not a match: they
+  // rank rows the terms already reached, and on their own they are not a
+  // reason to reorder the block.
+  if (!scored.some((s) => s.matched >= 1)) return null
+  scored.sort((a, b) => b.matched - a.matched || byRecency(a.c, b.c))
   return {
     songs: scored.filter((s) => s.c.item.kind === 'liked').map((s) => s.c.item),
     lately: scored.filter((s) => s.c.item.kind === 'history').map((s) => s.c.item),

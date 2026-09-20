@@ -163,6 +163,31 @@ describe('the digest reaches the brain (spec 14 §2.3/§5.3)', () => {
     // title that happens to name another band cannot drop that band's songs.
     for (const artist of moment.avoidArtists) expect(artist).not.toContain('\u2014')
   })
+
+  // codex review: the pick's avoid-list is up to 256 songs over seven days,
+  // and handing all of them over as artists deleted a week of artists from
+  // the selection -- and cost 10 ms of a 5 ms budget. The moment excludes
+  // the last THREE (spec 14 §2.12); the song-level avoid-list is untouched.
+  it('excludes the last three artists, not a week of them', async () => {
+    const player = new FakeMixingPlayer()
+    const source = new FakeTrackSource()
+    source.picks = [pickOf('https://stream/1')]
+    const taste = fakeTaste()
+    const memory = new InProcessMemoryStore()
+    for (let i = 0; i < 8; i++) memory.recordEvent('song', `Song ${i} \u2014 Band ${i}`)
+    const { director } = setup({ player, memory, music: { source, cadence: new EveryNCadence(1), engine: player }, taste })
+    const run = director.run(2)
+    await until(() => source.contexts.length >= 1, 'a pick was asked for')
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    const moment = taste.moments.find((m) => m !== undefined)!
+    expect(moment.avoidArtists.length).toBeLessThanOrEqual(3)
+    expect(moment.avoidArtists).toContain('Band 7')
+    expect(moment.avoidArtists).not.toContain('Band 0')
+    // The pick's own avoid-list still carries every one of them.
+    expect(source.contexts[0]!.avoid!.length).toBeGreaterThan(3)
+  })
 })
 
 describe('boot never waits (spec 14 §3.4/§5.9)', () => {

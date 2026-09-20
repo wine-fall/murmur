@@ -148,6 +148,9 @@ const AVOID_WINDOW_DAYS = 7
 // line per song in the pick prompt. It is not an anti-repeat depth — set it
 // small and the time rule collapses back into the count rule it replaced.
 const AVOID_CAP = 256
+// How many of those the moment excludes by artist (spec 14 §2.12): the last
+// three on or near the air, newest last.
+const MOMENT_AVOID = 3
 
 // spec 04 §3.1: how many picks the music look-ahead holds. Two, so the pick
 // behind the one on air is also standing by — which is what makes a second
@@ -883,7 +886,11 @@ export class Director {
       hour: new Date().getHours(),
       persona: this.persona(),
       lastTalk: this.deps.memory.recent(1).at(-1)?.text ?? '',
-      avoidArtists: avoid.map(labelArtist).filter((a) => a !== ''),
+      // The last three, not the avoid-list's whole week: excluding every
+      // artist heard in seven days deletes most of a collection from the
+      // selection, and 256 credits to test blows the 5 ms budget. The
+      // song-level avoid-list keeps its own, wider window.
+      avoidArtists: avoid.slice(-MOMENT_AVOID).map(labelArtist).filter((a) => a !== ''),
     }
   }
 
