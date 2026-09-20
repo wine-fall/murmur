@@ -64,7 +64,7 @@ import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
 import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
 import { accentFor, CARD, CARD_INK, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
-import { cells, clock, fit, progressBar } from './progress.ts'
+import { cells, clock, fit, playedS, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
 import {
   awayGreeting,
@@ -769,7 +769,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     // The identity of the TRACK, not of the object: a re-emit during the song
     // (a typed line refreshing presence) must not restart the interval.
   }, [track?.startedAt, track?.durationS])
-  const elapsedS = track === null ? 0 : (now - track.startedAt) / 1000
+  const elapsedS = track === null ? 0 : playedS(track.startedAt, track.durationS, now)
 
   // The alive band's composition follows the live pet setting (spec 12 §3.7),
   // with the env override resolved inside bandLayout.

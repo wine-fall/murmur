@@ -27,6 +27,17 @@ export function clock(seconds: number): string {
   return `${h > 0 ? `${h}:` : ''}${mm}:${String(s).padStart(2, '0')}`
 }
 
+// How far into the track the strip should read, on the clock the front-end keeps
+// (spec 10 3.3). Bounded by the length, because the state stays on music after
+// the audio has ended -- a coda riding the outro (spec 04 3.3) holds it there
+// for as long as it takes to say, and unbounded wall clock prints 3:03 of a
+// 2:54 song. A length of 0 is "unknown" (no rail), so there is nothing to bound
+// it with.
+export function playedS(startedAt: number, durationS: number, now: number): number {
+  const played = Math.max(0, (now - startedAt) / 1000)
+  return durationS > 0 ? Math.min(played, durationS) : played
+}
+
 // The rail split in two so the caller can ink them differently: what has played
 // (full cells plus the eighth-cell leading edge) and what has not. The two
 // always add up to exactly `width` cells.
