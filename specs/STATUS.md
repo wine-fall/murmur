@@ -27,22 +27,15 @@ by-ear issue below. Everything else is under **Open** — engineering items
 first, then the by-ear passes.
 
 **In flight: spec 14's taste amendment**, three PRs in order, each on the
-previous one's merged tip (they all touch `taste.ts` / `refresh.ts` /
-`store.ts`):
-
-1. ~~**The digest spends its budget on music** (§2.3)~~ — landed, PR #278.
-2. **The ledger and the per-kind clock** (§2.11, §3.4) — an append-only file
-   per source beside the snapshot; `history` re-read every 3 h, collections
-   every 24 h, only the due lists read.
-3. **The moment-matched half** (§2.12) — the pick's rows chosen in code from
-   the ledger against the hour, the persona, the last three artists and the
-   last talk beat. No new tool, no extra model call, 5 ms.
+previous one's merged tip (all touch `taste.ts` / `refresh.ts` / `store.ts`).
+§2.3's budget landed (#278); the ledger and per-kind clock (§2.11, §3.4) are
+in flight; the moment-matched half (§2.12) is next.
 
 **No listener data in the repository** (2026-09-20, user): nothing from
 `~/.murmur` — a song, artist, playlist or channel name, an account name, a
-url — goes into git. Test fixtures are invented; the real snapshots are
-measured only in the gitignored `scratch/`, and a PR body or commit message
-carries numbers, never content.
+url — goes into git. Fixtures are invented, the real snapshots are measured
+only in the gitignored `scratch/`, and a PR body or commit message carries
+numbers, never content.
 
 ## Open
 
