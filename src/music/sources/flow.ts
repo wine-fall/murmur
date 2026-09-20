@@ -230,7 +230,11 @@ function parsePick(line: string, rows: readonly MenuRow[]): Set<MenuKey> | strin
   for (const word of line.split(/\s+/).filter((w) => w !== '')) {
     const byNumber = /^\d+$/.test(word) ? rows[Number(word) - 1]?.key : undefined
     const byLabel = rows.find((row) => row.label.toLowerCase() === word)?.key
-    const key = byNumber ?? NAMES[word] ?? byLabel
+    // The TUI answers with the row's own key (`playOrder`), lowercased on the
+    // way in — a label of two words cannot be matched as one, so the key is
+    // read directly rather than spelled into NAMES per row (codex review).
+    const byKey = rows.find((row) => row.key.toLowerCase() === word)?.key
+    const key = byNumber ?? NAMES[word] ?? byLabel ?? byKey
     if (key === undefined || !rows.some((row) => row.key === key)) return `I didn't catch "${word}" — numbers or names from the list`
     picked.add(key)
   }
@@ -509,16 +513,24 @@ async function runPlayOrder(
       playOrder.write(opened)
       return 'ok play order unchanged'
     }
-    // Enter with the current first still selected, or the done button.
-    if (line === '' || line === 'done') break
-    const picked = rows.find(
-      (row, i) => row.key === line || row.label.toLowerCase() === line || String(i + 1) === line,
-    )
-    if (picked === undefined) {
-      result = `-- I didn't catch "${line}" — numbers or names from the list`
+    // A list answers with its ticked row AND, when a button was pressed, that
+    // button's key — `youtube done`, not `done` (spec 10 §3.2-D). So the line
+    // is read as the words it is, and the plain host's single word is the
+    // same read with one word in it.
+    const words = line.split(/\s+/).filter((w) => w !== '')
+    const named = words.map((word) => rows.find((row, i) => row.key.toLowerCase() === word || row.label.toLowerCase() === word || String(i + 1) === word))
+    const miss = words.find((_, i) => named[i] === undefined)
+    if (miss !== undefined) {
+      result = `-- I didn't catch "${miss}" — numbers or names from the list`
       continue
     }
-    if (picked.key === 'done') break
+    // Enter with nothing, the done button, or the row that is already first:
+    // three ways of saying "keep this order".
+    const picked = named.find((row) => row?.key !== 'done')
+    if (words.length === 0 || named.some((row) => row?.key === 'done')) break
+    // The row drawn as 1st, which on a card that hides an unmounted catalogue
+    // is the first one that will actually play.
+    if (picked === undefined || picked.key === rows[0]?.key) break
     order = promote(order, picked.key as PlayCatalogue)
     playOrder.write(order)
     result = orderLine(order)

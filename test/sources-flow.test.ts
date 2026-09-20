@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import { SourceAuthWatch } from '../src/music/sources/auth.ts'
-import { runSources, SOURCES_OFFER, type BrowserMounts, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
+import { PLAY_ORDER_QUESTION, runSources, SOURCES_OFFER, type BrowserMounts, type SourceMounts, type SourcesFlowDeps } from '../src/music/sources/flow.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { BUNDLED_CLIENT_ID, CLIENT_ID_ENV } from '../src/music/sources/spotify.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
@@ -18,6 +18,7 @@ import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/
 import { quitLatch } from '../src/setup/guide.ts'
 import { PLAY_ORDER, type TrackPick } from '../src/contracts.ts'
 import { musicTools } from '../src/music/music-tools.ts'
+import { SettingsValuesSchema } from '../src/host/ipc.ts'
 import { readSettingsFile, SETTINGS_FILE, SettingsStore } from '../src/host/settings.ts'
 import { callTool, FakeHost, FakeMusicProvider } from './fakes.ts'
 
@@ -1055,5 +1056,41 @@ describe('the play order card (spec 14 §2.13/§5.18)', () => {
     await runSources(deps)
     await submit()
     expect(picks.at(-1)?.clip.source).toContain('video/BVb')
+  })
+
+  // Regression, codex review round 2: the TUI answers with the row's own KEY
+  // and, on a button press, the ticks alongside it (spec 10 §3.2-D). Every
+  // test above types what a plain host types, which is the other shape — and
+  // the shape that was passing while the default front-end could not open the
+  // card at all. These are the lines `pickAnswer` actually produces.
+  it('takes the answer the TUI sends, not only the one a plain host types', async () => {
+    // Pressing ( play order ) on the menu: the ticks plus the row's key.
+    const { host, deps, store, settings } = withOrder(['youtube playOrder', 'bilibili', 'bilibili done', 'youtube bilibili'])
+    store.mount('youtube', { browser: 'chrome' })
+    store.mount('bilibili', { auth: 'browser', browser: 'chrome', mid: '9' })
+    await runSources(deps)
+    // The card opened (it did not answer "I didn't catch"), the pick landed,
+    // and `<ticked> done` closed it.
+    expect(host.asks[1]!.text).toContain(PLAY_ORDER_QUESTION)
+    expect(settings.current().playOrder).toEqual(['bilibili', 'youtube', 'qqmusic', 'netease'])
+    expect(host.asks.at(-1)!.text).toContain('ok play order: Bilibili > YouTube')
+  })
+
+  it('reads the row that is already first as keep-this-order, which is what Enter sends', async () => {
+    // A single-pick list never answers '': Enter on the ticked first row sends
+    // that row's key, and taking it as a promotion would never close the card.
+    const { host, deps, store, settings } = withOrder(['playOrder', 'youtube', 'youtube'])
+    store.mount('youtube', { browser: 'chrome' })
+    await runSources(deps)
+    expect(host.asks.at(-1)!.text).toContain('ok play order unchanged')
+    expect(settings.current().playOrder).toEqual([...PLAY_ORDER])
+  })
+
+  // Regression, codex review round 2: a hand-edited settings.json must not be
+  // able to hide a catalogue from a card that can only promote what it shows.
+  it('completes a short or repeating stored order at the boundary', () => {
+    expect(SettingsValuesSchema.shape.playOrder.parse(['bilibili'])).toEqual(['bilibili', 'youtube', 'qqmusic', 'netease'])
+    expect(SettingsValuesSchema.shape.playOrder.parse([])).toEqual([...PLAY_ORDER])
+    expect(SettingsValuesSchema.shape.playOrder.parse(['netease', 'netease'])).toEqual(['netease', 'youtube', 'bilibili', 'qqmusic'])
   })
 })

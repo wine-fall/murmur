@@ -129,7 +129,12 @@ const OTHER_RECORDING =
   // The Chinese markers are escaped because committed source is English only
   // (AGENTS.md): \u4f34\u594f backing track, \u7ffb\u5531 cover,
   // \u7eaf\u97f3\u4e50 instrumental, \u6296\u97f3\u7248 / dj\u7248 edits.
-  /karaoke|instrumental|cover|remix|nightcore|sped up|slowed|8d audio|\u4f34\u594f|\u7ffb\u5531|\u7eaf\u97f3\u4e50|\u6296\u97f3\u7248|dj\u7248/
+  /karaoke|instrumental|cover|remix|nightcore|sped up|slowed|8d audio|\u4f34\u594f|\u7ffb\u5531|\u7eaf\u97f3\u4e50|\u6296\u97f3\u7248|dj\u7248/g
+
+// Which of those words a title carries. A hit may carry no marker the
+// submitted title did not: asking for a remix and getting "remix - karaoke"
+// is still the wrong recording (codex review).
+const markers = (title: string): Set<string> => new Set(title.match(OTHER_RECORDING) ?? [])
 
 // Whoever the model said made it has to show up somewhere in the hit — its
 // title or its uploader — before the pick is moved onto it. A catalogue that
@@ -279,8 +284,11 @@ export function musicTools(
         const found = folded(hit.title)
         const sameSong = found.includes(wanted) || wanted.includes(found)
         if (!sameSong || !sameArtist(hit, artist)) return false
-        if (OTHER_RECORDING.test(found) && !OTHER_RECORDING.test(wanted)) return false
-        return length === undefined || Math.abs(hit.durationS - length) <= SAME_LENGTH_S
+        const asked = markers(wanted)
+        if ([...markers(found)].some((word) => !asked.has(word))) return false
+        // yt-dlp prints a missing duration as 0 (`parseSearchOutput`), and an
+        // unknown length is not a length to hold a hit against.
+        return length === undefined || length === 0 || Math.abs(hit.durationS - length) <= SAME_LENGTH_S
       })
       if (match === undefined) continue
       const opened = await deadline.race(openClip(match.ref)).catch((): Opened => ({ ok: false, why: 'dead', error: 'timed out' }))

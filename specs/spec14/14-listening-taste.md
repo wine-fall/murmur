@@ -1165,7 +1165,22 @@ ok play order: Bilibili > YouTube > QQ Music > NetEase     <- the previous pick
   restored, however many picks were made inside it, and the menu comes back
   with `ok play order unchanged`.
 - Plain host: numbers or names, the same one-word-fails-the-line rule as the
-  menu itself.
+  menu itself. **A list answers with its ticked row and, on a button press,
+  that button's key** (spec 10 §3.2-D) — `youtube done`, not `done` — so the
+  answer is read as the words it is, and the row's own key is an answer
+  everywhere a label or a number is (*codex review, 2026-09-20: the TUI sends
+  `playOrder`, which no label or name could match*).
+- **The stored order is completed at the settings boundary**: a hand-edited
+  `settings.json` holding a short or repeating list is filled out in default
+  order rather than refused, because the card can only promote what it shows
+  and a short list would hide a catalogue with no way back.
+
+Matching a relocation candidate carries one more rule than containment and the
+window: a hit may carry **no recording marker the submitted title did not**
+(karaoke, instrumental, cover, remix, and their Chinese spellings), and the
+artist must appear in the hit's title or uploader when one was submitted. A
+stated length of `0` is yt-dlp's "unknown", not a length to hold a hit
+against. All three fail closed to the original ref.
 
 ponytail: promotion is the whole vocabulary — no drag, no move-up/move-down,
 no rank typing. Three picks put four catalogues in any order, and one key per

@@ -75,6 +75,16 @@ export const MIX_EVERY_N: Record<MixName, number> = {
 export const LANGUAGE_MAX = 40
 const LanguageSchema = z.string().trim().min(1).max(LANGUAGE_MAX).regex(/^[^\n\r]+$/)
 
+// The stored order always holds all four catalogues, whatever it is handed
+// (spec 14 §2.13): a hand-edited settings.json naming one, or naming one
+// twice, is completed in default order rather than refused — the card can
+// only promote what it is shown, so a short list would hide a catalogue with
+// no way to bring it back.
+const PLAY_ORDER_IDS = ['youtube', 'bilibili', 'qqmusic', 'netease'] as const
+export const PlayOrderSchema = z
+  .array(z.enum(PLAY_ORDER_IDS))
+  .transform((order) => [...new Set([...order, ...PLAY_ORDER_IDS])])
+
 export const SettingsValuesSchema = z.object({
   anchorsEnabled: z.boolean(),
   musicEnabled: z.boolean(),
@@ -92,7 +102,7 @@ export const SettingsValuesSchema = z.object({
   // Where a found song is PLAYED from, best first (spec 14 §2.13). Set from
   // the /sources play-order card; the ids are spelled out here for the same
   // reason SourceLine's are — this module ships with the front-end.
-  playOrder: z.array(z.enum(['youtube', 'bilibili', 'qqmusic', 'netease'])),
+  playOrder: PlayOrderSchema,
   // The one OPTIONAL knob (spec 12 §3.9). Absent means the listener never said,
   // and the persona decides; set is an override applied as a directive on top
   // of the persona, never an edit to persona.md. Free text — a language name as
@@ -113,7 +123,7 @@ export const SettingsPatchSchema = z.object({
   muted: z.boolean().optional(),
   tuiPet: z.boolean().optional(),
   rwtEnabled: z.boolean().optional(),
-  playOrder: z.array(z.enum(['youtube', 'bilibili', 'qqmusic', 'netease'])).optional(),
+  playOrder: PlayOrderSchema.optional(),
   // Empty string is legal HERE and only here: it is how the listener clears the
   // override and hands the language back to the persona (spec 12 §3.9).
   language: z.union([LanguageSchema, z.literal('')]).optional(),

@@ -214,4 +214,32 @@ describe('play-source preference (spec 14 §2.13)', () => {
     expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
     expect(log).toContain('music.relocate from=netease none reason=timed-out')
   })
+
+  // Regression, codex review round 2: a marker the submitted title already
+  // carries must not wave every OTHER marker through with it.
+  it('refuses a hit that adds a recording marker the pick did not ask for', async () => {
+    const { tools, picks } = build({
+      byCatalogue: { youtube: [candidate('https://www.youtube.com/watch?v=abc', { title: 'Kong Kong (Remix) - Karaoke' })] },
+    })
+    await callTool(tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Kong Kong (Remix)', artist: 'Chen Li' })
+    expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
+    // The remix itself is still the song it asked for.
+    const ok = build({ byCatalogue: { youtube: [candidate('https://www.youtube.com/watch?v=abc', { title: 'Kong Kong (Remix)' })] } })
+    await callTool(ok.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Kong Kong (Remix)', artist: 'Chen Li' })
+    expect(ok.picks[0]?.clip.source).toContain('watch?v=abc')
+  })
+
+  // Regression, codex review round 2: yt-dlp prints a missing duration as 0,
+  // and a 0 held against a 20 s window refuses every real hit.
+  it('treats a zero stated length as no length at all', async () => {
+    const { tools, picks } = build({
+      byCatalogue: {
+        netease: [candidate(NETEASE_REF, { durationS: 0 })],
+        youtube: [candidate('https://www.youtube.com/watch?v=abc', { durationS: 240 })],
+      },
+    })
+    await callTool(tools, 'search_music', { query: 'kong kong', catalogue: 'netease' })
+    await submit(tools)
+    expect(picks[0]?.clip.source).toContain('watch?v=abc')
+  })
 })
