@@ -14,7 +14,7 @@ import { setCookieHeader } from './cookies.ts'
 import type { MountResult } from './netease.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const API = 'https://api.bilibili.com'
 const PASSPORT = 'https://passport.bilibili.com'
@@ -278,12 +278,14 @@ export class BilibiliSource implements TasteSource {
 
   // What they watched, who they took to lately, who they keep going back to,
   // and the account's own audio uploads (spec 14 §2.3).
-  async snapshot(): Promise<TasteSnapshot> {
+  readonly kinds = ['history', 'follows', 'frequents', 'liked'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
     const items: TasteItem[] = [
-      ...(await this.client.history(BOUNDS.history)),
-      ...(await this.client.followings(this.entry.mid, BOUNDS.follows, 'follows')),
-      ...(await this.client.followings(this.entry.mid, BOUNDS.follows, 'frequents')),
-      ...(await this.client.spaceAudio(this.entry.mid, BOUNDS.liked)),
+      ...(asked(kinds, 'history') ? await this.client.history(BOUNDS.history) : []),
+      ...(asked(kinds, 'follows') ? await this.client.followings(this.entry.mid, BOUNDS.follows, 'follows') : []),
+      ...(asked(kinds, 'frequents') ? await this.client.followings(this.entry.mid, BOUNDS.follows, 'frequents') : []),
+      ...(asked(kinds, 'liked') ? await this.client.spaceAudio(this.entry.mid, BOUNDS.liked) : []),
     ]
     return { source: 'bilibili', takenAt: this.now().toISOString(), items }
   }

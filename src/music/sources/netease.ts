@@ -15,7 +15,7 @@ import { SourceAuthError } from './auth.ts'
 import { setCookieHeader } from './cookies.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const API_BASE = 'https://music.163.com/api'
 const SONG_URL = 'https://music.163.com/#/song?id='
@@ -331,13 +331,19 @@ export class NeteaseSource implements TasteSource {
   // contribute their names only. The login is checked first: the playlist
   // endpoints serve a public list anonymously, and a snapshot that "worked"
   // on a cookie that no longer signs in would hide an expired mount.
-  async snapshot(): Promise<TasteSnapshot> {
+  readonly kinds = ['liked', 'playlist'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
+    // The identity probe runs whatever is due: a read that quietly returned
+    // nothing because the cookie died is the failure this throw exists for.
     if ((await this.client.account()) === null) throw new SourceAuthError('netease', 'login-required', 'the cookie no longer signs in')
-    const liked = await this.client.playlistTracks(this.entry.likedPlaylistId, BOUNDS.liked)
-    const playlists = (await this.client.playlists(this.entry.userId))
-      .filter((p) => p.id !== this.entry.likedPlaylistId)
-      .slice(0, BOUNDS.playlist)
-      .map((p): TasteItem => ({ kind: 'playlist', title: p.name }))
+    const liked = asked(kinds, 'liked') ? await this.client.playlistTracks(this.entry.likedPlaylistId, BOUNDS.liked) : []
+    const playlists = !asked(kinds, 'playlist')
+      ? []
+      : (await this.client.playlists(this.entry.userId))
+          .filter((p) => p.id !== this.entry.likedPlaylistId)
+          .slice(0, BOUNDS.playlist)
+          .map((p): TasteItem => ({ kind: 'playlist', title: p.name }))
     return { source: 'netease', takenAt: this.now().toISOString(), items: [...liked, ...playlists] }
   }
 }

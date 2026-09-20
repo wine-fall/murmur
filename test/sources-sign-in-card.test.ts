@@ -39,6 +39,7 @@ function chrome(state: string, env: NodeJS.ProcessEnv = {}): ChromeDeps {
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
+  readonly kinds = ['liked'] as const
   constructor(id: SourceId) {
     this.id = id
   }

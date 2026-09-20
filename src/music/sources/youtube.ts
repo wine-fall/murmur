@@ -17,7 +17,7 @@ import type { CookieLease } from './cookies.ts'
 import { flatEntries } from './flat.ts'
 import type { MountResult } from './netease.ts'
 import type { BrowserName } from './store.ts'
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 export type YouTubeEntry = { browser: BrowserName; profile?: string | undefined }
 
@@ -91,8 +91,13 @@ export class YouTubeSource implements TasteSource {
     return name === null ? { ok: false, reason: 'login-required' } : { ok: true, who: name }
   }
 
-  async snapshot(): Promise<TasteSnapshot> {
-    const [history, subs] = await Promise.all([this.list(':ythistory', BOUNDS.history), this.list(':ytsubs', BOUNDS.subscription)])
+  readonly kinds = ['history', 'subscription'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
+    const [history, subs] = await Promise.all([
+      asked(kinds, 'history') ? this.list(':ythistory', BOUNDS.history) : [],
+      asked(kinds, 'subscription') ? this.list(':ytsubs', BOUNDS.subscription) : [],
+    ])
     const items: TasteItem[] = [
       // History rows carry no channel in the flat list; the title is the fact.
       ...history.map((e): TasteItem => ({ kind: 'history', title: e.title, ...(e.uploader !== '' && { artist: e.uploader }), ref: e.url })),

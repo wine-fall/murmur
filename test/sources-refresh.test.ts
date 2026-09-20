@@ -10,33 +10,41 @@ import { describe, expect, it } from 'vitest'
 import { SourceAuthError, SourceAuthWatch } from '../src/music/sources/auth.ts'
 import { CHROME_PROFILE_ENV } from '../src/music/sources/chrome.ts'
 import { BrowserCookieError } from '../src/music/sources/cookies.ts'
+import { emptyLedger } from '../src/music/sources/ledger.ts'
 import { TasteRefresher } from '../src/music/sources/refresh.ts'
 import { SourcesStore } from '../src/music/sources/store.ts'
-import type { SourceId, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
+import type { SourceId, TasteItem, TasteKind, TasteSnapshot, TasteSource } from '../src/music/sources/taste.ts'
 import { FakeHost, until } from './fakes.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
+  kinds: readonly TasteKind[] = ['liked']
   snapshots = 0
+  // What each call was asked for, so a test can see the clock's decision
+  // rather than infer it from the rows.
+  asked: (readonly TasteKind[] | undefined)[] = []
   fail: Error | null = null
   hang = false
-  items = [{ kind: 'liked' as const, title: 'a', artist: 'b' }]
+  items: TasteItem[] = [{ kind: 'liked', title: 'a', artist: 'b' }]
 
-  constructor(id: SourceId) {
+  constructor(id: SourceId, kinds?: readonly TasteKind[]) {
     this.id = id
+    if (kinds !== undefined) this.kinds = kinds
   }
 
   async verify() {
     return { ok: true as const, who: 'me' }
   }
 
-  async snapshot(): Promise<TasteSnapshot> {
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
     this.snapshots++
+    this.asked.push(kinds)
     if (this.hang) await new Promise<never>(() => {})
     if (this.fail !== null) throw this.fail
-    return { source: this.id, takenAt: NOW.toISOString(), items: this.items }
+    const wanted = this.items.filter((i) => kinds === undefined || kinds.includes(i.kind))
+    return { source: this.id, takenAt: NOW.toISOString(), items: wanted }
   }
 }
 
@@ -53,6 +61,12 @@ function build(over: { now?: Date } = {}) {
     now: () => over.now ?? NOW,
   })
   return { store, host, sources, refresher }
+}
+
+// The read clock lives in the ledger file (spec 14 §2.11), so a test that
+// wants a list to look already-read stamps it there.
+function markRead(store: SourcesStore, id: SourceId, lastRead: Partial<Record<TasteKind, string>>): void {
+  store.writeLedger({ ...(store.readLedger(id) ?? emptyLedger(id)), lastRead })
 }
 
 describe('TasteRefresher.maybeRefresh (boot policy)', () => {
@@ -72,11 +86,12 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
   it('leaves a fresh snapshot alone and refreshes a stale one', async () => {
     const { store, sources, refresher } = build()
     store.mount('youtube', { browser: 'chrome' }, new Date('2026-09-06T00:00:00Z'))
-    store.writeSnapshot({ source: 'youtube', takenAt: '2026-09-06T00:00:00.000Z', items: [] })
-    store.markRefreshed('youtube', new Date('2026-09-06T00:00:00Z')) // 12 h ago: fresh
+    store.writeSnapshot({ source: 'youtube', takenAt: '2026-09-06T11:30:00.000Z', items: [] })
+    // Both of YouTube's lists read half an hour ago: nothing is due.
+    markRead(store, 'youtube', { history: '2026-09-06T11:30:00.000Z', subscription: '2026-09-06T11:30:00.000Z' })
     store.mount('spotify', { clientId: 'c', refreshToken: 'r', accessToken: 'a', expiresAt: 'x' }, new Date('2026-09-01T00:00:00Z'))
-    store.markRefreshed('spotify', new Date('2026-09-04T00:00:00Z')) // 2 days ago: stale
-    const yt = new FakeSource('youtube')
+    markRead(store, 'spotify', { liked: '2026-09-04T00:00:00.000Z' }) // 2 days ago: stale
+    const yt = new FakeSource('youtube', ['history', 'subscription'])
     const sp = new FakeSource('spotify')
     sources.set('youtube', yt)
     sources.set('spotify', sp)
@@ -232,6 +247,123 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
 // A mount binds one account, and the account lives in one Chrome profile
 // (spec 14 §3.1). Refresh reads the pin; it never re-guesses, because
 // re-guessing is what quietly moved a mount to another profile's login.
+// spec 14 §3.4, the per-kind clock: what the listener is on right now is a
+// different question from what they have collected, and asking both at the
+// same cadence meant either a stale afternoon or eight needless collection
+// reads a day.
+describe('the per-kind refresh clock', () => {
+  const HOURS = (n: number): string => new Date(NOW.getTime() - n * 3_600_000).toISOString()
+
+  it('asks only for the lists that are due, and stamps the ones it asked for', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome' }, new Date('2026-09-01T00:00:00Z'))
+    // The watch history is 4 h old (due at 3 h); the subscriptions were read
+    // 4 h ago too but ride the same 3 h clock, so both are due. The liked
+    // collection of the source beside it is 4 h old and is not.
+    markRead(store, 'youtube', { history: HOURS(4), subscription: HOURS(4) })
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    markRead(store, 'netease', { liked: HOURS(4), playlist: HOURS(4) })
+    const yt = new FakeSource('youtube', ['history', 'subscription'])
+    const ne = new FakeSource('netease', ['liked', 'playlist'])
+    sources.set('youtube', yt)
+    sources.set('netease', ne)
+    expect(refresher.maybeRefresh()).toBe(true)
+    await until(() => yt.snapshots === 1, 'the due lists read')
+    await new Promise((r) => setTimeout(r, 20))
+    expect(yt.asked).toEqual([['history', 'subscription']])
+    expect(ne.snapshots).toBe(0)
+    expect(store.readLedger('youtube')?.lastRead).toEqual({ history: NOW.toISOString(), subscription: NOW.toISOString() })
+  })
+
+  it('asks for the collection too once a day has passed', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('youtube', { browser: 'chrome' }, new Date('2026-09-01T00:00:00Z'))
+    markRead(store, 'youtube', { history: HOURS(4), subscription: HOURS(25) })
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    markRead(store, 'netease', { liked: HOURS(25), playlist: HOURS(2) })
+    const ne = new FakeSource('netease', ['liked', 'playlist'])
+    sources.set('youtube', new FakeSource('youtube', ['history', 'subscription']))
+    sources.set('netease', ne)
+    refresher.maybeRefresh()
+    await until(() => ne.snapshots === 1, 'the collection read')
+    // The playlists were read two hours ago and ride the 24 h clock, so they
+    // are not asked for again just because the liked list is due.
+    expect(ne.asked).toEqual([['liked']])
+  })
+
+  it('asks for everything when no list has ever been read', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    const ne = new FakeSource('netease', ['liked', 'playlist'])
+    sources.set('netease', ne)
+    refresher.maybeRefresh()
+    await until(() => ne.snapshots === 1, 'the first read')
+    expect(ne.asked).toEqual([['liked', 'playlist']])
+  })
+
+  it('never asks an expired mount, whatever its clock says', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    store.setStatus('netease', 'expired')
+    const ne = new FakeSource('netease', ['liked', 'playlist'])
+    sources.set('netease', ne)
+    expect(refresher.maybeRefresh()).toBe(false)
+    expect(ne.snapshots).toBe(0)
+  })
+
+  it('a partial read replaces its own kinds and leaves the rest of the snapshot standing', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    store.writeSnapshot({
+      source: 'netease',
+      takenAt: HOURS(30),
+      items: [
+        { kind: 'liked', title: 'an old song', artist: 'a band' },
+        { kind: 'playlist', title: 'late drive' },
+      ],
+    })
+    markRead(store, 'netease', { liked: HOURS(30), playlist: HOURS(2) })
+    const ne = new FakeSource('netease', ['liked', 'playlist'])
+    ne.items = [
+      { kind: 'liked', title: 'a new song', artist: 'a band' },
+      { kind: 'playlist', title: 'a playlist this read never asked for' },
+    ]
+    sources.set('netease', ne)
+    refresher.maybeRefresh()
+    await until(() => ne.snapshots === 1, 'the partial read')
+    await until(() => store.readSnapshot('netease')?.items.some((i) => i.title === 'a new song') === true, 'the new rows')
+    const items = store.readSnapshot('netease')!.items
+    // The liked rows are replaced; the playlist row nobody re-read is kept.
+    expect(items.filter((i) => i.kind === 'liked').map((i) => i.title)).toEqual(['a new song'])
+    expect(items.filter((i) => i.kind === 'playlist').map((i) => i.title)).toEqual(['late drive'])
+  })
+
+  it('folds every read into the ledger, which only grows', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    const ne = new FakeSource('netease', ['liked'])
+    ne.items = [{ kind: 'liked', title: 'one', artist: 'a band' }]
+    sources.set('netease', ne)
+    await refresher.refreshAll()
+    ne.items = [{ kind: 'liked', title: 'two', artist: 'a band' }]
+    await refresher.refreshAll()
+    // The snapshot is the latest read; the ledger is both.
+    expect(store.readSnapshot('netease')!.items.map((i) => i.title)).toEqual(['two'])
+    expect(store.readLedger('netease')!.entries.map((e) => e.title).sort()).toEqual(['one', 'two'])
+  })
+
+  it('drops the ledger with the snapshot when the account goes', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    sources.set('netease', new FakeSource('netease', ['liked']))
+    await refresher.refreshAll()
+    expect(store.readLedger('netease')).not.toBeNull()
+    store.unmount('netease')
+    // A remount of a different account must not inherit this one's history.
+    expect(store.readLedger('netease')).toBeNull()
+  })
+})
+
 describe('the Chrome profile a refresh reads', () => {
   // Awaited, not just called: restoring the knob before the refresh has
   // finished would leave the read looking at the developer's own setting.

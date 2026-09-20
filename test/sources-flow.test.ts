@@ -31,6 +31,7 @@ const CHROME: ChromeDeps = { env: {}, platform: 'linux', home: '/home/someone', 
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
+  readonly kinds = ['liked'] as const
   fail: Error | null = null
   constructor(id: SourceId) {
     this.id = id

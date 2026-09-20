@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-19 (spec 14 amended: the taste digest accumulates and picks for the moment — three PRs)_
+_Last updated: 2026-09-20 (spec 14's taste amendment: PR 1 landed as #278, PR 2 in flight)_
 
 ## Where we are
 
@@ -30,15 +30,19 @@ first, then the by-ear passes.
 previous one's merged tip (they all touch `taste.ts` / `refresh.ts` /
 `store.ts`):
 
-1. **The digest spends its budget on music** (§2.3) — the invariant that
-   every row traces to a songs-only source or an artist match, the fixed /
-   flexible halves, the weights.
+1. ~~**The digest spends its budget on music** (§2.3)~~ — landed, PR #278.
 2. **The ledger and the per-kind clock** (§2.11, §3.4) — an append-only file
    per source beside the snapshot; `history` re-read every 3 h, collections
    every 24 h, only the due lists read.
 3. **The moment-matched half** (§2.12) — the pick's rows chosen in code from
    the ledger against the hour, the persona, the last three artists and the
    last talk beat. No new tool, no extra model call, 5 ms.
+
+**No listener data in the repository** (2026-09-20, user): nothing from
+`~/.murmur` — a song, artist, playlist or channel name, an account name, a
+url — goes into git. Test fixtures are invented; the real snapshots are
+measured only in the gitignored `scratch/`, and a PR body or commit message
+carries numbers, never content.
 
 ## Open
 

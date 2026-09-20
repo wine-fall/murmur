@@ -16,7 +16,7 @@ import type { MountResult } from './netease.ts'
 import { QR_POLL_MS, QR_TIMEOUT_MS, waitBetweenPolls, type QrStatus } from './qr.ts'
 
 export { QR_POLL_MS, QR_TIMEOUT_MS }
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const PC_HOST = 'https://api.qishui.com'
 const LUNA_HOST = 'https://beta-luna.douyin.com'
@@ -350,11 +350,13 @@ export class QishuiSource implements TasteSource {
     return me === null ? { ok: false, reason: 'expired' } : { ok: true, who: me.who }
   }
 
-  async snapshot(): Promise<TasteSnapshot> {
+  readonly kinds = ['liked', 'playlist', 'daily'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
     const [collection, playlists, daily] = await Promise.all([
-      this.client.collection(this.entry),
-      this.client.playlists(this.entry),
-      this.client.dailyMix(this.entry),
+      asked(kinds, 'liked') ? this.client.collection(this.entry) : [],
+      asked(kinds, 'playlist') ? this.client.playlists(this.entry) : [],
+      asked(kinds, 'daily') ? this.client.dailyMix(this.entry) : [],
     ])
     return { source: 'qishui', takenAt: this.now().toISOString(), items: [...collection, ...playlists, ...daily] }
   }

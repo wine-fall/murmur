@@ -27,7 +27,7 @@ export const SOURCE_NAMES: Record<SourceId, string> = {
 const KINDS = ['liked', 'history', 'top-track', 'top-artist', 'playlist', 'favourite', 'subscription', 'daily', 'follows', 'frequents'] as const
 export type TasteKind = (typeof KINDS)[number]
 
-const TasteItemSchema = z.object({
+export const TasteItemSchema = z.object({
   kind: z.enum(KINDS),
   title: z.string(),
   artist: z.string().optional(),
@@ -54,17 +54,41 @@ export type VerifyResult = { ok: true; who: string } | { ok: false; reason: Auth
 
 export interface TasteSource {
   readonly id: SourceId
+  // The lists this platform can be asked for, which is what the per-kind
+  // clock schedules (spec 14 §3.4).
+  readonly kinds: readonly TasteKind[]
   verify(): Promise<VerifyResult>
-  // May throw SourceAuthError; any other failure is a plain error.
-  snapshot(): Promise<TasteSnapshot>
+  // `kinds` narrows the read to the lists that are due; undefined is all of
+  // them. A source free to ignore it returns everything -- correct, just not
+  // cheaper. May throw SourceAuthError; any other failure is a plain error.
+  snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot>
+}
+
+// Was this list asked for? Undefined means the whole source was.
+export const asked = (kinds: readonly TasteKind[] | undefined, kind: TasteKind): boolean => kinds === undefined || kinds.includes(kind)
+
+// A partial read (spec 14 §3.4): the kinds it carries replace their rows,
+// every other kind keeps the rows it had, so the snapshot still means "the
+// latest read of each list" rather than "the latest read".
+export function mergeSnapshot(previous: TasteSnapshot | null, next: TasteSnapshot, readKinds: readonly TasteKind[] | undefined): TasteSnapshot {
+  if (previous === null || readKinds === undefined) return next
+  const kept = previous.items.filter((i) => !readKinds.includes(i.kind))
+  return { ...next, items: [...next.items, ...kept] }
 }
 
 // The per-source bounds (spec 14 §3.5).
 export const BOUNDS = { liked: 500, history: 200, playlist: 50, top: 50, subscription: 100, follows: 50 } as const
 
 // A snapshot file past the byte cap is a bug in the adapter that wrote it,
-// and is skipped rather than fed to a prompt.
+// and is skipped rather than fed to a prompt. A ledger is allowed four times
+// as much because accumulating is its job (spec 14 §2.11), and it sheds its
+// oldest entries rather than growing past it.
 export const SNAPSHOT_MAX_BYTES = 1024 * 1024
+export const LEDGER_MAX_BYTES = 4 * 1024 * 1024
+
+// Only what the digest reads out of a ledger file; §2.11 owns the full
+// shape, and parsing it here would tie the render to the writer.
+const LedgerCountsSchema = z.object({ source: z.enum(SOURCE_IDS), entries: z.array(TasteItemSchema) })
 export const DIGEST_BUDGET = 1500
 // Sources + Artists + Playlists together: the listener's shape, the same on
 // every pick of the day, held to a fifth of the block so the songs get the
@@ -239,7 +263,15 @@ function platformLayers(kept: readonly { snapshot: TasteSnapshot; items: readonl
   return layers
 }
 
-export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date, budget = DIGEST_BUDGET): string {
+export function renderTasteDigest(
+  snapshots: readonly TasteSnapshot[],
+  now: Date,
+  budget = DIGEST_BUDGET,
+  // "They return to" is a claim about months. A snapshot is one read inside
+  // a rolling window, so the count comes from the source's ledger when there
+  // is one (spec 14 §2.3, §2.11) and from the snapshot when there is not.
+  ledgers: readonly { source: SourceId; entries: readonly TasteItem[] }[] = [],
+): string {
   if (snapshots.length === 0) return ''
   // The render holds the invariant on ANY snapshot, not only a freshly read
   // one: a returning listener keeps yesterday's file until the next refresh,
@@ -255,17 +287,27 @@ export function renderTasteDigest(snapshots: readonly TasteSnapshot[], now: Date
   // Artists merge across sources by exact string after trim; a top-artist row
   // names the artist in its title.
   const artists = new Map<string, number>()
+  const byLedger = new Map(ledgers.map((l) => [l.source, l.entries]))
+  const countArtist = (item: TasteItem): void => {
+    if (!MUSICAL.includes(item.kind)) return
+    const name = (item.kind === 'top-artist' ? item.title : (item.artist ?? '')).trim()
+    if (name !== '') artists.set(name, (artists.get(name) ?? 0) + 1)
+  }
+  for (const [source, entries] of byLedger) {
+    // The invariant holds over the ledger too: it carries every row that was
+    // ever read, including the watch rows the block never shows.
+    for (const item of entries) if (shown(source, item)) countArtist(item)
+  }
   const lately: { item: TasteItem; order: number }[] = []
   const songs: { item: TasteItem; order: number }[] = []
   const playlists: string[] = []
   let order = 0
-  for (const { items } of kept) {
+  for (const { snapshot, items } of kept) {
     for (const item of items) {
       order++
-      if (MUSICAL.includes(item.kind)) {
-        const name = (item.kind === 'top-artist' ? item.title : (item.artist ?? '')).trim()
-        if (name !== '') artists.set(name, (artists.get(name) ?? 0) + 1)
-      }
+      // Only when this source has no ledger: otherwise the ledger already
+      // counted it, and counting both would double every current row.
+      if (!byLedger.has(snapshot.source)) countArtist(item)
       if (item.kind === 'history') lately.push({ item, order })
       if (item.kind === 'liked') songs.push({ item, order })
       if (item.kind === 'playlist') playlists.push(item.title.trim())
@@ -345,8 +387,10 @@ export class TasteReader {
     const mounted = this.deps.mounted?.()
     let names: string[]
     try {
+      // `<source>.ledger.json` sits in the same directory and is read
+      // below, never here: parsed as a snapshot it would fail and warn.
       names = readdirSync(this.deps.dir)
-        .filter((n) => n.endsWith('.json'))
+        .filter((n) => n.endsWith('.json') && !n.endsWith('.ledger.json'))
         .filter((n) => mounted === undefined || mounted.includes(n.slice(0, -'.json'.length) as SourceId))
         .sort()
     } catch {
@@ -357,7 +401,7 @@ export class TasteReader {
       this.cached = ''
       return ''
     }
-    const files = names.map((name) => {
+    const stamp = (name: string): { path: string; key: string; size: number } | null => {
       const path = join(this.deps.dir, name)
       try {
         const stat = statSync(path)
@@ -365,8 +409,12 @@ export class TasteReader {
       } catch {
         return null
       }
-    })
-    const key = files.map((f) => f?.key ?? '').join('|')
+    }
+    const files = names.map(stamp)
+    // The ledgers ride the same memoisation: an artist count that moved is a
+    // digest that changed, even when no snapshot did.
+    const ledgerFiles = names.map((n) => stamp(`${n.slice(0, -'.json'.length)}.ledger.json`))
+    const key = [...files, ...ledgerFiles].map((f) => f?.key ?? '').join('|')
     if (key === this.key) return this.cached
     const snapshots: TasteSnapshot[] = []
     for (const file of files) {
@@ -376,10 +424,27 @@ export class TasteReader {
     }
     // A fixed order, so the digest never depends on directory listing order.
     snapshots.sort((a, b) => SOURCE_IDS.indexOf(a.source) - SOURCE_IDS.indexOf(b.source))
+    const ledgers = ledgerFiles.flatMap((file) => {
+      const parsed = file === null ? null : this.readLedger(file)
+      return parsed === null ? [] : [parsed]
+    })
     this.renders++
-    this.cached = renderTasteDigest(snapshots, (this.deps.now ?? (() => new Date()))())
+    this.cached = renderTasteDigest(snapshots, (this.deps.now ?? (() => new Date()))(), DIGEST_BUDGET, ledgers)
     this.key = key
     return this.cached
+  }
+
+  // Only what the digest needs from a ledger: the source and its rows. A
+  // ledger that will not parse is skipped in silence -- the refresher owns
+  // repairing it (spec 14 §2.11), and the digest still has the snapshot.
+  private readLedger(file: { path: string; key: string; size: number }): { source: SourceId; entries: readonly TasteItem[] } | null {
+    if (file.size > LEDGER_MAX_BYTES) return null
+    try {
+      const parsed = LedgerCountsSchema.safeParse(JSON.parse(readFileSync(file.path, 'utf-8')))
+      return parsed.success ? parsed.data : null
+    } catch {
+      return null
+    }
   }
 
   private readSnapshot(file: { path: string; key: string; size: number }): TasteSnapshot | null {

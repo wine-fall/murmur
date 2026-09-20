@@ -11,6 +11,7 @@ import { dirname, join } from 'node:path'
 import { z } from 'zod'
 
 import { chromeProfile } from './chrome.ts'
+import { capLedger, type TasteLedger, TasteLedgerSchema } from './ledger.ts'
 import { SOURCE_IDS, type SourceId, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
 
 // yt-dlp's --cookies-from-browser vocabulary, minus whale.
@@ -173,10 +174,13 @@ export class SourcesStore {
     this.dropSnapshot(id)
   }
 
-  // The snapshot alone: what a remount drops before reading the new account,
-  // so a failed first read leaves no taste rather than the old account's.
+  // The snapshot and the ledger: what a remount drops before reading the new
+  // account, so a failed first read leaves no taste rather than the old
+  // account's, and the new account inherits none of its history (spec 14
+  // §2.11).
   dropSnapshot(id: SourceId): void {
     rmSync(this.snapshotPath(id), { force: true })
+    rmSync(this.ledgerPath(id), { force: true })
   }
 
   // A status for something not mounted is dropped: the file never grows a
@@ -226,6 +230,35 @@ export class SourcesStore {
 
   writeSnapshot(snapshot: TasteSnapshot): void {
     atomicWrite(this.snapshotPath(snapshot.source), JSON.stringify(snapshot))
+  }
+
+  ledgerPath(id: SourceId): string {
+    return join(this.deps.tasteDir, `${id}.ledger.json`)
+  }
+
+  // Capped on the way out (spec 14 §2.11), so the file can never be written
+  // past the bound; the drop is a count in the log, never a title.
+  writeLedger(ledger: TasteLedger): void {
+    const { ledger: capped, dropped } = capLedger(ledger)
+    if (dropped > 0) this.deps.log?.(`sources.ledger ${ledger.source} dropped=${dropped}`)
+    atomicWrite(this.ledgerPath(ledger.source), JSON.stringify(capped))
+  }
+
+  // A ledger that will not parse is moved aside once and started fresh: it
+  // is derived data, and blocking the refresh over it would be worse.
+  readLedger(id: SourceId): TasteLedger | null {
+    const path = this.ledgerPath(id)
+    if (!existsSync(path)) return null
+    let parsed
+    try {
+      parsed = TasteLedgerSchema.safeParse(JSON.parse(readFileSync(path, 'utf-8')))
+    } catch {
+      parsed = { success: false } as const
+    }
+    if (parsed.success) return parsed.data
+    renameSync(path, `${path}.broken`)
+    this.deps.log?.(`sources.ledger ${id} unreadable; started fresh`)
+    return null
   }
 
   readSnapshot(id: SourceId): TasteSnapshot | null {

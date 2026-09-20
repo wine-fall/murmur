@@ -22,7 +22,7 @@ import type { TrackCandidate } from '../../contracts.ts'
 import { SourceAuthError } from './auth.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const API = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 const SONG_URL = 'https://y.qq.com/n/ryqq/songDetail/'
@@ -471,14 +471,21 @@ export class QQMusicSource implements TasteSource {
   // key flipped, GetPlaylistByUin still answers code 0 with the account's
   // lists — it authenticates on the uin alone. A snapshot that skipped this
   // check would read a signed-out account as healthy and never say "expired".
-  async snapshot(): Promise<TasteSnapshot> {
+  readonly kinds = ['liked', 'playlist'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
     const account = await this.client.account()
     if (account === null) throw new SourceAuthError('qqmusic', 'login-required', 'the cookie no longer signs in')
-    const liked = await this.client.likedSongs(account.euin, BOUNDS.liked)
-    const created = (await this.client.playlists(account.uin)).filter((list) => !list.liked).map((list) => list.name)
-    const names = [...created, ...(await this.client.favouritePlaylists(account.euin))]
-      .slice(0, BOUNDS.playlist)
-      .map((title): TasteItem => ({ kind: 'playlist', title }))
+    const liked = asked(kinds, 'liked') ? await this.client.likedSongs(account.euin, BOUNDS.liked) : []
+    const names: TasteItem[] = []
+    if (asked(kinds, 'playlist')) {
+      const created = (await this.client.playlists(account.uin)).filter((list) => !list.liked).map((list) => list.name)
+      names.push(
+        ...[...created, ...(await this.client.favouritePlaylists(account.euin))]
+          .slice(0, BOUNDS.playlist)
+          .map((title): TasteItem => ({ kind: 'playlist', title })),
+      )
+    }
     return { source: 'qqmusic', takenAt: this.now().toISOString(), items: [...liked, ...names] }
   }
 }

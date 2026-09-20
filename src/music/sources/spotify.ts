@@ -14,7 +14,7 @@ import { z } from 'zod'
 
 import { SourceAuthError } from './auth.ts'
 import type { MountResult } from './netease.ts'
-import { BOUNDS, type TasteItem, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
+import { asked, BOUNDS, type TasteItem, type TasteKind, type TasteSnapshot, type TasteSource, type VerifyResult } from './taste.ts'
 
 const ACCOUNTS = 'https://accounts.spotify.com'
 const API = 'https://api.spotify.com/v1'
@@ -386,11 +386,13 @@ export class SpotifySource implements TasteSource {
     }
   }
 
-  async snapshot(): Promise<TasteSnapshot> {
-    const artists = await this.client.topArtists()
-    const tracks = await this.client.topTracks()
-    const liked = await this.client.savedTracks()
-    const playlists = await this.client.playlists()
+  readonly kinds = ['top-artist', 'top-track', 'liked', 'playlist'] as const
+
+  async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
+    const artists = asked(kinds, 'top-artist') ? await this.client.topArtists() : []
+    const tracks = asked(kinds, 'top-track') ? await this.client.topTracks() : []
+    const liked = asked(kinds, 'liked') ? await this.client.savedTracks() : []
+    const playlists = asked(kinds, 'playlist') ? await this.client.playlists() : []
     return { source: 'spotify', takenAt: this.now().toISOString(), items: [...artists, ...tracks, ...liked, ...playlists] }
   }
 }
