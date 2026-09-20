@@ -15,9 +15,10 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { Catalogue, MusicProvider, TaskTool, TrackCandidate, TrackPick } from '../contracts.ts'
+import { PLAY_ORDER, type AudioClip, type Catalogue, type MusicProvider, type PlayCatalogue, type TaskTool, type TrackCandidate, type TrackPick } from '../contracts.ts'
 import { ANNOUNCE_FIELD_DESCRIPTION } from '../prompts/music.ts'
 import { previewTrap, SourceAuthError } from './sources/auth.ts'
+import { parseSegmentRef } from './music.ts'
 import { sourceOfRef } from './sources/store.ts'
 import { SOURCE_NAMES } from './sources/taste.ts'
 
@@ -43,6 +44,12 @@ export type TasteToolOptions = {
     headers?: Readonly<Record<string, string>>,
     startS?: number,
   ) => Promise<number | null>
+  // Where a found song is PLAYED from, best first (spec 14 §2.13). Absent =
+  // the default order, so a caller that never heard of the knob still relocates.
+  playOrder?: readonly PlayCatalogue[]
+  // The dev-log sink MusicProgrammer already feeds; the relocation line joins
+  // music.search / music.resolve / music.probe there.
+  debug?: (message: string) => void
 }
 
 function reply(payload: Record<string, unknown>) {
@@ -78,6 +85,14 @@ function trimmed(value: string | undefined): string | undefined {
 }
 
 const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels'] as const
+
+// A relocated hit must be the same song: its title contains the submitted one
+// (or the reverse — a catalogue that appends "(Official Audio)" is still it)
+// and its length is within this much of what the original candidate claimed.
+// ponytail: containment plus a window, no fuzzy distance and no pinyin table —
+// a wrong relocation plays a different song, so the rule fails closed. Upgrade
+// path in spec 14 §2.13.
+const SAME_LENGTH_S = 20
 
 // The curated-channel pool (spec 14 §2.9), read live: a local match over the
 // recent uploads of the channels the listener curated. It is offered only
@@ -129,6 +144,98 @@ export function musicTools(
         ? `${SOURCE_NAMES[err.source]} is unavailable for the rest of this task; do not search or submit it again. Catalogues still open: ${open().join(', ')}.`
         : `${SOURCE_NAMES[err.source]} cannot serve that track from here; pick another.`,
     })
+  }
+
+
+  // Resolve a ref and prove it will really play: the NetEase preview trap
+  // (spec 14 §2.6) and then the decoder probe, which the trap's own read
+  // stands in for when it got one. Shared by the submitted ref and by every
+  // relocation attempt, so a relocated pick is held to the same bar.
+  type Opened =
+    | { ok: true; clip: AudioClip }
+    | { ok: false; why: 'dead' | 'resolve-failed'; error: string }
+    | { ok: false; why: 'auth'; err: SourceAuthError }
+  const openClip = async (ref: string): Promise<Opened> => {
+    let clip: AudioClip
+    try {
+      clip = await provider.resolve(ref)
+    } catch (err) {
+      if (err instanceof SourceAuthError) return { ok: false, why: 'auth', err }
+      return { ok: false, why: 'resolve-failed', error: err instanceof Error ? err.message : String(err) }
+    }
+    // The length the trap read off the stream, null when it never ran or read
+    // nothing — the playability probe below reads it.
+    let trapRead: number | null = null
+    if (taste?.probeDurationS !== undefined && sourceOfRef(ref) === 'netease') {
+      trapRead = await taste.probeDurationS(clip.source, clip.headers, clip.segment?.startS)
+      // A segment clip is meant to be its chapter's length; a whole track is
+      // meant to be the length its candidate claimed.
+      const expected = clip.segment === undefined ? (stated.get(ref) ?? 0) : clip.segment.endS - clip.segment.startS
+      if (previewTrap(expected, trapRead)) {
+        const err = new SourceAuthError('netease', 'login-required', `preview clip of ${String(trapRead)}s`)
+        return { ok: false, why: 'auth', err }
+      }
+    }
+    // A resolved stream URL can still 403 in the decoder and never produce a
+    // frame. Reject it now, during talk, so the announce never claims a track
+    // that turns out silent.
+    // Unless the trap above just opened this very stream and read a real
+    // length off it — that IS the proof, and opening it twice costs another
+    // 13-15 s against a slow NetEase CDN, where the probe's own 15 s ceiling
+    // then calls a live stream dead and the whole pick starts over (issue
+    // #164). A trap that read nothing proves nothing, so the probe still runs.
+    if (trapRead === null && probe !== undefined && !(await probe(clip.source, clip.headers, clip.segment?.startS))) {
+      return { ok: false, why: 'dead', error: `${ref} resolved but the stream did not play; pick another` }
+    }
+    return { ok: true, clip }
+  }
+
+  // Where the pick will PLAY from (spec 14 §2.13). The model chose the song;
+  // this chooses the CDN, model-free, and every failure simply falls through
+  // to the ref the model actually submitted. null = nothing better was found,
+  // or there was nothing better to look for.
+  const relocate = async (ref: string, title: string, artist: string | undefined): Promise<AudioClip | null> => {
+    // A chapter of one specific upload has no equivalent anywhere else.
+    if (parseSegmentRef(ref).segment !== undefined) return null
+    const order = taste?.playOrder ?? PLAY_ORDER
+    // An unknown host is a YouTube ref in everything but spelling — that is
+    // where a bare search sends the model, and where `channels` uploads live.
+    const own: PlayCatalogue = sourceOfRef(ref) ?? 'youtube'
+    const rank = order.indexOf(own)
+    const better = (rank === -1 ? order : order.slice(0, rank)).filter((c) => open().includes(c))
+    if (better.length === 0) return null
+
+    const wanted = folded(title)
+    const length = stated.get(ref)
+    let reason = 'no-hit'
+    for (const catalogue of better) {
+      let hits: TrackCandidate[]
+      try {
+        hits = await provider.search(`${artist ?? ''} ${title}`.trim(), 5, catalogue)
+      } catch (err) {
+        // A lost login here closes that catalogue for the task like any other
+        // auth failure, but it must never end a submit that was going fine.
+        if (err instanceof SourceAuthError) authResult(err)
+        reason = err instanceof SourceAuthError ? 'auth' : 'search-failed'
+        continue
+      }
+      for (const hit of hits) stated.set(hit.ref, hit.durationS)
+      const match = hits.find((hit) => {
+        const found = folded(hit.title)
+        const sameSong = found.includes(wanted) || wanted.includes(found)
+        return sameSong && (length === undefined || Math.abs(hit.durationS - length) <= SAME_LENGTH_S)
+      })
+      if (match === undefined) continue
+      const opened = await openClip(match.ref)
+      if (opened.ok) {
+        taste?.debug?.(`music.relocate from=${own} to=${catalogue} ok`)
+        return opened.clip
+      }
+      if (opened.why === 'auth') authResult(opened.err)
+      reason = opened.why
+    }
+    taste?.debug?.(`music.relocate from=${own} none reason=${reason}`)
+    return null
   }
 
   const searchMusic = tool(
@@ -192,38 +299,17 @@ export function musicTools(
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
       }
 
-      let clip
-      try {
-        clip = await provider.resolve(ref)
-      } catch (err) {
-        if (err instanceof SourceAuthError) return authResult(err)
-        return reply({ ok: false, error: err instanceof Error ? err.message : String(err) })
-      }
-      // The preview trap (spec 14 §2.6): NetEase hands a rights-less request a
-      // 30 s clip with no error, so the decoded length is checked against the
-      // length the candidate claimed.
-      // The length the trap read off the stream, null when it never ran or read
-      // nothing — the playability probe below reads it.
-      let trapRead: number | null = null
-      if (taste?.probeDurationS !== undefined && sourceOfRef(ref) === 'netease') {
-        trapRead = await taste.probeDurationS(clip.source, clip.headers, clip.segment?.startS)
-        // A segment clip is meant to be its chapter's length; a whole track is
-        // meant to be the length its candidate claimed.
-        const expected = clip.segment === undefined ? (stated.get(ref) ?? 0) : clip.segment.endS - clip.segment.startS
-        if (previewTrap(expected, trapRead)) {
-          return authResult(new SourceAuthError('netease', 'login-required', `preview clip of ${String(trapRead)}s`))
+      // Found is not where it plays from (spec 14 §2.13): a song the model
+      // found on a slow catalogue is played from the fastest one that also
+      // has it. Only a pick that names itself can be looked for elsewhere.
+      let clip = title === undefined ? null : await relocate(ref, title, artist)
+      if (clip === null) {
+        const opened = await openClip(ref)
+        if (!opened.ok) {
+          if (opened.why === 'auth') return authResult(opened.err)
+          return reply({ ok: false, error: opened.error })
         }
-      }
-      // A resolved stream URL can still 403 in the decoder and never produce a
-      // frame. Reject it now, during talk, so the announce never claims a track
-      // that turns out silent.
-      // Unless the trap above just opened this very stream and read a real
-      // length off it — that IS the proof, and opening it twice costs another
-      // 13-15 s against a slow NetEase CDN, where the probe's own 15 s ceiling
-      // then calls a live stream dead and the whole pick starts over (issue
-      // #164). A trap that read nothing proves nothing, so the probe still runs.
-      if (trapRead === null && probe !== undefined && !(await probe(clip.source, clip.headers, clip.segment?.startS))) {
-        return reply({ ok: false, error: `${ref} resolved but the stream did not play; pick another` })
+        clip = opened.clip
       }
 
       const announce = trimmed(args.announce)

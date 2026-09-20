@@ -13,6 +13,7 @@ import { parseArgs } from 'node:util'
 
 import { z } from 'zod'
 
+import { PLAY_ORDER } from './contracts.ts'
 import { LogEvidenceSchema, resolveLogSource, type LogEvidence } from './support/dev-log.ts'
 import {
   dataRoot,
@@ -96,6 +97,9 @@ export const ConfigSchema = z.object({
   // host's own voice: they run often, in the background, and a pick that misses
   // is over by the next song.
   musicModel: z.string().default('claude-sonnet-5'),
+  // Where a found song is PLAYED from (spec 14 §2.13), best first. Finding and
+  // playing are two decisions: the model picks the song, this picks the CDN.
+  playOrder: z.array(z.enum(PLAY_ORDER)).default([...PLAY_ORDER]),
   // The listener-owned taste half of the pick instruction (spec 03-01 §2.3),
   // under the one murmur home. Absent = the built-in policy.
   musicPolicyPath: z.string().default(() => musicPolicyPath()),
@@ -258,6 +262,20 @@ function ttsFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
   }
 }
 
+// MURMUR_PLAY_ORDER: a comma-separated preference, warn-and-default like every
+// other env knob here. Whatever the listener omits keeps its default rank
+// behind whatever they named, so naming one catalogue only promotes that one.
+function playOrderFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
+  const raw = env.MURMUR_PLAY_ORDER?.trim()
+  if (!raw) return {}
+  const parsed = z.array(z.enum(PLAY_ORDER)).safeParse(raw.split(',').map((t) => t.trim()))
+  if (!parsed.success) {
+    console.warn(`warning: ignoring unusable MURMUR_PLAY_ORDER=${JSON.stringify(raw)}`)
+    return {}
+  }
+  return { playOrder: [...new Set([...parsed.data, ...PLAY_ORDER])] }
+}
+
 // The MURMUR_RWT_* numbers (spec 13 §2.6): the same warn-and-default posture,
 // omitted when unset so the schema default stands.
 function rwtFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
@@ -353,6 +371,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     sourcesPath: sourcesConfigPath(env),
     tasteDir: tasteDir(env),
     ...rwtFromEnv(env),
+    ...playOrderFromEnv(env),
     tuiSocket: tuiSocketPath(env),
     ...logSource(env),
     // Having an endpoint IS the reason to speak with it: a voice configured

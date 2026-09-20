@@ -373,6 +373,8 @@ function buildMusic(
         catalogues: taste.catalogues,
         onAuthFailure: (err) => taste.watch.note(err),
         probeDurationS: (s, headers, startS) => probePlayableDurationS(s, config.ffmpegCmd, undefined, headers, startS),
+        // Where a found song plays from (spec 14 §2.13), MURMUR_PLAY_ORDER.
+        playOrder: config.playOrder,
       },
     }),
     // Discovery stage timings land in the dev log (issue #76).

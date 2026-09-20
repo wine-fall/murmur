@@ -1072,6 +1072,81 @@ scores 0, the order falls back to newest first, and the render is what it was
 before this section existed: an unmatched pick, a source with no ledger and a
 silent moment all degrade by the same path, not by a special case.
 
+### 2.13 Play-source preference — found anywhere, played from the fastest
+
+Where a song is **found** and where it **plays from** are two decisions, and
+only the first belongs to the model. NetEase's CDN delivers ~59 KB/s to a
+developer machine here while yt-dlp's `bestaudio` picks its FLAC (~1 Mbps),
+so a NetEase pick stutters that the same song on YouTube or Bilibili would
+not (measured 2026-09-20 on one Chinese track; related: issue #272, NetEase
+resolve slowness — this routes around it and does not fix it).
+
+So after `submit_pick` has a ref and before the resolve, code — never the
+model — tries to **relocate** the pick to a faster catalogue:
+
+```ts
+playOrder: readonly ('youtube' | 'bilibili' | 'qqmusic' | 'netease')[]   // default in that order
+```
+
+**When relocation is skipped**, and the original ref goes straight down
+today's path:
+
+- the ref is a **segment** ref (`parseSegmentRef` yields a segment) — a
+  chapter of one specific upload has no equivalent elsewhere;
+- **no title** was submitted — there is nothing to match a hit against;
+- the ref's own catalogue is already **top-ranked** among the catalogues open
+  in this task. A ref whose host is unknown (or is YouTube) counts as
+  `youtube`; a `channels` pick is a YouTube or Bilibili upload and is read by
+  its host like any other ref.
+
+**Otherwise**, walk `playOrder` from the top down to (excluding) the ref's own
+catalogue, visiting only catalogues that are **mounted and still open** in
+this task. For each:
+
+1. `provider.search(`${artist ?? ''} ${title}`.trim(), 5, catalogue)`;
+2. take the **first** hit whose folded title contains the submitted folded
+   title (or the reverse) **and** whose `durationS` is within **20 s** of the
+   length the original candidate stated (no stated length → accept any);
+3. `resolve` and probe it exactly as the original path would — including the
+   preview trap, which still applies only when the *relocated* target is
+   NetEase.
+
+The first success wins and its clip becomes the pick's. Any failure — no hit,
+a resolve error, a dead probe, a `SourceAuthError` — falls to the next
+catalogue; an auth failure during relocation still goes through `authResult`
+so that catalogue closes for the task, but it does **not** end the submit.
+All of them failing is not a failure: the submit continues with the original
+ref through the unchanged existing path. The finished pick keeps the model's
+`title`, `artist` and `announce` — **only the clip changes**.
+
+**ponytail: the match is containment plus a 20 s window, nothing more.** No
+fuzzy distance, no pinyin folding, no romanisation table — a wrong relocation
+plays a different song, so the ceiling is deliberately a rule that is cheap to
+read and easy to fail closed on. Upgrade path, if real use shows misses worth
+paying for: fold both sides through the same converter `folded()` names, and
+score candidates rather than taking the first.
+
+**The knob.** `MURMUR_PLAY_ORDER`, comma-separated, the same
+warn-and-default posture as the other `MURMUR_*` music knobs: parsed to a
+de-duplicated list of `youtube|bilibili|qqmusic|netease`, with any catalogue
+the list omits appended in default order (`MURMUR_PLAY_ORDER=bilibili` means
+bilibili first, the rest as they were). An unknown token is rejected — the
+whole value is ignored with one warning and the default stands.
+
+**The dev log** (§3.6 applies: lengths, never words). One line per submit that
+attempted a relocation, through the same sink as `music.search` /
+`music.resolve` / `music.probe`:
+
+```
+music.relocate from=netease to=youtube ok
+music.relocate from=netease none reason=no-hit        # also: dead | resolve-failed | auth
+```
+
+**What the prompt says** (§3.3, revised): search wherever the song is likeliest
+to be **found** — NetEase and QQ Music for Chinese-catalogue depth, Bilibili
+and YouTube as well — because where a pick plays from is decided after
+`submit_pick`. Choose the best song, not the best source.
+
 ---
 
 ## 3. Design
@@ -1434,8 +1509,8 @@ sources are not a knob.
 One paragraph added to the music prompt (`src/prompts/music.ts`), rendered
 only when a digest is present: the listener's kept music is a strong prior
 for *style*; pick for the moment; when a kept track fits, it is fine to play
-it, but not two in a row; when the listener's taste points at Chinese
-catalogue, prefer NetEase or Bilibili search if mounted; say in `announce`
+it, but not two in a row; search wherever the song is likeliest to be FOUND,
+not where it plays best (§2.13 relocates the pick after submit); say in `announce`
 where a pick came from only when it is theirs ("one you've kept").
 
 ### 3.4 Boot and refresh
@@ -1781,8 +1856,25 @@ the no-argument render in every case (§2.12's scope), and two pack reads
 across a changed moment render **once** — `TasteReader.renders` proves the
 memoisation still holds.
 
+### 5.17 Found on NetEase, played from YouTube (unit) — *added 2026-09-20*
+A `submit_pick` on a NetEase ref whose title and duration a YouTube hit
+matches finishes with the **YouTube** resolve as its clip, keeps the model's
+title/artist/announce, and leaves `music.relocate from=netease to=youtube ok`
+in the dev log. A YouTube hit more than 20 s off is not taken — the walk falls
+to Bilibili and then to the original ref. A submit with no title, and a
+segment ref, run no relocation search at all. A `SourceAuthError` from a
+relocation search closes that catalogue for the task and the submit still
+succeeds. `MURMUR_PLAY_ORDER=bilibili` tries Bilibili first and YouTube
+second; an unknown token in it is refused and the default order stands.
+
 ## 6. Resolved decisions
 
+- **Where a song is found and where it plays from are two decisions**
+  (2026-09-20, user). NetEase's CDN measured ~59 KB/s against a ~1 Mbps FLAC
+  here, so the model is told to search for the best *song* and code relocates
+  the pick to the fastest catalogue that has it (§2.13). The alternative —
+  teaching the prompt to prefer fast sources — trades recall for speed at the
+  one place the model is actually good, and cannot know today's throughput.
 - **Taste over transport** (2026-09-06, user). The requirement is
   recommendation quality; playback stays where it is.
 - **Spotify read-only, free account** — Premium gates streaming only; the Web

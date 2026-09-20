@@ -126,6 +126,9 @@ export class MusicProgrammer implements TrackSource {
     const { debug, probe } = this.deps
     const provider = debug === undefined ? this.deps.provider : timedProvider(this.deps.provider, debug)
     const wiredProbe = probe !== undefined && debug !== undefined ? timedProbe(probe, debug) : probe
+    // The relocation line (spec 14 §2.13) rides the same sink as the timings.
+    const taste =
+      this.deps.taste === undefined || debug === undefined ? this.deps.taste : { ...this.deps.taste, debug }
     const t = performance.now()
     // The situation size rides along because prompt growth is the suspected
     // hot-slower-than-cold term (spec 04 §3.3 measurement).
@@ -139,7 +142,7 @@ export class MusicProgrammer implements TrackSource {
       // states, and nothing reads its reasoning back. The SDK's default extended
       // thinking spent ~45 s of a ~100 s pick writing it (issue #164).
       thinking: 'disabled',
-      tools: (finish) => musicTools(provider, finish, wiredProbe, this.deps.taste, this.deps.channels, avoid),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, taste, this.deps.channels, avoid),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

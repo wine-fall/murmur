@@ -461,7 +461,9 @@ describe('the digest in the prompts (spec 14 §2.3/§3.3)', () => {
     expect(buildFindMusicInstruction(undefined, { taste: false })).not.toContain(TASTE_GUIDANCE)
     expect(buildFindMusicInstruction()).not.toContain(TASTE_GUIDANCE)
     expect(TASTE_GUIDANCE).toMatch(/not two in a row/)
-    expect(TASTE_GUIDANCE).toMatch(/NetEase or Bilibili/)
+    // Found, not fast: where a pick plays from is §2.13's, not the model's.
+    expect(TASTE_GUIDANCE).toMatch(/likeliest to be FOUND/)
+    expect(TASTE_GUIDANCE).toMatch(/best song,\nnot the best source/)
     expect(TASTE_GUIDANCE).toMatch(/one you've kept/)
   })
 
