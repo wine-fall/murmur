@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { cells, clock, fit, progressBar } from '../tui/src/progress.ts'
+import { cells, clock, fit, playedS, progressBar } from '../tui/src/progress.ts'
 
 // Wide glyphs are the SUBJECT of these cases, so they ride in as code points:
 // the source-language gate (DESIGN 0) keeps CJK out of v1 sources, and a test
@@ -76,6 +76,33 @@ describe('progressBar', () => {
     expect(progressBar(-20, 100, 10).played).toBe('')
     expect(progressBar(50, 0, 10)).toEqual({ played: '', rest: '──────────' })
     expect(progressBar(50, 100, 0)).toEqual({ played: '', rest: '' })
+  })
+})
+
+describe('playedS', () => {
+  const started = 1_700_000_000_000
+
+  it('advances on the clock the front-end keeps itself', () => {
+    expect(playedS(started, 174, started)).toBe(0)
+    expect(playedS(started, 174, started + 63_500)).toBe(63.5)
+  })
+
+  it('stops at the length of the track instead of outrunning it', () => {
+    // A coda riding the outro (spec 04 3.3) keeps the state on music after the
+    // song itself has ended, and the wall clock would otherwise print 3:03 of
+    // a 2:54 track. The rail already clamps; the readout has to agree with it.
+    expect(playedS(started, 174, started + 189_000)).toBe(174)
+    expect(progressBar(playedS(started, 174, started + 189_000), 174, 10).played).toHaveLength(10)
+  })
+
+  it('reads an unknown length as no ceiling at all', () => {
+    // durationS absent is "no rail, just the title" (spec 10 3.3): nothing to
+    // clamp to, and a zero ceiling would freeze the clock at 0:00.
+    expect(playedS(started, 0, started + 42_000)).toBe(42)
+  })
+
+  it('never reads back before the start', () => {
+    expect(playedS(started, 174, started - 5_000)).toBe(0)
   })
 })
 
