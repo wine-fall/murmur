@@ -42,8 +42,9 @@ import type {
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
-import { trackLabel } from '../music/music-tools.ts'
+import { labelArtist, trackLabel } from '../music/music-tools.ts'
 import { chromeProfile } from '../music/sources/chrome.ts'
+import type { Moment } from '../music/sources/moment.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
 import { INSTALL_COMMAND } from '../support/update.ts'
@@ -338,7 +339,10 @@ export type DirectorDeps = {
   // loop pokes once the broadcast has settled — never awaited. Absent on a
   // stub run, which is what keeps sources.json unread there (§3.2).
   taste?: {
-    digest(): string
+    // With a moment, the flexible half is chosen against the ledger for the
+    // pick that is happening (spec 14 §2.12); without one it is the static,
+    // memoised render the context pack reads.
+    digest(moment?: Moment): string
     mounted(): readonly SourceId[]
     maybeRefresh(): void
   }
@@ -867,8 +871,20 @@ export class Director {
   }
 
   // The rendered digest (spec 14 §2.3), '' when there is none or no wiring.
-  private tasteDigest(): string {
-    return this.deps.taste?.digest() ?? ''
+  private tasteDigest(moment?: Moment): string {
+    return this.deps.taste?.digest(moment) ?? ''
+  }
+
+  // What the pick is happening inside (spec 14 §2.12). Four signals already
+  // in hand -- no tool, no model call, no extra read. The avoid-list is the
+  // pick's own, reduced to artists: the exclusion is by who, not by title.
+  private moment(avoid: readonly string[]): Moment {
+    return {
+      hour: new Date().getHours(),
+      persona: this.persona(),
+      lastTalk: this.deps.memory.recent(1).at(-1)?.text ?? '',
+      avoidArtists: avoid.map(labelArtist).filter((a) => a !== ''),
+    }
   }
 
   // The pack's real music status (spec 04 bugfix), most-live fact first: a
@@ -1107,7 +1123,7 @@ export class Director {
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         avoid,
-        this.tasteDigest(),
+        this.tasteDigest(this.moment(avoid)),
       ),
       // The same list as data, so submit_pick can refuse a repeat instead of
       // only asking for none: the prompt rule alone let one through.

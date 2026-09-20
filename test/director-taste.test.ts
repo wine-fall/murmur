@@ -9,6 +9,7 @@ import { EveryNCadence } from '../src/director/cadence.ts'
 import { Director, type DirectorDeps, steerFromLine } from '../src/director/director.ts'
 import type { Invitation } from '../src/host/ipc.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
+import type { Moment } from '../src/music/sources/moment.ts'
 import type { SourceId } from '../src/music/sources/taste.ts'
 import { directorSettings, FakeBrain, FakeHost, FakeMixingPlayer, FakePlayer, FakeTrackSource, FakeVoice, pickOf, until } from './fakes.ts'
 
@@ -16,10 +17,16 @@ const DIGEST = '## What the listener keeps (as of 2026-09-06)\nSources: NetEase 
 
 type Taste = NonNullable<DirectorDeps['taste']>
 
-function fakeTaste(over: Partial<Taste> & { mountedIds?: SourceId[]; digestText?: string } = {}): Taste & { refreshes: number } {
+function fakeTaste(over: Partial<Taste> & { mountedIds?: SourceId[]; digestText?: string } = {}): Taste & { refreshes: number; moments: (Moment | undefined)[] } {
   const taste = {
     refreshes: 0,
-    digest: () => over.digestText ?? DIGEST,
+    // Every moment the Director handed over, so a test can read what the
+    // pick asked for rather than infer it from the rendered text.
+    moments: [] as (Moment | undefined)[],
+    digest: (moment?: Moment) => {
+      taste.moments.push(moment)
+      return over.digestText ?? DIGEST
+    },
     mounted: () => over.mountedIds ?? [],
     maybeRefresh: () => void taste.refreshes++,
     ...over,
@@ -130,6 +137,31 @@ describe('the digest reaches the brain (spec 14 §2.3/§5.3)', () => {
     await until(() => player.handles.length === 1, 'song on air')
     player.handles[0]!.end()
     await run
+  })
+
+  // spec 14 §2.12: the pick gets the moment, the pack does not. Talk needs
+  // to know who the listener is, not which songs match this minute, and a
+  // pack whose song list moved every beat would lose its memoisation for a
+  // prompt that should not be reciting song titles anyway.
+  it('hands the pick a moment and the pack none', async () => {
+    const player = new FakeMixingPlayer()
+    const source = new FakeTrackSource()
+    source.picks = [pickOf('https://stream/1')]
+    const taste = fakeTaste()
+    const { director } = setup({ player, music: { source, cadence: new EveryNCadence(1), engine: player }, taste })
+    const run = director.run(2)
+    await until(() => source.contexts.length >= 1, 'a pick was asked for')
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    // The pack asked without one; the pick asked with one.
+    expect(taste.moments.some((m) => m === undefined)).toBe(true)
+    const moment = taste.moments.find((m) => m !== undefined)!
+    expect(moment.hour).toBe(new Date().getHours())
+    expect(moment.persona).toBe('p')
+    // `trackLabel` is "Title \u2014 Artist"; the exclusion is by artist, so a
+    // title that happens to name another band cannot drop that band's songs.
+    for (const artist of moment.avoidArtists) expect(artist).not.toContain('\u2014')
   })
 })
 

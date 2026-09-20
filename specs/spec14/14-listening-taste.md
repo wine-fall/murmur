@@ -965,8 +965,11 @@ and the pack's memoisation would be gone for nothing.
 - It runs **in code, before the situation string is assembled**. No new tool
   is offered to the brain, and no extra model call is made. A pick's median
   is already 142 s (measured 2026-09-18); this step may not add to it.
-- Its budget is **5 ms**, asserted in its own test. It is a local scan and a
-  local index, nothing more.
+- Its budget is **5 ms**, asserted in its own test as the **median** of
+  fifteen warmed runs over a 4000-row ledger. A median, because one
+  scheduling stall on a shared runner is not what the budget is about and a
+  mean lets that stall fail a green build (issue #269 is what that habit
+  costs). It is a local scan, nothing more.
 - With no ledger, no musical entries, or no usable signal, it returns exactly
   what §2.3 renders today. Degrading is silent and is the default.
 
@@ -979,11 +982,18 @@ and the pack's memoisation would be gone for nothing.
 | the last three songs' artists | the pick's own avoid-list (03-01 §2.3) | an **exclusion**: no entry by those artists is chosen |
 | the last talk beat | the transcript the pack already carries | its content words, tokenised, are the query terms |
 
-**Tokenising**: latin words lowercased and split on non-word characters,
-minimum length 2; CJK runs split into overlapping bigrams (the same treatment
-`src/memory/recall.ts` gives its own text). A small stop list drops the
-function words. Terms are capped at 24 — a long talk beat does not become a
-long query.
+**Tokenising**: the **query** is built with `src/memory/recall.ts`'s exported
+`queryTokens()` — latin words lowercased and split on non-word characters,
+CJK runs shingled into overlapping bigrams. A small stop list drops the
+function words and terms are capped at 24, so a long talk beat does not
+become a long query.
+
+The **rows** are not tokenised. Tokenising every ledger row on every pick
+cost 4.3 ms of the 5 ms budget on a 4000-row ledger (measured 2026-09-20), so
+a row is scanned instead: its title, artist and album lowercased once, then
+each term tested against it — a latin term at a word boundary, a CJK bigram
+as a plain substring, which is the same match shingling both sides produces.
+Same answer, no per-row allocation, 2.5 ms.
 
 **Matching and score** — per ledger entry of a musical kind, highest wins:
 
@@ -994,7 +1004,13 @@ long query.
 | a query term appears among the entry's title / artist / album tokens | 1 |
 | the entry came from a music sub-zone (`isMusicCategory`) | `+0.5` |
 | **gone-quiet penalty** | `-1` when `lastSeen` is older than the source's most recent read |
-| the entry's artist is in the last-three-played set | the entry is dropped |
+| the entry's artist **carries** a last-played name | the entry is dropped |
+
+The exclusion is by **credit, not by string**: `Corin Vanterpool & Static
+Meadow` *is* the band the listener just heard, and an equality test offers it
+straight back (found on the fixture). The last-played name is matched inside
+the credit at a word boundary, so a collaboration and a `feat.` go with it
+while a band whose name merely starts the same stays.
 
 The **gone-quiet penalty** is how an unliked song fades. The ledger never
 deletes (§2.11), so a song removed from the collection a year ago is still
@@ -1020,10 +1036,14 @@ own file `data/taste/taste.db`, built the way `recall.ts` builds its index and
 sharing none of its tables — a kept song is not a memory, and the
 conversation's recall must never start returning song titles.
 
-**What is selected**: the top 10-15 `liked` entries and the top 3-5 watch
-rows by score, then the §2.3 line caps and the flexible half's weights cut
-them to the budget. Fewer matches than that is not a failure — an unmatched
-pick falls back to the newest rows, which is today's behaviour.
+**What is selected**: every musical row, ordered by score, cut by §2.3's own
+line caps (40 songs, 8 watch rows) and the flexible half's weights. So
+**relevance decides the order and the budget still decides the length** — the
+ten or fifteen rows the moment actually matched lead, and the rest of the
+line fills behind them rather than being left empty. With no terms every row
+scores 0, the order falls back to newest first, and the render is what it was
+before this section existed: an unmatched pick, a source with no ledger and a
+silent moment all degrade by the same path, not by a special case.
 
 ---
 

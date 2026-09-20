@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { z } from 'zod'
 
 import type { AuthFailure } from './auth.ts'
+import { type Moment, selectForMoment } from './moment.ts'
 
 export const SOURCE_IDS = ['youtube', 'bilibili', 'netease', 'spotify', 'qishui', 'qqmusic'] as const
 export type SourceId = (typeof SOURCE_IDS)[number]
@@ -88,7 +89,20 @@ export const LEDGER_MAX_BYTES = 4 * 1024 * 1024
 
 // Only what the digest reads out of a ledger file; §2.11 owns the full
 // shape, and parsing it here would tie the render to the writer.
-const LedgerCountsSchema = z.object({ source: z.enum(SOURCE_IDS), entries: z.array(TasteItemSchema) })
+const LedgerCountsSchema = z.object({
+  source: z.enum(SOURCE_IDS),
+  // `lastSeen` and `lastRead` are what §2.12 scores the gone-quiet penalty
+  // from; the rest of a ledger's bookkeeping is the writer's business.
+  entries: z.array(TasteItemSchema.extend({ lastSeen: z.string().optional() })),
+  lastRead: z.record(z.string(), z.string()).optional(),
+})
+// Written out rather than inferred: the render only ever reads it, and a
+// `z.infer` leaves the arrays mutable at the seam.
+export type LedgerView = {
+  readonly source: SourceId
+  readonly entries: readonly (TasteItem & { lastSeen?: string | undefined })[]
+  readonly lastRead?: Record<string, string> | undefined
+}
 export const DIGEST_BUDGET = 1500
 // Sources + Artists + Playlists together: the listener's shape, the same on
 // every pick of the day, held to a fifth of the block so the songs get the
@@ -270,7 +284,12 @@ export function renderTasteDigest(
   // "They return to" is a claim about months. A snapshot is one read inside
   // a rolling window, so the count comes from the source's ledger when there
   // is one (spec 14 §2.3, §2.11) and from the snapshot when there is not.
-  ledgers: readonly { source: SourceId; entries: readonly TasteItem[] }[] = [],
+  ledgers: readonly LedgerView[] = [],
+  // The pick's moment (spec 14 §2.12). Given one, the flexible half's rows are
+  // chosen against the ledger for the pick that is happening instead of
+  // rendered newest first. The context pack passes none and keeps today's
+  // memoised render.
+  moment?: Moment,
 ): string {
   if (snapshots.length === 0) return ''
   // The render holds the invariant on ANY snapshot, not only a freshly read
@@ -324,6 +343,26 @@ export function renderTasteDigest(
 
   lately.sort(byDate)
   songs.sort(byDate)
+  // The moment-matched half. The invariant holds over the ledger exactly as
+  // it holds over a snapshot, and `quiet` is "the last read of this row's
+  // own list did not return it" -- per kind, because a partial refresh
+  // moves one list's clock and not the others'.
+  const matched =
+    moment === undefined || ledgers.length === 0
+      ? null
+      : selectForMoment(
+          ledgers.flatMap((ledger) =>
+            ledger.entries
+              .filter((item) => shown(ledger.source, item))
+              .map((item, order) => ({
+                item,
+                lastSeen: item.lastSeen ?? '',
+                quiet: item.lastSeen !== undefined && (ledger.lastRead?.[item.kind] ?? '') > item.lastSeen,
+                order,
+              })),
+          ),
+          moment,
+        )
   // The fixed half: who this listener is, in the fewest words, the same on
   // every pick of the day. Sources is served first, out of half the half --
   // an equal third would starve it (it is one phrase per mounted source and
@@ -338,8 +377,8 @@ export function renderTasteDigest(
   // the watch rows are context, so the weights run 3 to 1. Measured with the
   // watch rows leading instead: 14 of 186 kept songs reached the page.
   const flexible: Layer[] = [
-    { lead: 'Songs they keep', parts: songs.slice(0, SONG_ITEMS).map((r) => quoted(r.item)), sep: ' \u00b7 ', weight: 3 },
-    { lead: 'Lately they have been listening to', parts: lately.slice(0, WATCH_ITEMS).map((r) => watched(r.item)), sep: ' \u00b7 ', weight: 1 },
+    { lead: 'Songs they keep', parts: (matched?.songs ?? songs.map((r) => r.item)).slice(0, SONG_ITEMS).map(quoted), sep: ' \u00b7 ', weight: 3 },
+    { lead: 'Lately they have been listening to', parts: (matched?.lately ?? lately.map((r) => r.item)).slice(0, WATCH_ITEMS).map(watched), sep: ' \u00b7 ', weight: 1 },
   ]
   let used = lines[0]!.length
   const fixedBudget = Math.max(Math.min(Math.floor(budget * FIXED_SHARE), budget - used), 0)
@@ -375,15 +414,22 @@ export class TasteReader {
   private deps: TasteReaderDeps
   private key = ''
   private cached = ''
+  private parsed: { snapshots: TasteSnapshot[]; ledgers: LedgerView[] } = { snapshots: [], ledgers: [] }
   private warned = new Set<string>()
-  // How many renders ran; the memoisation's own evidence.
+  // How many static renders ran, and how many times the files were parsed;
+  // the memoisation's own evidence. A moment renders every time by design
+  // (it is a different question each pick) but must never re-read.
   renders = 0
+  parses = 0
 
   constructor(deps: TasteReaderDeps) {
     this.deps = deps
   }
 
-  digest(): string {
+  // With no moment: the memoised render the context pack reads. With one:
+  // the flexible half chosen against the ledger for this pick (spec 14
+  // §2.12), off the same parsed files.
+  digest(moment?: Moment): string {
     const mounted = this.deps.mounted?.()
     let names: string[]
     try {
@@ -399,6 +445,7 @@ export class TasteReader {
     if (names.length === 0) {
       this.key = ''
       this.cached = ''
+      this.parsed = { snapshots: [], ledgers: [] }
       return ''
     }
     const stamp = (name: string): { path: string; key: string; size: number } | null => {
@@ -415,29 +462,39 @@ export class TasteReader {
     // digest that changed, even when no snapshot did.
     const ledgerFiles = names.map((n) => stamp(`${n.slice(0, -'.json'.length)}.ledger.json`))
     const key = [...files, ...ledgerFiles].map((f) => f?.key ?? '').join('|')
-    if (key === this.key) return this.cached
-    const snapshots: TasteSnapshot[] = []
-    for (const file of files) {
-      if (file === null) continue
-      const parsed = this.readSnapshot(file)
-      if (parsed !== null) snapshots.push(parsed)
+    if (key !== this.key) {
+      const snapshots: TasteSnapshot[] = []
+      for (const file of files) {
+        if (file === null) continue
+        const parsed = this.readSnapshot(file)
+        if (parsed !== null) snapshots.push(parsed)
+      }
+      // A fixed order, so the digest never depends on directory listing order.
+      snapshots.sort((a, b) => SOURCE_IDS.indexOf(a.source) - SOURCE_IDS.indexOf(b.source))
+      const ledgers = ledgerFiles.flatMap((file) => {
+        const parsed = file === null ? null : this.readLedger(file)
+        return parsed === null ? [] : [parsed]
+      })
+      this.parses++
+      this.parsed = { snapshots, ledgers }
+      this.key = key
+      this.cached = this.render()
+      this.renders++
     }
-    // A fixed order, so the digest never depends on directory listing order.
-    snapshots.sort((a, b) => SOURCE_IDS.indexOf(a.source) - SOURCE_IDS.indexOf(b.source))
-    const ledgers = ledgerFiles.flatMap((file) => {
-      const parsed = file === null ? null : this.readLedger(file)
-      return parsed === null ? [] : [parsed]
-    })
-    this.renders++
-    this.cached = renderTasteDigest(snapshots, (this.deps.now ?? (() => new Date()))(), DIGEST_BUDGET, ledgers)
-    this.key = key
-    return this.cached
+    // A moment is a different question every pick, so it is never cached --
+    // but it costs the render alone, never a re-read.
+    return moment === undefined ? this.cached : this.render(moment)
+  }
+
+  private render(moment?: Moment): string {
+    const { snapshots, ledgers } = this.parsed
+    return renderTasteDigest(snapshots, (this.deps.now ?? (() => new Date()))(), DIGEST_BUDGET, ledgers, moment)
   }
 
   // Only what the digest needs from a ledger: the source and its rows. A
   // ledger that will not parse is skipped in silence -- the refresher owns
   // repairing it (spec 14 §2.11), and the digest still has the snapshot.
-  private readLedger(file: { path: string; key: string; size: number }): { source: SourceId; entries: readonly TasteItem[] } | null {
+  private readLedger(file: { path: string; key: string; size: number }): LedgerView | null {
     if (file.size > LEDGER_MAX_BYTES) return null
     try {
       const parsed = LedgerCountsSchema.safeParse(JSON.parse(readFileSync(file.path, 'utf-8')))

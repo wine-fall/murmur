@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-20 (spec 14's taste amendment: PR 1 landed as #278, PR 2 in flight)_
+_Last updated: 2026-09-20 (spec 14's taste amendment: PRs 1 and 2 landed as #278 and #280, PR 3 in flight)_
 
 ## Where we are
 
@@ -28,8 +28,8 @@ first, then the by-ear passes.
 
 **In flight: spec 14's taste amendment**, three PRs in order, each on the
 previous one's merged tip (all touch `taste.ts` / `refresh.ts` / `store.ts`).
-§2.3's budget landed (#278); the ledger and per-kind clock (§2.11, §3.4) are
-in flight; the moment-matched half (§2.12) is next.
+§2.3's budget landed (#278) and so did the ledger and per-kind clock (§2.11,
+§3.4, #280); the moment-matched half (§2.12) is in flight and is the last.
 
 **No listener data in the repository** (2026-09-20, user): nothing from
 `~/.murmur` — a song, artist, playlist or channel name, an account name, a
@@ -44,6 +44,7 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#269** (bug, eng) The session-mark invitation test races a 40 ms timer against a 1 s poll budget — four CI occurrences, never reproduced locally.
 - **#272** (bug, eng) A NetEase resolve costs 15-55 s — yt-dlp walks its quality levels one request at a time.
 - **#273** (bug, eng) Brain cadence never beats its own 8 s deadline, so every boundary falls back silently.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
