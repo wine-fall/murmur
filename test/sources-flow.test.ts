@@ -31,6 +31,11 @@ const CHROME: ChromeDeps = { env: {}, platform: 'linux', home: '/home/someone', 
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
+  // Both of the kinds it answers with: a source that declares fewer than it
+  // returns would have the extra rows dropped, which is the guard against a
+  // mixed endpoint doubling a kind (spec 14 §3.4).
+  readonly kinds = ['liked', 'playlist'] as const
+  snapshots = 0
   fail: Error | null = null
   constructor(id: SourceId) {
     this.id = id
@@ -39,6 +44,7 @@ class FakeSource implements TasteSource {
     return { ok: true as const, who: 'me' }
   }
   async snapshot(): Promise<TasteSnapshot> {
+    this.snapshots++
     if (this.fail !== null) throw this.fail
     return { source: this.id, takenAt: NOW.toISOString(), items: [{ kind: 'liked', title: 't', artist: 'a' }, { kind: 'playlist', title: 'p' }] }
   }
@@ -187,6 +193,25 @@ describe('runSources (spec 14 §3.1)', () => {
     const options = host.asks.at(-1)!.choices!.options!
     expect(options[0]).toEqual({ key: 'youtube', label: 'YouTube', note: '1 liked, 1 playlist · read just now', checked: true })
     expect(options.at(-1)).toEqual({ key: 'refresh', label: 'refresh now', note: 're-read every connected account now', checked: false, action: true })
+  })
+
+  // The mount's own read is a read: it lands in the ledger and stamps the
+  // clock like any other (spec 14 §2.11, §3.4). It did not, once -- the
+  // mount had its own write path -- so every list of a just-mounted source
+  // looked never-read and the next background poke re-read the whole
+  // account for nothing.
+  it('the first read counts: it lands in the ledger, and nothing is due straight after', async () => {
+    const { deps, store, sources } = build(['youtube', '', 'youtube'], { platform: 'darwin' })
+    await runSources(deps)
+    const ledger = store.readLedger('youtube')
+    expect(ledger?.entries).toHaveLength(2)
+    // Every list this source has, stamped by the read that just happened.
+    expect(Object.keys(ledger?.lastRead ?? {}).sort()).toEqual([...sources.get('youtube')!.kinds].sort())
+    // So the background poke has nothing to do, and asks for nothing.
+    const before = sources.get('youtube')!.snapshots
+    expect(deps.refresher!.maybeRefresh()).toBe(false)
+    await new Promise((r) => setTimeout(r, 20))
+    expect(sources.get('youtube')!.snapshots).toBe(before)
   })
 
   // spec 14 §2.3: Bilibili's snapshot is a watch history and a follow list

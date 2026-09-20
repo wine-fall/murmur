@@ -11,7 +11,8 @@ import { dirname, join } from 'node:path'
 import { z } from 'zod'
 
 import { chromeProfile } from './chrome.ts'
-import { SOURCE_IDS, type SourceId, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
+import { capLedger, emptyLedger, mergeLedger, type TasteLedger, TasteLedgerSchema } from './ledger.ts'
+import { mergeSnapshot, SOURCE_IDS, type SourceId, type TasteKind, type TasteSnapshot, TasteSnapshotSchema } from './taste.ts'
 
 // yt-dlp's --cookies-from-browser vocabulary, minus whale.
 export const BROWSERS = ['chrome', 'chromium', 'brave', 'edge', 'firefox', 'safari', 'vivaldi', 'opera'] as const
@@ -173,10 +174,17 @@ export class SourcesStore {
     this.dropSnapshot(id)
   }
 
-  // The snapshot alone: what a remount drops before reading the new account,
-  // so a failed first read leaves no taste rather than the old account's.
+  // The snapshot and the ledger: what a remount drops before reading the new
+  // account, so a failed first read leaves no taste rather than the old
+  // account's, and the new account inherits none of its history (spec 14
+  // §2.11).
   dropSnapshot(id: SourceId): void {
     rmSync(this.snapshotPath(id), { force: true })
+    rmSync(this.ledgerPath(id), { force: true })
+    // The copy a failed parse moved aside is the same songs and artists
+    // under another name; leaving it behind would be the leak this delete
+    // exists to prevent (codex review).
+    rmSync(`${this.ledgerPath(id)}.broken`, { force: true })
   }
 
   // A status for something not mounted is dropped: the file never grows a
@@ -226,6 +234,55 @@ export class SourcesStore {
 
   writeSnapshot(snapshot: TasteSnapshot): void {
     atomicWrite(this.snapshotPath(snapshot.source), JSON.stringify(snapshot))
+  }
+
+  // Landing a read: the ONE place a read becomes state (spec 14 §2.11).
+  // Both the mount's first read and the background refresh come through
+  // here, because two write paths meant the mount left no read stamp and
+  // the next poke re-read the whole account it had just finished reading.
+  //
+  // `kinds` is what was asked for. A correct adapter answers with nothing
+  // else, so filtering is usually a no-op; it is the guard against one whose
+  // endpoint is mixed (Soda's collection carries playlist names beside kept
+  // tracks) handing back a kind whose old rows the merge is about to keep.
+  recordRead(read: TasteSnapshot, kinds: readonly TasteKind[], now: Date = new Date()): TasteSnapshot {
+    const snapshot = { ...read, items: read.items.filter((i) => kinds.includes(i.kind)) }
+    // The snapshot is the latest read of each list; the ledger is every read
+    // there has ever been.
+    const merged = mergeSnapshot(this.readSnapshot(read.source), snapshot, kinds)
+    this.writeSnapshot(merged)
+    this.writeLedger(mergeLedger(this.readLedger(read.source) ?? emptyLedger(read.source), snapshot, kinds))
+    this.markRefreshed(read.source, now)
+    return merged
+  }
+
+  ledgerPath(id: SourceId): string {
+    return join(this.deps.tasteDir, `${id}.ledger.json`)
+  }
+
+  // Capped on the way out (spec 14 §2.11), so the file can never be written
+  // past the bound; the drop is a count in the log, never a title.
+  writeLedger(ledger: TasteLedger): void {
+    const { ledger: capped, dropped } = capLedger(ledger)
+    if (dropped > 0) this.deps.log?.(`sources.ledger ${ledger.source} dropped=${dropped}`)
+    atomicWrite(this.ledgerPath(ledger.source), JSON.stringify(capped))
+  }
+
+  // A ledger that will not parse is moved aside once and started fresh: it
+  // is derived data, and blocking the refresh over it would be worse.
+  readLedger(id: SourceId): TasteLedger | null {
+    const path = this.ledgerPath(id)
+    if (!existsSync(path)) return null
+    let parsed
+    try {
+      parsed = TasteLedgerSchema.safeParse(JSON.parse(readFileSync(path, 'utf-8')))
+    } catch {
+      parsed = { success: false } as const
+    }
+    if (parsed.success) return parsed.data
+    renameSync(path, `${path}.broken`)
+    this.deps.log?.(`sources.ledger ${id} unreadable; started fresh`)
+    return null
   }
 
   readSnapshot(id: SourceId): TasteSnapshot | null {

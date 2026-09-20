@@ -1428,6 +1428,12 @@ age:
 - **What is marked read** is the set of kinds that were **requested** (every
   kind, when none was), not the set that came back. A list that is genuinely
   empty must not be re-read every three hours.
+- **The mount's own first read is a read.** `/sources` reads the account in
+  the foreground as it mounts it (§3.1), and that read lands through the
+  same one path a background refresh does — into the ledger, and stamping
+  every list's clock with all the kinds it asked for. With a second write
+  path it did not, so every list of a just-mounted source looked never-read
+  and the next poke re-read the whole account for nothing.
 - **`lastRead` lives in the ledger file, not in `sources.json`** (§2.11):
   it is rebuildable bookkeeping and the sources file is the one that holds
   credentials. `lastRefresh` in `sources.json` keeps its meaning — the last

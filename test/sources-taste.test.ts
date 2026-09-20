@@ -6,7 +6,8 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import { renderTasteDigest, TasteReader, TasteSnapshotSchema, type SourceId, type TasteKind, type TasteSnapshot } from '../src/music/sources/taste.ts'
+import type { LedgerEntry, TasteLedger } from '../src/music/sources/ledger.ts'
+import { DIGEST_BUDGET, renderTasteDigest, TasteReader, TasteSnapshotSchema, type SourceId, type TasteKind, type TasteSnapshot } from '../src/music/sources/taste.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
 
@@ -348,6 +349,58 @@ describe('renderTasteDigest on a full set of snapshots', () => {
   })
 })
 
+// spec 14 §2.3 as amended: "they return to" is a claim about months, not
+// about the 500 rows the last read happened to carry, so the count comes
+// from the ledger when there is one.
+describe('artist counts from the ledger', () => {
+  const entry = (title: string, artist: string, lastSeen = '2026-09-01T00:00:00.000Z'): LedgerEntry => ({
+    kind: 'liked',
+    title,
+    artist,
+    key: `${title}|${artist}`,
+    firstSeen: '2026-01-01T00:00:00.000Z',
+    lastSeen,
+    seen: 3,
+  })
+
+  it('counts the ledger\'s distinct musical entries, not the snapshot\'s', () => {
+    const snapshot: TasteSnapshot = {
+      source: 'netease',
+      takenAt: '2026-09-06T10:00:00.000Z',
+      items: [{ kind: 'liked', title: 'the one still in the window', artist: 'Cheer Chen' }],
+    }
+    const ledger: TasteLedger = {
+      source: 'netease',
+      updatedAt: '2026-09-06T10:00:00.000Z',
+      // Eleven kept over the months; the rolling window can only show one.
+      entries: Array.from({ length: 11 }, (_, i) => entry(`kept ${i}`, 'Cheer Chen')),
+    }
+    expect(renderTasteDigest([snapshot], NOW)).toContain('Cheer Chen (1)')
+    expect(renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger])).toContain('Cheer Chen (11)')
+  })
+
+  it('falls back to the snapshot for a source with no ledger yet', () => {
+    const withLedger: TasteSnapshot = { source: 'netease', takenAt: '2026-09-06T10:00:00.000Z', items: [{ kind: 'liked', title: 'a', artist: 'Bon Iver' }] }
+    const without: TasteSnapshot = { source: 'qqmusic', takenAt: '2026-09-06T10:00:00.000Z', items: [{ kind: 'liked', title: 'b', artist: 'Aimer' }] }
+    const ledger: TasteLedger = { source: 'netease', updatedAt: '', entries: [entry('a', 'Bon Iver'), entry('c', 'Bon Iver')] }
+    const digest = renderTasteDigest([withLedger, without], NOW, DIGEST_BUDGET, [ledger])
+    expect(digest).toContain('Bon Iver (2)')
+    expect(digest).toContain('Aimer (1)')
+  })
+
+  it('holds the same invariant over the ledger: no row a video platform merely watched', () => {
+    const snapshot: TasteSnapshot = { source: 'bilibili', takenAt: '2026-09-06T10:00:00.000Z', items: [{ kind: 'liked', title: 'my upload', artist: 'FAWineLL' }] }
+    const ledger: TasteLedger = {
+      source: 'bilibili',
+      updatedAt: '',
+      entries: [entry('my upload', 'FAWineLL'), { ...entry('a gossip clip', 'a chat channel'), kind: 'history' }],
+    }
+    const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger])
+    expect(digest).toContain('FAWineLL (1)')
+    expect(digest).not.toContain('a chat channel')
+  })
+})
+
 describe('TasteReader', () => {
   function dir(): string {
     const d = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
@@ -401,6 +454,42 @@ describe('TasteReader', () => {
     // The mounted set is part of the memo key, so an unmount lands at once.
     mounted = []
     expect(reader.digest()).toBe('')
+  })
+
+  it('reads the ledgers beside the snapshots, and never as snapshots', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: [{ kind: 'liked', title: 'a', artist: 'Bon Iver' }] }))
+    writeFileSync(join(dir, 'netease.ledger.json'), JSON.stringify({
+      source: 'netease',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+      entries: [1, 2, 3].map((n) => ({ kind: 'liked', title: `song ${n}`, artist: 'Bon Iver', key: `k${n}`, firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 })),
+    }))
+    const logs: string[] = []
+    const reader = new TasteReader({ dir, now: () => NOW, log: (m) => logs.push(m) })
+    expect(reader.digest()).toContain('Bon Iver (3)')
+    // A ledger is not a malformed snapshot; it must not be warned about.
+    expect(logs).toEqual([])
+  })
+
+  it('re-renders when a ledger changes, not only when a snapshot does', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
+    const ledger = join(dir, 'netease.ledger.json')
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: [{ kind: 'liked', title: 'a', artist: 'Bon Iver' }] }))
+    const write = (n: number): void =>
+      writeFileSync(ledger, JSON.stringify({
+        source: 'netease',
+        updatedAt: '2026-09-06T00:00:00.000Z',
+        entries: Array.from({ length: n }, (_, i) => ({ kind: 'liked', title: `song ${i}`, artist: 'Bon Iver', key: `k${i}`, firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 1 })),
+      }))
+    write(2)
+    const reader = new TasteReader({ dir, now: () => NOW })
+    expect(reader.digest()).toContain('Bon Iver (2)')
+    expect(reader.digest()).toContain('Bon Iver (2)')
+    expect(reader.renders).toBe(1)
+    write(5)
+    utimesSync(ledger, new Date(), new Date(Date.now() + 1000))
+    expect(reader.digest()).toContain('Bon Iver (5)')
+    expect(reader.renders).toBe(2)
   })
 
   it('a snapshot over the 1 MB bound is skipped as a bug, not rendered', () => {

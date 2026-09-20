@@ -9,9 +9,17 @@ import type { Host } from '../../host/host.ts'
 import { SourceAuthError, SourceAuthWatch } from './auth.ts'
 import { BrowserCookieError } from './cookies.ts'
 import type { SourcesStore } from './store.ts'
-import { SOURCE_NAMES, type SourceId, type TasteSource } from './taste.ts'
+import { SOURCE_NAMES, type SourceId, type TasteKind, type TasteSource } from './taste.ts'
 
 export const STALE_MS = 24 * 60 * 60_000
+// What the listener is on RIGHT NOW is a different question from what they
+// have collected (spec 14 §3.4). An afternoon's listening should reach the
+// evening's picks, while a liked collection moves on the scale of days --
+// and one clock for both meant either a stale afternoon or eight needless
+// collection reads a day.
+export const FRESH_MS = 3 * 60 * 60_000
+const FRESH_KINDS: readonly TasteKind[] = ['history', 'subscription', 'daily']
+export const staleMs = (kind: TasteKind): number => (FRESH_KINDS.includes(kind) ? FRESH_MS : STALE_MS)
 // A read that failed is not tried again before this: a dead platform or a
 // rate limit must not be hit at every segment boundary.
 export const RETRY_MS = 60 * 60_000
@@ -46,9 +54,27 @@ export class TasteRefresher {
     return (this.deps.now ?? (() => new Date()))()
   }
 
-  // Which mounted sources are due: no snapshot yet, or last read over a day
-  // ago — never one whose login is known to be gone (only /sources renews
-  // that), and never one tried within the retry window.
+  // Which of a source's lists are due: each on its own clock, from the
+  // read stamps the ledger carries (spec 14 §2.11). A list never read is
+  // due, which on a fresh mount is every list and then the new clock.
+  private due(id: SourceId): TasteKind[] {
+    const source = this.deps.source(id)
+    if (source === null) return []
+    // The stamps are the authority: a list with none has never been read and
+    // is due, which on a fresh mount is every list. The snapshot and the
+    // ledger are dropped together (`dropSnapshot`), so one cannot outlive
+    // the other and leave a stamp claiming a read whose rows are gone.
+    const lastRead = this.deps.store.readLedger(id)?.lastRead ?? {}
+    const now = this.now().getTime()
+    return source.kinds.filter((kind) => {
+      const at = new Date(lastRead[kind] ?? '').getTime()
+      return !Number.isFinite(at) || now - at > staleMs(kind)
+    })
+  }
+
+  // Which mounted sources have anything due — never one whose login is known
+  // to be gone (only /sources renews that), and never one tried within the
+  // retry window, whatever the kind.
   private stale(): SourceId[] {
     const file = this.deps.store.read()
     const now = this.now().getTime()
@@ -56,10 +82,7 @@ export class TasteRefresher {
       if (file[id]?.status === 'expired') return false
       const tried = this.tried.get(id)
       if (tried !== undefined && now - tried < RETRY_MS) return false
-      if (this.deps.store.readSnapshot(id) === null) return true
-      const stamp = file[id]?.lastRefresh ?? file[id]?.mountedAt ?? ''
-      const at = new Date(stamp).getTime()
-      return !Number.isFinite(at) || now - at > STALE_MS
+      return this.due(id).length > 0
     })
   }
 
@@ -77,20 +100,22 @@ export class TasteRefresher {
   // stale or not, awaited, with its outcomes.
   async refreshAll(): Promise<RefreshOutcome[]> {
     if (this.running !== null) await this.running.catch(() => {})
-    return this.run(this.deps.store.mounted())
+    return this.run(this.deps.store.mounted(), false)
   }
 
-  private run(ids: readonly SourceId[]): Promise<RefreshOutcome[]> {
+  private run(ids: readonly SourceId[], partial = true): Promise<RefreshOutcome[]> {
     const work = (async () => {
       const outcomes: RefreshOutcome[] = []
-      for (const id of ids) outcomes.push(await this.refreshOne(id))
+      // The background poke reads only what is due; a typed /sources refresh
+      // is the listener asking for everything, so it narrows nothing.
+      for (const id of ids) outcomes.push(await this.refreshOne(id, partial ? this.due(id) : undefined))
       return outcomes
     })()
     this.running = work.finally(() => (this.running = null))
     return work
   }
 
-  private async refreshOne(id: SourceId): Promise<RefreshOutcome> {
+  private async refreshOne(id: SourceId, kinds?: readonly TasteKind[]): Promise<RefreshOutcome> {
     const { store, host, watch } = this.deps
     // An expired login is renewed by mounting again, never by re-reading:
     // some platforms serve public lists anonymously, and a read that
@@ -106,10 +131,10 @@ export class TasteRefresher {
     const epoch = store.epoch
     const t = performance.now()
     try {
-      const snapshot = await source.snapshot()
+      const asked = kinds ?? source.kinds
+      const read = await source.snapshot(kinds)
       if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
-      store.writeSnapshot(snapshot)
-      store.markRefreshed(id, this.now())
+      const snapshot = store.recordRead(read, asked, this.now())
       // The read worked, so the profile it used is the one this account lives
       // in: pin it (spec 14 §3.1). A mount made before murmur named profiles
       // gets its pin here; from then on nothing re-guesses.
