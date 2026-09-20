@@ -91,9 +91,10 @@ export const MUSIC_POLICY_HEADER = 'Policy:'
 export const TASTE_GUIDANCE = `With taste in hand: the block "What the listener keeps" below is what they
 actually keep on their own platforms — a strong prior for STYLE, not a list
 to replay. Pick for the moment. When a kept track genuinely fits, playing it is
-fine, but not two in a row. When their taste points at a Chinese
-catalogue, prefer a NetEase or Bilibili search where search_music lists it as
-available. In the announce, say where a pick came from only when it is theirs
+fine, but not two in a row. Search wherever the song is likeliest to be FOUND — NetEase
+and QQ Music for Chinese-catalogue depth, Bilibili and YouTube as well.
+Where a pick PLAYS from is decided after submit_pick, so choose the best song,
+not the best source. In the announce, say where a pick came from only when it is theirs
 ("one you've kept"), never otherwise.`
 
 // What the `channels` catalogue IS (spec 14 §2.9), rendered only while the

@@ -5,6 +5,7 @@
 // parking: the loop waits inside it while the music plays on. It is the
 // single writer of sources.json for its whole duration (store.busy).
 
+import type { PlayCatalogue } from '../../contracts.ts'
 import type { Host, InfoTone } from '../../host/host.ts'
 import { ask } from '../../host/host.ts'
 import type { AskOption } from '../../host/ipc.ts'
@@ -77,6 +78,9 @@ export type SourcesFlowDeps = {
   refresher: TasteRefresher
   watch: SourceAuthWatch
   mounts: SourceMounts
+  // Where a found song is PLAYED from (spec 14 §2.13), read and written live
+  // through the settings store. Absent = the row is not offered at all.
+  playOrder?: { read: () => readonly PlayCatalogue[]; write: (order: readonly PlayCatalogue[]) => void }
   // The live adapter for a freshly mounted entry, for the first snapshot.
   build: (id: SourceId, entry: SourceEntry[SourceId]) => TasteSource | null
   // Drop whatever was cached from the browser's cookie store: a mount that
@@ -121,9 +125,12 @@ const NAMES: Record<string, MenuKey> = {
   // The row is drawn as a button — `( refresh now )` — so that is what gets
   // typed, and one word the flow cannot place fails the whole line.
   now: 'refresh',
+  // `( play order )`, read the same way: both of its words name the row.
+  play: 'playOrder',
+  order: 'playOrder',
 }
 
-type MenuKey = SourceId | 'refresh'
+type MenuKey = SourceId | 'refresh' | 'playOrder'
 type MenuRow = AskOption & { key: MenuKey; note: string; checked: boolean }
 
 const QUESTION = 'which accounts should I read? Enter with nothing changed leaves'
@@ -131,6 +138,9 @@ const QUESTION = 'which accounts should I read? Enter with nothing changed leave
 // now, not something you are connected to, so the row carries `action` and
 // is drawn as a button — on the card and in the numbered rows alike.
 const REFRESH_ROW: MenuRow = { key: 'refresh', label: 'refresh now', note: 're-read every connected account now', checked: false, action: true }
+// The other ACTION row (spec 14 §2.13): where a song plays FROM, once it has
+// been found. Always offered — YouTube is always there to order against.
+const PLAY_ORDER_ROW: MenuRow = { key: 'playOrder', label: 'play order', note: 'which catalogue a found song plays from first', checked: false, action: true }
 
 function ago(iso: string | undefined, now: Date): string {
   if (iso === undefined) return 'never read'
@@ -167,7 +177,7 @@ function counts(store: SourcesStore, id: SourceId): string {
 // when it is mounted (an expired login included — unticking it is how it
 // is forgotten without signing in), its note the state; a refresh row once
 // anything is mounted.
-function menuRows(store: SourcesStore, now: Date): MenuRow[] {
+function menuRows(store: SourcesStore, now: Date, playOrder: SourcesFlowDeps['playOrder']): MenuRow[] {
   const file = store.read()
   const rows: MenuRow[] = SOURCE_IDS.map((id) => {
     const entry = file[id]
@@ -176,7 +186,8 @@ function menuRows(store: SourcesStore, now: Date): MenuRow[] {
     if (entry.status === 'expired') return { key: id, label, note: 'expired — untick to forget it, tick refresh to sign in again', checked: true }
     return { key: id, label, note: `${counts(store, id)} · ${ago(entry.lastRefresh, now)}`, checked: true }
   })
-  return store.mounted().length > 0 ? [...rows, REFRESH_ROW] : rows
+  const actions = [...(store.mounted().length > 0 ? [REFRESH_ROW] : []), ...(playOrder === undefined ? [] : [PLAY_ORDER_ROW])]
+  return [...rows, ...actions]
 }
 
 // The card text: the question, the previous submit's results as ready/gap
@@ -219,7 +230,11 @@ function parsePick(line: string, rows: readonly MenuRow[]): Set<MenuKey> | strin
   for (const word of line.split(/\s+/).filter((w) => w !== '')) {
     const byNumber = /^\d+$/.test(word) ? rows[Number(word) - 1]?.key : undefined
     const byLabel = rows.find((row) => row.label.toLowerCase() === word)?.key
-    const key = byNumber ?? NAMES[word] ?? byLabel
+    // The TUI answers with the row's own key (`playOrder`), lowercased on the
+    // way in — a label of two words cannot be matched as one, so the key is
+    // read directly rather than spelled into NAMES per row (codex review).
+    const byKey = rows.find((row) => row.key.toLowerCase() === word)?.key
+    const key = byNumber ?? NAMES[word] ?? byLabel ?? byKey
     if (key === undefined || !rows.some((row) => row.key === key)) return `I didn't catch "${word}" — numbers or names from the list`
     picked.add(key)
   }
@@ -430,6 +445,100 @@ function obstacleLine(reason: CookieFailure, detail: string, platform: NodeJS.Pl
     : "Chrome is here, but I am not allowed to read its cookie store — check this terminal's permissions, then /sources again."
 }
 
+
+// --- the play-order card (spec 14 §2.13 / §3.1) --------------------------- //
+
+// A single-select card whose semantics are "a pick moves it to the front":
+// ordering by repeated promotion needs one key per visit and no up/down verbs,
+// and three picks put any four-item list in any order.
+// ponytail: no drag, no move-up/move-down, no rank typing — promotion is the
+// whole vocabulary. Upgrade path, if four catalogues ever become twelve: a
+// second key for demotion.
+export const PLAY_ORDER_QUESTION = 'Play from which first? (a pick moves it to the front)'
+const DONE_ROW: AskOption = { key: 'done', label: 'done', note: 'keep this order', action: true }
+const RANKS = ['1st', '2nd', '3rd', '4th'] as const
+
+const ordinal = (i: number): string => RANKS[i] ?? `${String(i + 1)}th`
+
+// The stored list always holds all four; the card shows only what is mounted,
+// so an unmounted catalogue keeps its place without ever being asked about.
+function shown(order: readonly PlayCatalogue[], store: SourcesStore): PlayCatalogue[] {
+  const mounted = new Set<string>(store.mounted())
+  return order.filter((c) => c === 'youtube' || mounted.has(c))
+}
+
+// Promote one catalogue to the front, everything else in the order it had.
+export function promote(order: readonly PlayCatalogue[], first: PlayCatalogue): PlayCatalogue[] {
+  return [first, ...order.filter((c) => c !== first)]
+}
+
+// How the order reads once it is set: the result row the menu comes back with.
+export const orderLine = (order: readonly PlayCatalogue[]): string =>
+  `ok play order: ${order.map((c) => SOURCE_NAMES[c]).join(' > ')}`
+
+function playOrderRows(order: readonly PlayCatalogue[], store: SourcesStore): (AskOption & { key: string })[] {
+  const rows = shown(order, store).map((c, i) => ({
+    key: c,
+    label: SOURCE_NAMES[c],
+    note: ordinal(i),
+    checked: i === 0,
+  }))
+  return [...rows, DONE_ROW]
+}
+
+function playOrderText(rows: readonly AskOption[], result: string | undefined): string {
+  const numbered = rows.map((row, i) => `>> ${String(i + 1)}) ${row.action === true ? `( ${row.label} )` : `[${row.checked === true ? 'x' : ' '}] ${row.label}`} - ${row.note ?? ''}`)
+  return [PLAY_ORDER_QUESTION, ...(result === undefined ? [] : [result]), ...numbered].join('\n')
+}
+
+// Re-rendered in place after every pick until `( done )` or Enter on the
+// current first. Esc abandons the visit and restores the order it opened on.
+// Returns the result row the /sources menu leads with.
+async function runPlayOrder(
+  deps: SourcesFlowDeps & { playOrder: NonNullable<SourcesFlowDeps['playOrder']> },
+  read: () => Promise<string>,
+  stopped: () => boolean,
+): Promise<string> {
+  const { host, store, playOrder } = deps
+  const opened = [...playOrder.read()]
+  let order = [...opened]
+  let result: string | undefined
+  for (;;) {
+    const rows = playOrderRows(order, store)
+    ask(host, playOrderText(rows, result), 'question', { options: rows, multi: false })
+    const line = (await read()).trim().toLowerCase()
+    if (stopped()) {
+      // Esc abandons the visit: the order that stood when the card opened is
+      // what the radio goes back to, however many picks were made inside it.
+      playOrder.write(opened)
+      return 'ok play order unchanged'
+    }
+    // A list answers with its ticked row AND, when a button was pressed, that
+    // button's key — `youtube done`, not `done` (spec 10 §3.2-D). So the line
+    // is read as the words it is, and the plain host's single word is the
+    // same read with one word in it.
+    const words = line.split(/\s+/).filter((w) => w !== '')
+    const named = words.map((word) => rows.find((row, i) => row.key.toLowerCase() === word || row.label.toLowerCase() === word || String(i + 1) === word))
+    const miss = words.find((_, i) => named[i] === undefined)
+    if (miss !== undefined) {
+      result = `-- I didn't catch "${miss}" — numbers or names from the list`
+      continue
+    }
+    // Enter with nothing, the done button, or the row that is already first:
+    // three ways of saying "keep this order".
+    const picked = named.find((row) => row?.key !== 'done')
+    if (words.length === 0 || named.some((row) => row?.key === 'done')) break
+    // The row drawn as 1st, which on a card that hides an unmounted catalogue
+    // is the first one that will actually play.
+    if (picked === undefined || picked.key === rows[0]?.key) break
+    order = promote(order, picked.key as PlayCatalogue)
+    playOrder.write(order)
+    result = orderLine(order)
+  }
+  const moved = order.some((c, i) => opened[i] !== c)
+  return moved ? orderLine(order) : 'ok play order unchanged'
+}
+
 export async function runSources(deps: SourcesFlowDeps): Promise<void> {
   const { host, store, quit } = deps
   const now = deps.now ?? (() => new Date())
@@ -452,7 +561,7 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
   try {
     let results: string[] = []
     while (!quit.requested) {
-      const rows = menuRows(store, now())
+      const rows = menuRows(store, now(), deps.playOrder)
       ask(host, menuText(rows, results), 'question', { options: rows, multi: true })
       results = []
       cancelled = false
@@ -465,6 +574,17 @@ export async function runSources(deps: SourcesFlowDeps): Promise<void> {
       if (typeof picked === 'string') {
         host.info(picked)
         results.push(`-- ${picked}`)
+        continue
+      }
+      // An action row is a button, not part of the selection: pressing it does
+      // its one thing and brings the menu back, so nothing else on the line
+      // can be read as "untick everything else".
+      if (picked.has('playOrder') && deps.playOrder !== undefined) {
+        cancelled = false
+        const withOrder = { ...deps, playOrder: deps.playOrder }
+        results.push(await runPlayOrder(withOrder, read, () => cancelled || gone || quit.requested))
+        if (gone || quit.requested) return
+        cancelled = false
         continue
       }
       // The diff against what stands: unticked-and-mounted goes, ticked-and-

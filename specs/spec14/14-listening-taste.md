@@ -1072,6 +1072,135 @@ scores 0, the order falls back to newest first, and the render is what it was
 before this section existed: an unmatched pick, a source with no ledger and a
 silent moment all degrade by the same path, not by a special case.
 
+### 2.13 Play-source preference — found anywhere, played from the fastest
+
+Where a song is **found** and where it **plays from** are two decisions, and
+only the first belongs to the model. NetEase's CDN delivers ~59 KB/s to a
+developer machine here while yt-dlp's `bestaudio` picks its FLAC (~1 Mbps),
+so a NetEase pick stutters that the same song on YouTube or Bilibili would
+not (measured 2026-09-20 on one Chinese track; related: issue #272, NetEase
+resolve slowness — this routes around it and does not fix it).
+
+So after `submit_pick` has a ref and before the resolve, code — never the
+model — tries to **relocate** the pick to a faster catalogue:
+
+```ts
+playOrder: readonly ('youtube' | 'bilibili' | 'qqmusic' | 'netease')[]   // default in that order
+```
+
+**When relocation is skipped**, and the original ref goes straight down
+today's path:
+
+- the ref is a **segment** ref (`parseSegmentRef` yields a segment) — a
+  chapter of one specific upload has no equivalent elsewhere;
+- **no title** was submitted — there is nothing to match a hit against;
+- the ref's own catalogue is already **top-ranked** among the catalogues open
+  in this task. A ref whose host is unknown (or is YouTube) counts as
+  `youtube`; a `channels` pick is a YouTube or Bilibili upload and is read by
+  its host like any other ref.
+
+**Otherwise**, walk `playOrder` from the top down to (excluding) the ref's own
+catalogue, visiting only catalogues that are **mounted and still open** in
+this task. For each:
+
+1. `provider.search(`${artist ?? ''} ${title}`.trim(), 5, catalogue)`;
+2. take the **first** hit whose folded title contains the submitted folded
+   title (or the reverse) **and** whose `durationS` is within **20 s** of the
+   length the original candidate stated (no stated length → accept any);
+3. `resolve` and probe it exactly as the original path would — including the
+   preview trap, which still applies only when the *relocated* target is
+   NetEase.
+
+The first success wins and its clip becomes the pick's. Any failure — no hit,
+a resolve error, a dead probe, a `SourceAuthError` — falls to the next
+catalogue; an auth failure during relocation still goes through `authResult`
+so that catalogue closes for the task, but it does **not** end the submit.
+All of them failing is not a failure: the submit continues with the original
+ref through the unchanged existing path. The finished pick keeps the model's
+`title`, `artist` and `announce` — **only the clip changes**.
+
+**ponytail: the match is containment plus a 20 s window, nothing more.** No
+fuzzy distance, no pinyin folding, no romanisation table — a wrong relocation
+plays a different song, so the ceiling is deliberately a rule that is cheap to
+read and easy to fail closed on. Upgrade path, if real use shows misses worth
+paying for: fold both sides through the same converter `folded()` names, and
+score candidates rather than taking the first.
+
+**The knob.** `playOrder` is a **settings-layer** knob (spec 12), like
+`musicEnabled` and `musicEveryN`: it lives in `~/.murmur/settings.json`, it is
+set from the /sources card below, and it is read **per submit** through a
+getter — never a value captured at boot — so a change lands on the next pick
+rather than the next launch. Layering is the settings layering: file < env <
+flag. The env override is `MURMUR_PLAY_ORDER`, comma-separated, with the same
+warn-and-default posture as the other `MURMUR_*` music knobs: parsed to a
+de-duplicated list of `youtube|bilibili|qqmusic|netease`, with any catalogue
+the list omits appended in default order (`MURMUR_PLAY_ORDER=bilibili` means
+bilibili first, the rest as they were). An unknown token is rejected — the
+whole value is ignored with one warning and the default stands. **The stored
+list always holds all four**, mounted or not, so an unmounted catalogue keeps
+its place and resumes it the day it is connected.
+
+
+**The card** (spec 10 §3.2-B, single-select, `multi: false`), reached from the
+/sources menu's `( play order )` action row and re-rendered **in place** after
+every pick:
+
+```
+Play from which first? (a pick moves it to the front)
+ok play order: Bilibili > YouTube > QQ Music > NetEase     <- the previous pick
+>> 1) [x] Bilibili - 1st
+>> 2) [ ] YouTube - 2nd
+>> 3) ( done ) - keep this order
+```
+
+- One option row per catalogue **currently mounted** (YouTube always; the rest
+  as `sources.json` says), listed in the current play order and labelled with
+  its rank, the current first ticked. Unmounted catalogues are not shown.
+- **A pick moves that catalogue to the front**, everything else keeping its
+  relative order; it is persisted at once and the same card is drawn again.
+- `( done )`, or Enter with the current first still selected, returns to the
+  /sources menu, which leads with `ok play order: <A> > <B> > <C> > <D>` — or
+  `ok play order unchanged` when nothing moved.
+- **Esc abandons the visit**: the order that stood when the card opened is
+  restored, however many picks were made inside it, and the menu comes back
+  with `ok play order unchanged`.
+- Plain host: numbers or names, the same one-word-fails-the-line rule as the
+  menu itself. **A list answers with its ticked row and, on a button press,
+  that button's key** (spec 10 §3.2-D) — `youtube done`, not `done` — so the
+  answer is read as the words it is, and the row's own key is an answer
+  everywhere a label or a number is (*codex review, 2026-09-20: the TUI sends
+  `playOrder`, which no label or name could match*).
+- **The stored order is completed at the settings boundary**: a hand-edited
+  `settings.json` holding a short or repeating list is filled out in default
+  order rather than refused, because the card can only promote what it shows
+  and a short list would hide a catalogue with no way back.
+
+Matching a relocation candidate carries one more rule than containment and the
+window: a hit may carry **no recording marker the submitted title did not**
+(karaoke, instrumental, cover, remix, and their Chinese spellings), and the
+artist must appear in the hit's title or uploader when one was submitted. A
+stated length of `0` is yt-dlp's "unknown", not a length to hold a hit
+against. All three fail closed to the original ref.
+
+ponytail: promotion is the whole vocabulary — no drag, no move-up/move-down,
+no rank typing. Three picks put four catalogues in any order, and one key per
+visit is the smallest thing that can. Upgrade path, if four ever become
+twelve: a second key for demotion.
+
+**The dev log** (§3.6 applies: lengths, never words). One line per submit that
+attempted a relocation, through the same sink as `music.search` /
+`music.resolve` / `music.probe`:
+
+```
+music.relocate from=netease to=youtube ok
+music.relocate from=netease none reason=no-hit        # also: dead | resolve-failed | auth
+```
+
+**What the prompt says** (§3.3, revised): search wherever the song is likeliest
+to be **found** — NetEase and QQ Music for Chinese-catalogue depth, Bilibili
+and YouTube as well — because where a pick plays from is decided after
+`submit_pick`. Choose the best song, not the best source.
+
 ---
 
 ## 3. Design
@@ -1099,6 +1228,7 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
 >> 5) [ ] Soda Music - not connected
 >> 6) [ ] QQ Music - not connected
 >> 7) ( refresh now ) - re-read every connected account now   ← only once something is mounted
+>> 8) ( play order ) - which catalogue a found song plays from first
 ```
 
 - **Ticked = mounted**, an expired login included: unticking it is how it
@@ -1122,6 +1252,15 @@ ok connected NetEase — signed in as Chen X · 312 liked   ← last submit's re
   box for the same reason; typing `refresh` still names it, and so does
   `refresh now`, the way it is drawn — a listener types the row they can see,
   and one word the flow cannot place fails the whole line (codex review).
+- **`( play order )` is the second ACTION row** (§2.13), placed after the
+  refresh row and **always present** — YouTube is always there to order
+  against, so there is always something to answer. Pressing it opens the
+  play-order card (§2.13), and pressing it is *all* that line does: an action
+  row is a button, not part of the selection, so nothing else typed alongside
+  it is read as a tick and nothing is mounted or unmounted by that visit.
+  Typing `play order` names it on the plain host, the way the row reads. When
+  the card closes the menu comes back with its result leading, under the same
+  results-land-in-the-next-card rule every other row follows.
 - **The TUI's multi card closes on an `( apply )` row it synthesizes itself**
   (10 §3.2-D) — not on the wire, not this flow's business: the card offered
   nothing that looked like a submit. Its note says what applying would do
@@ -1434,8 +1573,8 @@ sources are not a knob.
 One paragraph added to the music prompt (`src/prompts/music.ts`), rendered
 only when a digest is present: the listener's kept music is a strong prior
 for *style*; pick for the moment; when a kept track fits, it is fine to play
-it, but not two in a row; when the listener's taste points at Chinese
-catalogue, prefer NetEase or Bilibili search if mounted; say in `announce`
+it, but not two in a row; search wherever the song is likeliest to be FOUND,
+not where it plays best (§2.13 relocates the pick after submit); say in `announce`
 where a pick came from only when it is theirs ("one you've kept").
 
 ### 3.4 Boot and refresh
@@ -1781,8 +1920,43 @@ the no-argument render in every case (§2.12's scope), and two pack reads
 across a changed moment render **once** — `TasteReader.renders` proves the
 memoisation still holds.
 
+### 5.17 Found on NetEase, played from YouTube (unit) — *added 2026-09-20*
+A `submit_pick` on a NetEase ref whose title and duration a YouTube hit
+matches finishes with the **YouTube** resolve as its clip, keeps the model's
+title/artist/announce, and leaves `music.relocate from=netease to=youtube ok`
+in the dev log. A YouTube hit more than 20 s off is not taken — the walk falls
+to Bilibili and then to the original ref. A submit with no title, and a
+segment ref, run no relocation search at all. A `SourceAuthError` from a
+relocation search closes that catalogue for the task and the submit still
+succeeds. `MURMUR_PLAY_ORDER=bilibili` tries Bilibili first and YouTube
+second; an unknown token in it is refused and the default order stands.
+
+### 5.18 The play order is set from /sources (unit, scripted host) — *added 2026-09-20*
+A scripted /sources session: the menu carries `( play order )` as an action
+row after `( refresh now )`; pressing it opens the card in the current order
+with only the mounted catalogues shown and ranked, the first ticked; picking
+Bilibili re-renders the **same** card with Bilibili 1st and
+`ok play order: Bilibili > YouTube` leading it; `( done )` returns to the menu
+with `ok play order: Bilibili > YouTube > QQ Music > NetEase`; `settings.json`
+holds that list; and a `submit_pick` through tools built **before** the card
+ran relocates by the new order — no restart. Esc after a pick restores the
+order the card opened on. An unmounted catalogue is never shown and keeps its
+stored position behind the promotion.
+
 ## 6. Resolved decisions
 
+- **The play order is a card, not an env var** (2026-09-20, user). Where a
+  song plays from is the listener's preference, not a deployment setting, so
+  it is a settings-layer knob set from `( play order )` in /sources and read
+  per submit; `MURMUR_PLAY_ORDER` stays as the env override above the file.
+  The card's verb is promotion — a pick moves that catalogue to the front —
+  because it needs one key per visit and no ordering vocabulary at all.
+- **Where a song is found and where it plays from are two decisions**
+  (2026-09-20, user). NetEase's CDN measured ~59 KB/s against a ~1 Mbps FLAC
+  here, so the model is told to search for the best *song* and code relocates
+  the pick to the fastest catalogue that has it (§2.13). The alternative —
+  teaching the prompt to prefer fast sources — trades recall for speed at the
+  one place the model is actually good, and cannot know today's throughput.
 - **Taste over transport** (2026-09-06, user). The requirement is
   recommendation quality; playback stays where it is.
 - **Spotify read-only, free account** — Premium gates streaming only; the Web

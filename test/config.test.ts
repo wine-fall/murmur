@@ -228,6 +228,22 @@ describe('music discovery config', () => {
   it('defaults musicPolicyPath under the (relocatable) home', () => {
     expect(parseCli([], { MURMUR_HOME: '/tmp/mh' }).config.musicPolicyPath).toBe('/tmp/mh/music-policy.md')
   })
+
+  it('reads the play order from env, dedupes it, and ranks the rest behind (spec 14 §2.13)', () => {
+    expect(parseCli([], NO_ENV).config.playOrder).toEqual(['youtube', 'bilibili', 'qqmusic', 'netease'])
+    expect(parseCli([], isolated({ MURMUR_PLAY_ORDER: 'bilibili' })).config.playOrder).toEqual([
+      'bilibili', 'youtube', 'qqmusic', 'netease',
+    ])
+    expect(parseCli([], isolated({ MURMUR_PLAY_ORDER: ' netease , youtube ,netease' })).config.playOrder).toEqual([
+      'netease', 'youtube', 'bilibili', 'qqmusic',
+    ])
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    expect(parseCli([], isolated({ MURMUR_PLAY_ORDER: 'youtube,spotify' })).config.playOrder).toEqual([
+      'youtube', 'bilibili', 'qqmusic', 'netease',
+    ])
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('MURMUR_PLAY_ORDER'))
+    warn.mockRestore()
+  })
 })
 
 // spec 05 §2.3: an installed murmur logs by default, under the one home; only

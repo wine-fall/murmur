@@ -916,6 +916,7 @@ describe('Director — a language change invalidates the talk look-ahead (spec 1
         muted: false,
         tuiPet: true,
         rwtEnabled: true,
+        playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
       },
       touched: {},
     })

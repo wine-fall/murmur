@@ -84,9 +84,15 @@ export class FakeMusicProvider implements MusicProvider {
   // The headers the resolved stream needs (spec 03-01 §2.2), when it needs any.
   headers: Record<string, string> | null = null
 
+  // Per-catalogue answers, for the tests where the catalogues must differ
+  // (spec 14 §2.13's relocation). An Error is thrown instead of returned.
+  byCatalogue: Partial<Record<Catalogue, TrackCandidate[] | Error>> = {}
+
   async search(query: string, limit?: number, catalogue?: Catalogue): Promise<TrackCandidate[]> {
     this.searches.push({ query, limit, catalogue })
-    return this.candidates
+    const scripted = this.byCatalogue[catalogue ?? 'youtube']
+    if (scripted instanceof Error) throw scripted
+    return scripted ?? this.candidates
   }
 
   async resolve(ref: string): Promise<AudioClip> {

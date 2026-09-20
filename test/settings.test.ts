@@ -20,6 +20,7 @@ const BASE: Settings = {
   muted: false,
   tuiPet: true,
   rwtEnabled: true,
+  playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
 }
 
 const home = () => mkdtempSync(join(tmpdir(), 'murmur-settings-'))

@@ -243,6 +243,12 @@ export type TrackCandidate = {
 // a place to LOOK, never a statement about the listener's taste.
 export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'qqmusic' | 'channels'
 
+// Where a found song is PLAYED from, best first (spec 14 §2.13). `channels` is
+// absent on purpose: it is a place to LOOK, and its refs are YouTube or
+// Bilibili uploads that read as their own host.
+export const PLAY_ORDER = ['youtube', 'bilibili', 'qqmusic', 'netease'] as const
+export type PlayCatalogue = (typeof PLAY_ORDER)[number]
+
 // The low-level music source (spec 03-01 §2.2). No start/close: the default
 // adapter is a binary invoked per call, with nothing to warm or release.
 // `catalogue` is additive (spec 14 §2.4): absent means youtube, as before.
