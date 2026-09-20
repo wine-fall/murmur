@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-07 (spec 14 listening-taste built — PR #214; its by-ear pass is #213)_
+_Last updated: 2026-09-19 (spec 14 amended: the taste digest accumulates and picks for the moment — three PRs)_
 
 ## Where we are
 
@@ -23,8 +23,22 @@ green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
 spec for what it does, its PR for how it got there. Spec 14 (listening-taste,
 roadmap line 5) is built; its acceptance on the listener's own accounts is the
-by-ear issue below. **No build is in flight.** Everything else is under
-**Open** — engineering items first, then the by-ear passes.
+by-ear issue below. Everything else is under **Open** — engineering items
+first, then the by-ear passes.
+
+**In flight: spec 14's taste amendment**, three PRs in order, each on the
+previous one's merged tip (they all touch `taste.ts` / `refresh.ts` /
+`store.ts`):
+
+1. **The digest spends its budget on music** (§2.3) — the invariant that
+   every row traces to a songs-only source or an artist match, the fixed /
+   flexible halves, the weights.
+2. **The ledger and the per-kind clock** (§2.11, §3.4) — an append-only file
+   per source beside the snapshot; `history` re-read every 3 h, collections
+   every 24 h, only the due lists read.
+3. **The moment-matched half** (§2.12) — the pick's rows chosen in code from
+   the ledger against the hour, the persona, the last three artists and the
+   last talk beat. No new tool, no extra model call, 5 ms.
 
 ## Open
 
