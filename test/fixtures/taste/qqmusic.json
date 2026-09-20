@@ -1,0 +1,36 @@
+{
+"source": "qqmusic",
+"takenAt": "2026-09-17T05:45:05.000Z",
+"items": [
+{
+"kind": "liked",
+"title": "Falling at Dawn (Winter Signal Version)",
+"artist": "The Paper Ferries",
+"at": "2025-09-04T14:33:20.000Z"
+},
+{
+"kind": "playlist",
+"title": "long train"
+},
+{
+"kind": "playlist",
+"title": "long train quiet"
+},
+{
+"kind": "playlist",
+"title": "slow morning pale"
+},
+{
+"kind": "playlist",
+"title": "sunday kitchen"
+},
+{
+"kind": "playlist",
+"title": "after hours"
+},
+{
+"kind": "playlist",
+"title": "rainy window"
+}
+]
+}
