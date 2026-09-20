@@ -353,8 +353,11 @@ export class QishuiSource implements TasteSource {
   readonly kinds = ['liked', 'playlist', 'daily'] as const
 
   async snapshot(kinds?: readonly TasteKind[]): Promise<TasteSnapshot> {
+    // The collection endpoint is mixed: kept tracks AND kept playlist names
+    // come back together, so it is read whenever either kind is due. The
+    // refresher drops whatever was not asked for.
     const [collection, playlists, daily] = await Promise.all([
-      asked(kinds, 'liked') ? this.client.collection(this.entry) : [],
+      asked(kinds, 'liked') || asked(kinds, 'playlist') ? this.client.collection(this.entry) : [],
       asked(kinds, 'playlist') ? this.client.playlists(this.entry) : [],
       asked(kinds, 'daily') ? this.client.dailyMix(this.entry) : [],
     ])

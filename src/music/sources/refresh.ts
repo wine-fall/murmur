@@ -132,7 +132,12 @@ export class TasteRefresher {
     const epoch = store.epoch
     const t = performance.now()
     try {
-      const snapshot = await source.snapshot(kinds)
+      const read = await source.snapshot(kinds)
+      // Only the kinds that were asked for. An adapter whose endpoint is
+      // mixed answers with more than it was asked for (Soda's collection
+      // carries kept playlist names beside kept tracks), and mergeSnapshot
+      // would then keep the old rows of that kind beside the new ones.
+      const snapshot = kinds === undefined ? read : { ...read, items: read.items.filter((i) => kinds.includes(i.kind)) }
       if (store.epoch !== epoch || !store.mounted().includes(id)) return { id, ok: false, error: 'unmounted' }
       // The snapshot is the latest read of each list; the ledger is every
       // read there has ever been (spec 14 §2.11).

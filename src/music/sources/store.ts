@@ -181,6 +181,10 @@ export class SourcesStore {
   dropSnapshot(id: SourceId): void {
     rmSync(this.snapshotPath(id), { force: true })
     rmSync(this.ledgerPath(id), { force: true })
+    // The copy a failed parse moved aside is the same songs and artists
+    // under another name; leaving it behind would be the leak this delete
+    // exists to prevent (codex review).
+    rmSync(`${this.ledgerPath(id)}.broken`, { force: true })
   }
 
   // A status for something not mounted is dropped: the file never grows a

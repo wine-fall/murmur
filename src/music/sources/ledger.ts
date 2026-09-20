@@ -45,20 +45,30 @@ export function ledgerKey(item: TasteItem): string {
 // come out untouched rather than forgotten.
 export function mergeLedger(ledger: TasteLedger, snapshot: TasteSnapshot, readKinds: readonly TasteKind[]): TasteLedger {
   const at = snapshot.takenAt
-  const byKey = new Map(ledger.entries.map((e) => [e.key, e]))
+  const index = new Map(ledger.entries.map((e, i) => [e.key, i]))
   const entries = [...ledger.entries]
+  // `seen` counts READS, so a key this snapshot carries twice still counts
+  // once: Spotify answers the same track in `top-track` and in `liked`, and
+  // the two rows share a ref.
+  const counted = new Set<string>()
   for (const item of snapshot.items) {
     if (item.title.trim() === '') continue
     const key = ledgerKey(item)
-    const known = byKey.get(key)
+    const slot = index.get(key)
+    const known = slot === undefined ? undefined : entries[slot]!
+    const again = counted.has(key)
+    counted.add(key)
     // The platform can retitle a row or fill in an album it had not filled
     // in before, so the newest reading of those fields wins.
     const next: LedgerEntry = known === undefined
       ? { ...item, key, firstSeen: at, lastSeen: at, seen: 1 }
-      : { ...known, ...item, key, firstSeen: known.firstSeen, lastSeen: at, seen: known.seen + 1 }
-    if (known === undefined) entries.push(next)
-    else entries[entries.indexOf(known)] = next
-    byKey.set(key, next)
+      : { ...known, ...item, key, firstSeen: known.firstSeen, lastSeen: at, seen: known.seen + (again ? 0 : 1) }
+    if (slot === undefined) {
+      index.set(key, entries.length)
+      entries.push(next)
+    } else {
+      entries[slot] = next
+    }
   }
   // The kinds that were REQUESTED, not the kinds that came back: a list that
   // is genuinely empty must not be asked for again in three hours.

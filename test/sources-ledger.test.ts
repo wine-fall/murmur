@@ -62,6 +62,24 @@ describe('mergeLedger', () => {
     expect(later.lastRead).toEqual({ history: DAY_2, subscription: DAY_1 })
   })
 
+  // codex review: the loop looked its own writes back up, so a snapshot
+  // carrying one row twice (Spotify answers a track in both `top-track` and
+  // `liked`, same ref) counted it as two reads on the very first read, and
+  // kept double-counting for ever after. `seen` is a count of READS.
+  it('counts one read once, however many rows of a snapshot share a key', () => {
+    const twice = [
+      { kind: 'top-track' as const, title: 'the same song', artist: 'a band', ref: 'r' },
+      { kind: 'liked' as const, title: 'the same song', artist: 'a band', ref: 'r' },
+    ]
+    const first = mergeLedger(emptyLedger('spotify'), read(DAY_1, twice), ['liked', 'top-track'])
+    expect(first.entries).toHaveLength(1)
+    expect(first.entries[0]!.seen).toBe(1)
+    const second = mergeLedger(first, read(DAY_2, twice), ['liked', 'top-track'])
+    expect(second.entries[0]!.seen).toBe(2)
+    // The later row still wins on the fields a platform can change.
+    expect(second.entries[0]).toMatchObject({ kind: 'liked', lastSeen: DAY_2 })
+  })
+
   it('drops a row with no title, the way the digest does', () => {
     const ledger = mergeLedger(emptyLedger('netease'), read(DAY_1, [{ kind: 'liked', title: '  ' }, song('real')]), ['liked'])
     expect(ledger.entries).toHaveLength(1)

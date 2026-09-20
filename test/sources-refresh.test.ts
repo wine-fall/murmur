@@ -1,7 +1,7 @@
 // The refresh policy (spec 14 §3.4/§3.5): background, single-flight, only
 // what is stale, never while the /sources conversation holds the store, and
 // a failure keeps the last snapshot.
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -17,6 +17,7 @@ import type { SourceId, TasteItem, TasteKind, TasteSnapshot, TasteSource } from 
 import { FakeHost, until } from './fakes.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
+const HOURS = (n: number): string => new Date(NOW.getTime() - n * 3_600_000).toISOString()
 
 class FakeSource implements TasteSource {
   readonly id: SourceId
@@ -27,6 +28,9 @@ class FakeSource implements TasteSource {
   asked: (readonly TasteKind[] | undefined)[] = []
   fail: Error | null = null
   hang = false
+  // An adapter whose endpoints are mixed answers with rows of kinds this
+  // read did not ask for; the refresher, not the adapter, is what bounds it.
+  everything = false
   items: TasteItem[] = [{ kind: 'liked', title: 'a', artist: 'b' }]
 
   constructor(id: SourceId, kinds?: readonly TasteKind[]) {
@@ -43,7 +47,7 @@ class FakeSource implements TasteSource {
     this.asked.push(kinds)
     if (this.hang) await new Promise<never>(() => {})
     if (this.fail !== null) throw this.fail
-    const wanted = this.items.filter((i) => kinds === undefined || kinds.includes(i.kind))
+    const wanted = this.everything ? this.items : this.items.filter((i) => kinds === undefined || kinds.includes(i.kind))
     return { source: this.id, takenAt: NOW.toISOString(), items: wanted }
   }
 }
@@ -252,7 +256,6 @@ describe('TasteRefresher.maybeRefresh (boot policy)', () => {
 // same cadence meant either a stale afternoon or eight needless collection
 // reads a day.
 describe('the per-kind refresh clock', () => {
-  const HOURS = (n: number): string => new Date(NOW.getTime() - n * 3_600_000).toISOString()
 
   it('asks only for the lists that are due, and stamps the ones it asked for', async () => {
     const { store, sources, refresher } = build()
@@ -350,6 +353,50 @@ describe('the per-kind refresh clock', () => {
     // The snapshot is the latest read; the ledger is both.
     expect(store.readSnapshot('netease')!.items.map((i) => i.title)).toEqual(['two'])
     expect(store.readLedger('netease')!.entries.map((e) => e.title).sort()).toEqual(['one', 'two'])
+  })
+
+  // codex review: an adapter whose endpoint is mixed (Soda's collection
+  // answers kept tracks AND kept playlist names) hands back rows of a kind
+  // this read never asked for, and mergeSnapshot would then keep the old
+  // rows of that kind beside them. The refresher takes only what it asked
+  // for, so no adapter can duplicate a kind by being generous.
+  it('keeps only the kinds it asked for, whatever an adapter hands back', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('qishui', { sessionCookie: 'c', deviceId: 'd', installId: 'i' }, new Date('2026-09-01T00:00:00Z'))
+    store.writeSnapshot({ source: 'qishui', takenAt: HOURS(30), items: [{ kind: 'playlist', title: 'a playlist read yesterday' }] })
+    // Only the collection is due; the playlists were read two hours ago.
+    markRead(store, 'qishui', { liked: HOURS(25), playlist: HOURS(2), daily: HOURS(1) })
+    const soda = new FakeSource('qishui', ['liked', 'playlist', 'daily'])
+    soda.kinds = ['liked', 'playlist', 'daily']
+    // A generous adapter: asked for the collection, it also answers with the
+    // playlist names that share the endpoint.
+    soda.items = [
+      { kind: 'liked', title: 'a kept track' },
+      { kind: 'playlist', title: 'a playlist read yesterday' },
+    ]
+    soda.everything = true
+    sources.set('qishui', soda)
+    refresher.maybeRefresh()
+    await until(() => soda.snapshots === 1, 'the partial read')
+    await until(() => store.readSnapshot('qishui')?.items.some((i) => i.title === 'a kept track') === true, 'the new rows')
+    const playlists = store.readSnapshot('qishui')!.items.filter((i) => i.kind === 'playlist')
+    expect(playlists.map((i) => i.title)).toEqual(['a playlist read yesterday'])
+  })
+
+  it('takes the quarantined copy of a broken ledger with it when the account goes', async () => {
+    const { store, sources, refresher } = build()
+    store.mount('netease', { browser: 'chrome', userId: '1', likedPlaylistId: '2' }, new Date('2026-09-01T00:00:00Z'))
+    sources.set('netease', new FakeSource('netease', ['liked']))
+    await refresher.refreshAll()
+    writeFileSync(store.ledgerPath('netease'), 'not a ledger')
+    // The read moves it aside rather than blocking the refresh...
+    expect(store.readLedger('netease')).toBeNull()
+    const quarantined = `${store.ledgerPath('netease')}.broken`
+    expect(existsSync(quarantined)).toBe(true)
+    // ...and the account going takes that copy with it: it is the listener's
+    // songs and artists, sitting on disk under another name.
+    store.unmount('netease')
+    expect(existsSync(quarantined)).toBe(false)
   })
 
   it('drops the ledger with the snapshot when the account goes', async () => {
