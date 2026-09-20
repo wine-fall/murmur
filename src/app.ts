@@ -34,7 +34,7 @@ import {
   runGh,
   spawnClipboard,
 } from './support/deliver.ts'
-import { Director, openInBrowser, openInChrome, type MusicWiring, type PacingWiring } from './director/director.ts'
+import { Director, openInBrowser, openInChrome, type DirectorDeps, type MusicWiring, type PacingWiring } from './director/director.ts'
 import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './support/update.ts'
 import { AudioEngine } from './audio/engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probePlayableDurationS, probeStream } from './audio/ffmpeg.ts'
@@ -278,7 +278,15 @@ export type TasteWiring = {
   catalogues: () => Catalogue[]
   // The read-only lines the settings pane shows (spec 14 §3.1).
   lines: () => SourceLine[]
+  // Exactly the object the Director takes. Built here rather than spelled
+  // out at the call site: assembled there, `digest` was written without its
+  // moment parameter and silently dropped it, so every pick got the static
+  // render and the whole of §2.12 was dead in the real app while its tests
+  // were green (codex review).
+  forDirector: DirectorTaste
 }
+
+type DirectorTaste = NonNullable<DirectorDeps['taste']>
 
 export function buildTaste(config: Config, host: Host, ytdlp: YtDlpRunner = ytdlpRunner(config.ytdlpCmd)): TasteWiring | undefined {
   if (config.brain !== 'claude') return undefined
@@ -297,6 +305,11 @@ export function buildTaste(config: Config, host: Host, ytdlp: YtDlpRunner = ytdl
     watch,
     refresher,
     build,
+    forDirector: {
+      digest: (moment) => reader.digest(moment),
+      mounted: () => store.mounted(),
+      maybeRefresh: () => void refresher.maybeRefresh(),
+    },
     catalogues: () =>
       store.mounted().filter((id): id is 'bilibili' | 'netease' | 'qqmusic' => id === 'bilibili' || id === 'netease' || id === 'qqmusic'),
     lines: () => {
@@ -1012,15 +1025,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // The taste seams (spec 14): the digest for the pack, the mounts for the
     // invitations, the background refresh, and the /sources conversation on
     // the same floor parking /setup uses.
-    ...(taste !== undefined &&
-      sourcesRecall !== undefined && {
-        taste: {
-          digest: () => taste.reader.digest(),
-          mounted: () => taste.store.mounted(),
-          maybeRefresh: () => void taste.refresher.maybeRefresh(),
-        },
-        sourcesRecall,
-      }),
+    ...(taste !== undefined && sourcesRecall !== undefined && { taste: taste.forDirector, sourcesRecall }),
     // The one production wiring of the desktop opener: the Director has no
     // default, so this is the only place a real browser can be launched from.
     openUrl: openInBrowser,

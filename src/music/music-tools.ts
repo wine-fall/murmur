@@ -55,6 +55,14 @@ export function trackLabel(pick: { readonly title?: string; readonly artist?: st
   return pick.artist === undefined ? (pick.title ?? 'music') : `${pick.title ?? 'music'} — ${pick.artist}`
 }
 
+// The artist back out of a label. The moment excludes what just played by
+// ARTIST (spec 14 §2.12), and matching the whole label would let a title that
+// happens to name another band drop that band's songs instead.
+export function labelArtist(label: string): string {
+  const cut = label.lastIndexOf(' — ')
+  return cut === -1 ? '' : label.slice(cut + 3).trim()
+}
+
 // ponytail: trim + collapsed whitespace + case is the whole comparison. The
 // ledger holds a band under both its simplified and its traditional spelling
 // and those do NOT fold together here — a script-conversion table is far

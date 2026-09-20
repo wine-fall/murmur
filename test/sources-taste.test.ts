@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import type { LedgerEntry, TasteLedger } from '../src/music/sources/ledger.ts'
+import type { Moment } from '../src/music/sources/moment.ts'
 import { DIGEST_BUDGET, renderTasteDigest, TasteReader, TasteSnapshotSchema, type SourceId, type TasteKind, type TasteSnapshot } from '../src/music/sources/taste.ts'
 
 const NOW = new Date('2026-09-06T12:00:00Z')
@@ -339,6 +340,43 @@ describe('renderTasteDigest on a full set of snapshots', () => {
     expect(digest.length).toBeLessThanOrEqual(1500)
   })
 
+  // spec 14 §5.16, on the same full-size fixture: given a moment whose last
+  // song is by one of its artists, the selection leads with rows the terms
+  // matched and never offers the artist that just played.
+  it('picks for the moment and never offers the artist just played', () => {
+    const ledgers = real
+      .filter((s) => s.source === 'netease' || s.source === 'qqmusic')
+      .map((s) => ({
+        source: s.source,
+        lastRead: { liked: s.takenAt, playlist: s.takenAt },
+        entries: s.items.map((item) => ({ ...item, lastSeen: s.takenAt })),
+      }))
+    const moment: Moment = {
+      hour: 16,
+      persona: 'a quiet afternoon host',
+      lastTalk: 'that was Static Meadow, off a long train sort of afternoon',
+      avoidArtists: ['Static Meadow'],
+    }
+    const songs = (m?: Moment): string[] => {
+      const line = renderTasteDigest(real, new Date('2026-09-18T20:00:00Z'), DIGEST_BUDGET, ledgers, m)
+        .split('\n')
+        .find((l) => l.startsWith('Songs they keep: '))!
+      return line.slice('Songs they keep: '.length).split(' \u00b7 ')
+    }
+    const picked = songs(moment)
+    // The artist just played is out, and so is the collaboration credit that
+    // opens the same line without a moment -- though they are the ledger's
+    // most-kept name, with 15 rows.
+    expect(picked.join(' ')).not.toContain('Static Meadow')
+    expect(songs()[0]).toContain('Static Meadow')
+    // Every leading row carries a word the moment brought: the talk beat's
+    // and the persona's, not the newest rows the static render would give.
+    for (const row of picked.slice(0, 8)) expect(row.toLowerCase()).toMatch(/meadow|quiet|train|afternoon|long|sort/)
+    // And it is still a full line, not a handful of matches: relevance
+    // decides the order, the budget still decides the length.
+    expect(picked.length).toBeGreaterThanOrEqual(20)
+  })
+
   it('shows nothing a video platform merely watched or followed', () => {
     expect(digest).not.toContain('row ')
     expect(digest).not.toContain('channel ')
@@ -398,6 +436,96 @@ describe('artist counts from the ledger', () => {
     const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger])
     expect(digest).toContain('FAWineLL (1)')
     expect(digest).not.toContain('a chat channel')
+  })
+})
+
+// spec 14 §2.12: with a moment in hand the flexible half's rows are chosen
+// against the ledger for the pick that is happening, not rendered newest
+// first. The fixed half, the budget and the line shapes do not move.
+describe('the moment-matched half', () => {
+  const led = (title: string, artist: string, over: Partial<LedgerEntry> = {}): LedgerEntry => ({
+    kind: 'liked',
+    title,
+    artist,
+    key: `${title}|${artist}`,
+    firstSeen: '2026-01-01T00:00:00.000Z',
+    lastSeen: '2026-09-06T00:00:00.000Z',
+    seen: 2,
+    ...over,
+  })
+  const snapshot: TasteSnapshot = {
+    source: 'netease',
+    takenAt: '2026-09-06T10:00:00.000Z',
+    items: [{ kind: 'liked', title: 'whatever the window holds', artist: 'Low Antenna' }],
+  }
+  const ledger: TasteLedger = {
+    source: 'netease',
+    updatedAt: '2026-09-06T00:00:00.000Z',
+    lastRead: { liked: '2026-09-06T00:00:00.000Z' },
+    entries: [
+      led('a quiet one', 'Umber Radio'),
+      led('the harbour song', 'Paper Ferries'),
+      led('another harbour song', 'Harbour Weather'),
+      led('one they just heard', 'Static Meadow'),
+    ],
+  }
+  const moment: Moment = { hour: 16, persona: '', lastTalk: 'that was Harbour Weather', avoidArtists: ['Static Meadow'] }
+
+  it('leads the songs with what the moment matched, and drops the artist just played', () => {
+    const line = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], moment)
+      .split('\n')
+      .find((l) => l.startsWith('Songs they keep: '))!
+    expect(line).toMatch(/^Songs they keep: "another harbour song" Harbour Weather/)
+    expect(line).toContain('"the harbour song" Paper Ferries')
+    expect(line).not.toContain('Static Meadow')
+  })
+
+  it('without a moment it renders the snapshot, exactly as before', () => {
+    const before = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger])
+    expect(before).toContain('"whatever the window holds" Low Antenna')
+    expect(before).not.toContain('the harbour song')
+  })
+
+  it('with a moment but no ledger it renders the snapshot too', () => {
+    const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [], moment)
+    expect(digest).toContain('"whatever the window holds" Low Antenna')
+  })
+
+  // codex review: the candidate pool was built from the ledgers alone, so a
+  // source whose ledger is missing, unreadable or empty lost its songs from
+  // the pick entirely -- while the Sources line went on counting them.
+  it('keeps a source whose ledger is missing or empty, per source', () => {
+    const spotify: TasteSnapshot = {
+      source: 'spotify',
+      takenAt: '2026-09-06T10:00:00.000Z',
+      items: [{ kind: 'liked', title: 'only in the snapshot', artist: 'Slow Marina' }],
+    }
+    const empty: TasteLedger = { source: 'spotify', updatedAt: '', entries: [] }
+    for (const ledgers of [[ledger], [ledger, empty]]) {
+      const digest = renderTasteDigest([snapshot, spotify], NOW, DIGEST_BUDGET, ledgers, moment)
+      expect(digest).toContain('"only in the snapshot" Slow Marina')
+      // ...and the source that does have one is still chosen from it.
+      expect(digest).toContain('another harbour song')
+    }
+  })
+
+  // codex review: `lastSeen` is a READ time, so every row of one refresh
+  // shares it and the order falls to insertion -- which is not the newest
+  // first the static render gives. With nothing matched there is no moment
+  // signal, so the render must be the one it would have been.
+  it('is byte-identical to the static render when the moment matches nothing', () => {
+    const silent: Moment = { hour: 16, persona: '', lastTalk: '', avoidArtists: [] }
+    expect(renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], silent)).toBe(
+      renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger]),
+    )
+  })
+
+  it('leaves the fixed half and the budget where they were', () => {
+    const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], moment)
+    const line = (lead: string): string => digest.split('\n').find((l) => l.startsWith(`${lead}: `))!
+    expect(line('Sources')).toBe('Sources: NetEase (1 liked)')
+    expect(digest.length).toBeLessThanOrEqual(DIGEST_BUDGET)
+    expect(['Sources', 'Artists they return to'].map(line).join('\n').length).toBeLessThanOrEqual(300)
   })
 })
 
@@ -490,6 +618,78 @@ describe('TasteReader', () => {
     utimesSync(ledger, new Date(), new Date(Date.now() + 1000))
     expect(reader.digest()).toContain('Bon Iver (5)')
     expect(reader.renders).toBe(2)
+  })
+
+  // spec 14 §2.12: the pack keeps the memoised render; the pick gets a fresh
+  // one for its moment, off the same parsed files rather than a re-read.
+  it('memoises the static render and renders per moment without re-reading', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: [{ kind: 'liked', title: 'in the window', artist: 'Low Antenna' }] }))
+    writeFileSync(join(dir, 'netease.ledger.json'), JSON.stringify({
+      source: 'netease',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+      lastRead: { liked: '2026-09-06T00:00:00.000Z' },
+      entries: [
+        { kind: 'liked', title: 'the harbour song', artist: 'Paper Ferries', key: 'a', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
+        { kind: 'liked', title: 'another', artist: 'Low Antenna', key: 'b', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
+      ],
+    }))
+    const reader = new TasteReader({ dir, now: () => NOW })
+    expect(reader.digest()).toContain('"in the window" Low Antenna')
+    expect(reader.digest()).toContain('"in the window" Low Antenna')
+    expect(reader.renders).toBe(1)
+    const moment: Moment = { hour: 16, persona: '', lastTalk: 'paper ferries', avoidArtists: [] }
+    expect(reader.digest(moment)).toMatch(/Songs they keep: "the harbour song" Paper Ferries/)
+    // The static render is still the cached one, and the files were not
+    // re-parsed to serve the moment.
+    expect(reader.digest()).toContain('"in the window" Low Antenna')
+    expect(reader.parses).toBe(1)
+  })
+
+  // spec 14 §2.12's red line: this runs on the pick path, in code, before the
+  // prompt is assembled. A pick's median is already 142 s and this may not
+  // add to it.
+  //
+  // The budget is 5 ms on the machine the listener runs murmur on. A shared
+  // CI runner is about three times slower (measured: 2.5 ms here, 8.1 ms
+  // there), so the bound is scaled rather than asserted flat -- a wall-clock
+  // number that only holds on one class of machine is the flake #269
+  // already costs us, and the point of this test is to catch a blow-up (a
+  // per-row tokenise, an index build) which is an order of magnitude, not a
+  // factor of three.
+  const BUDGET_MS = process.env.CI === undefined ? 5 : 25
+  it(`renders a moment in under ${BUDGET_MS} ms on a full-size ledger`, () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
+    const entries = Array.from({ length: 4000 }, (_, i) => ({
+      kind: 'liked' as const,
+      title: `a song title of about the length a real one has, number ${i}`,
+      artist: `Band ${i % 400}`,
+      key: `k${i}`,
+      firstSeen: '2026-01-01T00:00:00.000Z',
+      lastSeen: `2026-09-0${(i % 9) + 1}T00:00:00.000Z`,
+      seen: 2,
+    }))
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: entries.slice(0, 500).map(({ kind, title, artist }) => ({ kind, title, artist })) }))
+    writeFileSync(join(dir, 'netease.ledger.json'), JSON.stringify({ source: 'netease', updatedAt: '2026-09-06T00:00:00.000Z', lastRead: { liked: '2026-09-06T00:00:00.000Z' }, entries }))
+    const reader = new TasteReader({ dir, now: () => NOW })
+    const moment: Moment = {
+      hour: 16,
+      persona: 'a warm evening host with a jazz habit and a soft spot for city pop',
+      lastTalk: 'that last one was Band 37, and before it something from the same corner of the shelf',
+      avoidArtists: ['Band 37'],
+    }
+    // Warm first: the parse is the pack's cost, not the pick's, and a cold
+    // JIT is not what the budget is about.
+    for (let i = 0; i < 5; i++) reader.digest(moment)
+    const runs = Array.from({ length: 15 }, () => {
+      const started = performance.now()
+      reader.digest(moment)
+      return performance.now() - started
+    }).sort((a, b) => a - b)
+    // The MEDIAN, not the mean: one scheduling stall on a shared runner is
+    // not the thing being measured, and a mean lets that one stall fail a
+    // green build (issue #269 is what that habit costs).
+    expect(runs[Math.floor(runs.length / 2)]!).toBeLessThan(BUDGET_MS)
   })
 
   it('a snapshot over the 1 MB bound is skipped as a bug, not rendered', () => {
