@@ -969,11 +969,16 @@ and the pack's memoisation would be gone for nothing.
   parameter and dropped it silently, so every real pick got the static
   render while the tests were green. A pick's median
   is already 142 s (measured 2026-09-18); this step may not add to it.
-- Its budget is **5 ms**, asserted in its own test as the **median** of
-  fifteen warmed runs over a 4000-row ledger. A median, because one
-  scheduling stall on a shared runner is not what the budget is about and a
-  mean lets that stall fail a green build (issue #269 is what that habit
-  costs). It is a local scan, nothing more.
+- Its budget is **5 ms on the listener's machine**, asserted in its own test
+  as the **median** of fifteen warmed runs over a 4000-row ledger (measured
+  2.5 ms, 2026-09-20). A median, because one scheduling stall is not what the
+  budget is about and a mean lets that stall fail a green build. The bound is
+  **scaled on CI** (25 ms): a shared runner is about three times slower
+  (8.1 ms measured there), and a flat wall-clock number that only holds on
+  one class of machine is the flake issue #269 already costs. What the test
+  is for is a blow-up -- a per-row tokenise, an index build -- which is an
+  order of magnitude, not a factor of three. It is a local scan, nothing
+  more.
 - With no ledger, no musical entries, or no usable signal, it returns exactly
   what §2.3 renders today. Degrading is silent and is the default.
 
