@@ -97,6 +97,11 @@ export class InProcessMemoryStore implements MemoryStore {
     this.ledger(kind).push({ key, ts: Date.now() / 1000 })
   }
 
+  // Nothing on disk to come back across: an in-process store IS one sitting.
+  lastOnAir(): undefined {
+    return undefined
+  }
+
   recentTopics(n: number): string[] {
     return keys(this.topics, n)
   }
@@ -139,10 +144,16 @@ export class InProcessMemoryStore implements MemoryStore {
   }
 }
 
-// Startup-prime freshness cutoff (spec 05 §3.4): only turns younger than this
-// join the recent window on boot. Older continuity flows through the profile.
-// By-feel tunable (spec 05 §6).
-const RECENT_MAX_AGE_H = 48
+// The sitting gap (spec 05 §3.4): a boot this soon after the last turn on disk
+// is the same sitting, so those turns are primed and the host simply carries
+// on. Past it the program is coming back on — nothing is primed, and continuity
+// flows through the profile and the lastOnAir fact instead of verbatim turns,
+// which a model reads as a sentence it was in the middle of. By-feel tunable
+// (spec 05 §6), aligned with the pet's away greeting (spec 10 §3.7.3).
+const SITTING_GAP_H = 1
+
+// How many of the previous sitting's topics the lastOnAir fact carries.
+const LAST_ON_AIR_TOPICS = 3
 
 // Compaction cadence (spec 05-01 §2.3): admitted LISTENER turns past the
 // watermark, not turns. A session the listener never typed in has nothing to
@@ -553,6 +564,7 @@ export class PersistentMemoryStore implements MemoryStore {
   // The gap this session opened across, measured once at load and then frozen
   // (spec 10 §3.7.3). undefined = no history on disk to measure from.
   private away: number | undefined
+  private last: { ts: number; topics: readonly string[] } | undefined
   // Turns recorded past the watermark — the next compaction slice.
   private backlog: { ts: number; turn: Turn; steered: boolean }[] = []
 
@@ -667,6 +679,11 @@ export class PersistentMemoryStore implements MemoryStore {
 
     this.profileText = this.readText(this.profilePath)
     this.topics = this.topics.filter((e) => !hit(e.key))
+    // The opening fact is a copy of those keys, taken at boot: a forget that
+    // left it standing would hand the deleted words straight back to the model.
+    if (this.last !== undefined) {
+      this.last = { ...this.last, topics: this.last.topics.filter((k) => !hit(k)) }
+    }
     this.turns = this.turns.filter((t) => !hit(t.turn.text))
     this.backlog = this.backlog.filter((b) => !hit(b.turn.text))
     // The index holds every row's text verbatim, so a stale index.db is a copy
@@ -772,6 +789,13 @@ export class PersistentMemoryStore implements MemoryStore {
   // undefined = nothing on record: a first run has no absence to acknowledge.
   awaySeconds(): number | undefined {
     return this.away
+  }
+
+  // When the program was last on the air before this boot, and the handful of
+  // topics it touched (spec 05 §3.4). undefined on a first run and on a boot
+  // inside the same sitting — there the primed turns already carry it.
+  lastOnAir(): { ts: number; topics: readonly string[] } | undefined {
+    return this.last
   }
 
   // --- profile write-through (spec 06 §2.4 — the slice-B bootstrap) --------- //
@@ -1124,18 +1148,50 @@ export class PersistentMemoryStore implements MemoryStore {
     // citations this one just wrote as legacy and fade the profile away.
     if (schema < PROFILE_SCHEMA) this.writeMeta()
 
-    const cutoff = this.now() - RECENT_MAX_AGE_H * 3600
-    for (const row of this.readJsonl(this.historyPath, historyRowSchema)) {
-      this.lastTs = Math.max(this.lastTs, row.ts)
-      const turn: Turn = { role: row.role, text: row.text }
-      if (row.ts >= cutoff) this.remember(row.ts, turn)
-      if (row.ts > this.watermark) this.backlog.push({ ts: row.ts, turn, steered: row.steered })
+    const rows = this.readJsonl(this.historyPath, historyRowSchema)
+    for (const row of rows) this.lastTs = Math.max(this.lastTs, row.ts)
+    const gap = SITTING_GAP_H * 3600
+    // Where the last sitting began: walk back from the newest row until two
+    // rows sit further apart than the gap. Age from `now` alone is not enough —
+    // a listener who opens the radio for one line after a week away and
+    // restarts it ten minutes later would otherwise be handed that week-old
+    // sitting again, which is the very continuity this is here to stop.
+    let from = 0
+    for (let i = rows.length - 1; i > 0; i--) {
+      if (rows[i]!.ts - rows[i - 1]!.ts >= gap) {
+        from = i
+        break
+      }
     }
+    // Decided before anything is primed: the sitting is in or out whole,
+    // because half a previous sitting reads exactly like a whole one.
+    const sameSitting = this.lastTs > 0 && this.now() - this.lastTs < gap
+    rows.forEach((row, i) => {
+      const turn: Turn = { role: row.role, text: row.text }
+      if (sameSitting && i >= from) this.remember(row.ts, turn)
+      // The backlog is the compaction debt, not the recent window: every row
+      // past the watermark is still owed to the next fold, gap or no gap.
+      if (row.ts > this.watermark) this.backlog.push({ ts: row.ts, turn, steered: row.steered })
+    })
 
     if (this.lastTs > 0) this.away = Math.max(0, Math.round(this.now() - this.lastTs))
 
     for (const row of this.readJsonl(this.ledgerPath, ledgerRowSchema)) {
       this.rememberEvent(row.kind, row.key, row.ts ?? 0)
+    }
+
+    // After the ledger, so the topics are the previous sitting's own: bounded by
+    // where that sitting began, because a topic from a month ago reported as
+    // "what we talked about yesterday" is a false fact, not a coarse one.
+    // Frozen here, so what this session goes on to say never rewrites the fact
+    // it opened with.
+    if (!sameSitting && this.lastTs > 0) {
+      // Bounded by the last row BEFORE that sitting, not its first: a beat
+      // ledgers its topic and records its turn in the same breath, and the two
+      // stamps differ by a millisecond in whichever order.
+      const since = from > 0 ? rows[from - 1]!.ts : 0
+      const topics = this.topics.filter((e) => e.ts > since)
+      this.last = { ts: this.lastTs, topics: keys(topics, LAST_ON_AIR_TOPICS) }
     }
   }
 }

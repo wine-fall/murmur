@@ -23,6 +23,25 @@ export function withLanguage(persona: string, language: string | undefined): str
   return `${persona}\n\nSpeak in ${name}. This overrides any language the persona above names.`
 }
 
+// The host's craft, behind the persona in every system prompt (spec 05 §3.4).
+// Whole-role framing and nothing else: the program hands the host facts — the
+// hour, what is on the air, what the listener said, when it was last on — and
+// a rule per fact ("that one is reference only") is how a fact turns into a
+// line about the fact. What to do with them is the host's judgment, which is
+// what this names.
+export const HOST_CRAFT =
+  'You are a skilled radio host. Read the situation the program hands you — ' +
+  'the hour, what is on the air, what the listener said, when you were last ' +
+  'on and what you talked about — and use your own judgment about what to say ' +
+  'next, the way a seasoned host does. None of it is a script to read back or ' +
+  'a checklist to cover.'
+
+// The system prompt every persona-voiced call sends: persona first so it stays
+// the stable, cacheable prefix (master §7 pillar 4), craft behind it.
+export function hostSystemPrompt(persona: string): string {
+  return `${persona}\n\n${HOST_CRAFT}`
+}
+
 // Hard cap on the generated persona: it is the stable, cached prefix of every
 // later Brain call (master §7 pillar 4). By-feel tunable (spec 06 §6).
 export const PERSONA_CHAR_CAP = 1200

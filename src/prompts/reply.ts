@@ -5,14 +5,16 @@
 import type { ContextPack, RecallHit } from '../contracts.ts'
 import { PROFILE_TAGS } from './profile.ts'
 
-import { OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
+import { openingBlock, OUTPUT_RULES, profileBlock, renderTranscript, statusBlock, tasteBlock } from './talk.ts'
 
 // Prompt for an in-persona reply to a typed user line. Carries the profile
 // block too (spec 05 §3.5): a direct reply is exactly where cross-session
 // listener facts should shape what the host says back.
 export function buildRespondPrompt(userText: string, ctx: ContextPack): string {
   const transcript = renderTranscript(ctx, userText)
-  const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
+  const head = transcript
+    ? `(The program so far)\n${transcript}\n\n`
+    : `${openingBlock(ctx)}\n\n`
   return (
     `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${statusBlock(ctx)}The listener just said to you: "${userText}"\n` +
     `Respond in character, then ease back into the program.\n${OUTPUT_RULES}`
@@ -111,7 +113,9 @@ export function buildSteerPrompt(
   },
 ): string {
   const transcript = renderTranscript(ctx, userText)
-  const head = transcript ? `(The program so far)\n${transcript}\n\n` : ''
+  const head = transcript
+    ? `(The program so far)\n${transcript}\n\n`
+    : `${openingBlock(ctx)}\n\n`
   const rules =
     `${opts.musicWired ? STEER_SWITCH_RULE : ''}` +
     `${opts.settingsWired ? STEER_SETTINGS_RULE : ''}` +

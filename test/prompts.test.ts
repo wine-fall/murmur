@@ -9,13 +9,15 @@ import { buildFetchTopicsPrompt, DEFAULT_RWT_POLICY, RWT_FETCH_SYSTEM_PROMPT, RW
 import { buildFixMusicPrompt, buildSetupPrompt, VISIT_PERSONA, GUIDE_PERSONA } from '../src/prompts/setup.ts'
 import { STATUS_MICROCOPY, statusMicrocopy } from '../src/prompts/status.ts'
 import { ACTIVITY_GUIDANCE, buildNextTalkPrompt, buildNextTalksPrompt, CUE_GUIDANCE, CODA_CUE, MUSIC_OUTLASTS_RULE, aboutSection, profileBlock } from '../src/prompts/talk.ts'
+import { HOST_CRAFT, hostSystemPrompt } from '../src/prompts/persona.ts'
+import { openingBlock } from '../src/prompts/talk.ts'
 
 const ctx = (recent: ContextPack['recent']): ContextPack => ({ persona: 'p', recent })
 
 describe('prompt builders', () => {
   it('opens naturally with an empty transcript', () => {
     const p = buildNextTalkPrompt(ctx([]))
-    expect(p).toContain('just starting')
+    expect(p).toContain('starting now')
     expect(p).not.toContain('The program so far')
   })
 
@@ -1185,5 +1187,79 @@ describe('setup prompts — the language is not the voice (spec 12 \u00a73.9)', 
   })
   it('is stated even when the only gap is music', () => {
     rule(buildSetupPrompt({ gaps: [{ kind: 'music', reason: 'yt-dlp missing' }], ...base }))
+  })
+})
+
+
+// spec 05 §3.4: the program that comes back after a gap opens on a FACT about
+// when it was last on — never on the previous sitting's turns, which read as a
+// sentence to finish. One opening, shared by every persona-voiced builder.
+describe('the opening after a gap (spec 05 §3.4)', () => {
+  const back = (over: Partial<ContextPack> = {}): ContextPack => ({
+    persona: 'p',
+    recent: [],
+    lastOnAir: { when: 'Thursday afternoon', topics: ['rain', 'night walks'] },
+    ...over,
+  })
+
+  const builders: [string, (c: ContextPack) => string][] = [
+    ['next talk', (c) => buildNextTalkPrompt(c)],
+    ['batched talks', (c) => buildNextTalksPrompt(c, 3)],
+    ['respond', (c) => buildRespondPrompt('hey', c)],
+    [
+      'steer',
+      (c) =>
+        buildSteerPrompt('hey', c, {
+          musicWired: true,
+          shutdownArmed: false,
+          settingsWired: true,
+          memoryWired: true,
+        }),
+    ],
+  ]
+
+  for (const [name, build] of builders) {
+    it(`states the last airing as a fact in the ${name} prompt`, () => {
+      const p = build(back())
+      expect(p).toContain('Last on the air: Thursday afternoon')
+      expect(p).toContain('rain, night walks')
+      expect(p).toContain('coming back on now')
+      expect(p).not.toContain('The program so far')
+    })
+
+    it(`says the program is starting when there is no last airing (${name})`, () => {
+      const p = build({ persona: 'p', recent: [] })
+      expect(p).toContain('starting now')
+      expect(p).not.toContain('Last on the air')
+    })
+
+    it(`leaves the opening out once there is a transcript (${name})`, () => {
+      const p = build(back({ recent: [{ role: 'radio', text: 'mid-sentence' }] }))
+      expect(p).toContain('The program so far')
+      expect(p).toContain('You: mid-sentence')
+      expect(p).not.toContain('Last on the air')
+    })
+  }
+
+  // A fact, not a rule: the opening never tells the host whether to mention it.
+  it('adds no guidance about the gap', () => {
+    const block = openingBlock(back())
+    expect(block).not.toMatch(/mention|refer|bring (it|this) up|do not|don't|never/i)
+  })
+
+  it('carries the last airing with no topics on record', () => {
+    const p = buildNextTalkPrompt(back({ lastOnAir: { when: 'last week', topics: [] } }))
+    expect(p).toContain('Last on the air: last week')
+    expect(p).toContain('coming back on now')
+  })
+})
+
+// spec 05 §3.4: the host's craft is one whole-role framing in the system
+// prompt, behind the persona — not a rule per fact the program hands over.
+describe('hostSystemPrompt', () => {
+  it('keeps the persona first and appends the craft', () => {
+    const p = hostSystemPrompt('PERSONA TEXT')
+    expect(p.startsWith('PERSONA TEXT')).toBe(true)
+    expect(p).toContain(HOST_CRAFT)
   })
 })

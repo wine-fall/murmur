@@ -5,7 +5,7 @@
 > tool paths were smoke-tested through the SDK. The five design forks (topic
 > tagging, persona homing, freshness cutoff, compaction cadence, path
 > governance) were resolved with the user — see §6; the by-feel constants
-> (`_RECENT_MAX_AGE_H`, `_COMPACT_EVERY_TURNS`, the profile cap) remain tunable.
+> (`SITTING_GAP_H`, `_COMPACT_EVERY_TURNS`, the profile cap) remain tunable.
 > **Owed (real-run pass):** the on-demand two-run "run 2 sees run 1's tail +
 > compaction produces a plausible profile" smoke (§5.10), and profile/topic
 > quality by feel (eval track).
@@ -290,13 +290,35 @@ migration (structure reserved, master §6).
 
 - In-process behavior is unchanged: a bounded deque is the hot cache;
   `record()` appends to both deque and file; `recent(n)` never touches disk.
-- **Startup prime**: the deque is seeded from the tail of `history.jsonl`,
-  bounded by a **freshness cutoff** — only turns younger than
-  `_RECENT_MAX_AGE_H = 48` (module constant, by-feel tunable) are primed.
-  Rationale: last night's closing turns *are* the continuity the master wants
-  ("take the last N for continuity"); a week-old line resurfacing as "recent"
-  reads as a glitch. Older continuity reaches the Brain through the profile
-  (compaction), not the window.
+- **Startup prime, gated on the sitting**: the deque is seeded from the tail of
+  `history.jsonl` only when the boot is inside the **same sitting** — the newest
+  row is younger than `SITTING_GAP_H = 1` hour (module constant, by-feel
+  tunable, aligned with the pet's away greeting, spec 10 §3.7.3). Inside that
+  hour the listener stepped out and came back; the host carries on mid-thought
+  and nothing else changes.
+- **Past the sitting gap the window starts EMPTY.** A primed transcript says
+  "you were in the middle of this", which is what a transcript means, and the
+  host obliges: after a 44.7 h gap the program opened by naming the song it had
+  been talking about at the end of the previous sitting, as a sentence it was
+  halfway through. A time marker on the turns would not fix it — the fix is to
+  stop handing over the turns.
+- **The sitting is a run of rows, not an age.** The prime walks back from the
+  newest row and stops where two rows sit further apart than the gap, so a
+  listener who opens the radio for one line after a week away and restarts it
+  ten minutes later is handed tonight's line and not last week's sitting. The
+  `lastOnAir` topics are bounded the same way: a topic from a month ago reported
+  as what was talked about yesterday is a false fact, not a coarse one.
+- **The return is a fact, not a transcript**: `lastOnAir()` reports when the
+  program was last on before this boot and the last ≤3 `topic` ledger keys from
+  then (no model call, no extra read). `undefined` on a first run and inside
+  the same sitting. The Director renders it once at boot into
+  `ContextPack.lastOnAir` as a COARSE phrase computed in code — "earlier today",
+  "yesterday evening", "Thursday afternoon", "last week", "a few weeks ago", "a
+  while ago" — never a count of hours, because a number in the prompt comes back
+  out of the host's mouth as a line about the number. The prompt states it and
+  says nothing about whether to mention it (spec 04 §3.5).
+- Continuity across a gap therefore flows through the profile (compaction), the
+  cross-day ledger line (§3.5) and this one fact — not through verbatim turns.
 
 ### 3.5 Pack assembly + prompt rendering
 
@@ -394,8 +416,13 @@ Unit (fakes / tmp_path, model-free) unless noted:
 1. **Cross-session round-trip**: record turns via one `PersistentMemoryStore`;
    a fresh instance on the same dir returns them from `recent(n)`,
    oldest-first, merged seamlessly with newly recorded turns.
-2. **Freshness cutoff**: turns older than `_RECENT_MAX_AGE_H` at load are not
-   primed into the window (injected clock — never wall-clock in tests).
+2. **Sitting gap**: a boot inside `SITTING_GAP_H` primes the turns on disk and
+   reports no `lastOnAir()`; a boot past it primes nothing and reports
+   `lastOnAir()` = the newest row's timestamp plus the last ≤3 topic keys, which
+   what the new session records never rewrites, and which a `forget` prunes as
+   it prunes the ledger. A restart inside the gap primes the last sitting only,
+   never the one before it. No history → `undefined` (injected clock — never
+   wall-clock in tests).
 3. **Ledger queries**: `recent_topics(n)` returns the last n topic keys in
    order, unaffected by session or midnight boundaries (pinned with injected
    clock/timestamps); `recent_songs(n)` returns the last n song keys in order.
@@ -437,9 +464,11 @@ Unit (fakes / tmp_path, model-free) unless noted:
    paths stay untagged (no structured output there).
 2. **Persona homing** (§3.2): seed-copy `persona.md` into `memory_dir` on
    first run; spec 06 gets its writable evolution target.
-3. **Freshness cutoff** (§3.4): 48h (`_RECENT_MAX_AGE_H`), with the cross-day
+3. **Freshness cutoff** (§3.4): a 48 h `_RECENT_MAX_AGE_H`, with the cross-day
    ledger line (§3.5) backstopping repetition when the window is empty
-   (issue #44).
+   (issue #44). **Superseded 2026-09-20**: the cutoff is now the 1 h sitting
+   gap and the `lastOnAir` fact — an age-bounded transcript still read as a
+   sentence to finish.
 4. **Compaction cadence** (§3.6): backlog ≥ 100 turns + graceful shutdown +
    startup catch-up, all off the live loop.
 5. **Path governance** (§2.3): the `paths.py` two-root rule (XDG data/cache
@@ -447,7 +476,7 @@ Unit (fakes / tmp_path, model-free) unless noted:
 
 ### Still open (build-time / eval-track, none blocking)
 
-- **The by-feel constants** — `_RECENT_MAX_AGE_H = 48`,
+- **The by-feel constants** — `SITTING_GAP_H = 1`,
   `_COMPACT_EVERY_TURNS = 100`, the ~1500-char profile cap — are starting
   guesses; tune on real-run feel, same posture as the bed gains (03-04 §6).
 - **Topic-tag quality** (does the model produce useful, stable keys?) is

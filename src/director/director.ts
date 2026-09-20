@@ -51,7 +51,7 @@ import { INSTALL_COMMAND } from '../support/update.ts'
 import { buildMusicSituation } from '../prompts/music.ts'
 import { withLanguage } from '../prompts/persona.ts'
 import { CODA_CUE } from '../prompts/talk.ts'
-import { currentScene, formatClock, sceneFor } from './scene.ts'
+import { currentScene, formatClock, lastOnAirPhrase, sceneFor } from './scene.ts'
 import type { AnchorId, Scheduler } from './scheduler.ts'
 
 // Literal, not destructured from COMMANDS: meaning must never depend on the
@@ -442,8 +442,18 @@ export class Director {
 
   private deps: DirectorDeps
 
+  // How the return is said, settled once at boot (spec 05 §3.4). It is one fact
+  // about THIS session's opening — a phrase recomputed per beat would drift
+  // through the buckets while the program is on the air. The topics are read
+  // live beside it, so a /forget mid-session takes them out of the opening too.
+  private lastOnAirWhen: string | undefined
+
   constructor(deps: DirectorDeps) {
     this.deps = deps
+    const last = deps.memory.lastOnAir()
+    if (last !== undefined) {
+      this.lastOnAirWhen = lastOnAirPhrase(new Date(last.ts * 1000), new Date())
+    }
     // Every buffered beat was written in the language the persona spoke when
     // it was generated. A language change (the setup guide, the /settings
     // pane, the reply turn — the store does not care who) drops them, like a
@@ -870,7 +880,17 @@ export class Director {
       ...(cue !== undefined && { cue }),
       ...(rwt !== undefined && { rwt }),
       ...(taste !== '' && { taste }),
+      ...this.lastOnAirFact(),
     }
+  }
+
+  // The opening fact, or nothing: the phrase from boot over the topics as the
+  // store holds them NOW (spec 05 §3.4).
+  private lastOnAirFact(): { lastOnAir: { when: string; topics: readonly string[] } } | undefined {
+    const when = this.lastOnAirWhen
+    const last = this.deps.memory.lastOnAir()
+    if (when === undefined || last === undefined) return undefined
+    return { lastOnAir: { when, topics: last.topics } }
   }
 
   // The rendered digest (spec 14 §2.3), '' when there is none or no wiring.
