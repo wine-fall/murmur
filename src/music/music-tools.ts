@@ -86,7 +86,7 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
-const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels', 'playlists'] as const
+const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels', 'playlists', 'neighbours'] as const
 
 // A relocated hit must be the same song: its title contains the submitted one
 // (or the reverse — a catalogue that appends "(Official Audio)" is still it)

@@ -35,6 +35,12 @@ describe('the mood pool on search_music (spec 14 §3.10)', () => {
   it('says what it is for, in the words the model fills the field with', () => {
     const { tools } = build()
     const schema = tools.find((t) => t.name === 'search_music')!.inputSchema as Record<string, { description?: string }>
+    // Every catalogue the tool answers for must also be a value the schema
+    // ACCEPTS, or the model is told about a field it cannot fill.
+    const field = tools.find((t) => t.name === 'search_music')!.inputSchema as { catalogue: { safeParse: (v: unknown) => { success: boolean } } }
+    for (const name of ['playlists', 'neighbours', 'channels', 'netease', 'qqmusic', 'bilibili', 'youtube']) {
+      expect(field.catalogue.safeParse(name).success, name).toBe(true)
+    }
     expect(schema.catalogue!.description).toMatch(/playlists/)
     // Measured live 2026-09-21: a bare mood word ("quiet") fills the pool
     // with piano and classical sets, which policy rule 7 forbids.
