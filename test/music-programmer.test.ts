@@ -127,8 +127,8 @@ describe('the pick task, when a candidate does not hold up', () => {
     music.broken.add('loop')
     const results: Record<string, unknown>[] = []
     const harness = new FakeHarness(async (tools) => {
-      results.push(await callTool(tools, 'submit_pick', { ref: 'loop', why: 'oops' }))
-      results.push(await callTool(tools, 'submit_pick', { ref: 'good', why: 'better' }))
+      results.push(await callTool(tools, 'submit_pick', { ref: 'loop', why: 'oops', title: 'Zelkova Hour', artist: 'Nine Lantern' }))
+      results.push(await callTool(tools, 'submit_pick', { ref: 'good', why: 'better', title: 'Zelkova Hour', artist: 'Nine Lantern' }))
     })
 
     const pick = await new MusicProgrammer({ brain: harness, provider: music, model: 'haiku' }).nextTrack(ctx)
@@ -142,7 +142,7 @@ describe('the pick task, when a candidate does not hold up', () => {
   it('rejects a pick whose resolved stream does not actually play (pull-time probe)', async () => {
     const probed: string[] = []
     const harness = new FakeHarness(async (tools) => {
-      const dead = await callTool(tools, 'submit_pick', { ref: 'good', why: 'looks fine' })
+      const dead = await callTool(tools, 'submit_pick', { ref: 'good', why: 'looks fine', title: 'Zelkova Hour', artist: 'Nine Lantern' })
       expect(dead).toMatchObject({ ok: false })
       expect(dead.error).toMatch(/pick another/)
     })
@@ -184,7 +184,7 @@ describe('discovery instrumentation', () => {
     const lines: string[] = []
     const harness = new FakeHarness(async (tools) => {
       await callTool(tools, 'search_music', { query: 'city pop', limit: 2 })
-      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits' })
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     })
     await new MusicProgrammer({
       brain: harness,
@@ -214,7 +214,7 @@ describe('discovery instrumentation', () => {
     const music = provider()
     music.candidates = [{ ref: 'https://youtube.com/watch?v=a#t=612,868', title: 'S', uploader: 'U', durationS: 7_200, extra: {} }]
     const harness = new FakeHarness(async (tools) => {
-      await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a#t=612,868', why: 'fits' })
+      await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a#t=612,868', why: 'fits', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     })
     await new MusicProgrammer({
       brain: harness,
@@ -232,8 +232,8 @@ describe('discovery instrumentation', () => {
     music.broken.add('loop')
     const lines: string[] = []
     const harness = new FakeHarness(async (tools) => {
-      await callTool(tools, 'submit_pick', { ref: 'loop', why: 'dead ref' })
-      await callTool(tools, 'submit_pick', { ref: 'good', why: 'dead stream' })
+      await callTool(tools, 'submit_pick', { ref: 'loop', why: 'dead ref', title: 'Zelkova Hour', artist: 'Nine Lantern' })
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'dead stream', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     })
     const pick = await new MusicProgrammer({
       brain: harness,
@@ -251,7 +251,7 @@ describe('discovery instrumentation', () => {
 
   it('stays silent with no debug sink', async () => {
     const harness = new FakeHarness(async (tools) => {
-      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits' })
+      await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     })
     const pick = await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
     expect(pick).not.toBeNull() // instrumentation is optional and changes nothing

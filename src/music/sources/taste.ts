@@ -111,7 +111,6 @@ export const DIGEST_BUDGET = 1500
 // the same proportions. What the half does not spend rolls forward.
 export const FIXED_SHARE = 0.2
 const TOP_ARTISTS = 25
-const SONG_ITEMS = 40
 const WATCH_ITEMS = 8
 const PLAYLIST_NAMES = 12
 const PLATFORM_LIST = 10
@@ -318,7 +317,6 @@ export function renderTasteDigest(
     for (const item of ledger.entries) if (shown(source, item)) countArtist(item)
   }
   const lately: { item: TasteItem; order: number }[] = []
-  const songs: { item: TasteItem; order: number }[] = []
   const playlists: string[] = []
   let order = 0
   for (const { snapshot, items } of kept) {
@@ -328,7 +326,6 @@ export function renderTasteDigest(
       // counted it, and counting both would double every current row.
       if (!byLedger.has(snapshot.source)) countArtist(item)
       if (item.kind === 'history') lately.push({ item, order })
-      if (item.kind === 'liked') songs.push({ item, order })
       if (item.kind === 'playlist') playlists.push(item.title.trim())
     }
   }
@@ -342,7 +339,6 @@ export function renderTasteDigest(
   }
 
   lately.sort(byDate)
-  songs.sort(byDate)
   // The moment-matched half. Per source: a source with a usable ledger is
   // chosen from it, and a source whose ledger is missing, unreadable or
   // empty keeps the rows its snapshot already has -- otherwise the pick
@@ -381,11 +377,15 @@ export function renderTasteDigest(
     { lead: 'Artists they return to', parts: [...artists.entries()].sort((a, b) => b[1] - a[1] || byName(a[0], b[0])).slice(0, TOP_ARTISTS).map(([name, n]) => `${name} (${n})`), sep: ', ', weight: 1 },
     { lead: 'Playlists', parts: playlists.slice(0, PLAYLIST_NAMES), sep: ', ', weight: 1 },
   ]
-  // The flexible half. For choosing a song the kept songs ARE the signal and
-  // the watch rows are context, so the weights run 3 to 1. Measured with the
-  // watch rows leading instead: 14 of 186 kept songs reached the page.
+  // The flexible half. The kept songs are NOT named here (spec 14 \u00a73.10):
+  // over 68 measured airs the line read as a playlist -- 19 of the songs that
+  // went out came off it and 31 more were the same artists' best-known ten.
+  // What the listener keeps still reaches the brain as the artist count and
+  // the playlist names above; the titles are what is withheld, so the pick
+  // has to be found rather than recalled. `selectForMoment` still scores the
+  // kept rows: the block no longer renders them, but the moment is what the
+  // familiarity rule reads (\u00a73.10) and the experiment is reversible.
   const flexible: Layer[] = [
-    { lead: 'Songs they keep', parts: (matched?.songs ?? songs.map((r) => r.item)).slice(0, SONG_ITEMS).map(quoted), sep: ' \u00b7 ', weight: 3 },
     { lead: 'Lately they have been listening to', parts: (matched?.lately ?? lately.map((r) => r.item)).slice(0, WATCH_ITEMS).map(watched), sep: ' \u00b7 ', weight: 1 },
   ]
   let used = lines[0]!.length

@@ -67,14 +67,33 @@ describe('submit_pick refuses a track on the avoid-list', () => {
     expect(picks).toHaveLength(0)
   })
 
-  // A pick that names no title is labelled 'music', which is an absence of
-  // identity, not a song. Reading it as one would refuse every metadata-less
-  // pick after the first (codex review).
-  it('never reads the placeholder label as a song identity', async () => {
-    const { tools, picks } = build(['music'])
+  // A pick that names no title used to carry the placeholder label 'music',
+  // and every label-keyed guard slid off it: the repeat check, and now the
+  // familiarity rule (spec 14 §3.10). The pick has to say what it is.
+  it('turns back a submission that names no title, without resolving it', async () => {
+    const { provider, tools, picks } = build([])
+    provider.broken.add('https://youtu.be/1')
     const result = await callTool(tools, 'submit_pick', { ref: 'https://youtu.be/1', why: 'w' })
-    expect(result.ok).toBe(true)
-    expect(picks).toHaveLength(1)
+    expect(result.ok).toBe(false)
+    expect(String(result.error)).toMatch(/title and artist/i)
+    expect(picks).toHaveLength(0)
+  })
+
+  it('turns back a submission whose title or artist is blank', async () => {
+    const { tools, picks } = build([])
+    expect((await callTool(tools, 'submit_pick', { ...ARGS, title: '   ' })).ok).toBe(false)
+    expect((await callTool(tools, 'submit_pick', { ...ARGS, artist: '' })).ok).toBe(false)
+    expect(picks).toHaveLength(0)
+  })
+
+  // The schema the model reads is the first half of the same rule: an
+  // optional field is one it may leave out and never be told it mattered.
+  it('declares both fields required in the tool schema', () => {
+    const { tools } = build([])
+    const schema = tools.find((t) => t.name === 'submit_pick')!.inputSchema as Record<string, { isOptional?: () => boolean }>
+    expect(schema.title!.isOptional!()).toBe(false)
+    expect(schema.artist!.isOptional!()).toBe(false)
+    expect(schema.announce!.isOptional!()).toBe(true)
   })
 
   // ponytail: trim + collapsed whitespace + case is the whole normalisation.

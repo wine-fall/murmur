@@ -349,8 +349,8 @@ export function musicTools(
     {
       ref: z.string().describe("the chosen candidate's ref"),
       why: z.string().describe('one line: why this track'),
-      title: z.string().optional().describe("the track's title"),
-      artist: z.string().optional().describe("the track's artist/uploader"),
+      title: z.string().describe("the track's title"),
+      artist: z.string().describe("the track's artist/uploader"),
       announce: z.string().optional().describe(ANNOUNCE_FIELD_DESCRIPTION),
     },
     async (args) => {
@@ -359,19 +359,24 @@ export function musicTools(
 
       const title = trimmed(args.title)
       const artist = trimmed(args.artist)
+      // A pick has to say what it is (spec 14 §3.10). Anything keyed on the
+      // song's label — the repeat guard below, the relocate, the familiarity
+      // rule — slides off a submission that names none, so an unnamed one is
+      // turned back here rather than aired as "music".
+      if (title === undefined || artist === undefined) {
+        return reply({ ok: false, error: "submit_pick requires the track's title and artist; resubmit with both" })
+      }
+
       // Before the resolve: a repeat costs a tool turn, never a network round.
-      // Only a pick that names itself can be recognised as one — a submission
-      // with no title carries the placeholder label, which is an absence of
-      // identity and not a song to match on.
-      const label = trackLabel({ ...(title !== undefined && { title }), ...(artist !== undefined && { artist }) })
-      if (title !== undefined && avoided.has(folded(label))) {
+      const label = trackLabel({ title, artist })
+      if (avoided.has(folded(label))) {
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
       }
 
       // Found is not where it plays from (spec 14 §2.13): a song the model
       // found on a slow catalogue is played from the fastest one that also
-      // has it. Only a pick that names itself can be looked for elsewhere.
-      let clip = title === undefined ? null : await relocate(ref, title, artist)
+      // has it.
+      let clip = await relocate(ref, title, artist)
       if (clip === null) {
         const opened = await openClip(ref)
         if (!opened.ok) {
@@ -382,14 +387,9 @@ export function musicTools(
       }
 
       const announce = trimmed(args.announce)
-      const pick: TrackPick = {
-        clip,
-        ...(title !== undefined && { title }),
-        ...(artist !== undefined && { artist }),
-        ...(announce !== undefined && { announce }),
-      }
+      const pick: TrackPick = { clip, title, artist, ...(announce !== undefined && { announce }) }
       finish(pick)
-      return reply({ ok: true, source: clip.source, title: pick.title ?? null })
+      return reply({ ok: true, source: clip.source, title })
     },
   )
 

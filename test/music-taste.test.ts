@@ -286,38 +286,40 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
   it('an auth failure on submit returns reason auth, reports once, and closes that catalogue for the task', async () => {
     const { provider, tools, auth } = build({ mounted: ['netease'] })
     provider.failWith = new SourceAuthError('netease', 'expired', '<redacted>')
-    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(result).toMatchObject({ ok: false, reason: 'auth', source: 'netease', detail: 'expired' })
     expect(String(result.note)).toMatch(/unavailable for the rest of this task/)
     expect(auth).toHaveLength(1)
     const again = await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
     expect(again).toEqual({ ok: false, reason: 'unavailable', mounted: ['youtube'] })
-    expect(provider.searches).toHaveLength(0)
+    // Only the searches this test asked for: a named submit also searches on
+    // its own, to relocate the pick (spec 14 §2.13).
+    expect(provider.searches.filter((s) => s.query === 'q')).toHaveLength(0)
   })
 
   it('a closed youtube is closed for the default search too, and a geo block closes nothing', async () => {
     const { provider, tools } = build({ mounted: ['netease'] })
     provider.candidates = [{ ref: 'https://youtube.com/watch?v=a', title: 'S', uploader: 'U', durationS: 240, extra: {} }]
     provider.failWith = new SourceAuthError('youtube', 'expired', '<redacted>')
-    await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })
+    await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(await callTool(tools, 'search_music', { query: 'q' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
     expect(await callTool(tools, 'search_music', { query: 'q', catalogue: 'youtube' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
     // A rights-less track is that track's problem, not the catalogue's.
     const geo = build({ mounted: ['netease'] })
     geo.provider.failWith = new SourceAuthError('netease', 'geo', '<redacted>')
-    const result = await callTool(geo.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    const result = await callTool(geo.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(result).toMatchObject({ ok: false, reason: 'auth', source: 'netease', detail: 'geo' })
     expect(String(result.note)).toMatch(/pick another/)
     expect(geo.auth).toHaveLength(1)
     geo.provider.failWith = null
     await callTool(geo.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect(geo.provider.searches).toHaveLength(1)
+    expect(geo.provider.searches.filter((s) => s.query === 'q')).toHaveLength(1)
   })
 
   it('a plain resolve failure is still just "pick another"', async () => {
     const { provider, tools, auth } = build({ mounted: ['netease'] })
     provider.broken.add('https://music.163.com/#/song?id=5')
-    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    const result = await callTool(tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(result.ok).toBe(false)
     expect(result).not.toHaveProperty('reason')
     expect(auth).toHaveLength(0)
@@ -328,7 +330,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     const ref = 'https://y.qq.com/n/ryqq/songDetail/000P8peU0HhORi'
     provider.candidates = [{ ref, title: 'VIP Song', uploader: 'Artist', durationS: 240, extra: {} }]
     provider.failWith = new TrackRightsError('qqmusic', 'only available for registered users')
-    const result = await callTool(tools, 'submit_pick', { ref, why: 'w' })
+    const result = await callTool(tools, 'submit_pick', { ref, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(result.ok).toBe(false)
     // Not an auth result: nothing to renew, so the Director hears nothing and
     // the mount's status is never touched.
@@ -339,14 +341,14 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     // The other catalogues are untouched — the next candidate still resolves.
     provider.failWith = null
     await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect(provider.searches).toHaveLength(1)
+    expect(provider.searches.filter((s) => s.query === 'q')).toHaveLength(1)
   })
 
   it('the preview trap: a 30 s netease clip against a 240 s candidate is login-required; 235 s plays (spec 14 §5.6)', async () => {
     const probes: string[] = []
     const short = build({ mounted: ['netease'], probeDurationS: async (s) => (probes.push(s), 30) })
     await callTool(short.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    const trapped = await callTool(short.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    const trapped = await callTool(short.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(trapped).toMatchObject({ ok: false, reason: 'auth', source: 'netease', detail: 'login-required' })
     expect(short.auth[0]).toMatchObject({ reason: 'login-required' })
     expect(probes).toEqual(['https://stream/https://music.163.com/#/song?id=5'])
@@ -354,7 +356,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
 
     const full = build({ mounted: ['netease'], probeDurationS: async () => 235 })
     await callTool(full.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    const played = await callTool(full.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w' })
+    const played = await callTool(full.tools, 'submit_pick', { ref: 'https://music.163.com/#/song?id=5', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(played.ok).toBe(true)
     expect(full.picks).toHaveLength(1)
   })
@@ -363,12 +365,12 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     const headers = { 'User-Agent': 'Mozilla/5.0 Chrome/145' }
     const trap = openings({ headers, trapDurationS: 240 })
     await callTool(trap.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect((await callTool(trap.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect((await callTool(trap.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })).ok).toBe(true)
     expect(trap.seen).toEqual([headers])
 
     const plain = openings({ headers, ref: 'https://youtube.com/watch?v=a' })
     await callTool(plain.tools, 'search_music', { query: 'q' })
-    expect((await callTool(plain.tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })).ok).toBe(true)
+    expect((await callTool(plain.tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })).ok).toBe(true)
     expect(plain.seen).toEqual([headers])
   })
 
@@ -380,7 +382,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
   it('does not open a netease stream twice: the trap is the playability proof', async () => {
     const both = openings({ trapDurationS: 240 })
     await callTool(both.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect((await callTool(both.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect((await callTool(both.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })).ok).toBe(true)
     expect(both.opened).toEqual(['trap'])
   })
 
@@ -389,12 +391,12 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
   it('falls back to the playability probe when the trap reads no duration', async () => {
     const unread = openings({ trapDurationS: null })
     await callTool(unread.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect((await callTool(unread.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).ok).toBe(true)
+    expect((await callTool(unread.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })).ok).toBe(true)
     expect(unread.opened).toEqual(['trap', 'probe'])
 
     const dead = openings({ trapDurationS: null, plays: false })
     await callTool(dead.tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect(await callTool(dead.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w' })).toMatchObject({ ok: false })
+    expect(await callTool(dead.tools, 'submit_pick', { ref: NETEASE_REF, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })).toMatchObject({ ok: false })
     expect(dead.picks).toHaveLength(0)
   })
 
@@ -403,7 +405,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     const { provider, tools, picks } = build({ probeDurationS: async (s) => (probes.push(s), 30) })
     provider.candidates = [{ ref: 'https://youtube.com/watch?v=a', title: 'S', uploader: 'U', durationS: 240, extra: {} }]
     await callTool(tools, 'search_music', { query: 'q' })
-    await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w' })
+    await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(probes).toEqual([])
     expect(picks).toHaveLength(1)
   })
@@ -430,7 +432,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     )
     // No search ran, so there is no stated length: only the segment can say
     // how long this pick is meant to be.
-    const trapped = await callTool(tools, 'submit_pick', { ref, why: 'w' })
+    const trapped = await callTool(tools, 'submit_pick', { ref, why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     expect(trapped).toMatchObject({ ok: false, reason: 'auth', detail: 'login-required' })
     expect(auth).toHaveLength(1)
     expect(picks).toHaveLength(0)
@@ -460,7 +462,11 @@ describe('the digest in the prompts (spec 14 §2.3/§3.3)', () => {
     expect(buildFindMusicInstruction(undefined, { taste: true })).toContain(TASTE_GUIDANCE)
     expect(buildFindMusicInstruction(undefined, { taste: false })).not.toContain(TASTE_GUIDANCE)
     expect(buildFindMusicInstruction()).not.toContain(TASTE_GUIDANCE)
-    expect(TASTE_GUIDANCE).toMatch(/not two in a row/)
+    // spec 14 \u00a73.10: what they keep is an anchor to reach out from, and
+    // the block no longer carries a kept title to reach back to.
+    expect(TASTE_GUIDANCE).toMatch(/anchors/)
+    expect(TASTE_GUIDANCE).not.toMatch(/not two in a row/)
+    expect(TASTE_GUIDANCE).not.toMatch(/Songs they keep/)
     // Found, not fast: where a pick plays from is §2.13's, not the model's.
     expect(TASTE_GUIDANCE).toMatch(/likeliest to be FOUND/)
     expect(TASTE_GUIDANCE).toMatch(/best song,\nnot the best source/)

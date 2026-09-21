@@ -87,11 +87,18 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
 export const MUSIC_POLICY_HEADER = 'Policy:'
 
 // Search with taste in hand (spec 14 §3.3), rendered only when a digest rides
-// the situation: the kept music is a prior for style, never a playlist.
-export const TASTE_GUIDANCE = `With taste in hand: the block "What the listener keeps" below is what they
-actually keep on their own platforms — a strong prior for STYLE, not a list
-to replay. Pick for the moment. When a kept track genuinely fits, playing it is
-fine, but not two in a row. Search wherever the song is likeliest to be FOUND — NetEase
+// the situation. The block is the listener's shape, not a shelf to pull from:
+// measured over 68 airs, a radio handed the kept titles played them back (19
+// of 68) or reached for the same artists' best-known ten (31 of 68). §3.10
+// withholds the titles; this paragraph says what to do with what is left.
+export const TASTE_GUIDANCE = `With taste in hand: the block "What the listener keeps" below is the shape of
+what they already have — the artists they return to, the playlists they made,
+what has been on lately. Those are anchors, not requests. A radio that plays
+what someone already keeps is a shuffle button with a voice; your half of this
+is the rest of the map — the record beside the one they keep, the labelmate,
+the scene, the year, the country, the singer that artist learned from. Reach
+out from the anchors, never back to them.
+Search wherever the song is likeliest to be FOUND — NetEase
 and QQ Music for Chinese-catalogue depth, Bilibili and YouTube as well.
 Where a pick PLAYS from is decided after submit_pick, so choose the best song,
 not the best source. In the announce, say where a pick came from only when it is theirs
