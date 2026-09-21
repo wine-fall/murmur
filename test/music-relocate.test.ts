@@ -81,10 +81,13 @@ describe('play-source preference (spec 14 §2.13)', () => {
     expect(log).toContain('music.relocate from=netease none reason=no-hit')
   })
 
-  it('does not relocate a submit that carries no title', async () => {
+  // A submit that names nothing cannot be looked for elsewhere -- and is no
+  // longer accepted at all (spec 14 §3.10), so nothing resolves either.
+  it('turns back a submit that carries no title instead of resolving it', async () => {
     const { tools, picks, provider, log } = build()
-    await submit(tools, { title: undefined, artist: undefined })
-    expect(picks[0]?.clip.source).toBe(`https://stream/${NETEASE_REF}`)
+    const result = await submit(tools, { title: undefined, artist: undefined })
+    expect(result.ok).toBe(false)
+    expect(picks).toHaveLength(0)
     expect(relocations(provider)).toEqual([])
     expect(log.filter((l) => l.startsWith('music.relocate'))).toEqual([])
   })
@@ -92,14 +95,14 @@ describe('play-source preference (spec 14 §2.13)', () => {
   it('does not relocate a segment ref', async () => {
     const ref = 'https://www.bilibili.com/video/BV1#t=612,868'
     const { tools, picks, provider } = build({ mounted: ['bilibili'] })
-    await callTool(tools, 'submit_pick', { ref, why: 'w', title: 'Kong Kong' })
+    await callTool(tools, 'submit_pick', { ref, why: 'w', title: 'Kong Kong', artist: 'Chen Li' })
     expect(picks[0]?.clip.segment).toEqual({ startS: 612, endS: 868 })
     expect(relocations(provider)).toEqual([])
   })
 
   it('does not relocate a ref whose catalogue is already top-ranked', async () => {
     const { tools, provider } = build({ mounted: ['netease'] })
-    await callTool(tools, 'submit_pick', { ref: 'https://www.youtube.com/watch?v=abc', why: 'w', title: 'Kong Kong' })
+    await callTool(tools, 'submit_pick', { ref: 'https://www.youtube.com/watch?v=abc', why: 'w', title: 'Kong Kong', artist: 'Chen Li' })
     expect(relocations(provider)).toEqual([])
   })
 

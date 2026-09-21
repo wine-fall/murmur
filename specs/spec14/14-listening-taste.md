@@ -228,7 +228,6 @@ A pure function; same inputs, same output; unit-tested on fixtures. Shape
 Sources: NetEase (312 liked, 9 playlists), QQ Music (40 liked, 6 playlists)
 Artists they return to: Cheer Chen (41), Bon Iver (27), ...              <- top 25 by count; with the two lines above, <= 300 chars
 Playlists: late drive, deep focus, Liked from Radio, ...                 <- names only, <= 12
-Songs they keep: "Travel Is Meaningful" Cheer Chen - "Holocene" Bon Iver <- the long tail, weight 3, <= 40
 Lately they have been listening to: "..." Night Tape - ...               <- songs-only sources, weight 1, <= 8
 Spotify says (top, medium term): artists - ...; tracks - ...             <- Spotify's own ranking, <= 10 each
 ```
@@ -291,7 +290,6 @@ an artist match — so they leave rather than being ranked last.
 
   | line | weight | item cap |
   |---|---|---|
-  | `Songs they keep` | 3 | 40 |
   | `Lately they have been listening to` | 1 | 8 |
   | `<platform> says (top, medium term)` | 1 per source | 10 each |
   | `<platform> suggests today` | 1 per source | 10 |
@@ -1571,9 +1569,10 @@ sources are not a knob.
 ### 3.3 Search with taste in hand — what the prompt says
 
 One paragraph added to the music prompt (`src/prompts/music.ts`), rendered
-only when a digest is present: the listener's kept music is a strong prior
-for *style*; pick for the moment; when a kept track fits, it is fine to play
-it, but not two in a row; search wherever the song is likeliest to be FOUND,
+only when a digest is present. *Amended 2026-09-21 (§3.10)*: what the block
+shows is the shape of what the listener already has — anchors to reach out
+from, never a shelf to pull from; the radio's half is the rest of the map.
+Then, unchanged: search wherever the song is likeliest to be FOUND,
 not where it plays best (§2.13 relocates the pick after submit); say in `announce`
 where a pick came from only when it is theirs ("one you've kept").
 
@@ -1727,6 +1726,113 @@ lines):
   `persona.md` stays the only first-run marker.
 
 ---
+
+### 3.10 Discovery over recall — the pick is not a shuffle button
+
+*Added 2026-09-21.*
+
+**The measurement.** 68 consecutive airs, read from the listener's own logs
+and snapshots (counts only — §3.6: no title left the machine, none is written
+here):
+
+| what the aired song was | share |
+|---|---|
+| in the listener's liked list on a mounted source | 19 / 68 |
+| in that artist's top ten on NetEase | 31 / 68 |
+| by an artist who appears in the liked list | 63 / 68 |
+| "not two in a row", the rule the old §3.3 paragraph asked for | violated — three kept songs ran consecutively |
+
+**The requirement.** This is a *discovery* radio. Artist repeats are welcome —
+the listener's artists are the shape of their taste. Songs they already know
+must not dominate. A blunt "never play a kept song" is **rejected**: a kept
+song at the right moment is the right song.
+
+**FAMILIAR is code-judged, never model-judged.** A candidate is familiar when
+any of these holds:
+
+  a. it is a liked/playlist row in **any** mounted source's snapshot — every
+     platform, unioned, not NetEase alone;
+  b. it is a history row in any snapshot — the YouTube/Bilibili watch rows
+     count here even though §2.3's block never shows them;
+  c. murmur has aired it — `memory.recentSongsSince`, any window;
+  d. it is in the artist's **top ten** on a platform that ranks them. NetEase
+     first: anonymous `GET music.163.com/api/search/get?s=<artist>&type=100`
+     for the artist id, then `/api/v1/artist/<id>` → `hotSongs`. Cached per
+     artist for 24 h. QQ Music and YouTube rankings are a later step.
+
+**Matching** is the folded title with parenthetical suffixes stripped, plus an
+artist match through `moment.ts` `carries()` (word-boundary aware) — **not**
+`relocate()`'s bare containment, which would call a one-word title familiar
+inside any longer one. Simplified/traditional folding is **not** attempted;
+the miss rate is logged rather than guessed at.
+
+**Step one (this change).**
+
+1. **`submit_pick` requires `title` and `artist`.** §2.3 of spec 03-01 already
+   says a pick carries them; the schema had them optional, and an unnamed
+   submission slid past every label-keyed guard — the repeat check, the
+   relocate, and the familiarity rule above. Both are required in the schema
+   the model reads, and a submission whose title or artist is blank is
+   refused with a message that says to resubmit with both.
+2. **The digest stops naming the kept songs.** The `Songs they keep` line of
+   §2.3 is gone: 40 titles were the largest thing in the block and the model
+   read them as a playlist (19/68 above). `Artists they return to`,
+   `Playlists`, the `Sources` counts and `Lately they have been listening to`
+   all stay — what they keep still reaches the brain as *shape*. §2.12's
+   selection still scores the kept rows; the block no longer renders them,
+   and the experiment is reversible on the measurement below.
+3. **The taste paragraph (§3.3) is rewritten**, code-owned. It must live in
+   `src/prompts/music.ts` and **never** in the listener-editable
+   `music-policy.md`: that file is seeded once and existing installs never
+   receive a new sentence, so nothing may arm off a sentence in it.
+
+**Later steps of this section**, in order, each its own change:
+
+4. **Candidate pools** — where the model goes instead of its memory:
+   situation→mood playlists (NetEase `search/get?type=1000` and
+   `/api/playlist/list?cat=<category>&order=hot`, categories from
+   `/api/playlist/catalogue`, tracks through the existing `v6/playlist/detail`
+   read; QQ's anonymous `soso/fcgi-bin/client_music_search_songlist` works
+   too), exposed on **`search_music`** as a catalogue value or query mode and
+   **never as a third tool** (§5 acceptance #7 locks the pick task at exactly
+   two). A **separate lane** for the platform's own daily recommendation
+   (NetEase `/api/v1/discovery/recommend/songs`, login cookie, 30 songs with a
+   reason string, measured 0/32 in the liked list; QQ's radar), rendered as
+   its own situation block with its reasons on a 24 h tier — **not** a `daily`
+   `TasteKind`: that kind counts into `Artists they return to`, polls on
+   §3.4's 3 h clock and costs §2.12's 5 ms scan, and it is never written to
+   the taste ledger. And **neighbours of the song on air** (NetEase
+   `/api/v1/discovery/simiSong?songid=`, five; the YouTube auto-mix via
+   `yt-dlp --flat-playlist ".../watch?v=<id>&list=RD<id>"`, ~15 s), prefetched
+   in the background **while the song plays** and read from cache at the next
+   pick — never on the pick path. QQ's `GetSimilarSongs` returns null and
+   Bilibili's related list is junk; both are skipped.
+5. **Labels and rotation.** Every `search_music` hit carries its familiarity
+   label — `kept`, `artist's #N hit`, `watched`, `played by murmur`, `new` —
+   so the model chooses knowing. Rotation is a **shuffled deck, not
+   independent dice**: of every 10 pick slots exactly 3 allow a familiar
+   song, shuffled so streaks stay bounded. The slot's verdict is decided in
+   code at pick start, written into the situation ("this slot: new only") and
+   enforced in `submit_pick`, which refuses a familiar submission **at most
+   once** per pick — naming the pools to try — and then **fails open**, because
+   a familiar song beats dead air; the fail-open is counted. The queue window
+   is `queuedLabels()` plus the ledger (`PICK_LOOKAHEAD = 2`, the ledger
+   written at air time). A **listener request** (the Director's `listener
+   request:` hint) reaches `musicTools` as a flag that disables the slot rule
+   entirely. The 3-in-10 is a constant with a `ponytail:` comment, not a
+   setting.
+
+**Dropped on purpose** (do not add them back): a 30-day cooldown on kept
+songs; a `source`/`outcome` field on the memory ledger (familiarity is a pure
+function of the label — recompute it); a pick-time tool; and any kept/new tag
+beside a title in the dev log — §3.6 allows counts only.
+
+**Measurement.** Per pick, counts only: the familiar share, the fail-open
+count, the refusal count. The acceptance metric is the **familiar share per
+100 airs**, against a baseline of ~60 % (the 19/68 + 31/68 above). A verdict
+needs hundreds of airs — roughly two weeks of listening — so step 5 lands
+after steps 1–4 have been on the air, and no change in this section is judged
+inside the session that wrote it.
 
 ## 4. Dependencies
 
@@ -1886,8 +1992,9 @@ rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
 On a fixture that invents every row but keeps the kind counts a real mount of
 each platform returns (200 watched, 186 liked, 50 playlists, 100
 subscriptions and so on — a handful of rows would not put the budget under
-pressure): `Songs they keep` holds **at least 25 songs**, where the layering
-this replaces left **4**; no `history`, `follows` or
+pressure): *amended 2026-09-21 (§3.10)* — **not one of the 186 kept titles
+appears anywhere in the block**, while every artist behind them is counted on
+`Artists they return to`; no `history`, `follows` or
 `frequents` row from a video platform (YouTube, Bilibili) appears anywhere in
 the block, nor in the `Sources` counts; `Recently followed` and `Who they
 keep going back to` are absent entirely; every remaining row traces to a
@@ -1910,10 +2017,14 @@ status is `expired` is due on neither. A ledger past `LEDGER_MAX_BYTES` sheds
 its oldest `lastSeen` entries and logs a count with no title in it.
 
 ### 5.16 The moment picks the rows (unit + timing) — *added 2026-09-18*
-Given the §5.14 fixture, a ledger built from it, and a moment whose last
-song is by one of its artists: the selected rows include other entries by
-artists and playlists the moment's terms match, and include **nothing by the
-artist just played**. The selection runs in **under 5 ms** on the fixture,
+*Amended 2026-09-21 (§3.10)*: the only line the selection still renders is
+`Lately they have been listening to`, so the row assertions run on a
+songs-only source's watch rows; on the §5.14 fixture, whose watch rows are
+all on video platforms the block never shows, a moment renders the block
+byte-for-byte as no moment does. Given a ledger of watch rows and a moment
+whose last song is by one of its artists: the selected rows include other
+entries by artists and playlists the moment's terms match, and include
+**nothing by the artist just played**. The selection runs in **under 5 ms** on the fixture,
 asserted. With the ledger removed, the selection equals the §2.3
 render of the same snapshots, byte for byte. The context pack's `taste` is
 the no-argument render in every case (§2.12's scope), and two pack reads
@@ -1942,6 +2053,18 @@ holds that list; and a `submit_pick` through tools built **before** the card
 ran relocates by the new order — no restart. Esc after a pick restores the
 order the card opened on. An unmounted catalogue is never shown and keeps its
 stored position behind the promotion.
+
+### 5.19 A pick names itself, and the block names no kept song (unit) — *added 2026-09-21*
+`submit_pick` declares `title` and `artist` **required** in the schema the
+model reads (asserted on the tool's own schema, not only on the handler), and
+a call whose title or artist is missing or blank is refused — before the
+avoid-list check, before any relocate, before any network round — with a
+message naming both fields; nothing is aired and no clip is resolved. On the
+§5.14 fixture the block contains **none** of the 186 kept titles while
+`Artists they return to` still counts them, and `TASTE_GUIDANCE` describes
+what the listener keeps as anchors, with the old "not two in a row" sentence
+gone. The per-100-air familiar share is **not** asserted in a unit test: it is
+the by-ear metric of §3.10, owed after the change has run.
 
 ## 6. Resolved decisions
 
