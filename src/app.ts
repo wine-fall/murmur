@@ -413,7 +413,7 @@ function buildMusic(
     taste === undefined
       ? undefined
       : new DailyLane({
-          feeds: dailyFeeds(taste.build),
+          feeds: () => dailyFeeds(taste.build),
           ...(host.debug !== undefined && { log: host.debug.bind(host) }),
         })
   return { source, cadence, engine, ...(daily !== undefined && { daily: { maybeRefresh: () => void daily.maybeRefresh(), block: () => daily.block() } }) }

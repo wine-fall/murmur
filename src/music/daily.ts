@@ -10,6 +10,10 @@
 import type { DailySong } from '../contracts.ts'
 
 export const DAILY_STALE_MS = 24 * 60 * 60 * 1000
+// How long a day whose feeds all failed waits before asking again. The pick
+// pokes this far more often than the clock it rides, so without a floor a
+// cookie that stopped signing in would be read again at every boundary.
+export const DAILY_RETRY_MS = 60 * 60 * 1000
 // What one lane is allowed to spend of the situation: enough to be a shelf,
 // short enough that it cannot crowd out the turns above it.
 export const DAILY_ITEMS = 12
@@ -20,7 +24,10 @@ export const DAILY_HEADING = '## New for them today'
 export type DailyFeed = { id: string; read: () => Promise<DailySong[]> }
 
 export type DailyLaneDeps = {
-  feeds: readonly DailyFeed[]
+  // Read per refresh, never captured: a listener who mounts an account
+  // mid-session through `/sources` gets a lane on the next day's read, and
+  // one who disconnects stops being read with a credential that is gone.
+  feeds: () => readonly DailyFeed[]
   now?: () => Date
   log?: (message: string) => void
 }
@@ -32,6 +39,7 @@ export class DailyLane {
   private deps: DailyLaneDeps
   private songs: DailySong[] = []
   private readAt = 0
+  private triedAt = 0
   private inFlight: Promise<void> | null = null
 
   constructor(deps: DailyLaneDeps) {
@@ -41,17 +49,18 @@ export class DailyLane {
   // Fire-and-forget from the pick path: it resolves, it never rejects, and a
   // read already in flight is the answer to a second call.
   maybeRefresh(): Promise<void> {
-    if (this.deps.feeds.length === 0) return Promise.resolve()
     const now = (this.deps.now ?? (() => new Date()))().getTime()
     if (this.inFlight !== null) return this.inFlight
     if (this.readAt !== 0 && now - this.readAt < DAILY_STALE_MS) return Promise.resolve()
+    if (this.triedAt !== 0 && now - this.triedAt < DAILY_RETRY_MS) return Promise.resolve()
     this.inFlight = this.refresh(now).finally(() => (this.inFlight = null))
     return this.inFlight
   }
 
   private async refresh(now: number): Promise<void> {
+    this.triedAt = now
     const read = await Promise.all(
-      this.deps.feeds.map(async (feed) => {
+      this.deps.feeds().map(async (feed) => {
         try {
           const songs = await feed.read()
           // Counts only, never a title (spec 14 §3.6).
