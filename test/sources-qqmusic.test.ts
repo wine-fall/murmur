@@ -490,3 +490,32 @@ describe('the WeChat scan', () => {
     expect(await mountQQMusicQr({ fetch }, { show: () => {}, sleep: async () => {}, timeoutMs: 0 })).toEqual({ ok: false, reason: 'timeout' })
   })
 })
+
+// spec 14 §3.10 step 4: QQ's radar, the second feed of the daily lane. It
+// gives no reason string of its own — the lane simply lists what it sends.
+describe('QQMusicClient.radar', () => {
+  const answer = {
+    code: 0,
+    data: {
+      VecSongs: [
+        { Track: { mid: 'aaa', name: 'World Goes Round', singer: [{ name: 'Slow Marina' }] } },
+        { Track: { mid: 'bbb', name: 'Second One', singer: [{ name: 'Umber Radio' }], pay: { pay_play: 1 } } },
+        { Track: { mid: 'ccc', name: '  ', singer: [] } },
+      ],
+    },
+  }
+
+  it('reads the radar and drops what this account cannot play', async () => {
+    const { fetch, calls } = fakeFetch({ 'music.recommend.TrackRelationServer.GetRadarSong': answer })
+    const songs = await new QQMusicClient({ cookie: async () => COOKIE, fetch }).radar(10)
+    expect(songs).toEqual([
+      { ref: 'https://y.qq.com/n/ryqq/songDetail/aaa', title: 'World Goes Round', artist: 'Slow Marina' },
+    ])
+    expect(calls[0]!.body.req.method).toBe('GetRadarSong')
+  })
+
+  it('needs the account, like every other read here', async () => {
+    const { fetch } = fakeFetch({})
+    await expect(new QQMusicClient({ cookie: async () => '', fetch }).radar(10)).rejects.toBeInstanceOf(SourceAuthError)
+  })
+})

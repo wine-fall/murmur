@@ -49,6 +49,10 @@ export type MusicProgrammerDeps = {
   // makes that a no-op on all but one pick a day, so there is no second
   // scheduler here. Absent = the catalogue is not offered at all.
   channels?: ChannelCatalogue & { maybeRefresh: () => boolean }
+  // The neighbours of the song on air (spec 14 3.10): submit_pick fills the
+  // pool from the ref it commits to, and the pick after this one reads it
+  // back through the provider's `neighbours` catalogue.
+  neighbours?: { prime: (ref: string) => void }
   // Per-stage discovery timing (spec 04 §3.1, issue #76): dev-log-only lines
   // that say where a pick's wall-clock goes. Optional — absent means silent.
   debug?: (message: string) => void
@@ -142,7 +146,7 @@ export class MusicProgrammer implements TrackSource {
       // states, and nothing reads its reasoning back. The SDK's default extended
       // thinking spent ~45 s of a ~100 s pick writing it (issue #164).
       thinking: 'disabled',
-      tools: (finish) => musicTools(provider, finish, wiredProbe, taste, this.deps.channels, avoid),
+      tools: (finish) => musicTools(provider, finish, wiredProbe, taste, this.deps.channels, avoid, this.deps.neighbours),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

@@ -139,6 +139,29 @@ describe('the digest reaches the brain (spec 14 §2.3/§5.3)', () => {
     await run
   })
 
+  // spec 14 §3.10: the daily lane is its own block, poked at each pick and
+  // never awaited — and it is not in the talk pack, which is about who the
+  // listener is and not about what a platform is pushing today.
+  it('carries the daily lane as its own block, and pokes it once per pick', async () => {
+    const player = new FakeMixingPlayer()
+    const source = new FakeTrackSource()
+    source.picks = [pickOf('https://stream/1')]
+    let pokes = 0
+    const daily = { maybeRefresh: (): void => void pokes++, block: (): string => '## New for them today\n- "a track" a singer' }
+    const { brain, director } = setup({ player, music: { source, cadence: new EveryNCadence(1), engine: player, daily }, taste: fakeTaste() })
+    const run = director.run(2)
+    await until(() => source.contexts.length >= 1, 'a pick was asked for')
+    expect(source.contexts[0]!.situation).toContain('## New for them today')
+    expect(pokes).toBeGreaterThanOrEqual(1)
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    // The lane is the pick's, not the pack's: talk is about who the listener
+    // is, not about what a platform is pushing today.
+    expect(brain.talkContexts[0]).not.toHaveProperty('daily')
+    expect(brain.talkContexts[0]!.taste).toBe(DIGEST)
+  })
+
   // spec 14 §2.12: the pick gets the moment, the pack does not. Talk needs
   // to know who the listener is, not which songs match this minute, and a
   // pack whose song list moved every beat would lose its memoisation for a

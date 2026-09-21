@@ -8,6 +8,7 @@ import type { YtDlpRunner } from '../music.ts'
 import { BilibiliSource, mountBilibili, mountBilibiliQr } from './bilibili.ts'
 import { cookieHeader, exportCookieJar, jarRowsFromHeader, siteRows, writeJar, type CookieLease, type CookieRow } from './cookies.ts'
 import type { BrowserPick, SourceMounts } from './flow.ts'
+import { DAILY_ITEMS, type DailyFeed } from '../daily.ts'
 import { mountNetease, mountNeteaseQr, NeteaseClient, NeteaseSource } from './netease.ts'
 import { mountQQMusic, mountQQMusicQr, QQMusicClient, QQMusicSource } from './qqmusic.ts'
 import { mountQishui, QishuiSource } from './qishui.ts'
@@ -177,6 +178,33 @@ export function neteaseSearch(deps: SourceBuildDeps): { search: NeteaseClient['s
       return new NeteaseClient({ cookie: cookieOf(deps.jars, entry, SITES.netease) }).search(query, limit)
     },
   }
+}
+
+// The anonymous reads of spec 14 3.10 -- the mood pool and a song's
+// neighbours -- need no mount and no jar. One client for the process, which
+// is also what caches the playlist category tree.
+export function anonymousNetease(): NeteaseClient {
+  return new NeteaseClient({ cookie: async () => '' })
+}
+
+// The daily lane's feeds (spec 14 3.10): each platform's own pick of the
+// day, read over the account that is mounted. A source that is not mounted
+// is not a feed -- this is the one read here that IS about the listener.
+export function dailyFeeds(deps: SourceBuildDeps): DailyFeed[] {
+  const mounted = deps.store.read()
+  const feeds: DailyFeed[] = []
+  const netease = mounted.netease
+  if (netease !== undefined) {
+    feeds.push({
+      id: 'netease',
+      read: () => new NeteaseClient({ cookie: cookieOf(deps.jars, netease, SITES.netease) }).dailyRecommendation(DAILY_ITEMS),
+    })
+  }
+  const qqmusic = mounted.qqmusic
+  if (qqmusic !== undefined) {
+    feeds.push({ id: 'qqmusic', read: () => new QQMusicClient({ cookie: cookieOf(deps.jars, qqmusic, SITES.qqmusic) }).radar(DAILY_ITEMS) })
+  }
+  return feeds
 }
 
 export function qqmusicSearch(deps: SourceBuildDeps): { search: QQMusicClient['search'] } {

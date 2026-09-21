@@ -268,9 +268,11 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
   }
 
   it('lists only youtube when nothing is mounted, and the mounted catalogues otherwise', () => {
-    expect(build().tools.find((t) => t.name === 'search_music')!.description).toMatch(/available now: youtube\b(?!, )/)
+    // The mood pool needs no mount at all (spec 14 3.10), so it is listed
+    // beside youtube even when nothing has been signed in to.
+    expect(build().tools.find((t) => t.name === 'search_music')!.description).toContain('available now: youtube, playlists')
     const desc = build({ mounted: ['bilibili', 'netease'] }).tools.find((t) => t.name === 'search_music')!.description
-    expect(desc).toContain('available now: youtube, bilibili, netease')
+    expect(desc).toContain('available now: youtube, bilibili, netease, playlists')
   })
 
   it('passes the catalogue to the provider, and answers not-mounted for one it cannot have', async () => {
@@ -278,7 +280,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
     expect(provider.searches.at(-1)).toEqual({ query: 'q', limit: undefined, catalogue: 'netease' })
     const refused = await callTool(tools, 'search_music', { query: 'q', catalogue: 'bilibili' })
-    expect(refused).toEqual({ ok: false, reason: 'not-mounted', mounted: ['youtube', 'netease'] })
+    expect(refused).toEqual({ ok: false, reason: 'not-mounted', mounted: ['youtube', 'netease', 'playlists'] })
     await callTool(tools, 'search_music', { query: 'q' })
     expect(provider.searches.at(-1)).toEqual({ query: 'q', limit: undefined, catalogue: undefined })
   })
@@ -291,7 +293,7 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     expect(String(result.note)).toMatch(/unavailable for the rest of this task/)
     expect(auth).toHaveLength(1)
     const again = await callTool(tools, 'search_music', { query: 'q', catalogue: 'netease' })
-    expect(again).toEqual({ ok: false, reason: 'unavailable', mounted: ['youtube'] })
+    expect(again).toEqual({ ok: false, reason: 'unavailable', mounted: ['youtube', 'playlists'] })
     // Only the searches this test asked for: a named submit also searches on
     // its own, to relocate the pick (spec 14 §2.13).
     expect(provider.searches.filter((s) => s.query === 'q')).toHaveLength(0)
@@ -302,8 +304,8 @@ describe('the music tools with taste (spec 14 §2.4/§2.6)', () => {
     provider.candidates = [{ ref: 'https://youtube.com/watch?v=a', title: 'S', uploader: 'U', durationS: 240, extra: {} }]
     provider.failWith = new SourceAuthError('youtube', 'expired', '<redacted>')
     await callTool(tools, 'submit_pick', { ref: 'https://youtube.com/watch?v=a', why: 'w', title: 'Zelkova Hour', artist: 'Nine Lantern' })
-    expect(await callTool(tools, 'search_music', { query: 'q' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
-    expect(await callTool(tools, 'search_music', { query: 'q', catalogue: 'youtube' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease'] })
+    expect(await callTool(tools, 'search_music', { query: 'q' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease', 'playlists'] })
+    expect(await callTool(tools, 'search_music', { query: 'q', catalogue: 'youtube' })).toEqual({ ok: false, reason: 'unavailable', mounted: ['netease', 'playlists'] })
     // A rights-less track is that track's problem, not the catalogue's.
     const geo = build({ mounted: ['netease'] })
     geo.provider.failWith = new SourceAuthError('netease', 'geo', '<redacted>')

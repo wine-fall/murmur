@@ -249,7 +249,7 @@ export type TrackCandidate = {
 // `channels` (spec 14 §2.9) is the odd one: not an account and not a network
 // search, but a local pool of recent uploads from the curated channel list —
 // a place to LOOK, never a statement about the listener's taste.
-export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'qqmusic' | 'channels'
+export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'qqmusic' | 'channels' | 'playlists' | 'neighbours'
 
 // Where a found song is PLAYED from, best first (spec 14 §2.13). `channels` is
 // absent on purpose: it is a place to LOOK, and its refs are YouTube or
@@ -268,6 +268,10 @@ export interface MusicProvider {
 // One found-and-pulled track (spec 03-01 §2.4, widened by 03-02): the playable
 // clip, the display metadata the model read off the candidate, and the one-line
 // in-persona DJ intro to speak over its ducked head (absent -> no intro).
+// One song of a platform's own recommendation for this listener, with the
+// reason it gives where it gives one (spec 14 3.10, the daily lane).
+export type DailySong = { readonly ref: string; readonly title: string; readonly artist: string; readonly reason?: string }
+
 export type TrackPick = {
   readonly clip: AudioClip
   readonly title?: string

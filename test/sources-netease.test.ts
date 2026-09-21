@@ -184,3 +184,139 @@ describe('NeteaseSource', () => {
     ])
   })
 })
+
+// spec 14 §3.10 step 4: the mood pool. A moment translated into words finds
+// playlists other people made, and their tracks are the candidates — a place
+// to look that is nobody's memory of the obvious song.
+describe('NeteaseClient.playlistPool', () => {
+  const CATALOGUE = { code: 200, sub: [{ name: 'quiet' }, { name: 'night' }] }
+  const detail = (ids: number[]) => ({
+    code: 200,
+    playlist: {
+      trackIds: ids.map((id) => ({ id })),
+      tracks: ids.map((id) => ({ id, name: `track ${id}`, ar: [{ name: `singer ${id}` }], dt: 200000 })),
+    },
+  })
+
+  it('searches playlists for a phrase the category tree does not know', async () => {
+    const { fetch, calls } = fakeFetch({
+      '/playlist/catalogue': CATALOGUE,
+      '/search/get': { code: 200, result: { playlists: [{ id: 11, name: 'a long drive' }, { id: 12, name: 'rain on the window' }] } },
+      '/v6/playlist/detail': detail([1, 2]),
+    })
+    const client = new NeteaseClient({ cookie: async () => '', fetch })
+    const hits = await client.playlistPool('a long drive in the rain', 4)
+    expect(hits.map((h) => h.title)).toEqual(['track 1', 'track 2'])
+    expect(hits[0]).toMatchObject({ ref: 'https://music.163.com/#/song?id=1', uploader: 'singer 1', durationS: 200, catalogue: 'netease' })
+    const search = calls.find((c) => c.url.includes('/search/get'))!
+    expect(search.url).toContain('type=1000')
+    expect(search.headers.Cookie).toBeUndefined()
+  })
+
+  it('takes the curated category when the words ARE one', async () => {
+    const { fetch, calls } = fakeFetch({
+      '/playlist/catalogue': CATALOGUE,
+      '/playlist/list': { code: 200, playlists: [{ id: 21, name: 'hot quiet one' }] },
+      '/v6/playlist/detail': detail([3]),
+    })
+    const hits = await new NeteaseClient({ cookie: async () => '', fetch }).playlistPool('  Quiet ', 5)
+    expect(hits.map((h) => h.title)).toEqual(['track 3'])
+    expect(calls.find((c) => c.url.includes('/playlist/list'))!.url).toContain('order=hot')
+    expect(calls.some((c) => c.url.includes('/search/get'))).toBe(false)
+  })
+
+  it('reads the category tree once, not once per pick', async () => {
+    const { fetch, calls } = fakeFetch({
+      '/playlist/catalogue': CATALOGUE,
+      '/playlist/list': { code: 200, playlists: [{ id: 21, name: 'hot quiet one' }] },
+      '/v6/playlist/detail': detail([3]),
+    })
+    const client = new NeteaseClient({ cookie: async () => '', fetch })
+    await client.playlistPool('quiet', 5)
+    await client.playlistPool('quiet', 5)
+    expect(calls.filter((c) => c.url.includes('/playlist/catalogue'))).toHaveLength(1)
+  })
+
+  it('interleaves the playlists it read, deduped, and asks for no more than the cap', async () => {
+    let n = 0
+    const { fetch, calls } = fakeFetch({
+      '/playlist/catalogue': CATALOGUE,
+      '/search/get': { code: 200, result: { playlists: [{ id: 11 }, { id: 12 }, { id: 13 }, { id: 14 }] } },
+      '/v6/playlist/detail': detail([1, 2]),
+    })
+    const spy: NeteaseFetch = async (url, init) => {
+      if (String(url).includes('/v6/playlist/detail')) n++
+      return fetch(url, init)
+    }
+    const hits = await new NeteaseClient({ cookie: async () => '', fetch: spy }).playlistPool('whatever', 3)
+    // Two playlists read, not four; the same track in both counts once.
+    expect(n).toBe(2)
+    expect(hits.map((h) => h.ref)).toEqual(['https://music.163.com/#/song?id=1', 'https://music.163.com/#/song?id=2'])
+    expect(calls.length).toBeGreaterThan(0)
+  })
+
+  it('answers with nothing when the mood finds no playlist at all', async () => {
+    const { fetch } = fakeFetch({ '/playlist/catalogue': CATALOGUE, '/search/get': { code: 200, result: {} } })
+    expect(await new NeteaseClient({ cookie: async () => '', fetch }).playlistPool('nothing like this', 5)).toEqual([])
+  })
+})
+
+// spec 14 §3.10 step 4: the daily lane. The platform's own recommendation,
+// with the sentence it gives for each — a lane of its own, never a taste
+// kind and never written to the ledger.
+describe('NeteaseClient.dailyRecommendation', () => {
+  const answer = {
+    code: 200,
+    data: {
+      dailySongs: [
+        { id: 1, name: 'World Goes Round', ar: [{ name: 'Slow Marina' }], dt: 200000, reason: 'kept by over 45% of listeners' },
+        { id: 2, name: 'Second One', ar: [{ name: 'Umber Radio' }], dt: 180000, reason: null },
+        { id: 3, name: '   ', ar: [], dt: 0 },
+      ],
+    },
+  }
+
+  it('reads the day\'s songs with their reasons, over the account cookie', async () => {
+    const { fetch, calls } = fakeFetch({ '/v1/discovery/recommend/songs': answer })
+    const songs = await new NeteaseClient({ cookie: async () => COOKIE, fetch }).dailyRecommendation(10)
+    expect(songs).toEqual([
+      { ref: 'https://music.163.com/#/song?id=1', title: 'World Goes Round', artist: 'Slow Marina', reason: 'kept by over 45% of listeners' },
+      { ref: 'https://music.163.com/#/song?id=2', title: 'Second One', artist: 'Umber Radio' },
+    ])
+    expect(calls[0]!.headers.Cookie).toBe(COOKIE)
+  })
+
+  it('takes no more than it was asked for', async () => {
+    const { fetch } = fakeFetch({ '/v1/discovery/recommend/songs': answer })
+    expect(await new NeteaseClient({ cookie: async () => COOKIE, fetch }).dailyRecommendation(1)).toHaveLength(1)
+  })
+
+  it('a cookie that no longer signs in is the typed failure', async () => {
+    const { fetch } = fakeFetch({ '/v1/discovery/recommend/songs': { code: 301, msg: '<redacted>' } })
+    await expect(new NeteaseClient({ cookie: async () => '', fetch }).dailyRecommendation(10)).rejects.toMatchObject({
+      source: 'netease',
+      reason: 'login-required',
+    })
+  })
+})
+
+// spec 14 §3.10 step 4: the neighbours of a song, read anonymously.
+describe('NeteaseClient.similarSongs', () => {
+  it('reads the platform\'s own "next to this one", with no account at all', async () => {
+    const { fetch, calls } = fakeFetch({
+      '/v1/discovery/simiSong': {
+        code: 200,
+        songs: [
+          { id: 9, name: 'Next To It', artists: [{ name: 'Slow Marina' }], duration: 200000 },
+          { id: 10, name: '  ', artists: [] },
+        ],
+      },
+    })
+    const hits = await new NeteaseClient({ cookie: async () => '', fetch }).similarSongs('5', 5)
+    expect(hits).toEqual([
+      { ref: 'https://music.163.com/#/song?id=9', title: 'Next To It', uploader: 'Slow Marina', durationS: 200, extra: {}, catalogue: 'netease' },
+    ])
+    expect(calls[0]!.url).toContain('songid=5')
+    expect(calls[0]!.headers.Cookie).toBeUndefined()
+  })
+})

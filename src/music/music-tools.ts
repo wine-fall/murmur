@@ -86,7 +86,7 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
-const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels'] as const
+const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels', 'playlists', 'neighbours'] as const
 
 // A relocated hit must be the same song: its title contains the submitted one
 // (or the reverse — a catalogue that appends "(Official Audio)" is still it)
@@ -160,6 +160,10 @@ export function musicTools(
   taste?: TasteToolOptions,
   channels?: ChannelCatalogue,
   avoid?: readonly string[],
+  // The neighbours of the song on air (spec 14 3.10): the pool is FILLED
+  // here, from the ref this task commits to, and READ through the provider's
+  // `neighbours` catalogue at the pick after this one. Absent = no lane.
+  neighbours?: { prime: (ref: string) => void },
 ): TaskTool[] {
   // What this task may not submit: the recently-played labels the situation
   // already names in words. The policy asks the model to skip them and a
@@ -173,6 +177,10 @@ export function musicTools(
     'youtube',
     ...(taste?.catalogues() ?? []).filter((c) => c !== 'youtube'),
     ...(channels !== undefined && channels.count() > 0 ? (['channels'] as const) : []),
+    // The mood pool reads anonymously (spec 14 3.10), so it is there for a
+    // listener who has mounted nothing at all.
+    'playlists' as const,
+    ...(neighbours === undefined ? [] : (['neighbours'] as const)),
   ]
   const closed = new Set<Catalogue>()
   const open = (): Catalogue[] => mounted.filter((c) => !closed.has(c))
@@ -307,7 +315,9 @@ export function musicTools(
     'search_music',
     'Search for candidate tracks by query; returns candidates (ref, title, ' +
       'uploader, durationS) to judge before picking.' +
-      (taste === undefined && channels === undefined ? '' : ` Catalogues available now: ${mounted.join(', ')}.`),
+      (taste === undefined && channels === undefined && neighbours === undefined
+        ? ''
+        : ` Catalogues available now: ${mounted.join(', ')}.`),
     {
       query: z.string().describe('search terms for the track'),
       limit: z.number().int().min(1).max(10).optional().describe('max candidates (default 5)'),
@@ -315,7 +325,11 @@ export function musicTools(
         .enum(CATALOGUES)
         .optional()
         .describe(
-          'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are',
+          'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are. ' +
+            'neighbours is what the platforms put next to the song that is on the air right now, read while it played — it ignores the query, and early in a program it may be empty. ' +
+            'playlists is the mood pool: give it the situation in a few words (a scene, a weather, an hour, a feeling, or one of the platform\'s own category words) ' +
+            'and it answers with tracks off playlists other people keep for that — somewhere to look that is nobody\'s memory of the obvious song. ' +
+            'A mood word alone (quiet, sleep, study) fills with instrumental and piano sets; the policy still holds, so judge what comes back',
         ),
     },
     async (args) => {
@@ -389,6 +403,9 @@ export function musicTools(
       const announce = trimmed(args.announce)
       const pick: TrackPick = { clip, title, artist, ...(announce !== undefined && { announce }) }
       finish(pick)
+      // Background, after the pick is committed (spec 14 3.10): the song's
+      // own airtime is what pays for the next pick's neighbour pool.
+      neighbours?.prime(ref)
       return reply({ ok: true, source: clip.source, title })
     },
   )

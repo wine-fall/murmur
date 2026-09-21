@@ -51,9 +51,11 @@ import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './brain/rwt.
 import { MusicProgrammer } from './music/music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './support/report.ts'
 import { SteerResponder } from './brain/steer-responder.ts'
-import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
+import { YtDlpMusicProvider, ytdlpRunner, youtubeMix, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
-import { buildSource, CookieJars, cookieLeaser, defaultMounts, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { DailyLane } from './music/daily.ts'
+import { NEIGHBOUR_ITEMS, NeighbourPool } from './music/neighbours.ts'
+import { anonymousNetease, buildSource, CookieJars, cookieLeaser, dailyFeeds, defaultMounts, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
@@ -338,8 +340,22 @@ function buildMusic(
   // With taste wired the provider leases the mounted host's jar per call
   // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
   // cookie-less provider it always was.
+  // The neighbours of the song on air (spec 14 3.10): filled from submit_pick
+  // while that song plays, read from cache at the pick after it.
+  // The anonymous NetEase reads (spec 14 3.10): the mood pool and a song's
+  // neighbours, neither of which needs an account.
+  const anonymous = anonymousNetease()
+  const neighbours = new NeighbourPool({
+    similar: (songId) => anonymous.similarSongs(songId, NEIGHBOUR_ITEMS),
+    mix: youtubeMix(ytdlpRunner(config.ytdlpCmd)),
+    ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+  })
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
+    neighbours: { search: (query, limit) => neighbours.search(query, limit) },
+    // The mood pool reads anonymously (spec 14 3.10), so it is wired for a
+    // listener who has mounted nothing.
+    playlists: { search: (query, limit) => anonymous.playlistPool(query, limit) },
     ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build), qqmusic: qqmusicSearch(taste.build) }),
   })
   // The listener's policy file, seeded once so it is discoverable and read
@@ -364,6 +380,7 @@ function buildMusic(
         taste: taste !== undefined && taste.reader.digest() !== '',
         channels: channelPool.count() > 0,
       }),
+    neighbours: { prime: (ref) => void neighbours.prime(ref) },
     channels: {
       count: () => channelPool.count(),
       search: (query, limit) => channelPool.search(query, limit),
@@ -390,7 +407,16 @@ function buildMusic(
   // Gating composes with the chosen cadence rather than replacing it (spec 07
   // §2.5): an empty room gets music/bed, everything else is the user's policy.
   const cadence = config.gatingEnabled ? new PacingCadence(configured) : configured
-  return { source, cadence, engine }
+  // The daily lane (spec 14 3.10): read over the accounts that are mounted,
+  // so a session with none has no lane rather than an empty one.
+  const daily =
+    taste === undefined
+      ? undefined
+      : new DailyLane({
+          feeds: () => dailyFeeds(taste.build),
+          ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+        })
+  return { source, cadence, engine, ...(daily !== undefined && { daily: { maybeRefresh: () => void daily.maybeRefresh(), block: () => daily.block() } }) }
 }
 
 // The language the gists are written in (spec 13 §3.5), read where the host
