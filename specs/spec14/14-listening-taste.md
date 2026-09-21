@@ -1868,14 +1868,23 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    not the avoid-list's week — plus `queuedLabels()`, so the two picks the
    queue is holding count before the ledger has heard of them. The ranking is
    NetEase's `search/get?type=100` → `/api/v1/artist/<id>` → `hotSongs`, top
-   ten, anonymous, cached per artist for 24 h, and under a **2.5 s ceiling of
+   ten, anonymous, cached per artist for 24 h — **the promise is cached, not
+   the answer**, because one search returns several songs by one artist and
+   every label is judged at once: caching on resolve cost ten rankings for
+   one artist and let a late failure overwrite the good answer. And under a
+   **2.5 s ceiling of
    its own** — the client's own 15 s twice over would be half a minute of a
    search the listener is sitting through. Measured live 2026-09-21: the two
    reads plus the labelling of three candidates cost **733 ms** cold, and
    nothing after that for the same artist that day. Matching is the folded title
-   with a trailing parenthetical stripped, plus an artist match through
-   `moment.ts` `carries()` — word-boundary aware, **not** `relocate()`'s bare
-   containment. Simplified and traditional are **not** folded together; the
+   with a trailing parenthetical stripped, plus an artist match that **splits
+   the credits first** (`/`, `&`, `,`, `feat.`, `with`, a platform's own
+   `- Topic` suffix) and then matches name against name: a one-word name must
+   match exactly, a name of two words or more may sit inside a longer credit.
+   Not `relocate()`'s bare containment, and not §2.12's `carries()` either —
+   word-boundary containment still calls "Chen" and "Chen Li" the same artist,
+   which would hand a new-only slot a refusal for a song the listener has
+   never heard (codex review, reproduced). Simplified and traditional are **not** folded together; the
    miss that leaves is counted rather than guessed at: a song called `new`
    whose **artist** is one of theirs is flagged `artistKnown` and logged as a
    per-search count (`artist-known=N`), which is where such a miss hides.

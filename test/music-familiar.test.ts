@@ -38,6 +38,25 @@ describe('Familiar', () => {
     expect(await familiar.label('The Harbour Song', 'Another Band', played)).toMatchObject({ familiar: false, label: 'new' })
   })
 
+  // A collaboration credit IS the band; a name that merely contains another
+  // name is not. "Chen" must not swallow "Chen Li", or a song they have never
+  // heard is called theirs and a new-only slot refuses it for nothing.
+  it('matches a credit, not a word inside a longer name', async () => {
+    const familiar = new Familiar({
+      rows: () => [
+        { kind: 'liked', title: 'Same Title', artist: 'Chen' },
+        { kind: 'liked', title: 'Another', artist: 'Corin Vanterpool & Static Meadow' },
+        { kind: 'liked', title: 'Third', artist: 'Cheer Chen' },
+      ],
+    })
+    expect(await familiar.label('Same Title', 'Chen Li', [])).toMatchObject({ label: 'new', familiar: false })
+    expect(await familiar.label('Same Title', 'Chen', [])).toMatchObject({ label: 'kept' })
+    // ...while the collaboration credit still counts as the band, and a
+    // platform's own suffix does not break the name.
+    expect(await familiar.label('Another', 'Static Meadow', [])).toMatchObject({ label: 'kept' })
+    expect(await familiar.label('Third', 'Cheer Chen - Topic', [])).toMatchObject({ label: 'kept' })
+  })
+
   it('counts a watch row, including the ones the digest never shows', async () => {
     const { familiar, played } = judge()
     expect(await familiar.label('Watched Once', 'Night Tape', played)).toMatchObject({ familiar: true, label: 'watched' })
@@ -56,6 +75,28 @@ describe('Familiar', () => {
     expect(await familiar.label('Their Biggest', 'Big Name', played)).toMatchObject({ familiar: true, label: "artist's #1 hit" })
     expect(await familiar.label('Second Biggest', 'Big Name', played)).toMatchObject({ label: "artist's #2 hit" })
     expect(await familiar.label('An Album Track', 'Big Name', played)).toMatchObject({ familiar: false, label: 'new' })
+  })
+
+  // A search answers with several songs by one artist, and every label is
+  // judged at once: a cache written only when the read RESOLVES lets all of
+  // them through, so one artist cost ten searches and ten rankings — and a
+  // late failure then overwrote the good answer with an empty one.
+  it('shares one ranking request across the candidates judged together', async () => {
+    let reads = 0
+    let release = (): void => {}
+    const gate = new Promise<void>((r) => (release = r))
+    const familiar = new Familiar({
+      rows: () => [],
+      hotSongs: async () => {
+        reads++
+        await gate
+        return ['Their Biggest']
+      },
+    })
+    const all = Promise.all(Array.from({ length: 10 }, () => familiar.label('Their Biggest', 'Big Name', [])))
+    release()
+    for (const mark of await all) expect(mark).toMatchObject({ label: "artist's #1 hit" })
+    expect(reads).toBe(1)
   })
 
   it('asks the ranking once per artist, not once per candidate', async () => {

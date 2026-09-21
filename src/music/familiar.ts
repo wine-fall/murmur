@@ -8,7 +8,6 @@
 // exact evening the radio stops sounding like a discovery.
 
 import type { Familiarity } from '../contracts.ts'
-import { carries } from './sources/moment.ts'
 import type { TasteItem } from './sources/taste.ts'
 
 // ponytail: three in ten, a constant and not a setting. It is the shape of
@@ -56,20 +55,41 @@ const foldTitle = (title: string): string =>
 
 const foldName = (name: string): string => name.trim().replace(/\s+/g, ' ').toLowerCase()
 
-// Whoever the candidate names has to BE the row's artist -- word-boundary
-// aware, so "Chen" does not match "Chen Li", and either way round, so a
-// collaboration credit still counts as the band.
+// How the catalogues join several artists onto one line, and the suffixes a
+// platform adds to a channel name. The CJK comma is escaped because
+// committed source is English only.
+const CREDITS = /\s*(?:[/&,;\uff0c\u3001\u00d7]|\bfeat\.?\b|\bft\.?\b|\bwith\b|\bvs\.?\b)\s*/gi
+const SUFFIX = /\s*-\s*topic\s*$/i
+
+const credits = (line: string): string[] =>
+  foldName(line)
+    .replace(SUFFIX, '')
+    .split(CREDITS)
+    .map((name) => name.trim())
+    .filter((name) => name !== '')
+
+// Whoever the candidate names has to BE one of the row's credits. Split
+// first, so a collaboration still counts as the band; then matched name
+// against name, so "Chen" cannot swallow "Chen Li" -- bare containment (and
+// the word-boundary containment of §2.12's `carries`) calls those two the
+// same artist, which would hand a new-only slot a refusal for a song the
+// listener has never heard.
+//
+// ponytail: a one-word name must match exactly; a name of two words or more
+// may sit inside a longer credit, which is what covers a platform's own
+// decoration around a full name. Upgrade path if it mislabels: an alias
+// table, which is a far bigger thing than this buys.
 function sameArtist(a: string, b: string): boolean {
-  const left = foldName(a)
-  const right = foldName(b)
-  if (left === '' || right === '') return false
-  if (left === right) return true
-  return carries(left, right) || carries(right, left)
+  const left = credits(a)
+  const right = credits(b)
+  const fits = (name: string, credit: string): boolean =>
+    name === credit || (name.includes(' ') && credit.includes(name))
+  return left.some((one) => right.some((other) => fits(one, other) || fits(other, one)))
 }
 
 export class Familiar {
   private deps: FamiliarDeps
-  private hot = new Map<string, { at: number; songs: readonly string[] }>()
+  private hot = new Map<string, { at: number; read: Promise<readonly string[]> }>()
 
   constructor(deps: FamiliarDeps) {
     this.deps = deps
@@ -110,21 +130,22 @@ export class Familiar {
     const read = this.deps.hotSongs
     if (name === '' || read === undefined) return []
     const held = this.hot.get(name)
-    if (held !== undefined && Date.now() - held.at < HOT_TTL_MS) return held.songs
-    try {
-      const songs = await Promise.race([
-        read(artist),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`ranking budget spent (${RANKING_BUDGET_MS}ms)`)), RANKING_BUDGET_MS).unref?.()),
-      ])
-      this.hot.set(name, { at: Date.now(), songs })
-      return songs
-    } catch (err) {
+    if (held !== undefined && Date.now() - held.at < HOT_TTL_MS) return held.read
+    // The PROMISE is cached, not the answer: one search returns several songs
+    // by one artist and every label is judged at once, so a cache written
+    // only on resolve let all of them through -- ten candidates, ten
+    // rankings, and a late failure overwriting the good answer with nothing.
+    const read1 = Promise.race([
+      read(artist),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`ranking budget spent (${RANKING_BUDGET_MS}ms)`)), RANKING_BUDGET_MS).unref?.()),
+    ]).catch((err: unknown): readonly string[] => {
       this.deps.log?.(`music.familiar ranking failed: ${String(err)}`)
-      // Cached as empty for the day too: a platform that is refusing will
-      // refuse the next candidate as well, and the pick pays once.
-      this.hot.set(name, { at: Date.now(), songs: [] })
+      // Empty for the day, not retried per candidate: a platform that is
+      // refusing will refuse the next one too, and the pick pays once.
       return []
-    }
+    })
+    this.hot.set(name, { at: Date.now(), read: read1 })
+    return read1
   }
 }
 
