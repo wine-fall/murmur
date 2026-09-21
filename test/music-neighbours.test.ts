@@ -128,7 +128,7 @@ describe('submit_pick primes the pool for the next pick (spec 14 §3.10)', () =>
     const picks: TrackPick[] = []
     const primed: string[] = []
     const tools = musicTools(provider, (pick) => picks.push(pick), undefined, undefined, undefined, [], {
-      prime: (ref) => void primed.push(ref),
+      prime: (ref: string) => void primed.push(ref),
     })
     return { tools, picks, primed, provider }
   }

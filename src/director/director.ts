@@ -42,6 +42,7 @@ import type {
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
 import { dueInvitations, FEATURE_INVITE_AFTER_MS, type InvitationState } from './invitations.ts'
+import { SlotDeck } from '../music/familiar.ts'
 import { labelArtist, trackLabel } from '../music/music-tools.ts'
 import { chromeProfile } from '../music/sources/chrome.ts'
 import type { Moment } from '../music/sources/moment.ts'
@@ -148,6 +149,14 @@ const AVOID_WINDOW_DAYS = 7
 // line per song in the pick prompt. It is not an anti-repeat depth — set it
 // small and the time rule collapses back into the count rule it replaced.
 const AVOID_CAP = 256
+// How far back the familiarity rule (spec 14 3.10) counts murmur's own airs.
+// Wider than the avoid-list's week and capped only so one read cannot grow
+// without bound.
+const PLAYED_CAP = 2048
+// What a "new only" slot says in the situation. The enforcement is in
+// submit_pick; this is the half the model can act on before it searches.
+const SLOT_LINE =
+  'this slot: something they have not heard. Their own shelves are not the place to look for it — the playlists catalogue, the neighbours of what is on air, and what the platforms picked for them today are.'
 // How many of those the moment excludes by artist (spec 14 §2.12): the last
 // three on or near the air, newest last.
 const MOMENT_AVOID = 3
@@ -409,6 +418,9 @@ export class Director {
   // resolve in the background so their find-and-pull latency overlaps talk and
   // airtime, never the boundary. Head-first — index 0 is the next to air.
   private pickQueue: Pending<TrackPick | null>[] = []
+  // Which pick slots may play something the listener already knows: three in
+  // ten, shuffled (spec 14 3.10).
+  private deck: SlotDeck
   // The steer-task state (spec 11): a due switch hands the air over when the
   // fresh pick resolves (or owns the next boundary when no track is live);
   // pickPredatesTurn tells a hinted switch whether the queue is stale.
@@ -455,6 +467,7 @@ export class Director {
 
   constructor(deps: DirectorDeps) {
     this.deps = deps
+    this.deck = new SlotDeck(deps.random === undefined ? {} : { random: deps.random })
     const last = deps.memory.lastOnAir()
     if (last !== undefined) {
       this.lastOnAirWhen = lastOnAirPhrase(new Date(last.ts * 1000), new Date())
@@ -1147,16 +1160,26 @@ export class Director {
     return withLanguage(this.deps.persona, this.deps.settings().language)
   }
 
-  private musicContext(): MusicContext {
+  // `request` = the listener asked for this one, which owns the slot rule
+  // outright (spec 14 3.10): a rotation that refused what they just asked for
+  // would be a radio arguing with its listener.
+  private musicContext(request = false): MusicContext {
     const since = Date.now() / 1000 - AVOID_WINDOW_DAYS * 24 * 3600
     const avoid = [...this.deps.memory.recentSongsSince(since, AVOID_CAP), ...this.queuedLabels()]
+    // The whole window, not the avoid-list's week: a song murmur played a
+    // month ago is still one the listener has heard from this radio.
+    const played = [...this.deps.memory.recentSongsSince(0, PLAYED_CAP), ...this.queuedLabels()]
+    const newOnly = !request && !this.deck.draw()
     return {
       persona: this.persona(),
+      played,
+      newOnly,
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         avoid,
         this.tasteDigest(this.moment(avoid)),
         this.dailyLane(),
+        newOnly ? SLOT_LINE : '',
       ),
       // The same list as data, so submit_pick can refuse a repeat instead of
       // only asking for none: the prompt rule alone let one through.
@@ -1191,7 +1214,7 @@ export class Director {
 
   // `extraLine` is a pre-rendered situation line (the airing beat, or a
   // listener request from switch_music).
-  private prefetchMusic(extraLine?: string): void {
+  private prefetchMusic(extraLine?: string, request = false): void {
     const music = this.deps.music
     if (music === undefined) return
     // A search that came back empty is not a queued pick, and must never sit in
@@ -1208,7 +1231,7 @@ export class Director {
     // The live off switch gates the SPEND, not just the airtime (spec 12 §3.2):
     // a disabled session must not pay discovery calls it will never play.
     if (!this.deps.settings().musicEnabled) return
-    const base = this.musicContext()
+    const base = this.musicContext(request)
     const ctx =
       extraLine === undefined ? base : { ...base, situation: `${base.situation}\n${extraLine}` }
     // A failed prefetch degrades like an empty pick at the boundary. One
@@ -1252,7 +1275,7 @@ export class Director {
     // prefetchMusic drops the spent slots first, so a search that already came
     // back empty is never handed to handoverTrack as this request's answer
     // (codex review) — the request buys a real search of its own.
-    this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`)
+    this.prefetchMusic(hint === undefined ? undefined : `- listener request: ${hint}`, hint !== undefined)
     this.switchDue = true
     this.deps.host.debug?.('music.switch due')
   }

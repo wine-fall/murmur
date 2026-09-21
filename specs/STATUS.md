@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-20 (spec 14's taste amendment: PRs 1 and 2 landed as #278 and #280, PR 3 in flight)_
+_Last updated: 2026-09-21 (spec 14 §3.10, discovery over recall: three PRs open, #288 / #289 / this one)_
 
 ## Where we are
 
@@ -21,15 +21,15 @@ bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
 07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
-spec for what it does, its PR for how it got there. Spec 14 (listening-taste,
-roadmap line 5) is built; its acceptance on the listener's own accounts is the
-by-ear issue below. Everything else is under **Open** — engineering items
-first, then the by-ear passes.
+spec for what it does, its PR for how it got there. Everything open is under
+**Open** — engineering items first, then the by-ear passes.
 
-**In flight: spec 14's taste amendment**, three PRs in order, each on the
-previous one's merged tip (all touch `taste.ts` / `refresh.ts` / `store.ts`).
-§2.3's budget landed (#278) and so did the ledger and per-kind clock (§2.11,
-§3.4, #280); the moment-matched half (§2.12) is in flight and is the last.
+**In flight: spec 14 §3.10, discovery over recall.** Over 68 measured airs the
+radio was recalling, not discovering (19/68 already in the liked list, 31/68
+the artist's own top ten). Three stacked PRs: **#288** takes the kept titles
+out of the digest, **#289** opens the candidate pools, the third labels every
+hit and rations the familiar to 3 slots in 10. The verdict is the familiar
+share per 100 airs and needs weeks of listening — #290 carries it.
 
 **No listener data in the repository** (2026-09-20, user): nothing from
 `~/.murmur` — a song, artist, playlist or channel name, an account name, a
@@ -44,6 +44,7 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#290** (by-ear) Does the discovery change actually widen what plays — spec 14 §3.10's familiar share per 100 airs.
 - **#284** (eng) `CLOCK_USAGE` is a per-fact "reference only" rule — the one prompt rule spec 04 §3.5 forbids.
 - **#269** (bug, eng) The session-mark invitation test races a 40 ms timer against a 1 s poll budget — four CI occurrences, never reproduced locally.
 - **#272** (bug, eng) A NetEase resolve costs 15-55 s — yt-dlp walks its quality levels one request at a time.

@@ -54,6 +54,7 @@ import { SteerResponder } from './brain/steer-responder.ts'
 import { YtDlpMusicProvider, ytdlpRunner, youtubeMix, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
 import { DailyLane } from './music/daily.ts'
+import { Familiar, HOT_SONGS } from './music/familiar.ts'
 import { NEIGHBOUR_ITEMS, NeighbourPool } from './music/neighbours.ts'
 import { anonymousNetease, buildSource, CookieJars, cookieLeaser, dailyFeeds, defaultMounts, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
@@ -337,19 +338,24 @@ function buildMusic(
   host: Host,
   taste: TasteWiring | undefined,
 ): MusicWiring {
-  // With taste wired the provider leases the mounted host's jar per call
-  // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
-  // cookie-less provider it always was.
-  // The neighbours of the song on air (spec 14 3.10): filled from submit_pick
-  // while that song plays, read from cache at the pick after it.
-  // The anonymous NetEase reads (spec 14 3.10): the mood pool and a song's
-  // neighbours, neither of which needs an account.
+  // The anonymous NetEase reads (spec 14 3.10): the mood pool, a song's
+  // neighbours and an artist's own ranking, none of which needs an account.
   const anonymous = anonymousNetease()
+  // The neighbours of the song on air: filled from submit_pick while that
+  // song plays, read from cache at the pick after it.
   const neighbours = new NeighbourPool({
     similar: (songId) => anonymous.similarSongs(songId, NEIGHBOUR_ITEMS),
     mix: youtubeMix(ytdlpRunner(config.ytdlpCmd)),
     ...(host.debug !== undefined && { log: host.debug.bind(host) }),
   })
+  const familiar = new Familiar({
+    rows: () => taste?.reader.rows() ?? [],
+    hotSongs: (artist) => anonymous.artistHotSongs(artist, HOT_SONGS),
+    ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+  })
+  // With taste wired the provider leases the mounted host's jar per call
+  // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
+  // cookie-less provider it always was.
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
     neighbours: { search: (query, limit) => neighbours.search(query, limit) },
@@ -380,7 +386,16 @@ function buildMusic(
         taste: taste !== undefined && taste.reader.digest() !== '',
         channels: channelPool.count() > 0,
       }),
-    neighbours: { prime: (ref) => void neighbours.prime(ref) },
+    // The discovery wiring (spec 14 3.10): the neighbour pool this pick
+    // fills for the next one, and what the listener already knows of a
+    // candidate. The ranking behind the label is anonymous, so the judge is
+    // wired whether or not an account is mounted; with none, its rows are
+    // empty and only murmur's own airs and the ranking can make a song
+    // familiar.
+    discovery: {
+      prime: (ref: string) => void neighbours.prime(ref),
+      label: (title: string, artist: string, played: readonly string[]) => familiar.label(title, artist, played),
+    },
     channels: {
       count: () => channelPool.count(),
       search: (query, limit) => channelPool.search(query, limit),

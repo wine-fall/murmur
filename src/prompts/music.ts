@@ -134,7 +134,9 @@ export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
 // `daily` is the daily lane's own block (spec 14 3.10): the platforms' picks
 // of the day, kept apart from the taste block because it is not what the
 // listener keeps. '' renders nothing.
-export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = [], taste = '', daily = ''): string {
+// `slot` is this pick's rotation verdict (spec 14 3.10), rendered as its own
+// line so the model reads it before it searches. '' renders nothing.
+export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = [], taste = '', daily = '', slot = ''): string {
   const turns = recent.map((t) => `- ${t.role === 'radio' ? 'You' : 'Listener'}: ${t.text}`).join('\n')
   const avoidBlock =
     avoid.length === 0
@@ -145,8 +147,9 @@ export function buildMusicSituation(recent: readonly Turn[], avoid: readonly str
       ? ''
       : `\n${taste}\nPrefer what fits the moment; the listener's kept music is a strong prior, not a playlist to replay.\n`
   const dailyBlock = daily === '' ? '' : `\n${daily}\n`
+  const slotLine = slot === '' ? '' : `\n${slot}\n`
   return (
-    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}${tasteBlock}${dailyBlock}` +
+    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}${tasteBlock}${dailyBlock}${slotLine}` +
     'Intent: a music break in the program. Pick something that fits the mood and\n' +
     "subjects of the conversation above (or the persona's taste if it is quiet)."
   )
