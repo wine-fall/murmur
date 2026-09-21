@@ -53,7 +53,8 @@ import { startReport, type ReportDeps, type ReportSession } from './support/repo
 import { SteerResponder } from './brain/steer-responder.ts'
 import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
-import { buildSource, CookieJars, cookieLeaser, defaultMounts, moodPool, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { DailyLane } from './music/daily.ts'
+import { buildSource, CookieJars, cookieLeaser, dailyFeeds, defaultMounts, moodPool, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
@@ -393,7 +394,16 @@ function buildMusic(
   // Gating composes with the chosen cadence rather than replacing it (spec 07
   // §2.5): an empty room gets music/bed, everything else is the user's policy.
   const cadence = config.gatingEnabled ? new PacingCadence(configured) : configured
-  return { source, cadence, engine }
+  // The daily lane (spec 14 3.10): read over the accounts that are mounted,
+  // so a session with none has no lane rather than an empty one.
+  const daily =
+    taste === undefined
+      ? undefined
+      : new DailyLane({
+          feeds: dailyFeeds(taste.build),
+          ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+        })
+  return { source, cadence, engine, ...(daily !== undefined && { daily: { maybeRefresh: () => void daily.maybeRefresh(), block: () => daily.block() } }) }
 }
 
 // The language the gists are written in (spec 13 §3.5), read where the host

@@ -268,6 +268,10 @@ export interface MusicProvider {
 // One found-and-pulled track (spec 03-01 §2.4, widened by 03-02): the playable
 // clip, the display metadata the model read off the candidate, and the one-line
 // in-persona DJ intro to speak over its ducked head (absent -> no intro).
+// One song of a platform's own recommendation for this listener, with the
+// reason it gives where it gives one (spec 14 3.10, the daily lane).
+export type DailySong = { readonly ref: string; readonly title: string; readonly artist: string; readonly reason?: string }
+
 export type TrackPick = {
   readonly clip: AudioClip
   readonly title?: string

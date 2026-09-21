@@ -18,7 +18,7 @@
 
 import { z } from 'zod'
 
-import type { TrackCandidate } from '../../contracts.ts'
+import type { DailySong, TrackCandidate } from '../../contracts.ts'
 import { SourceAuthError } from './auth.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
 import type { BrowserName } from './store.ts'
@@ -120,6 +120,9 @@ const FavouritesSchema = z.object({ v_list: z.array(z.object({ name: z.string() 
 const SearchSchema = z.object({ body: z.object({ song: z.object({ list: z.array(z.unknown()).nullish() }).nullish() }).nullish() })
 // A search hit is a song row plus the rights flag the taste reads never carry.
 const SearchHitSchema = SongSchema.extend({ interval: z.number().nullish(), pay: z.object({ pay_play: z.number().nullish() }).nullish() })
+// The radar (spec 14 3.10): the platform's own push for this account, the
+// second feed of the daily lane. It carries no reason of its own.
+const RadarSchema = z.object({ VecSongs: z.array(z.object({ Track: z.unknown() })).nullish() })
 // The scan's exchange answers with some three dozen keys; these five are the
 // whole of what a mount needs. `str_musicid` is NOT interchangeable with
 // `musicid`: the account number is 19 digits, and JSON.parse rounds it
@@ -173,6 +176,27 @@ export class QQMusicClient {
   // Signed in only. An unsigned search is not refused — it answers `code: 0`
   // with an EMPTY list, which reads exactly like "no such song", so a mount
   // with no credential is turned away here rather than surfacing as no hits.
+  // The radar (spec 14 3.10), the QQ feed of the daily lane. `GetSimilarSongs`
+  // beside it answers `vecSong: null` on every seed measured, so neighbours
+  // are read from NetEase and YouTube instead.
+  async radar(limit: number): Promise<DailySong[]> {
+    const data = await this.call('music.recommend.TrackRelationServer', 'GetRadarSong', { Page: 1, ReqType: 0, FavSongs: [], EntranceSongs: [] })
+    const out: DailySong[] = []
+    for (const row of RadarSchema.parse(data).VecSongs ?? []) {
+      if (out.length >= limit) break
+      const hit = SearchHitSchema.safeParse(row.Track)
+      if (!hit.success || hit.data.name.trim() === '') continue
+      // A VIP track cannot play on this account (2.5).
+      if (hit.data.pay?.pay_play === 1) continue
+      out.push({
+        ref: `${SONG_URL}${hit.data.mid}`,
+        title: hit.data.name,
+        artist: (hit.data.singer ?? []).map((singer) => singer.name.trim()).filter((n) => n !== '').join(' / '),
+      })
+    }
+    return out
+  }
+
   async search(query: string, limit: number): Promise<TrackCandidate[]> {
     const cookie = await this.deps.cookie()
     if (credentialFrom(cookie) === null) throw new SourceAuthError('qqmusic', 'login-required', 'a search needs the account')

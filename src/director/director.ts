@@ -255,6 +255,11 @@ export type MusicWiring = {
   source: TrackSource
   cadence: CadencePolicy
   engine: MixingPlayer
+  // The daily lane (spec 14 3.10): the platforms' own picks of the day, as
+  // their own block of the pick situation. Poked at each pick and never
+  // awaited -- its own 24 h gate makes that a no-op on all but one a day.
+  // Absent = no lane at all.
+  daily?: { maybeRefresh: () => void; block: () => string }
 }
 
 // Proactive-and-pacing wiring (spec 07), optional as a block: without it the
@@ -1151,11 +1156,21 @@ export class Director {
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         avoid,
         this.tasteDigest(this.moment(avoid)),
+        this.dailyLane(),
       ),
       // The same list as data, so submit_pick can refuse a repeat instead of
       // only asking for none: the prompt rule alone let one through.
       avoid,
     }
+  }
+
+  // The daily lane (spec 14 3.10). The refresh is background and gated on a
+  // 24 h clock of its own, so the pick reads whatever the last one left.
+  private dailyLane(): string {
+    const daily = this.deps.music?.daily
+    if (daily === undefined) return ''
+    daily.maybeRefresh()
+    return daily.block()
   }
 
   // The songs the queue is already holding. The ledger only hears about a song

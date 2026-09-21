@@ -10,7 +10,7 @@
 
 import { z } from 'zod'
 
-import type { TrackCandidate } from '../../contracts.ts'
+import type { DailySong, TrackCandidate } from '../../contracts.ts'
 import { SourceAuthError } from './auth.ts'
 import { setCookieHeader } from './cookies.ts'
 import { scanToSignIn, type QrMountOptions, type QrMountResult, type QrPoll } from './qr.ts'
@@ -85,11 +85,16 @@ const PlaylistHitsSchema = z.object({
   playlists: z.array(z.object({ id: z.number() })).optional(),
 })
 const CatalogueSchema = z.object({ sub: z.array(z.object({ name: z.string() })).optional() })
+// The daily lane (spec 14 §3.10): the platform's own pick of the day, each
+// with the one-line reason it gives for it.
+const DailySchema = z.object({ data: z.object({ dailySongs: z.array(z.unknown()).optional() }).nullish() })
+const DailySongSchema = SongSchema.extend({ reason: z.string().nullish() })
 const QrKeySchema = z.object({ code: z.number(), unikey: z.string() })
 // The poll's whole answer is its code — there is no envelope under it.
 const QrPollSchema = z.object({ code: z.number() })
 
 export type NeteasePlaylist = { id: string; name: string; trackCount: number; liked: boolean; mine: boolean }
+
 
 type Song = z.infer<typeof SongSchema>
 
@@ -224,6 +229,27 @@ export class NeteaseClient {
       const song = SongSchema.safeParse(raw)
       if (!song.success || song.data.name.trim() === '') continue
       out.push(candidateOf(song.data))
+    }
+    return out
+  }
+
+  // The day's recommendation (spec 14 §3.10). Needs the account cookie --
+  // it is the one read here that is about this listener and not about a
+  // catalogue -- and carries the platform's own reason per song.
+  async dailyRecommendation(limit: number): Promise<DailySong[]> {
+    const parsed = DailySchema.parse(await this.call('/v1/discovery/recommend/songs', {}))
+    const out: DailySong[] = []
+    for (const raw of parsed.data?.dailySongs ?? []) {
+      if (out.length >= limit) break
+      const song = DailySongSchema.safeParse(raw)
+      if (!song.success || song.data.name.trim() === '') continue
+      const reason = song.data.reason?.trim()
+      out.push({
+        ref: `${SONG_URL}${song.data.id}`,
+        title: song.data.name,
+        artist: artistLine(song.data),
+        ...(reason !== undefined && reason !== '' && { reason }),
+      })
     }
     return out
   }

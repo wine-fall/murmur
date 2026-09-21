@@ -260,3 +260,42 @@ describe('NeteaseClient.playlistPool', () => {
     expect(await new NeteaseClient({ cookie: async () => '', fetch }).playlistPool('nothing like this', 5)).toEqual([])
   })
 })
+
+// spec 14 §3.10 step 4: the daily lane. The platform's own recommendation,
+// with the sentence it gives for each — a lane of its own, never a taste
+// kind and never written to the ledger.
+describe('NeteaseClient.dailyRecommendation', () => {
+  const answer = {
+    code: 200,
+    data: {
+      dailySongs: [
+        { id: 1, name: 'World Goes Round', ar: [{ name: 'Slow Marina' }], dt: 200000, reason: 'kept by over 45% of listeners' },
+        { id: 2, name: 'Second One', ar: [{ name: 'Umber Radio' }], dt: 180000, reason: null },
+        { id: 3, name: '   ', ar: [], dt: 0 },
+      ],
+    },
+  }
+
+  it('reads the day\'s songs with their reasons, over the account cookie', async () => {
+    const { fetch, calls } = fakeFetch({ '/v1/discovery/recommend/songs': answer })
+    const songs = await new NeteaseClient({ cookie: async () => COOKIE, fetch }).dailyRecommendation(10)
+    expect(songs).toEqual([
+      { ref: 'https://music.163.com/#/song?id=1', title: 'World Goes Round', artist: 'Slow Marina', reason: 'kept by over 45% of listeners' },
+      { ref: 'https://music.163.com/#/song?id=2', title: 'Second One', artist: 'Umber Radio' },
+    ])
+    expect(calls[0]!.headers.Cookie).toBe(COOKIE)
+  })
+
+  it('takes no more than it was asked for', async () => {
+    const { fetch } = fakeFetch({ '/v1/discovery/recommend/songs': answer })
+    expect(await new NeteaseClient({ cookie: async () => COOKIE, fetch }).dailyRecommendation(1)).toHaveLength(1)
+  })
+
+  it('a cookie that no longer signs in is the typed failure', async () => {
+    const { fetch } = fakeFetch({ '/v1/discovery/recommend/songs': { code: 301, msg: '<redacted>' } })
+    await expect(new NeteaseClient({ cookie: async () => '', fetch }).dailyRecommendation(10)).rejects.toMatchObject({
+      source: 'netease',
+      reason: 'login-required',
+    })
+  })
+})

@@ -131,7 +131,10 @@ export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
 // welcomes repeats could not overrule it.
 // `taste` is the rendered digest (spec 14 §2.3): appended under its own
 // heading with the one instruction the spec adds; '' renders nothing.
-export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = [], taste = ''): string {
+// `daily` is the daily lane's own block (spec 14 3.10): the platforms' picks
+// of the day, kept apart from the taste block because it is not what the
+// listener keeps. '' renders nothing.
+export function buildMusicSituation(recent: readonly Turn[], avoid: readonly string[] = [], taste = '', daily = ''): string {
   const turns = recent.map((t) => `- ${t.role === 'radio' ? 'You' : 'Listener'}: ${t.text}`).join('\n')
   const avoidBlock =
     avoid.length === 0
@@ -141,8 +144,9 @@ export function buildMusicSituation(recent: readonly Turn[], avoid: readonly str
     taste === ''
       ? ''
       : `\n${taste}\nPrefer what fits the moment; the listener's kept music is a strong prior, not a playlist to replay.\n`
+  const dailyBlock = daily === '' ? '' : `\n${daily}\n`
   return (
-    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}${tasteBlock}` +
+    `Recent on-air turns:\n${turns || '- (the program just started)'}\n${avoidBlock}${tasteBlock}${dailyBlock}` +
     'Intent: a music break in the program. Pick something that fits the mood and\n' +
     "subjects of the conversation above (or the persona's taste if it is quiet)."
   )
