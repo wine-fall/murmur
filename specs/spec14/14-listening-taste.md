@@ -1868,7 +1868,11 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    not the avoid-list's week — plus `queuedLabels()`, so the two picks the
    queue is holding count before the ledger has heard of them. The ranking is
    NetEase's `search/get?type=100` → `/api/v1/artist/<id>` → `hotSongs`, top
-   ten, anonymous, cached per artist for 24 h. Matching is the folded title
+   ten, anonymous, cached per artist for 24 h, and under a **2.5 s ceiling of
+   its own** — the client's own 15 s twice over would be half a minute of a
+   search the listener is sitting through. Measured live 2026-09-21: the two
+   reads plus the labelling of three candidates cost **733 ms** cold, and
+   nothing after that for the same artist that day. Matching is the folded title
    with a trailing parenthetical stripped, plus an artist match through
    `moment.ts` `carries()` — word-boundary aware, **not** `relocate()`'s bare
    containment. Simplified and traditional are **not** folded together; the

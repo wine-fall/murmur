@@ -21,6 +21,11 @@ const DECK = 10
 // track, and the whole label means "the one everybody already has".
 export const HOT_SONGS = 10
 const HOT_TTL_MS = 24 * 60 * 60 * 1000
+// The ranking is read while the model waits on its search, so it gets a
+// ceiling far below the client's own: two reads at the client's 15 s would
+// be half a minute of a search the listener is sitting through. Past this
+// the song is simply new, and the artist is not asked about again today.
+export const RANKING_BUDGET_MS = 2500
 
 const NEW: Familiarity = { label: 'new', familiar: false }
 
@@ -107,7 +112,10 @@ export class Familiar {
     const held = this.hot.get(name)
     if (held !== undefined && Date.now() - held.at < HOT_TTL_MS) return held.songs
     try {
-      const songs = await read(artist)
+      const songs = await Promise.race([
+        read(artist),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error(`ranking budget spent (${RANKING_BUDGET_MS}ms)`)), RANKING_BUDGET_MS).unref?.()),
+      ])
       this.hot.set(name, { at: Date.now(), songs })
       return songs
     } catch (err) {

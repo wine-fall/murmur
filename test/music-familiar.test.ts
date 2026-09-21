@@ -3,7 +3,7 @@
 // ledger, never a judgment the model is asked to make about itself.
 import { describe, expect, it } from 'vitest'
 
-import { Familiar, FAMILIAR_PER_10, SlotDeck } from '../src/music/familiar.ts'
+import { Familiar, FAMILIAR_PER_10, RANKING_BUDGET_MS, SlotDeck } from '../src/music/familiar.ts'
 import type { TasteItem } from '../src/music/sources/taste.ts'
 
 const rows: TasteItem[] = [
@@ -129,5 +129,21 @@ describe('SlotDeck', () => {
     }
     // Worst case is the tail of one deck meeting the head of the next.
     expect(longest).toBeLessThanOrEqual(FAMILIAR_PER_10 * 2)
+  })
+})
+
+// The ranking is read on the pick's own path, so it needs a ceiling of its
+// own: the client's 15 s timeout twice over would be half a minute of a
+// search the listener is waiting through.
+describe('the ranking has a budget', () => {
+  it('gives up on a slow ranking and calls the song new', async () => {
+    const familiar = new Familiar({
+      rows: () => [],
+      hotSongs: () => new Promise(() => {}),
+      log: () => {},
+    })
+    const started = Date.now()
+    expect(await familiar.label('Anything', 'Big Name', [])).toMatchObject({ label: 'new', familiar: false })
+    expect(Date.now() - started).toBeLessThan(RANKING_BUDGET_MS * 3)
   })
 })
