@@ -4,7 +4,7 @@
 // of its own rather than §3.4's.
 import { describe, expect, it } from 'vitest'
 
-import { DAILY_RETRY_MS, DailyLane, DAILY_STALE_MS } from '../src/music/daily.ts'
+import { DAILY_ITEMS, DAILY_RETRY_MS, DailyLane, DAILY_STALE_MS } from '../src/music/daily.ts'
 import type { DailySong } from '../src/contracts.ts'
 import { buildMusicSituation } from '../src/prompts/music.ts'
 
@@ -113,11 +113,40 @@ describe('DailyLane', () => {
     expect(l.block()).toContain('"track 1"')
   })
 
+  // A listener who disconnects every account has asked for the lane to stop:
+  // going on showing yesterday's recommendations off an account that is gone
+  // would be the block outliving its consent.
+  it('empties itself when every account has been disconnected', async () => {
+    let reads: (() => Promise<DailySong[]>)[] = [async () => [song(1)]]
+    let now = new Date('2026-09-21T10:00:00Z')
+    const l = new DailyLane({ feeds: () => reads.map((read, i) => ({ id: `feed${i}`, read })), now: () => now })
+    await l.maybeRefresh()
+    expect(l.block()).toContain('"track 1"')
+    // Straight away, inside the 24 h window: the time gate must not be what
+    // keeps a disconnected account's songs on the air.
+    reads = []
+    await l.maybeRefresh()
+    expect(l.block()).toBe('')
+  })
+
   it('merges the feeds it has and drops the one that is not wired', async () => {
     const { lane: l } = lane([async () => [song(1)], async () => [song(2)]])
     await l.maybeRefresh()
     expect(l.block()).toContain('"track 1"')
     expect(l.block()).toContain('"track 2"')
+  })
+
+  // Flattened and then cut, a first feed that filled the cap on its own left
+  // the second platform's songs out of the block entirely — while its
+  // request was paid for every day (codex review).
+  it('gives every feed a share of the cap, not the first one all of it', async () => {
+    const wide = (from: number) => async () => Array.from({ length: DAILY_ITEMS }, (_, i) => song(from + i))
+    const { lane: l } = lane([wide(100), wide(200)])
+    await l.maybeRefresh()
+    const block = l.block()
+    expect(block).toContain('"track 100"')
+    expect(block).toContain('"track 200"')
+    expect(block.split('\n').filter((line) => line.startsWith('- '))).toHaveLength(DAILY_ITEMS)
   })
 
   it('rides the music situation as its own block, and renders nothing when empty', () => {

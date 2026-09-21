@@ -221,18 +221,16 @@ export function ytdlpRunner(binary = 'yt-dlp', timeoutMs = YTDLP_TIMEOUT_MS): Yt
 }
 
 // The YouTube auto-mix (spec 14 3.10): the RD list of one video, which is
-// YouTube's own "songs next to this one". One flat read, no login, and a mix
-// that will not load is an empty pool rather than a failed pick.
+// YouTube's own "songs next to this one". One flat read, no login.
 export const MIX_ITEMS = 15
 
 export function youtubeMix(run: YtDlpRunner): (videoId: string) => Promise<TrackCandidate[]> {
   return async (videoId) => {
-    try {
-      const stdout = await run(['--dump-json', '--flat-playlist', '--playlist-items', `1:${MIX_ITEMS}`, `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`])
-      return parseSearchOutput(stdout, MIX_ITEMS).map((c) => ({ ...c, catalogue: 'youtube' as const }))
-    } catch {
-      return []
-    }
+    // A read that would not load is a FAILURE, never an empty mix: swallowed
+    // into [] it would wipe the pool the previous song filled, and the caller
+    // could not tell the two apart.
+    const stdout = await run(['--dump-json', '--flat-playlist', '--playlist-items', `1:${MIX_ITEMS}`, `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`])
+    return parseSearchOutput(stdout, MIX_ITEMS).map((c) => ({ ...c, catalogue: 'youtube' as const }))
   }
 }
 

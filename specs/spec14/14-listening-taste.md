@@ -1824,6 +1824,12 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    and never awaited; a day whose every feed fails keeps yesterday's lane. It
    rides the pick situation only — the talk pack (05 §2.2) is about who the
    listener is, not about what a platform is pushing today.
+   Two rules the lane's failure modes turn on: the feed list is read **per
+   refresh and before any clock**, so an account mounted mid-session is read
+   and one disconnected through `/sources` empties the lane at the very next
+   pick rather than a day later; and the cap is filled by **interleaving** the
+   feeds, so a first platform that answers 12 cannot spend the whole block
+   while the second platform's request is paid for daily and never shown.
 
 4c. **Neighbours of the song on air — `catalogue: "neighbours"`.** NetEase's
    `/api/v1/discovery/simiSong?songid=` (anonymous, five) for a pick that came
@@ -1831,7 +1837,12 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    --playlist-items 1:15 ".../watch?v=<id>&list=RD<id>"`, ~15 s) for one that
    came from YouTube. QQ's `GetSimilarSongs` answers null on every seed
    measured and Bilibili's related list is re-uploads and reaction videos;
-   both are skipped. The pool is **primed from `submit_pick`**, after the pick
+   both are skipped — and a pick from one of them leaves the pool **empty**,
+   because the catalogue's promise is the neighbours of the song ON AIR and
+   the previous song's are not that. A read that **failed** is not a song
+   with no neighbours: the pool keeps what it had, and only a read that
+   genuinely answered nothing empties it. Two primes can overlap, so a result
+   lands only while its seed is still the newest. The pool is **primed from `submit_pick`**, after the pick
    is committed, with the ref it committed to — so the read happens while that
    song is on the air and the pick that follows reads a **cache**. Nothing
    here is ever on the pick's own path: `search` returns what the last prime
@@ -2114,7 +2125,11 @@ fails, logs **counts only**, and reaches the pick situation but not the talk
 pack. `submit_pick` primes the neighbour pool with the ref it committed to and
 only on a pick that was accepted; the pool reads NetEase by song id and
 YouTube by video id, answers the cache without a network round, and is empty
-for a ref neither platform can seed from. Every endpoint above was **probed
+for a ref neither platform can seed from — including when a pool it had
+filled is followed by a pick from a platform that cannot seed one. A failed
+read keeps the pool; an older read that lands after a newer one does not
+overwrite it. Disconnecting every account empties the daily lane at the next
+pick, inside the 24 h window, and two mounted platforms each reach the block. Every endpoint above was **probed
 live** through this code on 2026-09-21 (mood pool 5, category pool 5,
 neighbours 5, YouTube mix 15); the unit suite runs on fakes.
 

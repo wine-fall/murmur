@@ -50,6 +50,13 @@ export class DailyLane {
   // read already in flight is the answer to a second call.
   maybeRefresh(): Promise<void> {
     const now = (this.deps.now ?? (() => new Date()))().getTime()
+    // Before any clock: a listener who disconnected every account has asked
+    // for the lane to stop, and a time gate must not keep their songs on the
+    // air for another day.
+    if (this.deps.feeds().length === 0) {
+      this.songs = []
+      return Promise.resolve()
+    }
     if (this.inFlight !== null) return this.inFlight
     if (this.readAt !== 0 && now - this.readAt < DAILY_STALE_MS) return Promise.resolve()
     if (this.triedAt !== 0 && now - this.triedAt < DAILY_RETRY_MS) return Promise.resolve()
@@ -59,8 +66,9 @@ export class DailyLane {
 
   private async refresh(now: number): Promise<void> {
     this.triedAt = now
+    const feeds = this.deps.feeds()
     const read = await Promise.all(
-      this.deps.feeds().map(async (feed) => {
+      feeds.map(async (feed) => {
         try {
           const songs = await feed.read()
           // Counts only, never a title (spec 14 §3.6).
@@ -72,11 +80,21 @@ export class DailyLane {
         }
       }),
     )
-    const answered = read.filter((songs): songs is DailySong[] => songs !== null).flat()
+    const answered = read.filter((songs): songs is DailySong[] => songs !== null)
     // A day whose every feed failed keeps yesterday's lane: a stale shelf is
     // worth more to a pick than an empty one.
-    if (answered.length === 0) return
-    this.songs = answered.slice(0, DAILY_ITEMS)
+    if (answered.every((songs) => songs.length === 0)) return
+    // Interleaved, then cut: flattened and then cut, a first feed that filled
+    // the cap on its own left the second platform out of the block entirely
+    // while its request was paid for every day.
+    const merged: DailySong[] = []
+    for (let i = 0; merged.length < DAILY_ITEMS && answered.some((songs) => i < songs.length); i++) {
+      for (const songs of answered) {
+        const song = songs[i]
+        if (song !== undefined && merged.length < DAILY_ITEMS) merged.push(song)
+      }
+    }
+    this.songs = merged
     this.readAt = now
   }
 

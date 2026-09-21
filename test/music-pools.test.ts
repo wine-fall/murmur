@@ -84,10 +84,13 @@ describe('youtubeMix', () => {
     expect(hits[0]).toMatchObject({ ref: 'https://www.youtube.com/watch?v=zzz', catalogue: 'youtube' })
   })
 
-  it('a mix that will not load is an empty pool, never a thrown pick', async () => {
+  // A mix that would not load is a FAILED read, not a song with no
+  // neighbours: swallowing it into [] would wipe the pool the previous song
+  // filled (codex review).
+  it('lets a failed read fail, so the pool can keep what it had', async () => {
     const mix = youtubeMix(async () => {
       throw new Error('this video is unavailable')
     })
-    expect(await mix('abc123')).toEqual([])
+    await expect(mix('abc123')).rejects.toThrow(/unavailable/)
   })
 })

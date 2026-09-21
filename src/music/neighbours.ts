@@ -41,16 +41,27 @@ export class NeighbourPool {
   // one read.
   async prime(ref: string): Promise<void> {
     const seed = SEEDS.map(([re, where]) => [re.exec(ref)?.[1], where] as const).find(([id]) => id !== undefined)
-    if (seed === undefined) return
+    const read = seed === undefined ? undefined : seed[1] === 'netease' ? this.deps.similar : this.deps.mix
+    // The catalogue says these are the neighbours of the song ON AIR, so a
+    // song no platform here can seed from leaves an empty pool rather than
+    // the previous song's neighbours wearing this song's name.
+    if (seed === undefined || read === undefined || seed[0] === undefined) {
+      this.seeded = ''
+      this.songs = []
+      return
+    }
     const [id, where] = seed
-    const read = where === 'netease' ? this.deps.similar : this.deps.mix
-    if (read === undefined || id === undefined || this.seeded === `${where}:${id}`) return
-    this.seeded = `${where}:${id}`
+    if (this.seeded === `${where}:${id}`) return
+    const key = `${where}:${id}`
+    this.seeded = key
     try {
       const found = await read(id)
       // Counts only, never a title (spec 14 §3.6).
       this.deps.log?.(`music.neighbours ${where} n=${found.length}`)
-      this.songs = found
+      // Two primes can overlap -- the queue runs two picks ahead and a mix
+      // read takes ~15 s -- and the pool belongs to the newest seed, not to
+      // whichever read finished last.
+      if (this.seeded === key) this.songs = found
     } catch (err) {
       this.deps.log?.(`music.neighbours ${where} failed: ${String(err)}`)
     }

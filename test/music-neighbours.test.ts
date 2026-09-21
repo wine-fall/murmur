@@ -57,11 +57,52 @@ describe('NeighbourPool', () => {
     expect(log.join()).not.toContain('track')
   })
 
+  // Two primes can overlap: the queue runs two picks ahead, and a YouTube
+  // mix takes ~15 s. The pool must hold the song on air, not whichever read
+  // happened to finish last.
+  it('keeps the newest seed when an older read lands after it', async () => {
+    let releaseSlow = (): void => {}
+    const slow = new Promise<void>((r) => (releaseSlow = r))
+    const { p } = pool({
+      mix: async (id) => {
+        await slow
+        return [candidate(`y${id}`)]
+      },
+    })
+    const first = p.prime(YOUTUBE)
+    await p.prime(NETEASE)
+    releaseSlow()
+    await first
+    expect(await p.search('', 5)).toEqual([candidate('n5')])
+  })
+
+  // The catalogue describes itself as the neighbours of the song ON AIR, so
+  // a song no platform here can seed from leaves an empty pool, never the
+  // previous song's neighbours wearing this song's name.
   it('has nothing to say for a ref no platform here can seed from', async () => {
     const { p, asked } = pool()
     await p.prime('https://www.bilibili.com/video/BV1')
     expect(asked).toEqual([])
     expect(await p.search('', 5)).toEqual([])
+    await p.prime(NETEASE)
+    expect(await p.search('', 5)).toHaveLength(1)
+    await p.prime('https://y.qq.com/n/ryqq/songDetail/abc')
+    expect(await p.search('', 5)).toEqual([])
+  })
+
+  // A read that failed is not a song with no neighbours: keeping what the
+  // pool had is worth more to the next pick than an empty shelf.
+  it('keeps the pool when the read throws, and empties it when the platform truly has none', async () => {
+    const { p } = pool()
+    await p.prime(NETEASE)
+    const thrown = pool({ mix: async () => Promise.reject(new Error('yt-dlp timed out')) })
+    await thrown.p.prime(NETEASE)
+    await thrown.p.prime(YOUTUBE)
+    expect(await thrown.p.search('', 5)).toEqual([candidate('n5')])
+    const empty = pool({ mix: async () => [] })
+    await empty.p.prime(NETEASE)
+    await empty.p.prime(YOUTUBE)
+    expect(await empty.p.search('', 5)).toEqual([])
   })
 
   it('answers the cache and never the network, at pick time', async () => {
