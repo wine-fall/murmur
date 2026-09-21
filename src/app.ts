@@ -53,7 +53,7 @@ import { startReport, type ReportDeps, type ReportSession } from './support/repo
 import { SteerResponder } from './brain/steer-responder.ts'
 import { YtDlpMusicProvider, ytdlpRunner, type YtDlpRunner } from './music/music.ts'
 import { SourceAuthWatch } from './music/sources/auth.ts'
-import { buildSource, CookieJars, cookieLeaser, defaultMounts, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
+import { buildSource, CookieJars, cookieLeaser, defaultMounts, moodPool, neteaseSearch, qqmusicSearch, type SourceBuildDeps } from './music/sources/build.ts'
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
@@ -340,6 +340,9 @@ function buildMusic(
   // cookie-less provider it always was.
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
+    // The mood pool reads anonymously (spec 14 3.10), so it is wired for a
+    // listener who has mounted nothing.
+    playlists: moodPool(),
     ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build), qqmusic: qqmusicSearch(taste.build) }),
   })
   // The listener's policy file, seeded once so it is discoverable and read

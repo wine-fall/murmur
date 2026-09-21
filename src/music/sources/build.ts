@@ -179,6 +179,14 @@ export function neteaseSearch(deps: SourceBuildDeps): { search: NeteaseClient['s
   }
 }
 
+// The mood pool (spec 14 3.10): playlists other people keep, found by the
+// words the moment gives. Anonymous, so it needs no mount and no jar -- one
+// client for the process, which is also what caches the category tree.
+export function moodPool(): { search: NeteaseClient['search'] } {
+  const client = new NeteaseClient({ cookie: async () => '' })
+  return { search: async (query, limit) => client.playlistPool(query, limit) }
+}
+
 export function qqmusicSearch(deps: SourceBuildDeps): { search: QQMusicClient['search'] } {
   return {
     search: async (query, limit) => {

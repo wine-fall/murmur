@@ -27,6 +27,11 @@ const DEFAULT_TIMEOUT_MS = 15_000
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
 // NetEase's own marker for the account's liked-songs playlist.
 const LIKED_SPECIAL_TYPE = 5
+// The mood pool (spec 14 §3.10): the platform's search type for playlists,
+// and how much of the index one pick is allowed to read.
+const PLAYLIST_SEARCH_TYPE = 1000
+const POOL_PLAYLISTS = 2
+const POOL_TRACKS = 30
 
 export type NeteaseFetch = (url: string, init?: RequestInit) => Promise<Response>
 
@@ -73,6 +78,13 @@ const SongSchema = z.object({
   duration: z.number().optional(),
 })
 const SearchSchema = z.object({ result: z.object({ songs: z.array(z.unknown()).optional() }).nullish() })
+// The mood pool (spec 14 §3.10): playlists other people made, found by the
+// words the moment gives, or under one of the platform's own categories.
+const PlaylistHitsSchema = z.object({
+  result: z.object({ playlists: z.array(z.object({ id: z.number() })).optional() }).nullish(),
+  playlists: z.array(z.object({ id: z.number() })).optional(),
+})
+const CatalogueSchema = z.object({ sub: z.array(z.object({ name: z.string() })).optional() })
 const QrKeySchema = z.object({ code: z.number(), unikey: z.string() })
 // The poll's whole answer is its code — there is no envelope under it.
 const QrPollSchema = z.object({ code: z.number() })
@@ -89,9 +101,22 @@ const artistLine = (song: Song): string =>
 const albumName = (song: Song): string | undefined => (song.al ?? song.album)?.name?.trim()
 const durationMs = (song: Song): number => song.dt ?? song.duration ?? 0
 
+const candidateOf = (song: Song): TrackCandidate => {
+  const album = albumName(song)
+  return {
+    ref: `${SONG_URL}${song.id}`,
+    title: song.name,
+    uploader: artistLine(song),
+    durationS: Math.trunc(durationMs(song) / 1000),
+    extra: album ? { album } : {},
+    catalogue: 'netease',
+  }
+}
+
 export class NeteaseClient {
   private deps: NeteaseClientDeps
   private fetch: NeteaseFetch
+  private catalogue: Promise<readonly string[]> | undefined
 
   constructor(deps: NeteaseClientDeps) {
     this.deps = deps
@@ -150,6 +175,59 @@ export class NeteaseClient {
     })
   }
 
+  // The mood pool (spec 14 §3.10): a situation in words -> playlists other
+  // people keep -> their tracks as candidates. Two reads of the playlist
+  // index at most, plus one detail read each, all anonymous.
+  //
+  // ponytail: the head of a hot playlist is what comes back, so the same
+  // mood word twice in an evening can offer the same first tracks twice --
+  // the avoid-list catches the exact repeat. Upgrade path: page the detail
+  // read at a rotating offset.
+  async playlistPool(query: string, limit: number): Promise<TrackCandidate[]> {
+    const mood = query.trim()
+    const categories = await this.categories()
+    const hit = categories.find((name) => name.toLowerCase() === mood.toLowerCase())
+    const json =
+      hit === undefined
+        ? await this.call('/search/get', { s: mood, type: PLAYLIST_SEARCH_TYPE, offset: 0, limit: POOL_PLAYLISTS })
+        : await this.call('/playlist/list', { cat: hit, order: 'hot', offset: 0, limit: POOL_PLAYLISTS })
+    const parsed = PlaylistHitsSchema.parse(json)
+    const found = (parsed.result?.playlists ?? parsed.playlists ?? []).slice(0, POOL_PLAYLISTS)
+    const read = await Promise.all(found.map((p) => this.playlistCandidates(String(p.id))))
+    // Interleaved, so a pool of two playlists is two moods and not one long
+    // one; the same track kept in both counts once.
+    const out = new Map<string, TrackCandidate>()
+    for (let i = 0; out.size < limit && read.some((tracks) => i < tracks.length); i++) {
+      for (const tracks of read) {
+        const track = tracks[i]
+        if (track !== undefined && !out.has(track.ref) && out.size < limit) out.set(track.ref, track)
+      }
+    }
+    return [...out.values()]
+  }
+
+  // The platform's own category names, read once per process: the tree moves
+  // on the scale of a product decision, not of a pick.
+  private async categories(): Promise<readonly string[]> {
+    this.catalogue ??= this.call('/playlist/catalogue', {})
+      .then((json) => (CatalogueSchema.parse(json).sub ?? []).map((c) => c.name))
+      // A tree that would not load is not a failed pick: every mood then
+      // takes the search route, which needs no category name.
+      .catch((): readonly string[] => [])
+    return this.catalogue
+  }
+
+  private async playlistCandidates(playlistId: string): Promise<TrackCandidate[]> {
+    const detail = DetailSchema.parse(await this.call('/v6/playlist/detail', { id: playlistId, n: POOL_TRACKS, s: 0 }))
+    const out: TrackCandidate[] = []
+    for (const raw of detail.playlist.tracks ?? []) {
+      const song = SongSchema.safeParse(raw)
+      if (!song.success || song.data.name.trim() === '') continue
+      out.push(candidateOf(song.data))
+    }
+    return out
+  }
+
   async search(query: string, limit: number): Promise<TrackCandidate[]> {
     const json = await this.call('/search/get', { s: query, type: 1, offset: 0, limit })
     const parsed = SearchSchema.parse(json)
@@ -157,15 +235,7 @@ export class NeteaseClient {
     for (const raw of parsed.result?.songs ?? []) {
       const song = SongSchema.safeParse(raw)
       if (!song.success || song.data.name.trim() === '') continue
-      const album = albumName(song.data)
-      candidates.push({
-        ref: `${SONG_URL}${song.data.id}`,
-        title: song.data.name,
-        uploader: artistLine(song.data),
-        durationS: Math.trunc(durationMs(song.data) / 1000),
-        extra: album ? { album } : {},
-        catalogue: 'netease',
-      })
+      candidates.push(candidateOf(song.data))
     }
     return candidates.slice(0, limit)
   }

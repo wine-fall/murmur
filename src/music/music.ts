@@ -171,6 +171,9 @@ export type YtDlpMusicProviderOptions = {
   cookies?: CookieLeaser
   netease?: ClientCatalogue
   qqmusic?: ClientCatalogue
+  // The mood pool (spec 14 3.10): playlists other people keep, read
+  // anonymously, so it is wired whether or not anything is mounted.
+  playlists?: ClientCatalogue
 }
 
 // The ceiling on one yt-dlp spawn. Generous on purpose: a cold network, a
@@ -225,7 +228,7 @@ export class YtDlpMusicProvider implements MusicProvider {
 
   async search(query: string, limit = 5, catalogue: Catalogue = 'youtube'): Promise<TrackCandidate[]> {
     // The client catalogues: each answers only while its own mount is there.
-    if (catalogue === 'netease' || catalogue === 'qqmusic') {
+    if (catalogue === 'netease' || catalogue === 'qqmusic' || catalogue === 'playlists') {
       const client = this.opts[catalogue]
       if (client === undefined) throw new Error(`${catalogue} is not mounted`)
       return client.search(query, limit)

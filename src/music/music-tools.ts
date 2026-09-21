@@ -86,7 +86,7 @@ function trimmed(value: string | undefined): string | undefined {
   return text ? text : undefined
 }
 
-const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels'] as const
+const CATALOGUES = ['youtube', 'bilibili', 'netease', 'qqmusic', 'channels', 'playlists'] as const
 
 // A relocated hit must be the same song: its title contains the submitted one
 // (or the reverse — a catalogue that appends "(Official Audio)" is still it)
@@ -173,6 +173,9 @@ export function musicTools(
     'youtube',
     ...(taste?.catalogues() ?? []).filter((c) => c !== 'youtube'),
     ...(channels !== undefined && channels.count() > 0 ? (['channels'] as const) : []),
+    // The mood pool reads anonymously (spec 14 3.10), so it is there for a
+    // listener who has mounted nothing at all.
+    'playlists' as const,
   ]
   const closed = new Set<Catalogue>()
   const open = (): Catalogue[] => mounted.filter((c) => !closed.has(c))
@@ -315,7 +318,9 @@ export function musicTools(
         .enum(CATALOGUES)
         .optional()
         .describe(
-          'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are',
+          'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are. ' +
+            'playlists is the mood pool: give it the situation in a few words (a scene, a weather, an hour, a feeling, or one of the platform\'s own category words) ' +
+            'and it answers with tracks off playlists other people keep for that — somewhere to look that is nobody\'s memory of the obvious song',
         ),
     },
     async (args) => {
