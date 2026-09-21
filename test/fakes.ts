@@ -413,10 +413,11 @@ export class FakeHost implements Host {
   }
 }
 
-// Poll until `cond` is true (or fail after ~1s) — keeps timing-based director
-// tests robust without fixed sleeps.
+// Poll until `cond` is true (or fail after ~5s) — keeps timing-based director
+// tests robust without fixed sleeps. The budget is wide on purpose: under the
+// full suite's parallel load a real 40 ms mark can land well past one second.
 export async function until(cond: () => boolean, what = 'condition'): Promise<void> {
-  for (let i = 0; i < 200; i++) {
+  for (let i = 0; i < 1000; i++) {
     if (cond()) return
     await sleep(5)
   }
