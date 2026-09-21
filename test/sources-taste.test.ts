@@ -65,7 +65,7 @@ describe('renderTasteDigest', () => {
     expect(renderTasteDigest([], NOW)).toBe('')
   })
 
-  it('matches the golden shape: header, sources, artists by count, songs, playlists, platform lists', () => {
+  it('matches the golden shape: header, sources, artists by count, playlists, platform lists', () => {
     const digest = renderTasteDigest([netease, spotify], NOW)
     expect(digest).toBe(
       [
@@ -73,7 +73,6 @@ describe('renderTasteDigest', () => {
         'Sources: NetEase (3 liked, 2 playlists), Spotify (1 liked, 1 playlist, top 2 artists, top 1 track; as of 2026-08-01)',
         'Artists they return to: Bon Iver (3), Cheer Chen (2), Ryuichi Sakamoto (2)',
         'Playlists: late drive, deep focus, Liked from Radio',
-        'Songs they keep: "Travel Is Meaningful" Cheer Chen · "Groupies" Cheer Chen · "Holocene" Bon Iver · "Re: Stacks" Bon Iver',
         'Spotify says (top, medium term): artists — Bon Iver, Ryuichi Sakamoto; tracks — "Merry Christmas Mr. Lawrence" Ryuichi Sakamoto',
       ].join('\n'),
     )
@@ -117,7 +116,7 @@ describe('renderTasteDigest', () => {
     expect(digest).not.toContain('YouTube')
     expect(digest).toContain('Playlists: late drive, deep focus')
     expect(digest).not.toContain('a city pop set')
-    expect(digest).toContain('Songs they keep:')
+    expect(digest).not.toContain('Songs they keep')
     // A snapshot left with nothing to say drops out of the source list
     // rather than standing there as an empty pair of brackets.
     const emptied = renderTasteDigest([{ source: 'bilibili', takenAt: old.takenAt, items: old.items.filter((i) => i.kind === 'favourite' || i.kind === 'playlist') }, netease], NOW)
@@ -138,7 +137,6 @@ describe('renderTasteDigest', () => {
         'Sources: NetEase (3 liked, 2 playlists)',
         'Artists they return to: Cheer Chen (2), Bon Iver (1)',
         'Playlists: late drive, deep focus',
-        'Songs they keep: "Travel Is Meaningful" Cheer Chen \u00b7 "Groupies" Cheer Chen \u00b7 "Holocene" Bon Iver',
       ].join('\n'),
     )
     // Not the music-zone row either: the zone tag is a scoring signal for the
@@ -196,7 +194,7 @@ describe('renderTasteDigest', () => {
     expect(digest.split('\n').every((line) => !line.includes('…') || line.endsWith('…'))).toBe(true)
   })
 
-  it('caps the lists: 25 artists, 40 songs, 12 playlists, 10 per platform list', () => {
+  it('caps the lists: 25 artists, 12 playlists, 10 per platform list', () => {
     const items = [
       ...Array.from({ length: 40 }, (_, i) => ({ kind: 'liked' as const, title: `t${i}`, artist: `a${i}`, at: `2026-01-${String((i % 28) + 1).padStart(2, '0')}T00:00:00.000Z` })),
       ...Array.from({ length: 20 }, (_, i) => ({ kind: 'playlist' as const, title: `p${i}` })),
@@ -205,16 +203,14 @@ describe('renderTasteDigest', () => {
     const lines = renderTasteDigest([{ source: 'spotify', takenAt: netease.takenAt, items }], NOW, 100_000).split('\n')
     expect(lines[2]!.split(', ')).toHaveLength(25)
     expect(lines[3]!.split(', ')).toHaveLength(12)
-    expect(lines[4]!.split(' · ')).toHaveLength(40)
-    expect(lines[5]!.split('artists — ')[1]!.split(', ')).toHaveLength(10)
+    expect(lines[4]!.split('artists — ')[1]!.split(', ')).toHaveLength(10)
   })
 
-  // Found on the real snapshot (2026-09-16): 200 watched rows with long
-  // titles filled all 1500 characters by themselves, and the musical source
-  // beside them never reached the page. Measured again 2026-09-18: with the
-  // watch rows leading, 'Songs they keep' held 14 of 186 liked songs. The
-  // budget now runs fixed half first (300 at most), then the songs.
-  it('spends the flexible budget on the songs, with the watch rows behind them', () => {
+  // Measured over 68 real airs (2026-09-21): 19 of them were a song off this
+  // line and 31 were the artist's own top ten, so the line the budget had
+  // been widened for was being read as a playlist. The kept rows are counted
+  // now, never named (spec 14 \u00a73.10); the watch rows still speak.
+  it('names no kept song, while still counting its artist', () => {
     const played: TasteSnapshot = {
       source: 'qqmusic',
       takenAt: '2026-09-06T08:00:00.000Z',
@@ -231,12 +227,14 @@ describe('renderTasteDigest', () => {
     const digest = renderTasteDigest([played, big], NOW)
     expect(digest.length).toBeLessThanOrEqual(1500)
     const line = (lead: string): string => digest.split('\n').find((l) => l.startsWith(`${lead}: `))!
-    // The fixed half is the listener's shape and is held to 300 characters,
-    // so the songs get what is left (spec 14 \u00a72.3).
+    // The fixed half is the listener's shape and is held to 300 characters.
     const fixed = ['Sources', 'Artists they return to', 'Playlists'].map(line)
     expect(fixed.join('\n').length).toBeLessThanOrEqual(300)
-    expect(line('Songs they keep').split(' \u00b7 ').length).toBeGreaterThanOrEqual(30)
-    // Weight 1 against the songs' 3: the watch rows still speak, briefly.
+    // Not one of the 186 kept titles, though all 30 of their artists are on
+    // the count line and the Sources line still counts the rows.
+    expect(digest).not.toContain('song number ')
+    expect(digest).toContain('Sources: QQ Music (history 40), NetEase (186 liked, 50 playlists)')
+    expect(line('Artists they return to')).toContain('artist 0 (7)')
     expect(line('Lately they have been listening to')).toContain('a long title for a track just played')
   })
 
@@ -247,11 +245,11 @@ describe('renderTasteDigest', () => {
     const long: TasteSnapshot = {
       source: 'netease',
       takenAt: netease.takenAt,
-      items: Array.from({ length: 200 }, (_, i) => ({ kind: 'liked' as const, title: `${'t'.repeat(72)}${String(i).padStart(4, '0')}` })),
+      items: Array.from({ length: 200 }, (_, i) => ({ kind: 'history' as const, title: `${'t'.repeat(72)}${String(i).padStart(4, '0')}` })),
     }
     const digest = renderTasteDigest([long], NOW)
     expect(digest.length).toBeLessThanOrEqual(1500)
-    expect(digest).toContain('Songs they keep:')
+    expect(digest).toContain('Lately they have been listening to:')
     expect(digest.split('\n').at(-1)).not.toBe('\u2026')
   })
 
@@ -288,7 +286,6 @@ describe('renderTasteDigest', () => {
     )
     expect(digest).toContain('Artists they return to: ')
     expect(digest).toContain('Playlists: ')
-    expect(digest).toContain('Songs they keep: ')
   })
 
   // codex review: the platform top lists were appended after the budget was
@@ -326,11 +323,13 @@ describe('renderTasteDigest on a full set of snapshots', () => {
   const digest = renderTasteDigest(real, new Date('2026-09-18T20:00:00Z'))
   const line = (lead: string): string | undefined => digest.split('\n').find((l) => l.startsWith(`${lead}: `))
 
-  // The layering this replaces left 4 of the 186 kept tracks on the page,
-  // because the watch and follow rows were served first. If the budget ever
-  // runs that way again, this count collapses and the test says so.
-  it('gives the songs at least 25 of the 186 kept tracks', () => {
-    expect(line('Songs they keep')!.split(' · ').length).toBeGreaterThanOrEqual(25)
+  // spec 14 \u00a73.10: not one of the 186 kept titles is named, and the
+  // artists behind them are all the block says about what they keep.
+  it('names none of the 186 kept tracks, and counts their artists instead', () => {
+    expect(line('Songs they keep')).toBeUndefined()
+    const kept = new Set(real.flatMap((s) => s.items.filter((i) => i.kind === 'liked').map((i) => i.title)))
+    for (const title of kept) expect(digest).not.toContain(title)
+    expect(line('Artists they return to')).toMatch(/\(\d+\)/)
   })
 
   it('holds the fixed half to 300 characters and the block to 1500', () => {
@@ -340,10 +339,11 @@ describe('renderTasteDigest on a full set of snapshots', () => {
     expect(digest.length).toBeLessThanOrEqual(1500)
   })
 
-  // spec 14 §5.16, on the same full-size fixture: given a moment whose last
-  // song is by one of its artists, the selection leads with rows the terms
-  // matched and never offers the artist that just played.
-  it('picks for the moment and never offers the artist just played', () => {
+  // The consequence of \u00a73.10 on this listener's own shape: the moment
+  // orders the watch layer, and their only watch rows are on video platforms
+  // the block never shows -- so the moment moves nothing here. \u00a72.12's
+  // selection is covered on songs-only watch rows in the describe below.
+  it('renders the same block with a moment as without, for a listener whose watch rows are all video', () => {
     const ledgers = real
       .filter((s) => s.source === 'netease' || s.source === 'qqmusic')
       .map((s) => ({
@@ -357,24 +357,8 @@ describe('renderTasteDigest on a full set of snapshots', () => {
       lastTalk: 'that was Static Meadow, off a long train sort of afternoon',
       avoidArtists: ['Static Meadow'],
     }
-    const songs = (m?: Moment): string[] => {
-      const line = renderTasteDigest(real, new Date('2026-09-18T20:00:00Z'), DIGEST_BUDGET, ledgers, m)
-        .split('\n')
-        .find((l) => l.startsWith('Songs they keep: '))!
-      return line.slice('Songs they keep: '.length).split(' \u00b7 ')
-    }
-    const picked = songs(moment)
-    // The artist just played is out, and so is the collaboration credit that
-    // opens the same line without a moment -- though they are the ledger's
-    // most-kept name, with 15 rows.
-    expect(picked.join(' ')).not.toContain('Static Meadow')
-    expect(songs()[0]).toContain('Static Meadow')
-    // Every leading row carries a word the moment brought: the talk beat's
-    // and the persona's, not the newest rows the static render would give.
-    for (const row of picked.slice(0, 8)) expect(row.toLowerCase()).toMatch(/meadow|quiet|train|afternoon|long|sort/)
-    // And it is still a full line, not a handful of matches: relevance
-    // decides the order, the budget still decides the length.
-    expect(picked.length).toBeGreaterThanOrEqual(20)
+    const at = new Date('2026-09-18T20:00:00Z')
+    expect(renderTasteDigest(real, at, DIGEST_BUDGET, ledgers, moment)).toBe(renderTasteDigest(real, at, DIGEST_BUDGET, ledgers))
   })
 
   it('shows nothing a video platform merely watched or followed', () => {
@@ -444,7 +428,7 @@ describe('artist counts from the ledger', () => {
 // first. The fixed half, the budget and the line shapes do not move.
 describe('the moment-matched half', () => {
   const led = (title: string, artist: string, over: Partial<LedgerEntry> = {}): LedgerEntry => ({
-    kind: 'liked',
+    kind: 'history',
     title,
     artist,
     key: `${title}|${artist}`,
@@ -456,12 +440,12 @@ describe('the moment-matched half', () => {
   const snapshot: TasteSnapshot = {
     source: 'netease',
     takenAt: '2026-09-06T10:00:00.000Z',
-    items: [{ kind: 'liked', title: 'whatever the window holds', artist: 'Low Antenna' }],
+    items: [{ kind: 'history', title: 'whatever the window holds', artist: 'Low Antenna' }],
   }
   const ledger: TasteLedger = {
     source: 'netease',
     updatedAt: '2026-09-06T00:00:00.000Z',
-    lastRead: { liked: '2026-09-06T00:00:00.000Z' },
+    lastRead: { history: '2026-09-06T00:00:00.000Z' },
     entries: [
       led('a quiet one', 'Umber Radio'),
       led('the harbour song', 'Paper Ferries'),
@@ -471,11 +455,11 @@ describe('the moment-matched half', () => {
   }
   const moment: Moment = { hour: 16, persona: '', lastTalk: 'that was Harbour Weather', avoidArtists: ['Static Meadow'] }
 
-  it('leads the songs with what the moment matched, and drops the artist just played', () => {
+  it('leads the watch rows with what the moment matched, and drops the artist just played', () => {
     const line = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], moment)
       .split('\n')
-      .find((l) => l.startsWith('Songs they keep: '))!
-    expect(line).toMatch(/^Songs they keep: "another harbour song" Harbour Weather/)
+      .find((l) => l.startsWith('Lately they have been listening to: '))!
+    expect(line).toMatch(/^Lately they have been listening to: "another harbour song" Harbour Weather/)
     expect(line).toContain('"the harbour song" Paper Ferries')
     expect(line).not.toContain('Static Meadow')
   })
@@ -498,7 +482,7 @@ describe('the moment-matched half', () => {
     const spotify: TasteSnapshot = {
       source: 'spotify',
       takenAt: '2026-09-06T10:00:00.000Z',
-      items: [{ kind: 'liked', title: 'only in the snapshot', artist: 'Slow Marina' }],
+      items: [{ kind: 'history', title: 'only in the snapshot', artist: 'Slow Marina' }],
     }
     const empty: TasteLedger = { source: 'spotify', updatedAt: '', entries: [] }
     for (const ledgers of [[ledger], [ledger, empty]]) {
@@ -523,9 +507,9 @@ describe('the moment-matched half', () => {
   it('leaves the fixed half and the budget where they were', () => {
     const digest = renderTasteDigest([snapshot], NOW, DIGEST_BUDGET, [ledger], moment)
     const line = (lead: string): string => digest.split('\n').find((l) => l.startsWith(`${lead}: `))!
-    expect(line('Sources')).toBe('Sources: NetEase (1 liked)')
+    expect(line('Sources')).toBe('Sources: NetEase (history 1)')
     expect(digest.length).toBeLessThanOrEqual(DIGEST_BUDGET)
-    expect(['Sources', 'Artists they return to'].map(line).join('\n').length).toBeLessThanOrEqual(300)
+    expect(line('Sources').length).toBeLessThanOrEqual(300)
   })
 })
 
@@ -624,14 +608,14 @@ describe('TasteReader', () => {
   // one for its moment, off the same parsed files rather than a re-read.
   it('memoises the static render and renders per moment without re-reading', () => {
     const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
-    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: [{ kind: 'liked', title: 'in the window', artist: 'Low Antenna' }] }))
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({ source: 'netease', takenAt: '2026-09-06T00:00:00.000Z', items: [{ kind: 'history', title: 'in the window', artist: 'Low Antenna' }] }))
     writeFileSync(join(dir, 'netease.ledger.json'), JSON.stringify({
       source: 'netease',
       updatedAt: '2026-09-06T00:00:00.000Z',
-      lastRead: { liked: '2026-09-06T00:00:00.000Z' },
+      lastRead: { history: '2026-09-06T00:00:00.000Z' },
       entries: [
-        { kind: 'liked', title: 'the harbour song', artist: 'Paper Ferries', key: 'a', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
-        { kind: 'liked', title: 'another', artist: 'Low Antenna', key: 'b', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
+        { kind: 'history', title: 'the harbour song', artist: 'Paper Ferries', key: 'a', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
+        { kind: 'history', title: 'another', artist: 'Low Antenna', key: 'b', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z', seen: 2 },
       ],
     }))
     const reader = new TasteReader({ dir, now: () => NOW })
@@ -639,7 +623,7 @@ describe('TasteReader', () => {
     expect(reader.digest()).toContain('"in the window" Low Antenna')
     expect(reader.renders).toBe(1)
     const moment: Moment = { hour: 16, persona: '', lastTalk: 'paper ferries', avoidArtists: [] }
-    expect(reader.digest(moment)).toMatch(/Songs they keep: "the harbour song" Paper Ferries/)
+    expect(reader.digest(moment)).toMatch(/Lately they have been listening to: "the harbour song" Paper Ferries/)
     // The static render is still the cached one, and the files were not
     // re-parsed to serve the moment.
     expect(reader.digest()).toContain('"in the window" Low Antenna')
