@@ -15,7 +15,7 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import { PLAY_ORDER, type AudioClip, type Catalogue, type MusicProvider, type PlayCatalogue, type TaskTool, type TrackCandidate, type TrackPick } from '../contracts.ts'
+import { PLAY_ORDER, type AudioClip, type Catalogue, type Familiarity, type MusicProvider, type PlayCatalogue, type TaskTool, type TrackCandidate, type TrackPick } from '../contracts.ts'
 import { ANNOUNCE_FIELD_DESCRIPTION } from '../prompts/music.ts'
 import { previewTrap, SourceAuthError } from './sources/auth.ts'
 import { parseSegmentRef } from './music.ts'
@@ -153,6 +153,17 @@ export type ChannelCatalogue = {
   search: (query: string, limit?: number) => TrackCandidate[]
 }
 
+// The discovery wiring (spec 14 3.10), one object because the three parts
+// arrive together: the neighbour pool this task FILLS from the ref it
+// commits to, what the listener already knows of a candidate, and whether
+// this slot may play something they know.
+export type DiscoveryOptions = {
+  prime?: (ref: string) => void
+  label?: (title: string, artist: string) => Promise<Familiarity>
+  newOnly?: boolean
+  log?: (message: string) => void
+}
+
 export function musicTools(
   provider: MusicProvider,
   finish: (pick: TrackPick) => void,
@@ -160,10 +171,9 @@ export function musicTools(
   taste?: TasteToolOptions,
   channels?: ChannelCatalogue,
   avoid?: readonly string[],
-  // The neighbours of the song on air (spec 14 3.10): the pool is FILLED
-  // here, from the ref this task commits to, and READ through the provider's
-  // `neighbours` catalogue at the pick after this one. Absent = no lane.
-  neighbours?: { prime: (ref: string) => void },
+  // The discovery wiring (spec 14 3.10). Absent = the tools are their
+  // pre-discovery selves: no labels, no slot rule, no neighbour pool.
+  discovery?: DiscoveryOptions,
 ): TaskTool[] {
   // What this task may not submit: the recently-played labels the situation
   // already names in words. The policy asks the model to skip them and a
@@ -180,7 +190,7 @@ export function musicTools(
     // The mood pool reads anonymously (spec 14 3.10), so it is there for a
     // listener who has mounted nothing at all.
     'playlists' as const,
-    ...(neighbours === undefined ? [] : (['neighbours'] as const)),
+    ...(discovery?.prime === undefined ? [] : (['neighbours'] as const)),
   ]
   const closed = new Set<Catalogue>()
   const open = (): Catalogue[] => mounted.filter((c) => !closed.has(c))
@@ -315,9 +325,12 @@ export function musicTools(
     'search_music',
     'Search for candidate tracks by query; returns candidates (ref, title, ' +
       'uploader, durationS) to judge before picking.' +
-      (taste === undefined && channels === undefined && neighbours === undefined
+      (taste === undefined && channels === undefined && discovery?.prime === undefined
         ? ''
-        : ` Catalogues available now: ${mounted.join(', ')}.`),
+        : ` Catalogues available now: ${mounted.join(', ')}.`) +
+      (discovery?.label === undefined
+        ? ''
+        : ' Each hit says what the listener already knows of it: kept, watched, played by murmur, the artist\'s own #N hit, or new.'),
     {
       query: z.string().describe('search terms for the track'),
       limit: z.number().int().min(1).max(10).optional().describe('max candidates (default 5)'),
@@ -343,18 +356,39 @@ export function musicTools(
       if (catalogue === 'channels') {
         const found = channels?.search(args.query, args.limit) ?? []
         for (const c of found) stated.set(c.ref, c.durationS)
-        return reply({ candidates: found })
+        return reply({ candidates: await labelled(found) })
       }
       try {
         const candidates = await provider.search(args.query, args.limit, catalogue)
         for (const c of candidates) stated.set(c.ref, c.durationS)
-        return reply({ candidates })
+        return reply({ candidates: await labelled(candidates) })
       } catch (err) {
         if (err instanceof SourceAuthError) return authResult(err)
         throw err
       }
     },
   )
+
+  // What the listener already knows of each hit (spec 14 3.10), read before
+  // the model chooses rather than asked of it afterwards. Judged in parallel;
+  // the ranking behind it is cached per artist for a day.
+  const labelled = async (candidates: readonly TrackCandidate[]): Promise<unknown[]> => {
+    const label = discovery?.label
+    if (label === undefined) return [...candidates]
+    const marks = await Promise.all(candidates.map((c) => label(c.title, c.uploader)))
+    // Counts only, never a title (spec 14 3.6). `artist-known` is the miss
+    // rate of the folding this does not do.
+    const familiar = marks.filter((m) => m.familiar).length
+    discovery?.log?.(`music.familiar hits=${marks.length} familiar=${familiar} artist-known=${marks.filter((m) => m.artistKnown === true).length}`)
+    return candidates.map((c, i) => ({ ...c, familiar: marks[i]!.label }))
+  }
+
+  // The slot rule (spec 14 3.10): this pick's verdict is decided before the
+  // task starts, and a "new only" slot refuses a familiar submission at most
+  // ONCE -- then it gets out of the way, because a familiar song beats dead
+  // air and a refusal loop spends the task's turns on nothing.
+  let refused = 0
+  let failOpen = 0
 
   const submitPick = tool(
     'submit_pick',
@@ -387,6 +421,19 @@ export function musicTools(
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
       }
 
+      const mark = discovery?.label === undefined ? undefined : await discovery.label(title, artist)
+      if (discovery?.newOnly === true && mark?.familiar === true) {
+        if (refused === 0) {
+          refused++
+          return reply({
+            ok: false,
+            error:
+              'this slot is for something they have not heard: that one is already theirs. Try the playlists catalogue with the situation in a few words, the neighbours of what is on air, or the block of what the platforms picked for them today.',
+          })
+        }
+        failOpen++
+      }
+
       // Found is not where it plays from (spec 14 §2.13): a song the model
       // found on a slow catalogue is played from the fastest one that also
       // has it.
@@ -403,9 +450,14 @@ export function musicTools(
       const announce = trimmed(args.announce)
       const pick: TrackPick = { clip, title, artist, ...(announce !== undefined && { announce }) }
       finish(pick)
+      if (discovery?.label !== undefined) {
+        discovery.log?.(
+          `music.slot ${discovery.newOnly === true ? 'new-only' : 'familiar-ok'} picked=${mark?.familiar === true ? 'familiar' : 'new'} refused=${refused} fail-open=${failOpen}`,
+        )
+      }
       // Background, after the pick is committed (spec 14 3.10): the song's
       // own airtime is what pays for the next pick's neighbour pool.
-      neighbours?.prime(ref)
+      discovery?.prime?.(ref)
       return reply({ ok: true, source: clip.source, title })
     },
   )

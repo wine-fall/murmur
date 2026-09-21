@@ -90,6 +90,11 @@ const CatalogueSchema = z.object({ sub: z.array(z.object({ name: z.string() })).
 const DailySchema = z.object({ data: z.object({ dailySongs: z.array(z.unknown()).optional() }).nullish() })
 const DailySongSchema = SongSchema.extend({ reason: z.string().nullish() })
 const SimilarSchema = z.object({ songs: z.array(z.unknown()).nullish() })
+// The artist ranking behind the "artist's #N hit" label (spec 14 3.10): the
+// name resolves to an id, the id to the songs the platform ranks highest.
+const ArtistSearchSchema = z.object({ result: z.object({ artists: z.array(z.object({ id: z.number() })).nullish() }).nullish() })
+const HotSongsSchema = z.object({ hotSongs: z.array(z.object({ name: z.string() })).nullish() })
+const ARTIST_SEARCH_TYPE = 100
 const QrKeySchema = z.object({ code: z.number(), unikey: z.string() })
 // The poll's whole answer is its code — there is no envelope under it.
 const QrPollSchema = z.object({ code: z.number() })
@@ -266,6 +271,23 @@ export class NeteaseClient {
       out.push(candidateOf(song.data))
     }
     return out.slice(0, limit)
+  }
+
+  // The artist's own top songs (spec 14 3.10), anonymous. Two reads: the
+  // name to an id, then the id's ranking.
+  //
+  // ponytail: the first artist the search returns is the one taken -- names
+  // repeat across artists and the platform's own order puts the one everyone
+  // means first. Upgrade path: score the candidates against the song that
+  // asked.
+  async artistHotSongs(artist: string, limit: number): Promise<string[]> {
+    const found = ArtistSearchSchema.parse(
+      await this.call('/search/get', { s: artist, type: ARTIST_SEARCH_TYPE, offset: 0, limit: 1 }),
+    )
+    const id = found.result?.artists?.[0]?.id
+    if (id === undefined) return []
+    const hot = HotSongsSchema.parse(await this.call(`/v1/artist/${id}`, {}))
+    return (hot.hotSongs ?? []).map((song) => song.name.trim()).filter((name) => name !== '').slice(0, limit)
   }
 
   async search(query: string, limit: number): Promise<TrackCandidate[]> {

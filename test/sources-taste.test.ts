@@ -689,3 +689,38 @@ describe('TasteReader', () => {
     expect(logs).toHaveLength(1)
   })
 })
+
+// spec 14 §3.10: what the familiarity rule reads. The digest's invariant is
+// about what the block SHOWS; this is about what the listener KNOWS, so the
+// watch rows the block hides are in here.
+describe('TasteReader.rows', () => {
+  it('carries every mounted row, snapshot and ledger, watch rows included', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-taste-'))
+    writeFileSync(join(dir, 'youtube.json'), JSON.stringify({
+      source: 'youtube',
+      takenAt: '2026-09-06T00:00:00.000Z',
+      items: [{ kind: 'history', title: 'watched once', artist: 'Night Tape' }],
+    }))
+    writeFileSync(join(dir, 'netease.json'), JSON.stringify({
+      source: 'netease',
+      takenAt: '2026-09-06T00:00:00.000Z',
+      items: [{ kind: 'liked', title: 'in the window', artist: 'Low Antenna' }],
+    }))
+    writeFileSync(join(dir, 'netease.ledger.json'), JSON.stringify({
+      source: 'netease',
+      updatedAt: '2026-09-06T00:00:00.000Z',
+      entries: [{ kind: 'liked', title: 'out of the window', artist: 'Low Antenna', key: 'a', firstSeen: '2026-01-01T00:00:00.000Z', lastSeen: '2026-09-06T00:00:00.000Z' }],
+    }))
+    const reader = new TasteReader({ dir, now: () => NOW })
+    const titles = reader.rows().map((r) => r.title)
+    expect(titles).toContain('watched once')
+    expect(titles).toContain('in the window')
+    expect(titles).toContain('out of the window')
+    // The block itself still shows none of the video platform's watching.
+    expect(reader.digest()).not.toContain('watched once')
+  })
+
+  it('is empty, not a throw, with nothing on disk', () => {
+    expect(new TasteReader({ dir: join(tmpdir(), 'murmur-no-such-dir'), now: () => NOW }).rows()).toEqual([])
+  })
+})

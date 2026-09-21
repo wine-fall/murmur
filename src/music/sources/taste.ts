@@ -434,6 +434,18 @@ export class TasteReader {
     this.deps = deps
   }
 
+  // Every row the mounted files carry -- snapshots and ledgers, liked,
+  // playlist and history, including the watch rows the block never shows.
+  // What the familiarity rule reads (spec 14 §3.10); the digest's own
+  // invariant is about what is SHOWN, and this is about what is KNOWN.
+  rows(): readonly TasteItem[] {
+    this.digest()
+    return [
+      ...this.parsed.snapshots.flatMap((snapshot) => snapshot.items),
+      ...this.parsed.ledgers.flatMap((ledger) => ledger.entries),
+    ]
+  }
+
   // With no moment: the memoised render the context pack reads. With one:
   // the flexible half chosen against the ledger for this pick (spec 14
   // §2.12), off the same parsed files.

@@ -320,3 +320,32 @@ describe('NeteaseClient.similarSongs', () => {
     expect(calls[0]!.headers.Cookie).toBeUndefined()
   })
 })
+
+// spec 14 §3.10 step 5: the artist's own top ten, the ranking the familiarity
+// label reads. Anonymous, two reads, and the id is found by name.
+describe('NeteaseClient.artistHotSongs', () => {
+  const answers = {
+    '/search/get': { code: 200, result: { artists: [{ id: 6731, name: 'Slow Marina' }, { id: 99, name: 'Slow Marina' }] } },
+    '/v1/artist/6731': { code: 200, hotSongs: [{ id: 1, name: 'The Famous One' }, { id: 2, name: 'The Second' }, { id: 3, name: '  ' }] },
+  }
+
+  it('finds the artist by name and answers with their top songs, in order', async () => {
+    const { fetch, calls } = fakeFetch(answers)
+    const hot = await new NeteaseClient({ cookie: async () => '', fetch }).artistHotSongs('Slow Marina', 10)
+    expect(hot).toEqual(['The Famous One', 'The Second'])
+    expect(calls[0]!.url).toContain('type=100')
+    expect(calls[0]!.headers.Cookie).toBeUndefined()
+    expect(calls[1]!.url).toContain('/artist/6731')
+  })
+
+  it('takes the top N and no more', async () => {
+    const { fetch } = fakeFetch(answers)
+    expect(await new NeteaseClient({ cookie: async () => '', fetch }).artistHotSongs('Slow Marina', 1)).toEqual(['The Famous One'])
+  })
+
+  it('an artist the platform does not know is no ranking, not an error', async () => {
+    const { fetch, calls } = fakeFetch({ '/search/get': { code: 200, result: {} } })
+    expect(await new NeteaseClient({ cookie: async () => '', fetch }).artistHotSongs('Nobody At All', 10)).toEqual([])
+    expect(calls).toHaveLength(1)
+  })
+})

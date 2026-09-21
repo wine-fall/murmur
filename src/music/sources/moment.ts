@@ -72,7 +72,11 @@ const isWordChar = (ch: string): boolean => /[\p{L}\p{N}]/u.test(ch)
 // Does the row's text carry this term as a word? Scanned rather than
 // tokenised: tokenising every row of the ledger on every pick was 4.3 ms of
 // the 5 ms budget, and this is the same answer without the allocations.
-function carries(text: string, term: string, loose: boolean): boolean {
+//
+// `loose` defaults to whether the term is CJK, where a bigram is a substring
+// by construction. Exported because the familiarity rule (spec 14 §3.10)
+// matches artists the same way and must not use bare containment.
+export function carries(text: string, term: string, loose = CJK.test(term)): boolean {
   if (loose) return text.includes(term)
   for (let i = text.indexOf(term); i !== -1; i = text.indexOf(term, i + 1)) {
     const before = i === 0 ? ' ' : text[i - 1]!

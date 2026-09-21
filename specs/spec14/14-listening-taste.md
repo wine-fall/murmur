@@ -1849,22 +1849,49 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    left, ignores the query, and is empty early in a program. A failed read
    keeps the pool it had.
 
-**Step three (labels and rotation), the last of this section:**
+**Step three (labels and rotation), the last of this section.**
 
-5. **Labels and rotation.** Every `search_music` hit carries its familiarity
-   label — `kept`, `artist's #N hit`, `watched`, `played by murmur`, `new` —
-   so the model chooses knowing. Rotation is a **shuffled deck, not
-   independent dice**: of every 10 pick slots exactly 3 allow a familiar
-   song, shuffled so streaks stay bounded. The slot's verdict is decided in
-   code at pick start, written into the situation ("this slot: new only") and
-   enforced in `submit_pick`, which refuses a familiar submission **at most
-   once** per pick — naming the pools to try — and then **fails open**, because
-   a familiar song beats dead air; the fail-open is counted. The queue window
-   is `queuedLabels()` plus the ledger (`PICK_LOOKAHEAD = 2`, the ledger
-   written at air time). A **listener request** (the Director's `listener
-   request:` hint) reaches `musicTools` as a flag that disables the slot rule
-   entirely. The 3-in-10 is a constant with a `ponytail:` comment, not a
-   setting.
+5a. **Every `search_music` hit carries its familiarity label** — `kept`,
+   `watched`, `played by murmur`, `artist's #N hit`, or `new` — so the model
+   chooses knowing rather than guessing. The labels are judged **in parallel**
+   with the search's results in hand; the ranking behind `#N` is read at most
+   once per artist per day and is never consulted for a song the cheaper
+   checks already settled. A ranking that will not answer makes a song `new`,
+   never familiar: a pick may not wait on it, and calling an unknown song
+   familiar would close the pools this section exists to open.
+
+5b. **What FAMILIAR means, as built.** The rows come from `TasteReader.rows()`
+   — every mounted snapshot and ledger, `liked`, `playlist` and `history`,
+   across every platform, **including the watch rows §2.3's block never
+   shows**. What murmur itself aired comes from the Director as
+   `MusicContext.played`: `memory.recentSongsSince(0, …)` — the whole window,
+   not the avoid-list's week — plus `queuedLabels()`, so the two picks the
+   queue is holding count before the ledger has heard of them. The ranking is
+   NetEase's `search/get?type=100` → `/api/v1/artist/<id>` → `hotSongs`, top
+   ten, anonymous, cached per artist for 24 h. Matching is the folded title
+   with a trailing parenthetical stripped, plus an artist match through
+   `moment.ts` `carries()` — word-boundary aware, **not** `relocate()`'s bare
+   containment. Simplified and traditional are **not** folded together; the
+   miss that leaves is counted rather than guessed at: a song called `new`
+   whose **artist** is one of theirs is flagged `artistKnown` and logged as a
+   per-search count (`artist-known=N`), which is where such a miss hides.
+
+5c. **Rotation is a shuffled deck, not independent dice.** Of every 10 pick
+   slots exactly **3** allow a familiar song, shuffled — a coin per pick would
+   give the listener a run of five familiar songs about once a fortnight,
+   which is the exact evening the radio stops sounding like one. The verdict
+   is drawn **in code at pick start**, written into the situation as its own
+   line (what the slot is, and where to look instead) **and** carried on
+   `MusicContext.newOnly`, because a prompt rule is advice. `submit_pick`
+   enforces it: a familiar submission on a "new only" slot is refused **at
+   most once**, with a message naming the pools to try, and then **fails
+   open** — a familiar song beats dead air, and a refusal loop would spend the
+   task's 8 turns and return `picked=no`, which costs the listener the whole
+   music slot. A **listener request** (the Director's `listener request:`
+   hint) reaches the context as `newOnly: false` and no slot line at all: a
+   rotation that refused what they just asked for would be a radio arguing
+   with its listener. The 3-in-10 is a constant with a `ponytail:` comment,
+   not a setting.
 
 **Dropped on purpose** (do not add them back): a 30-day cooldown on kept
 songs; a `source`/`outcome` field on the memory ledger (familiarity is a pure
@@ -2132,6 +2159,21 @@ overwrite it. Disconnecting every account empties the daily lane at the next
 pick, inside the 24 h window, and two mounted platforms each reach the block. Every endpoint above was **probed
 live** through this code on 2026-09-21 (mood pool 5, category pool 5,
 neighbours 5, YouTube mix 15); the unit suite runs on fakes.
+
+### 5.21 The radio knows what they already know (unit) — *added 2026-09-21*
+`search_music` hits come back labelled `kept` / `watched` / `played by
+murmur` / `artist's #N hit` / `new`, judged in code: a liked or playlist row
+on any mounted source, a history row (including a video platform's, which the
+block hides), a label murmur aired or has queued, or the artist's own top ten.
+A title matches through its trailing parenthetical; an artist matches
+word-boundary-aware, so the same title by another artist is **new**. The
+ranking is read once per artist, never for a song the cheaper checks settled,
+and a ranking that fails leaves the song `new`. A `new only` slot refuses a
+familiar submission **once** — naming the pools — then accepts it and counts
+the fail-open; a listener request arrives as `newOnly: false` with no slot
+line; and over any ten slots exactly three allow the familiar, with the
+streak bounded by the deck. Every line logged is a **count** (`hits=`,
+`familiar=`, `artist-known=`, `refused=`, `fail-open=`), never a title.
 
 ## 6. Resolved decisions
 

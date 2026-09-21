@@ -268,6 +268,12 @@ export interface MusicProvider {
 // One found-and-pulled track (spec 03-01 §2.4, widened by 03-02): the playable
 // clip, the display metadata the model read off the candidate, and the one-line
 // in-persona DJ intro to speak over its ducked head (absent -> no intro).
+// What the listener already knows about one candidate (spec 14 3.10),
+// judged in code and never by the model. `artistKnown` is the miss-rate
+// proxy for the folding this does NOT do: a song called new whose artist is
+// theirs is where an unfolded spelling would hide.
+export type Familiarity = { readonly label: string; readonly familiar: boolean; readonly artistKnown?: boolean }
+
 // One song of a platform's own recommendation for this listener, with the
 // reason it gives where it gives one (spec 14 3.10, the daily lane).
 export type DailySong = { readonly ref: string; readonly title: string; readonly artist: string; readonly reason?: string }
@@ -294,6 +300,14 @@ export type MusicContext = {
   // The same recently-played labels the situation names, carried as data so
   // submit_pick can refuse a repeat instead of only asking for none.
   readonly avoid?: readonly string[]
+  // This pick's rotation slot (spec 14 3.10): true = the listener may not be
+  // handed something they already know. Said in the situation AND carried
+  // here, because a prompt rule is advice and this one is enforced.
+  readonly newOnly?: boolean
+  // Every song murmur itself has aired, as track labels -- the ledger's whole
+  // window plus what the queue is holding. One of the things that make a
+  // candidate familiar (spec 14 3.10).
+  readonly played?: readonly string[]
 }
 
 // --- the brain harness (spec 03-01 §2.1) ---------------------------------- //
