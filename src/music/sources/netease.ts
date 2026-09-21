@@ -89,6 +89,7 @@ const CatalogueSchema = z.object({ sub: z.array(z.object({ name: z.string() })).
 // with the one-line reason it gives for it.
 const DailySchema = z.object({ data: z.object({ dailySongs: z.array(z.unknown()).optional() }).nullish() })
 const DailySongSchema = SongSchema.extend({ reason: z.string().nullish() })
+const SimilarSchema = z.object({ songs: z.array(z.unknown()).nullish() })
 const QrKeySchema = z.object({ code: z.number(), unikey: z.string() })
 // The poll's whole answer is its code — there is no envelope under it.
 const QrPollSchema = z.object({ code: z.number() })
@@ -252,6 +253,19 @@ export class NeteaseClient {
       })
     }
     return out
+  }
+
+  // The neighbours of one song (spec 14 3.10), anonymous: the platform's own
+  // "next to this one", which is a place to look that no memory of ours has.
+  async similarSongs(songId: string, limit: number): Promise<TrackCandidate[]> {
+    const parsed = SimilarSchema.parse(await this.call('/v1/discovery/simiSong', { songid: songId, limit }))
+    const out: TrackCandidate[] = []
+    for (const raw of parsed.songs ?? []) {
+      const song = SongSchema.safeParse(raw)
+      if (!song.success || song.data.name.trim() === '') continue
+      out.push(candidateOf(song.data))
+    }
+    return out.slice(0, limit)
   }
 
   async search(query: string, limit: number): Promise<TrackCandidate[]> {

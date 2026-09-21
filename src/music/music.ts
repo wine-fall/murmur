@@ -174,6 +174,9 @@ export type YtDlpMusicProviderOptions = {
   // The mood pool (spec 14 3.10): playlists other people keep, read
   // anonymously, so it is wired whether or not anything is mounted.
   playlists?: ClientCatalogue
+  // The neighbours of the song on air (spec 14 3.10): a cache the pick
+  // reads, filled while the previous song played.
+  neighbours?: ClientCatalogue
 }
 
 // The ceiling on one yt-dlp spawn. Generous on purpose: a cold network, a
@@ -217,6 +220,22 @@ export function ytdlpRunner(binary = 'yt-dlp', timeoutMs = YTDLP_TIMEOUT_MS): Yt
   }
 }
 
+// The YouTube auto-mix (spec 14 3.10): the RD list of one video, which is
+// YouTube's own "songs next to this one". One flat read, no login, and a mix
+// that will not load is an empty pool rather than a failed pick.
+export const MIX_ITEMS = 15
+
+export function youtubeMix(run: YtDlpRunner): (videoId: string) => Promise<TrackCandidate[]> {
+  return async (videoId) => {
+    try {
+      const stdout = await run(['--dump-json', '--flat-playlist', '--playlist-items', `1:${MIX_ITEMS}`, `https://www.youtube.com/watch?v=${videoId}&list=RD${videoId}`])
+      return parseSearchOutput(stdout, MIX_ITEMS).map((c) => ({ ...c, catalogue: 'youtube' as const }))
+    } catch {
+      return []
+    }
+  }
+}
+
 export class YtDlpMusicProvider implements MusicProvider {
   private run: YtDlpRunner
   private opts: YtDlpMusicProviderOptions
@@ -228,7 +247,7 @@ export class YtDlpMusicProvider implements MusicProvider {
 
   async search(query: string, limit = 5, catalogue: Catalogue = 'youtube'): Promise<TrackCandidate[]> {
     // The client catalogues: each answers only while its own mount is there.
-    if (catalogue === 'netease' || catalogue === 'qqmusic' || catalogue === 'playlists') {
+    if (catalogue === 'netease' || catalogue === 'qqmusic' || catalogue === 'playlists' || catalogue === 'neighbours') {
       const client = this.opts[catalogue]
       if (client === undefined) throw new Error(`${catalogue} is not mounted`)
       return client.search(query, limit)

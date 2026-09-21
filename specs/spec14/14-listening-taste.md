@@ -1789,27 +1789,57 @@ the miss rate is logged rather than guessed at.
    `music-policy.md`: that file is seeded once and existing installs never
    receive a new sentence, so nothing may arm off a sentence in it.
 
-**Later steps of this section**, in order, each its own change:
+**Step two (candidate pools).** Where the pick goes instead of its own
+memory. Both pools are **catalogue values on `search_music`**, never a third
+tool (§5 acceptance #7 locks the pick task at exactly two).
 
-4. **Candidate pools** — where the model goes instead of its memory:
-   situation→mood playlists (NetEase `search/get?type=1000` and
-   `/api/playlist/list?cat=<category>&order=hot`, categories from
-   `/api/playlist/catalogue`, tracks through the existing `v6/playlist/detail`
-   read; QQ's anonymous `soso/fcgi-bin/client_music_search_songlist` works
-   too), exposed on **`search_music`** as a catalogue value or query mode and
-   **never as a third tool** (§5 acceptance #7 locks the pick task at exactly
-   two). A **separate lane** for the platform's own daily recommendation
-   (NetEase `/api/v1/discovery/recommend/songs`, login cookie, 30 songs with a
-   reason string, measured 0/32 in the liked list; QQ's radar), rendered as
-   its own situation block with its reasons on a 24 h tier — **not** a `daily`
-   `TasteKind`: that kind counts into `Artists they return to`, polls on
-   §3.4's 3 h clock and costs §2.12's 5 ms scan, and it is never written to
-   the taste ledger. And **neighbours of the song on air** (NetEase
-   `/api/v1/discovery/simiSong?songid=`, five; the YouTube auto-mix via
-   `yt-dlp --flat-playlist ".../watch?v=<id>&list=RD<id>"`, ~15 s), prefetched
-   in the background **while the song plays** and read from cache at the next
-   pick — never on the pick path. QQ's `GetSimilarSongs` returns null and
-   Bilibili's related list is junk; both are skipped.
+4a. **The mood pool — `catalogue: "playlists"`.** The model puts the moment
+   into a few words and gets back tracks off playlists other people keep for
+   it. When the words ARE one of the platform's own category names
+   (`/api/playlist/catalogue`, read once per process and cached; a tree that
+   will not load means every mood takes the search route) the pool reads
+   `/api/playlist/list?cat=<name>&order=hot`; otherwise it searches playlists,
+   `/api/search/get?type=1000`. At most **two** playlists per call, each read
+   once through the existing `v6/playlist/detail` (30 tracks), interleaved and
+   deduped by ref. All of it **anonymous**, so the pool is offered to a
+   listener who has mounted nothing at all — the only catalogue of which that
+   is true besides `youtube`.
+   *Measured live 2026-09-21*: a bare mood word ("quiet") fills the pool with
+   piano and classical sets, which policy rule 7 forbids. The catalogue's own
+   description says so; the judgment stays the model's.
+   `ponytail:` the head of a hot playlist is what comes back, so the same mood
+   word twice in an evening can offer the same first tracks twice — the
+   avoid-list catches the exact repeat. Upgrade path: page the detail read at
+   a rotating offset.
+
+4b. **The daily lane.** NetEase's `/api/v1/discovery/recommend/songs` (the
+   account cookie; 30 songs, each with the platform's own one-line reason —
+   measured 0/32 already in the liked list) and QQ's
+   `music.recommend.TrackRelationServer.GetRadarSong`, merged into **one block
+   of the pick situation** under its own heading, at most 12 songs. It is
+   **not** a `daily` `TasteKind`: that kind counts into `Artists they return
+   to` (§2.3), polls on §3.4's 3 h clock and costs §2.12's 5 ms scan, and none
+   of that is true of a platform's guess about today. It is never written to
+   the taste ledger. Its own 24 h clock, single-flight, poked from the pick
+   and never awaited; a day whose every feed fails keeps yesterday's lane. It
+   rides the pick situation only — the talk pack (05 §2.2) is about who the
+   listener is, not about what a platform is pushing today.
+
+4c. **Neighbours of the song on air — `catalogue: "neighbours"`.** NetEase's
+   `/api/v1/discovery/simiSong?songid=` (anonymous, five) for a pick that came
+   from NetEase, and the YouTube auto-mix (`yt-dlp --flat-playlist
+   --playlist-items 1:15 ".../watch?v=<id>&list=RD<id>"`, ~15 s) for one that
+   came from YouTube. QQ's `GetSimilarSongs` answers null on every seed
+   measured and Bilibili's related list is re-uploads and reaction videos;
+   both are skipped. The pool is **primed from `submit_pick`**, after the pick
+   is committed, with the ref it committed to — so the read happens while that
+   song is on the air and the pick that follows reads a **cache**. Nothing
+   here is ever on the pick's own path: `search` returns what the last prime
+   left, ignores the query, and is empty early in a program. A failed read
+   keeps the pool it had.
+
+**Step three (labels and rotation), the last of this section:**
+
 5. **Labels and rotation.** Every `search_music` hit carries its familiarity
    label — `kept`, `artist's #N hit`, `watched`, `played by murmur`, `new` —
    so the model chooses knowing. Rotation is a **shuffled deck, not
@@ -2071,6 +2101,22 @@ message naming both fields; nothing is aired and no clip is resolved. On the
 what the listener keeps as anchors, with the old "not two in a row" sentence
 gone. The per-100-air familiar share is **not** asserted in a unit test: it is
 the by-ear metric of §3.10, owed after the change has run.
+
+### 5.20 The pick has somewhere to go besides memory (unit + live probe) — *added 2026-09-21*
+`search_music` offers **`playlists`** with nothing mounted at all, and routes
+it to the mood pool rather than to yt-dlp; a phrase the category tree does not
+know takes the playlist search, a phrase that IS a category takes
+`playlist/list?order=hot`, the tree is read once per process, and two
+playlists at most are read per call, interleaved and deduped. The daily lane
+renders its own block with each platform's reason where it gave one, reads
+once per 24 h and once at a time, keeps yesterday's songs when today's read
+fails, logs **counts only**, and reaches the pick situation but not the talk
+pack. `submit_pick` primes the neighbour pool with the ref it committed to and
+only on a pick that was accepted; the pool reads NetEase by song id and
+YouTube by video id, answers the cache without a network round, and is empty
+for a ref neither platform can seed from. Every endpoint above was **probed
+live** through this code on 2026-09-21 (mood pool 5, category pool 5,
+neighbours 5, YouTube mix 15); the unit suite runs on fakes.
 
 ## 6. Resolved decisions
 

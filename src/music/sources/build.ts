@@ -180,12 +180,11 @@ export function neteaseSearch(deps: SourceBuildDeps): { search: NeteaseClient['s
   }
 }
 
-// The mood pool (spec 14 3.10): playlists other people keep, found by the
-// words the moment gives. Anonymous, so it needs no mount and no jar -- one
-// client for the process, which is also what caches the category tree.
-export function moodPool(): { search: NeteaseClient['search'] } {
-  const client = new NeteaseClient({ cookie: async () => '' })
-  return { search: async (query, limit) => client.playlistPool(query, limit) }
+// The anonymous reads of spec 14 3.10 -- the mood pool and a song's
+// neighbours -- need no mount and no jar. One client for the process, which
+// is also what caches the playlist category tree.
+export function anonymousNetease(): NeteaseClient {
+  return new NeteaseClient({ cookie: async () => '' })
 }
 
 // The daily lane's feeds (spec 14 3.10): each platform's own pick of the

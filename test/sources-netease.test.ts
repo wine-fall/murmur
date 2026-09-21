@@ -299,3 +299,24 @@ describe('NeteaseClient.dailyRecommendation', () => {
     })
   })
 })
+
+// spec 14 §3.10 step 4: the neighbours of a song, read anonymously.
+describe('NeteaseClient.similarSongs', () => {
+  it('reads the platform\'s own "next to this one", with no account at all', async () => {
+    const { fetch, calls } = fakeFetch({
+      '/v1/discovery/simiSong': {
+        code: 200,
+        songs: [
+          { id: 9, name: 'Next To It', artists: [{ name: 'Slow Marina' }], duration: 200000 },
+          { id: 10, name: '  ', artists: [] },
+        ],
+      },
+    })
+    const hits = await new NeteaseClient({ cookie: async () => '', fetch }).similarSongs('5', 5)
+    expect(hits).toEqual([
+      { ref: 'https://music.163.com/#/song?id=9', title: 'Next To It', uploader: 'Slow Marina', durationS: 200, extra: {}, catalogue: 'netease' },
+    ])
+    expect(calls[0]!.url).toContain('songid=5')
+    expect(calls[0]!.headers.Cookie).toBeUndefined()
+  })
+})
