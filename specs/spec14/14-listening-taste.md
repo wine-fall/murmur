@@ -1773,7 +1773,10 @@ the miss rate is logged rather than guessed at.
    submission slid past every label-keyed guard — the repeat check, the
    relocate, and the familiarity rule above. Both are required in the schema
    the model reads, and a submission whose title or artist is blank is
-   refused with a message that says to resubmit with both.
+   refused with a message that says to resubmit with both. A named submit is
+   also a relocatable one (§2.13), so a pick that would have skipped the
+   relocation search now makes it: bounded by `RELOCATE_BUDGET_MS`, off the
+   critical path by the same deadline that has always guarded it.
 2. **The digest stops naming the kept songs.** The `Songs they keep` line of
    §2.3 is gone: 40 titles were the largest thing in the block and the model
    read them as a playlist (19/68 above). `Artists they return to`,
@@ -1829,7 +1832,10 @@ beside a title in the dev log — §3.6 allows counts only.
 
 **Measurement.** Per pick, counts only: the familiar share, the fail-open
 count, the refusal count. The acceptance metric is the **familiar share per
-100 airs**, against a baseline of ~60 % (the 19/68 + 31/68 above). A verdict
+100 airs**. The two shares above overlap by an amount nobody counted, so the
+baseline is a **range, 45.6 % to 73.5 %** (31/68 to 19/68 + 31/68), and the
+first job of the code that scores the metric is to recompute the baseline as
+one de-duplicated number over the same 68 airs. A verdict
 needs hundreds of airs — roughly two weeks of listening — so step 5 lands
 after steps 1–4 have been on the air, and no change in this section is judged
 inside the session that wrote it.
