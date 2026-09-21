@@ -21,20 +21,15 @@ bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
 07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
 green (vitest); real-SDK smokes passed per phase. **Each spec's own status
 header records what its build realized and the PR that landed it** — read the
-spec for what it does, its PR for how it got there. Spec 14 (listening-taste,
-roadmap line 5) is built; its acceptance on the listener's own accounts is the
-by-ear issue below. Everything else is under **Open** — engineering items
-first, then the by-ear passes.
+spec for what it does, its PR for how it got there. Everything open is under
+**Open** — engineering items first, then the by-ear passes.
 
-**In flight: spec 14 §3.10, discovery over recall.** Measured over 68 real
-airs, the radio was recalling rather than discovering: 19/68 aired songs were
-in the listener's liked list and 31/68 were the artist's own top ten. Three
-stacked PRs, in order: **#288** takes the kept titles out of the digest and
-makes a pick name itself; **#289** gives the pick somewhere else to go (mood
-playlists, the platforms' pick of the day, the neighbours of what is on air);
-the third adds the familiarity label on every hit and the 3-in-10 shuffled
-rotation deck. The verdict is the familiar share per 100 airs and needs weeks
-of listening — the by-ear issue below carries it.
+**In flight: spec 14 §3.10, discovery over recall.** Over 68 measured airs the
+radio was recalling, not discovering (19/68 already in the liked list, 31/68
+the artist's own top ten). Three stacked PRs: **#288** takes the kept titles
+out of the digest, **#289** opens the candidate pools, the third labels every
+hit and rations the familiar to 3 slots in 10. The verdict is the familiar
+share per 100 airs and needs weeks of listening — #290 carries it.
 
 **No listener data in the repository** (2026-09-20, user): nothing from
 `~/.murmur` — a song, artist, playlist or channel name, an account name, a
