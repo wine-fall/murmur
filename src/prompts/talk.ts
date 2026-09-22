@@ -4,6 +4,7 @@
 // builders. reply.ts reuses the shared renderers for the typed-line turns.
 
 import type { ContextPack } from '../contracts.ts'
+import type { StockRequest } from '../support/stock.ts'
 import { ABOUT_HEADER, PROFILE_TAGS, STYLE_HEADER } from './profile.ts'
 
 // Output discipline appended to every Brain call: the result is fed straight
@@ -146,7 +147,7 @@ function pacingLines(ctx: ContextPack): string {
 //
 // A fact line ends in the fading ledger's bookkeeping — `[seen YYYY-MM-DD]`,
 
-export function profileBlock(ctx: ContextPack): string {
+export function profileBlock(ctx: Partial<ContextPack>): string {
   const profile = ctx.profile?.replaceAll(PROFILE_TAGS, '').trim()
   return profile ? `(What you know about the listener)\n${profile}\n\n` : ''
 }
@@ -232,12 +233,22 @@ export function openingBlock(ctx: ContextPack): string {
   return `(Last on the air: ${last.when}${topics}.)\nThe program is coming back on now.`
 }
 
+// The head of a prompt that HAS a transcript behind it. Ordinarily the
+// transcript is the whole head — the session has already opened. When the
+// sitting opened on stock lines (spec 04 §3.6) the opening fact is still owed,
+// so it is stated first and the stock lines are named as what has been said,
+// which is what keeps the host from opening the program a second time.
+function carryOn(ctx: ContextPack, transcript: string): string {
+  if (ctx.opening !== true) return `(The program so far)\n${transcript}\n\nNow continue`
+  return `${openingBlock(ctx)}\n\n(Already on the air, just now)\n${transcript}\n\nCarry on from there`
+}
+
 // Prompt for a single self-initiated talk segment (the fallback path when the
 // batched tool call degrades — spec 04 §3.2).
 export function buildNextTalkPrompt(ctx: ContextPack): string {
   const transcript = renderTranscript(ctx)
   const head = transcript
-    ? `(The program so far)\n${transcript}\n\nNow continue — say your next beat.`
+    ? `${carryOn(ctx, transcript)} — say your next beat.`
     : `${openingBlock(ctx)} Open naturally with your first beat.`
   return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
@@ -248,7 +259,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
 export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
   const transcript = renderTranscript(ctx)
   const head = transcript
-    ? `(The program so far)\n${transcript}\n\nNow continue — say your next ${count} beats.`
+    ? `${carryOn(ctx, transcript)} — say your next ${count} beats.`
     : `${openingBlock(ctx)} Open naturally with your first ${count} beats.`
   return (
     `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
@@ -256,5 +267,37 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +
     `all ${count} beats in order by calling the emit_talk_beats tool.`
+  )
+}
+
+// The stock lines (spec 04 §3.6): the opener set and the sign-off, generated
+// ahead of time and played from disk. The prompt stands on persona and profile
+// ALONE — no clock, no scene, no transcript, no music status — because a stock
+// line airs at an hour and after a gap nobody can know when it is written.
+export function buildStockLinesPrompt(req: StockRequest): string {
+  const previous =
+    req.previous.length === 0
+      ? ''
+      : `\n(Last time you said)\n${req.previous.join('\n')}\nSay something different this time.\n`
+  const farewell = req.farewell
+    ? `\nAlso write ONE sign-off: the line you say as the program goes off the air, ` +
+      'in the same voice, under the same rules.\n'
+    : ''
+  return (
+    `${profileBlock(req)}` +
+    `These are lines you will say later, at a moment nobody can see from here.\n` +
+    `Write ${req.count} opening beats — the way this program comes on the air.\n` +
+    previous +
+    farewell +
+    '\nRules, because you cannot know when these will play:\n' +
+    '- Nothing about the time of day, the date, or the season.\n' +
+    '- Nothing about how long they have been away, or that they are back.\n' +
+    '- Nothing about anything you have talked about with them, and nothing about ' +
+    'music playing or about to play.\n' +
+    '- Each beat stands alone and is a complete stopping point: the program may ' +
+    'carry on right after any one of them, or not at all.\n' +
+    '- Together the opening beats read as one stretch of radio, in order.\n' +
+    `\n${OUTPUT_RULES}\n` +
+    'Return them by calling the emit_stock_lines tool.'
   )
 }

@@ -4,7 +4,7 @@
 // interim subprocess player is gone.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
@@ -45,6 +45,8 @@ import { HostedVoice } from './voice/hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './host/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory/memory.ts'
 import { sentinelRoot } from './paths.ts'
+import { personaFingerprint, signOff, StockLines, stockDir, type StockFingerprint } from './support/stock.ts'
+import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
 import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './brain/rwt.ts'
@@ -64,6 +66,7 @@ import { BilibiliSpace } from './music/sources/wbi.ts'
 import { SOURCE_NAMES, TasteReader } from './music/sources/taste.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLanguage, personaLine } from './brain/persona.ts'
+import { withLanguage } from './prompts/persona.ts'
 import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './setup/guide.ts'
 import { buildFindMusicInstruction } from './prompts/music.ts'
 import { aboutSection } from './prompts/talk.ts'
@@ -698,6 +701,24 @@ export function escalatingSigint(host: Host, onFirst: () => void, onForce: () =>
   return () => void process.off('SIGINT', handler)
 }
 
+// The persona as it sits on disk, for the stock fingerprint (spec 04 §3.6):
+// the file's own bytes, so any edit to it retires the stock it produced. null =
+// no persona to speak from, which is a run with no stock.
+function readPersonaText(path: string): string | null {
+  try {
+    return readFileSync(path, 'utf8')
+  } catch {
+    return null
+  }
+}
+
+// Which voice a stock file was made in (spec 04 §3.6): the provider plus every
+// knob that changes how the host SOUNDS. A run that does not match does not
+// play what the old voice said.
+function voiceIdentity(config: Config): string {
+  return [config.voice, config.ttsUrl, config.ttsModel, config.ttsReferenceId, config.ttsSpeed].join('|')
+}
+
 export async function runApp(config: Config, maxSegments?: number): Promise<void> {
   // Read before anything of this run's own reaches the log: it is the upper
   // bound of a crashed run's log window below, and every line under it belongs
@@ -768,7 +789,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const quit = quitLatch()
   // The side channel: the host fires the latch when /quit ARRIVES, so a
   // listener stuck behind a long model call (no read open) still leaves.
-  host.onQuit?.(() => quit.fire())
+  // A /quit typed during the farewell (spec 04 §3.6) cuts it, the way a second
+  // Ctrl-C does; outside that stretch it is the latch alone, as before.
+  let cutFarewell: () => void = () => {}
+  host.onQuit?.(() => {
+    quit.fire()
+    cutFarewell()
+  })
   // Armed from here until the Director's handler takes over, so a plain-mode
   // Ctrl-C anywhere in the pre-broadcast stretch (first-run, the setup
   // conversation, the bed pull) is a civilized exit, not a bare death.
@@ -781,6 +808,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // first run and the setup conversation, which turns its language knob (§3.9); the voice knobs
   // that conversation can change are not settings, so nothing here waits on it.
   const settings = buildSettingsStore(config, (m) => host.info(m))
+  // The listener's mute is the engine's master gain (spec 12 §3.4): applied
+  // from the persisted state as soon as BOTH exist and on every change — the
+  // program never notices, only the speakers do. Before anything can play,
+  // stock opener included (spec 04 §3.6), so muted means muted from the first
+  // sample rather than from the first thing that asks.
+  if (settings.current().muted) engine.setMuted(true)
+  settings.onChange((next) => engine.setMuted(next.muted))
   // The listener's taste (spec 14), on a real run only. Built BEFORE the first
   // run: its sources card (§3.9) runs the same /sources conversation the
   // Director later parks on, so the one closure serves both.
@@ -835,6 +869,61 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // and a successful swap clears it.
   const voiceAuthDown = { current: false }
   const targets = setupTargets(config, { voiceFailing: () => voiceAuthDown.current })
+  // The endpoint this run speaks through. Resolved here for the stock
+  // fingerprint below and re-resolved after the conversation, so an endpoint
+  // saved during it is heard THIS boot rather than the next one. `let`: the
+  // /setup recall re-resolves the same way and swaps the live provider.
+  let resolved = voiceAfterSetup(config, targets.voiceConfig())
+
+  // Stock lines (spec 04 §3.6): the opener set and the farewell the radio kept
+  // from an earlier sitting. Built here — persona, language and endpoint are
+  // all settled — and read BEFORE the gear probes, the bed pull and the banner,
+  // so the first beat is on the air while the rest of the boot runs behind it.
+  // A stub run has no brain to generate with, which is what keeps STUB=1 silent.
+  const stock =
+    claude === null
+      ? undefined
+      : new StockLines({
+          dir: stockDir(),
+          brain: { stockLines: (req) => claude.runTask(stockLinesTask(req, config.model)) },
+          // The delegate below, reached late: the refresh runs mid-session, so
+          // it speaks through whatever provider is live by then.
+          voice: { synthesize: (text) => voice.synthesize(text) },
+          fingerprint: (): StockFingerprint | null => {
+            // A run with no real voice has nothing to pre-render: generating
+            // would spend a model call and a silent synthesis for audio nobody
+            // can hear. Null here is the same silence as a missing file.
+            if (resolved.voice === 'stub' || resolved.ttsUrl === '') return null
+            const text = readPersonaText(personaPath)
+            if (text === null) return null
+            return {
+              voice: voiceIdentity(resolved),
+              language: settings.current().language ?? '',
+              persona: personaFingerprint(text),
+            }
+          },
+          // The persona under the LIVE language knob, exactly as the Director
+          // renders it (spec 12 §3.9): the fingerprint records that language,
+          // so the lines have to be written in it.
+          context: () => ({
+            persona: withLanguage(persona, settings.current().language),
+            profile: memory.profile(),
+          }),
+          log: (m) => host.debug?.(m),
+        })
+  const opener = stock?.opener() ?? []
+  const first = opener[0]
+  // Unawaited: the whole point is that the rest of the boot runs underneath it.
+  // The Director holds the promise so the next beat does not play OVER it — the
+  // engine mixes the voice channel rather than queueing it.
+  let bootPlaying = Promise.resolve()
+  if (first !== undefined) {
+    // Through the engine, never a raw player: the bed ducks under it like any
+    // talk clip. Unawaited — the whole point is that the boot runs underneath.
+    bootPlaying = engine.play(first.clip).catch(() => {})
+    host.debug?.('stock.opener aired n=1')
+  }
+
   let setupMusicOk = false
   if (claude !== null && !quit.requested) {
     const outcome = await runSetup({
@@ -856,11 +945,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     await closeFrontEnd()
     return
   }
-  // Resolved after the conversation, so an endpoint saved during it is heard
+  // Re-resolved after the conversation, so an endpoint saved during it is heard
   // THIS boot rather than the next one — and so the banner reports the voice
-  // that is actually playing, not the one the flags asked for. `let`: the
-  // /setup recall re-resolves the same way and swaps the live provider.
-  let resolved = voiceAfterSetup(config, targets.voiceConfig())
+  // that is actually playing, not the one the flags asked for.
+  resolved = voiceAfterSetup(config, targets.voiceConfig())
   // The delegate is what everything holds; the provider behind it can be
   // swapped by the /setup recall without anyone noticing (spec 10 §3.4).
   let liveVoice = buildVoice(resolved, (m) => host.info(m))
@@ -869,12 +957,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     synthesize: (text) => liveVoice.synthesize(text),
     close: () => liveVoice.close(),
   }
-  // The listener's mute is the engine's master gain (spec 12 §3.4): applied
-  // from the persisted state now and on every change — the program never
-  // notices, only the speakers do.
-  if (settings.current().muted) engine.setMuted(true)
-  settings.onChange((next) => engine.setMuted(next.muted))
-
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the
   // music check — a warm cache needs no yt-dlp, so talk-only sessions keep it.
@@ -1073,6 +1155,16 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(compactor !== undefined && { compactor }),
     ...(rwt !== undefined && { rwt }),
     ...(setupRecall !== undefined && { setupRecall }),
+    // The stock lines (spec 04 §3.6): what boot did not air itself, and the
+    // in-session refresh the loop pokes once a live beat has gone out.
+    ...(stock !== undefined && {
+      stock: {
+        owed: opener.slice(1),
+        openedAtBoot: first !== undefined,
+        playing: bootPlaying,
+        maybeRefresh: () => void stock.maybeRefresh(),
+      },
+    }),
     // The taste seams (spec 14): the digest for the pack, the mounts for the
     // invitations, the background refresh, and the /sources conversation on
     // the same floor parking /setup uses.
@@ -1136,6 +1228,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     voice: resolved.voice,
     ...(away !== undefined && { away }),
   })
+  // Recorded only now (spec 04 §3.6): the beat has been audible since boot, but
+  // admitting it any earlier would have moved the store's own last-on-air and
+  // away readings, which the banner and the opening fact above are built on.
+  if (first !== undefined) {
+    host.onRadioSegment(first.text)
+    memory.record({ role: 'radio', text: first.text })
+  }
   try {
     // A Ctrl-C during the bed pull or voice start fired the latch with nobody
     // left to read it: honor it here instead of going on the air.
@@ -1144,6 +1243,18 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // and leaves its sentinel for the next boot to find.
     disarm()
   } finally {
+    // The sign-off (spec 04 §3.6): the farewell plays over the ducked bed while
+    // the compaction flush runs alongside it, so the wait the listener feels is
+    // the farewell's own length rather than both in series. The SIGINT handler
+    // is still armed here on purpose — a second Ctrl-C cuts it and exits.
+    cutFarewell = () => void engine.stop()
+    await signOff({
+      clip: stock?.farewell() ?? null,
+      player: engine,
+      flush: () => compactor?.flush() ?? Promise.resolve(),
+      log: (m) => host.debug?.(m),
+    })
+    cutFarewell = () => {}
     offSigint()
     // Frames stop before the graph they read does.
     viz?.stop()
@@ -1159,14 +1270,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       }
     }
     await voice.close()
-    // Final compaction flush (spec 05 §3.6): fold any remaining backlog so a
-    // long session's tail lands in the profile. Best-effort and time-boxed by
-    // the Compactor — a fold is a model call, and Ctrl-C must not wait on one.
-    try {
-      await compactor?.flush()
-    } catch {
-      // an fs failure on apply must not mask the shutdown
-    }
     host.info('stopped cleanly.')
     await closeFrontEnd()
   }
