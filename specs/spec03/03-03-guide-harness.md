@@ -283,13 +283,27 @@
       (`assets/voice-presets.json`, which also carries the clip's title and
       transcript), and only then uploads. The pin is what makes a file fetched
       from `main` trustworthy under the listener's key — so a clip is never
-      edited in place; a new timbre is a new filename and a new pin. A cached
-      clip that no longer matches is re-fetched, not uploaded. A failed or
+      edited in place; a new timbre is a new filename and a new pin, and the
+      retired file **stays in `voices/`**, because every already-installed
+      build still fetches its own pinned URL off `main`. A cached clip that no
+      longer matches is re-fetched, not uploaded. A failed or
       mismatched download is an error that names the URL, so the guide can
       hand the listener the file to fetch by hand and finish through
       `audioPath`. No mirror, no retry queue: GitHub reachability is the one
       known soft spot (listeners in mainland China), and the by-hand path is
       the fallback until it is measured to matter.
+
+      A preset clip is cut from a **real human recording, never from TTS
+      output**, at >=20 s / 44.1 kHz mono / >=128 kbps. Measured 2026-09-22 on
+      one line through the production payload: re-cloning from a 5 s 64 kbps
+      render of an earlier clone flattens loudness range (female LRA 3.0 ->
+      2.0 LU, male 2.4 -> 1.7 LU), which is why the provider asks for >=10 s of
+      clean single-speaker speech. `female-v2.mp3` (32 s) is that shape; its
+      first-generation clone reads LRA 3.1 against the retired clip's 2.4 on a
+      20 s line, at I -19.9 LUFS against -13.5 -- the recording's own level,
+      which nothing downstream lifts (`src/audio/engine.ts`: a talk clip plays
+      at FULL_GAIN, the duck only moves the music bed). `male.mp3` still
+      carries the old shape.
   - `set_voice_speed` (2026-09-02, user report) — the speaking rate, one
     number in (spec 02 §3.6: fish.audio `prosody.speed`, bounded 0.5–2.0).
     The listener's "too fast" arrives right after the timbre is settled, and
