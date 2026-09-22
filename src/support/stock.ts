@@ -7,7 +7,7 @@
 // silence, exactly like today, and nothing on this path may block boot or quit.
 
 import { createHash } from 'node:crypto'
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { z } from 'zod'
@@ -79,10 +79,7 @@ export function readStockFile(dir: string, slot: StockSlot): StockFile | null {
 export function readStockSlot(dir: string, slot: StockSlot, fingerprint: StockFingerprint): StockBeat[] {
   const file = readStockFile(dir, slot)
   if (file === null) return []
-  const fp = file.fingerprint
-  if (fp.voice !== fingerprint.voice || fp.language !== fingerprint.language || fp.persona !== fingerprint.persona) {
-    return []
-  }
+  if (!sameFingerprint(file.fingerprint, fingerprint)) return []
   const beats: StockBeat[] = []
   for (const [i, text] of file.texts.entries()) {
     const source = wavPath(dir, slot, i)
@@ -96,6 +93,11 @@ export function readStockSlot(dir: string, slot: StockSlot, fingerprint: StockFi
   return beats
 }
 
+function sameFingerprint(a: StockFingerprint | null, b: StockFingerprint | null): boolean {
+  if (a === null || b === null) return false
+  return a.voice === b.voice && a.language === b.language && a.persona === b.persona
+}
+
 export type StockWrite = {
   texts: readonly string[]
   previous: readonly string[]
@@ -106,9 +108,19 @@ export type StockWrite = {
   generatedAt: string
 }
 
+// Every wav is copied aside first and only then moved into place: a copy that
+// dies halfway (a full disk, a provider temp dir already reaped) would
+// otherwise leave the previous generation's json pointing at a mix of old and
+// new audio — audible nonsense the fingerprint cannot catch, since it is the
+// SAME slot. The renames are the publish; the json goes last.
 export function writeStockSlot(dir: string, slot: StockSlot, write: StockWrite): void {
   mkdirSync(dir, { recursive: true })
-  for (const [i, clip] of write.clips.entries()) copyFileSync(clip.source, wavPath(dir, slot, i))
+  const staged = write.clips.map((clip, i) => {
+    const tmp = `${wavPath(dir, slot, i)}.new`
+    copyFileSync(clip.source, tmp)
+    return tmp
+  })
+  for (const [i, tmp] of staged.entries()) renameSync(tmp, wavPath(dir, slot, i))
   const file: StockFile = {
     texts: [...write.texts],
     previous: [...write.previous],
@@ -210,6 +222,11 @@ export class StockLines {
         previous,
       })
       if (set === null) return
+      // The /setup recall can pin a different voice while this call runs, and
+      // the synthesis below would then speak in it. Stamping the result with
+      // the fingerprint the round STARTED on would hand a later boot the wrong
+      // host, so a swap throws the round away; the next session regenerates.
+      if (!sameFingerprint(this.deps.fingerprint(), fp)) return
       const generatedAt = new Date(this.now()).toISOString()
       const texts = set.opener.filter((t) => t.trim() !== '').slice(0, OPENER_BEATS)
       if (texts.length > 0) {
@@ -257,11 +274,14 @@ export class StockLines {
     return clips
   }
 
+  // Due when there is no PLAYABLE farewell — the fingerprint gate and the
+  // missing-audio gate are the same read the quit path makes, so a slot whose
+  // wav went missing is repaired this session instead of sitting unplayable
+  // until the TTL runs out.
   private farewellDue(fp: StockFingerprint): boolean {
+    if (readStockSlot(this.deps.dir, 'farewell', fp).length === 0) return true
     const file = readStockFile(this.deps.dir, 'farewell')
     if (file === null) return true
-    const f = file.fingerprint
-    if (f.voice !== fp.voice || f.language !== fp.language || f.persona !== fp.persona) return true
     const at = Date.parse(file.generatedAt)
     return Number.isNaN(at) || this.now() - at >= FAREWELL_TTL_MS
   }

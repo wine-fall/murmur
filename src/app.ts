@@ -66,6 +66,7 @@ import { BilibiliSpace } from './music/sources/wbi.ts'
 import { SOURCE_NAMES, TasteReader } from './music/sources/taste.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLanguage, personaLine } from './brain/persona.ts'
+import { withLanguage } from './prompts/persona.ts'
 import { lineReader, quitLatch, runSetup, setupComplete, type SetupTargets } from './setup/guide.ts'
 import { buildFindMusicInstruction } from './prompts/music.ts'
 import { aboutSection } from './prompts/talk.ts'
@@ -807,6 +808,13 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   // first run and the setup conversation, which turns its language knob (§3.9); the voice knobs
   // that conversation can change are not settings, so nothing here waits on it.
   const settings = buildSettingsStore(config, (m) => host.info(m))
+  // The listener's mute is the engine's master gain (spec 12 §3.4): applied
+  // from the persisted state as soon as BOTH exist and on every change — the
+  // program never notices, only the speakers do. Before anything can play,
+  // stock opener included (spec 04 §3.6), so muted means muted from the first
+  // sample rather than from the first thing that asks.
+  if (settings.current().muted) engine.setMuted(true)
+  settings.onChange((next) => engine.setMuted(next.muted))
   // The listener's taste (spec 14), on a real run only. Built BEFORE the first
   // run: its sources card (§3.9) runs the same /sources conversation the
   // Director later parks on, so the one closure serves both.
@@ -882,6 +890,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
           // it speaks through whatever provider is live by then.
           voice: { synthesize: (text) => voice.synthesize(text) },
           fingerprint: (): StockFingerprint | null => {
+            // A run with no real voice has nothing to pre-render: generating
+            // would spend a model call and a silent synthesis for audio nobody
+            // can hear. Null here is the same silence as a missing file.
+            if (resolved.voice === 'stub' || resolved.ttsUrl === '') return null
             const text = readPersonaText(personaPath)
             if (text === null) return null
             return {
@@ -890,15 +902,25 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
               persona: personaFingerprint(text),
             }
           },
-          context: () => ({ persona, profile: memory.profile() }),
+          // The persona under the LIVE language knob, exactly as the Director
+          // renders it (spec 12 §3.9): the fingerprint records that language,
+          // so the lines have to be written in it.
+          context: () => ({
+            persona: withLanguage(persona, settings.current().language),
+            profile: memory.profile(),
+          }),
           log: (m) => host.debug?.(m),
         })
   const opener = stock?.opener() ?? []
   const first = opener[0]
+  // Unawaited: the whole point is that the rest of the boot runs underneath it.
+  // The Director holds the promise so the next beat does not play OVER it — the
+  // engine mixes the voice channel rather than queueing it.
+  let bootPlaying = Promise.resolve()
   if (first !== undefined) {
     // Through the engine, never a raw player: the bed ducks under it like any
     // talk clip. Unawaited — the whole point is that the boot runs underneath.
-    void engine.play(first.clip).catch(() => {})
+    bootPlaying = engine.play(first.clip).catch(() => {})
     host.debug?.('stock.opener aired n=1')
   }
 
@@ -935,12 +957,6 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     synthesize: (text) => liveVoice.synthesize(text),
     close: () => liveVoice.close(),
   }
-  // The listener's mute is the engine's master gain (spec 12 §3.4): applied
-  // from the persisted state now and on every change — the program never
-  // notices, only the speakers do.
-  if (settings.current().muted) engine.setMuted(true)
-  settings.onChange((next) => engine.setMuted(next.muted))
-
   // The bed (spec 03-04): first-run pull at loading time, then local-only. Any
   // failure degrades to no bed; the radio still starts. Independent of the
   // music check — a warm cache needs no yt-dlp, so talk-only sessions keep it.
@@ -1142,7 +1158,12 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     // The stock lines (spec 04 §3.6): what boot did not air itself, and the
     // in-session refresh the loop pokes once a live beat has gone out.
     ...(stock !== undefined && {
-      stock: { owed: opener.slice(1), openedAtBoot: first !== undefined, maybeRefresh: () => void stock.maybeRefresh() },
+      stock: {
+        owed: opener.slice(1),
+        openedAtBoot: first !== undefined,
+        playing: bootPlaying,
+        maybeRefresh: () => void stock.maybeRefresh(),
+      },
     }),
     // The taste seams (spec 14): the digest for the pack, the mounts for the
     // invitations, the background refresh, and the /sources conversation on

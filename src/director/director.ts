@@ -370,7 +370,15 @@ export type DirectorDeps = {
   // which is what the first live batch has to carry on from. The refresh is
   // poked once a live beat has aired, off the loop like the compactor's fold.
   // Absent (stub runs, tests): no stock, exactly as before.
-  stock?: { owed: readonly StockBeat[]; openedAtBoot: boolean; maybeRefresh(): void }
+  stock?: {
+    owed: readonly StockBeat[]
+    openedAtBoot: boolean
+    // Boot's own beat, still on the air. The engine MIXES the voice channel
+    // rather than queueing it, so the loop waits this out before putting
+    // anything over it — and fires the cold batch underneath it meanwhile.
+    playing: Promise<void>
+    maybeRefresh(): void
+  }
   // The /sources conversation (spec 14 §3.1): parks the loop like the /setup
   // recall while the music plays on. Absent (stub runs): a pointer line.
   sourcesRecall?: () => Promise<void>
@@ -419,6 +427,7 @@ export class Director {
   private beatsAired = 0
   private stockAired = false
   private liveAired = false
+  private bootPlaying: Promise<void> | null = null
   private coda: { beat: TalkBeat; clip: AudioClip } | null = null
   private codaEpoch = 0
   private talksSinceMusic = 0
@@ -487,6 +496,7 @@ export class Director {
     this.stockAhead = [...(deps.stock?.owed ?? [])]
     this.stockAired = deps.stock?.openedAtBoot ?? false
     this.beatsAired = this.stockAired ? 1 : 0
+    this.bootPlaying = this.stockAired ? (deps.stock?.playing ?? null) : null
     this.deck = new SlotDeck(deps.random === undefined ? {} : { random: deps.random })
     const last = deps.memory.lastOnAir()
     if (last !== undefined) {
@@ -626,8 +636,14 @@ export class Director {
     // (plus any prior-session ledger) is enough to choose by; staleness is
     // the accepted spec 04 §3.1 trade.
     this.prefetchMusic()
+    // With boot's opener on the air (spec 04 §3.6) the cold batch is fired HERE
+    // rather than inline at the first boundary, so it thinks underneath the
+    // beat the loop is about to wait out instead of behind it.
+    if (this.stockAired) this.prefetchTalk()
     let produced = 0
     while (!this.quit && (maxSegments === undefined || produced < maxSegments)) {
+      await this.awaitBootBeat()
+      if (this.quit) break
       this.beginBoundary()
       // The scheduler stays constructed; the live flag decides at the fire
       // site (spec 12 §3.2), so an anchors toggle needs no restart.
@@ -657,6 +673,17 @@ export class Director {
       const last = maxSegments !== undefined && produced >= maxSegments
       if (!last && !this.quit) await this.gap()
     }
+  }
+
+  // Boot's opener beat plays through the same voice channel every segment uses,
+  // and the engine mixes it rather than queueing behind it — so the first
+  // boundary waits for it. Raced against the quit so a listener who leaves
+  // mid-line is not held by it, and awaited at most once.
+  private async awaitBootBeat(): Promise<void> {
+    const playing = this.bootPlaying
+    if (playing === null) return
+    this.bootPlaying = null
+    await Promise.race([playing, this.quitting])
   }
 
   // --- presence, anchors (spec 07) ----------------------------------------- //
@@ -1082,9 +1109,11 @@ export class Director {
     const need = TALK_LOOKAHEAD - this.talkAhead.length
     if (need <= 0) return
     const epoch = this.talkEpoch
-    // The stock beats still owed are queued text too (spec 04 §3.6): the refill
-    // continues AFTER them instead of writing over the opening they carry.
-    const queued = [...this.stockAhead.map((s) => s.text), ...this.talkAhead.map((b) => b.beat.text)]
+    // Only the look-ahead's own beats are queued context. An opener beat still
+    // owed is NOT (spec 04 §3.6): the hand-off drops it the moment this very
+    // batch lands, so presenting it as already said would have the host carry
+    // on from a line nobody heard.
+    const queued = this.talkAhead.map((b) => b.beat.text)
     this.deps.host.debug?.(`talk.refill need=${need} queued=${queued.length}`)
     const beats = await this.generateTalks(need, queued)
     // A steer discarded the buffer while the batch was in flight: its beats

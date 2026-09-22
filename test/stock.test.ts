@@ -220,6 +220,80 @@ describe('StockLines refresh (spec 04 §3.6)', () => {
     expect(readStockSlot(dir, 'farewell', other).map((b) => b.text)).toEqual(['anew'])
   })
 
+  it('a farewell whose audio went missing is due however young its json is', async () => {
+    const dir = tmp()
+    const clock = { now: 0 }
+    const brain = fakeStockBrain([SET, { opener: ['a', 'b', 'c'], farewell: 'again' }])
+    const first = stockAt(dir, brain, clock)
+    first.stock.maybeRefresh()
+    await first.stock.settled()
+    rmSync(join(dir, 'farewell-1.wav'))
+    const next = stockAt(dir, brain, clock)
+    next.stock.maybeRefresh()
+    await next.stock.settled()
+    expect(brain.requests[1]).toMatchObject({ farewell: true })
+    expect(readStockSlot(dir, 'farewell', FP).map((b) => b.text)).toEqual(['again'])
+  })
+
+  it('a voice swapped under a running generation throws the round away', async () => {
+    const dir = tmp()
+    const src = tmp()
+    // A playable set from the old voice, so there is something to protect.
+    writeStockSlot(dir, 'opener', {
+      texts: ['kept'],
+      previous: [],
+      fingerprint: FP,
+      clips: [clip(src, 'k.wav')],
+      generatedAt: new Date(0).toISOString(),
+    })
+    let fp: StockFingerprint = FP
+    const voice = fakeStockVoice()
+    const lines: string[] = []
+    const stock = new StockLines({
+      dir,
+      brain: {
+        async stockLines(): Promise<StockSet> {
+          // The listener runs /setup and pins a different voice mid-call.
+          fp = { ...FP, voice: 'hosted:ref-9' }
+          return SET
+        },
+      },
+      voice,
+      fingerprint: () => fp,
+      context: () => ({ persona: 'p', profile: '' }),
+      now: () => 0,
+      log: (m) => lines.push(m),
+    })
+    stock.maybeRefresh()
+    await stock.settled()
+    expect(lines.some((l) => l.startsWith('stock.refresh opener=no farewell=no'))).toBe(true)
+    expect(readStockSlot(dir, 'opener', FP).map((b) => b.text)).toEqual(['kept'])
+  })
+
+  it('a copy that dies halfway leaves the old set playable rather than a mix', async () => {
+    const dir = tmp()
+    const src = tmp()
+    writeStockSlot(dir, 'opener', {
+      texts: ['kept one', 'kept two'],
+      previous: [],
+      fingerprint: FP,
+      clips: [clip(src, 'k1.wav'), clip(src, 'k2.wav')],
+      generatedAt: new Date(0).toISOString(),
+    })
+    expect(() =>
+      writeStockSlot(dir, 'opener', {
+        texts: ['new one', 'new two'],
+        previous: [],
+        fingerprint: FP,
+        clips: [clip(src, 'n1.wav'), { source: join(src, 'gone.wav'), kind: 'talk' }],
+        generatedAt: new Date(1).toISOString(),
+      }),
+    ).toThrow()
+    const kept = readStockSlot(dir, 'opener', FP)
+    expect(kept.map((b) => b.text)).toEqual(['kept one', 'kept two'])
+    expect(readFileSync(kept[0]!.clip.source, 'utf8')).toBe('k1.wav')
+  })
+
   it('is single-flight, and a failed generation leaves the files as they were', async () => {
     const dir = tmp()
     const clock = { now: 0 }

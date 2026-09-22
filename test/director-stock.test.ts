@@ -37,8 +37,8 @@ function setup(over: Partial<DirectorDeps> & { gapSeconds?: number } = {}) {
   return { brain, voice, player, host, memory, knobs, director }
 }
 
-function fakeStock(owed: StockBeat[], openedAtBoot = true) {
-  const stock = { owed, openedAtBoot, refreshes: 0, maybeRefresh: (): void => void (stock.refreshes += 1) }
+function fakeStock(owed: StockBeat[], openedAtBoot = true, playing = Promise.resolve()) {
+  const stock = { owed, openedAtBoot, playing, refreshes: 0, maybeRefresh: (): void => void (stock.refreshes += 1) }
   return stock
 }
 
@@ -59,8 +59,9 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
 
   it('a ready live beat beats the stock queue, and the hand-off names the beat it landed on', async () => {
     const stock = fakeStock(stockBeats('stock two', 'stock three'))
-    const { brain, host, director } = setup({ stock })
+    const { brain, host, director } = setup({ stock, gapSeconds: 0.1 })
     brain.batches = [['live one', 'live two'], ['live three']]
+    brain.nextTalksDelayMs = 20 // a cold batch thinks; that is what the stock covers
     await director.run(2)
     // Boundary 1 has no live beat yet (the batch is only fired behind the stock
     // beat); boundary 2 does, so the stock's third beat is never spent.
@@ -68,13 +69,44 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     expect(host.debugs).toContain('stock.handoff live at beat 3')
   })
 
+  it('waits out the beat boot put on the air before airing anything over it', async () => {
+    let done!: () => void
+    const playing = new Promise<void>((resolve) => (done = resolve))
+    const stock = fakeStock(stockBeats('stock two'), true, playing)
+    const { brain, player, director } = setup({ stock })
+    brain.batches = [['live one', 'live two']]
+    brain.nextTalksDelayMs = 40
+    const run = director.run(1)
+    // The engine MIXES rather than queues: a second clip started now would be
+    // heard on top of boot's.
+    await until(() => brain.nextTalksCalls === 1, 'the cold batch fired at time 0')
+    expect(player.played).toEqual([])
+    done()
+    await run
+    expect(player.played.map((c) => c.source)).toEqual(['/stock/opener-2.wav'])
+  })
+
+  it('never passes the live batch an opener beat that may never air', async () => {
+    const stock = fakeStock(stockBeats('stock two', 'stock three'))
+    const { brain, director } = setup({ stock })
+    brain.batches = [['live one', 'live two'], ['live three']]
+    brain.nextTalksDelayMs = 40
+    await director.run(2)
+    // Beat 3 is dropped at the hand-off, so writing it into the transcript
+    // would have the host carry on from a line nobody heard.
+    for (const ctx of brain.talkContexts) {
+      expect(ctx.recent.map((t) => t.text)).not.toContain('stock three')
+    }
+  })
+
   it('drops what is left of the opener once a live beat has caught up', async () => {
     const stock = fakeStock(stockBeats('stock two', 'stock three'))
-    const { brain, host, director } = setup({ stock })
+    const { brain, host, director } = setup({ stock, gapSeconds: 0.1 })
     // The refill comes back empty once, so the buffer is genuinely dry at the
     // third boundary — and an OPENING line must not air in the middle of a
     // sitting (nor read audio the refresh is busy rewriting under it).
     brain.batches = [['live one'], [], ['live two']]
+    brain.nextTalksDelayMs = 20
     await director.run(3)
     expect(host.radio).toEqual(['stock two', 'live one', 'live two'])
   })
@@ -92,6 +124,7 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     const stock = fakeStock(stockBeats('stock two', 'stock three'))
     const { brain, host, player, director } = setup({ stock })
     brain.batches = [['live one', 'live two'], ['after you']]
+    brain.nextTalksDelayMs = 40
     player.auto = false
     const run = director.run(2)
     await until(() => player.playing, 'the first stock beat is on the air')
@@ -109,23 +142,32 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
   it('records the aired stock beat and opens the first live batch from it', async () => {
     const stock = fakeStock(stockBeats('stock two'))
     const { brain, memory, director } = setup({ stock })
+    // What boot admitted for the beat it aired itself, before the loop started.
+    memory.record({ role: 'radio', text: 'stock one' })
     brain.batches = [['live one'], ['live two']]
+    brain.nextTalksDelayMs = 40
     await director.run(2)
-    expect(memory.recent(5).map((t) => t.text)).toEqual(['stock two', 'live one'])
-    // The cold batch is fired with the stock beats it has NOT aired yet in
-    // context, and told the program is opening with them.
+    expect(memory.recent(5).map((t) => t.text)).toEqual(['stock one', 'stock two', 'live one'])
+    // The cold batch stands on what has really been said, and is told the
+    // program is opening with it rather than opening a second time.
     const cold = brain.talkContexts[0]!
     expect(cold.opening).toBe(true)
-    expect(cold.recent.map((t) => t.text)).toEqual(['stock two'])
+    expect(cold.recent.map((t) => t.text)).toEqual(['stock one'])
   })
 
   it('pokes the refresh once a LIVE beat has aired, never behind a stock one', async () => {
-    const stock = fakeStock(stockBeats('stock two', 'stock three'))
-    const { brain, director } = setup({ stock })
-    brain.batches = [['live one', 'live two'], ['live three']]
-    await director.run(1)
-    expect(stock.refreshes).toBe(0)
-    await director.run(1)
-    expect(stock.refreshes).toBe(1)
+    const stockOnly = fakeStock(stockBeats('stock two', 'stock three'))
+    const a = setup({ stock: stockOnly, gapSeconds: 0.1 })
+    a.brain.batches = [['live one', 'live two']]
+    a.brain.nextTalksDelayMs = 20
+    await a.director.run(1)
+    expect(stockOnly.refreshes).toBe(0)
+
+    const reachesLive = fakeStock(stockBeats('stock two'))
+    const b = setup({ stock: reachesLive, gapSeconds: 0.1 })
+    b.brain.batches = [['live one', 'live two']]
+    b.brain.nextTalksDelayMs = 20
+    await b.director.run(2)
+    expect(reachesLive.refreshes).toBe(1)
   })
 })
