@@ -835,6 +835,18 @@ describe('create_voice preset (bundled male/female timbre, fetched on demand)', 
     expect(net.uploads).toHaveLength(0)
   })
 
+  // A preset that moves to a new clip retires the old file but does not delete
+  // it: the clips are fetched from `main` at setup time, so every already-
+  // installed build still asks for the filename ITS presets pinned. Removing a
+  // retired clip breaks those listeners silently, and nothing else here notices.
+  it('retired preset clips stay in the repo for already-installed builds', () => {
+    const retired = { 'female.mp3': '717c7e7b5b0874fc3429c10bf2431140b98964666443e9ba37677f6f1e048c3e' }
+    for (const [file, sha256] of Object.entries(retired)) {
+      const bytes = readFileSync(join(import.meta.dirname, '..', 'voices', file))
+      expect(createHash('sha256').update(bytes).digest('hex')).toBe(sha256)
+    }
+  })
+
   it('the bundled clips in the repo are the bytes the presets pin', () => {
     for (const preset of Object.values(VOICE_PRESETS)) {
       const bytes = readFileSync(join(import.meta.dirname, '..', 'voices', preset.file))

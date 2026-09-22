@@ -10,25 +10,23 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-22 (spec 04 §3.6, stock lines — PR #292 open)_
+_Last updated: 2026-09-22 (spec 03-03 §7.2, default female voice re-cloned from a real recording)_
 
 ## Where we are
 
 **L0 + L1 are code-complete in TypeScript, and every code spec on the roadmap is
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
-bed + spec 05 memory (now at v1.5 — `05-01` recall & forgetting), with 04, 06,
-07, 10, 11, 12 and 13 (real-world topics) built on top. Unit gate
-green (vitest); real-SDK smokes passed per phase. **Each spec's own status
-header records what its build realized and the PR that landed it** — read the
-spec for what it does, its PR for how it got there. Everything open is under
-**Open** — engineering items first, then the by-ear passes.
+bed + spec 05 memory (v1.5 — `05-01` recall & forgetting), with 04, 06, 07, 10,
+11, 12 and 13 (real-world topics) on top. Unit gate green (vitest); real-SDK
+smokes passed per phase. **Each spec's own status header records what its build
+realized and the PR that landed it.** Everything open is under **Open**.
 
-**In flight: spec 04 §3.6, stock lines (#292).** A cold start measured 24-31 s
-of silence and `/quit` cut the sound off with no sign-off. The radio now keeps
-three opener beats and one farewell on disk: sound ~2 s after launch, a sign-off
-on the way out. Spec 14 §3.10's discovery work landed (#288 / #289 / #291); its
-verdict needs weeks of listening and #290 carries it.
+**In flight: spec 03-03 §7.2, the default female voice.** It was a clone of a
+clone of a 5 s render; it is now a first-generation clone of a real recording,
+and `female-v2.mp3` is the matching >=20 s preset clip. #295 carries the ear,
+#294 the same debt on the male side. Stock lines (#292) and discovery
+(#288 / #289 / #291) landed; #293 and #290 carry their verdicts.
 
 **No listener data in the repository** (2026-09-20, user): nothing from
 `~/.murmur` — a song, artist, playlist or channel name, an account name, a
@@ -43,6 +41,8 @@ One line each — the issue body carries what it is, the spec it touches, and ho
 it closes. Add and remove entries with the `murmur-issue` skill, never by
 hand: CI fails if this section points at an issue that is already closed.
 
+- **#295** (by-ear) The new default female voice, and the 6.4 LU it lost against the retired clone — spec 03-03 §7.2.
+- **#294** (eng) `male.mp3` is still a clone of a clone; the preset clip needs a real recording — spec 03-03 §7.2.
 - **#293** (by-ear) The stock opener set and the farewell: count, genericness, variety — spec 04 §3.6.
 - **#290** (by-ear) Does the discovery change actually widen what plays — spec 14 §3.10's familiar share per 100 airs.
 - **#284** (eng) `CLOCK_USAGE` is a per-fact "reference only" rule — the one prompt rule spec 04 §3.5 forbids.

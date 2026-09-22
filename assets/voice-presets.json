@@ -7,10 +7,10 @@
     "text": "早啊，新的一天。窗外的光刚好，先给你放首轻快的。"
   },
   "female": {
-    "file": "female.mp3",
-    "url": "https://raw.githubusercontent.com/wine-fall/murmur/main/voices/female.mp3",
-    "sha256": "717c7e7b5b0874fc3429c10bf2431140b98964666443e9ba37677f6f1e048c3e",
+    "file": "female-v2.mp3",
+    "url": "https://raw.githubusercontent.com/wine-fall/murmur/main/voices/female-v2.mp3",
+    "sha256": "2a821d262c6cf847b437eb74746f2ec5bbbf0469b9ff9852afbe0fbff80e3d76",
     "title": "murmur (female)",
-    "text": "早啊，新的一天。窗外的光刚好，先给你放首轻快的。"
+    "text": "当然，笑并不是一件容易的事，因为生活给了我们太多的挫折、不幸与苦难。这些充满苦涩的东西，吃到任何人的嘴里都会让人觉得不愉快。所以总有一些东西让我们泪流满面。然而，我们更加确信，我们不喜欢那种苦涩，我们需要将它摆脱，然后才能拥有快乐的生活。"
   }
 }
