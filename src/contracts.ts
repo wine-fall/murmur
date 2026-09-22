@@ -98,6 +98,10 @@ export type ContextPack = {
   // after a gap (spec 05 §3.4). `when` is a coarse phrase ("yesterday evening")
   // — never a count of hours. Absent inside one sitting and on a first run.
   readonly lastOnAir?: { readonly when: string; readonly topics: readonly string[] }
+  // The sitting has opened on stock lines but no live beat has followed them
+  // yet (spec 04 §3.6). The transcript is no longer empty, so the opening fact
+  // would otherwise be dropped — and the host would open the program twice.
+  readonly opening?: boolean
 }
 
 // --- real-world topics (spec 13) ------------------------------------------ //

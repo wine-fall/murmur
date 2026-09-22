@@ -8,7 +8,10 @@
 import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
-import type { TalkBeat } from '../contracts.ts'
+import type { Task, TalkBeat } from '../contracts.ts'
+import { buildStockLinesPrompt } from '../prompts/talk.ts'
+import { hostSystemPrompt } from '../prompts/persona.ts'
+import type { StockRequest, StockSet } from '../support/stock.ts'
 
 const beatSchema = z.object({
   text: z.string().describe('the spoken beat, a few sentences'),
@@ -48,4 +51,42 @@ export function emitTalkBeatsTool(count: number, capture: (beats: TalkBeat[]) =>
       return { content: [{ type: 'text', text: JSON.stringify({ ok: true, beats: beats.length }) }] }
     },
   )
+}
+
+// The stock lines (spec 04 §3.6): the same terminal-call shape as the talk
+// beats — the opener set in order, plus the sign-off when that slot is due.
+const stockShape = {
+  opener: z.array(z.string()).min(1).describe('the opening beats, in order'),
+  farewell: z.string().optional().describe('the one line said as the program goes off the air'),
+}
+
+export function emitStockLinesTool(count: number, wantFarewell: boolean, capture: (set: StockSet) => void) {
+  return tool(
+    'emit_stock_lines',
+    'Return the lines you were asked for: `opener`, the opening beats in order' +
+      (wantFarewell ? ', and `farewell`, the single sign-off line' : '') +
+      '. Each is clean spoken text — no markup, speaker labels, quotation marks, ' +
+      'or stage directions. Calling this ends the task.',
+    stockShape,
+    async (args) => {
+      const opener = args.opener.map((t) => t.trim()).filter((t) => t !== '').slice(0, count)
+      const farewell = wantFarewell ? args.farewell?.trim() : undefined
+      if (opener.length > 0) capture({ opener, ...(farewell && { farewell }) })
+      return { content: [{ type: 'text', text: JSON.stringify({ ok: true, opener: opener.length }) }] }
+    },
+  )
+}
+
+// The stock generation as a task (spec 04 §3.6): one bounded call in the
+// host's own voice, off the live loop, that hands back the whole set at once.
+const STOCK_MAX_TURNS = 2
+
+export function stockLinesTask(req: StockRequest, model: string): Task<StockSet> {
+  return {
+    systemPrompt: hostSystemPrompt(req.persona),
+    prompt: buildStockLinesPrompt(req),
+    model,
+    maxTurns: STOCK_MAX_TURNS,
+    tools: (finish) => [emitStockLinesTool(req.count, req.farewell, finish)],
+  }
 }

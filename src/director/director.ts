@@ -48,6 +48,7 @@ import { chromeProfile } from '../music/sources/chrome.ts'
 import type { Moment } from '../music/sources/moment.ts'
 import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
+import type { StockBeat } from '../support/stock.ts'
 import { INSTALL_COMMAND } from '../support/update.ts'
 import { buildMusicSituation } from '../prompts/music.ts'
 import { withLanguage } from '../prompts/persona.ts'
@@ -363,6 +364,13 @@ export type DirectorDeps = {
     mounted(): readonly SourceId[]
     maybeRefresh(): void
   }
+  // The stock lines (spec 04 §3.6). `owed` are the opener beats boot did not
+  // air itself, queued SEPARATELY from the look-ahead so its depth invariant is
+  // untouched; `openedAtBoot` says the sitting already opened with a stock line,
+  // which is what the first live batch has to carry on from. The refresh is
+  // poked once a live beat has aired, off the loop like the compactor's fold.
+  // Absent (stub runs, tests): no stock, exactly as before.
+  stock?: { owed: readonly StockBeat[]; openedAtBoot: boolean; maybeRefresh(): void }
   // The /sources conversation (spec 14 §3.1): parks the loop like the /setup
   // recall while the music plays on. Absent (stub runs): a pointer line.
   sourcesRecall?: () => Promise<void>
@@ -403,6 +411,14 @@ export class Director {
   // untouched — it either rides the track's outro or goes to the head of the
   // queue when the track ends, and is dropped by a steer like any other beat
   // written before the listener spoke.
+  // spec 04 §3.6: the pre-generated opener beats still owed, oldest first.
+  // Aired only when no live beat is ready, dropped on a steer with the buffer.
+  private stockAhead: StockBeat[] = []
+  // Beats this sitting has put on the air, the stock ones boot aired included:
+  // what the hand-off seam names.
+  private beatsAired = 0
+  private stockAired = false
+  private liveAired = false
   private coda: { beat: TalkBeat; clip: AudioClip } | null = null
   private codaEpoch = 0
   private talksSinceMusic = 0
@@ -467,6 +483,10 @@ export class Director {
 
   constructor(deps: DirectorDeps) {
     this.deps = deps
+    // What boot left for the loop to finish saying (spec 04 §3.6).
+    this.stockAhead = [...(deps.stock?.owed ?? [])]
+    this.stockAired = deps.stock?.openedAtBoot ?? false
+    this.beatsAired = this.stockAired ? 1 : 0
     this.deck = new SlotDeck(deps.random === undefined ? {} : { random: deps.random })
     const last = deps.memory.lastOnAir()
     if (last !== undefined) {
@@ -820,9 +840,26 @@ export class Director {
   // Printed + recorded at air time, so an interjection's reply sees this
   // segment in context. The topic tag (when the model provided one) feeds the
   // cross-day anti-repeat ledger (spec 05 §3.9).
-  private airBeat(beat: TalkBeat): void {
+  private airBeat(beat: TalkBeat, stock = false): void {
     this.recordBeat(beat)
     this.emitState('talk')
+    this.beatsAired++
+    if (stock) {
+      this.stockAired = true
+      this.deps.host.debug?.(`stock.opener aired n=${this.beatsAired}`)
+      return
+    }
+    if (!this.liveAired) {
+      this.liveAired = true
+      if (this.stockAired) this.deps.host.debug?.(`stock.handoff live at beat ${this.beatsAired}`)
+      // What is left of the opener is spent (spec 04 §3.6): an OPENING line has
+      // no business mid-sitting, and the refresh below rewrites the very wavs
+      // those beats point at.
+      this.stockAhead = []
+    }
+    // Off the loop, single-flight, once a live beat proves the sitting is real
+    // — the same posture as the profile fold and the taste refresh.
+    this.deps.stock?.maybeRefresh()
   }
 
   // Everything airing a beat means EXCEPT claiming the segment: a coda riding a
@@ -898,6 +935,10 @@ export class Director {
       ...(cue !== undefined && { cue }),
       ...(rwt !== undefined && { rwt }),
       ...(taste !== '' && { taste }),
+      // The sitting opened on stock lines and no live beat has answered them
+      // yet (spec 04 §3.6): the opening fact is still owed, even though the
+      // transcript is no longer empty.
+      ...(this.stockAired && !this.liveAired && { opening: true }),
       ...this.lastOnAirFact(),
     }
   }
@@ -959,7 +1000,7 @@ export class Director {
   private async talkSegment(): Promise<void> {
     const aired = await this.steerable(this.nextTalkClip())
     if (aired === null) return // quit won, or generation/synthesis degraded; the loop decides
-    this.airBeat(aired.beat)
+    this.airBeat(aired.beat, aired.stock === true)
     // Refill AFTER recording, so the top-up's context already carries this
     // just-aired beat and its Brain+synth overlap the playback below.
     this.prefetchTalk()
@@ -971,7 +1012,7 @@ export class Director {
   // one batched nextTalks, air beat 1, buffer the rest (spec 04 §3.3). An
   // in-flight refill is awaited over a cold call so the two never
   // double-generate; a refill that degraded to nothing falls through cold.
-  private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip } | null> {
+  private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip; stock?: true } | null> {
     // Nobody around: yield the whole boundary to music/bed (spec 07 §3.2 —
     // "music/bed only"). Checked BEFORE the buffer is touched, so pre-synthesized
     // beats are kept for the moment the listener returns rather than spent on an
@@ -980,6 +1021,17 @@ export class Director {
     if (this.gated()) {
       this.deps.host.debug?.('talk.gated: nobody around; yielding to music/bed')
       return null
+    }
+    // Stock before waiting (spec 04 §3.6): a live beat that is already primed
+    // wins, but a boundary with nothing ready says a pre-generated line rather
+    // than holding the air open for a batch that is still thinking. The refill
+    // is fired by talkSegment behind it, exactly as it is behind a live beat.
+    if (this.talkAhead.length === 0) {
+      const stock = this.stockAhead.shift()
+      if (stock !== undefined) {
+        this.prefetchMusic(priorLine(stock.text))
+        return { beat: { text: stock.text }, clip: stock.clip, stock: true }
+      }
     }
     if (this.talkAhead.length === 0 && this.talkFill !== null && !this.talkFill.done()) {
       await this.talkFill.promise
@@ -1030,7 +1082,9 @@ export class Director {
     const need = TALK_LOOKAHEAD - this.talkAhead.length
     if (need <= 0) return
     const epoch = this.talkEpoch
-    const queued = this.talkAhead.map((b) => b.beat.text)
+    // The stock beats still owed are queued text too (spec 04 §3.6): the refill
+    // continues AFTER them instead of writing over the opening they carry.
+    const queued = [...this.stockAhead.map((s) => s.text), ...this.talkAhead.map((b) => b.beat.text)]
     this.deps.host.debug?.(`talk.refill need=${need} queued=${queued.length}`)
     const beats = await this.generateTalks(need, queued)
     // A steer discarded the buffer while the batch was in flight: its beats
@@ -1062,6 +1116,8 @@ export class Director {
     this.talkAhead = []
     this.talkFill = null
     this.coda = null
+    // The stock beats were written before the listener spoke too (spec 04 §3.6).
+    this.stockAhead = []
   }
 
   // -- the coda: the way out of a song (spec 04 §3.3) ----------------------- //

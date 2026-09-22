@@ -58,7 +58,7 @@ first song / first reply sooner — without multi-process complexity (master §4
   2026-07-29: spec 08 is dissolved — activity-gating moved to spec 07, the rest
   is config/SDK/backlog; master §7 status column. This spec's batch pillar is
   the one that landed.)*
-- Buffering across restarts; semantic recall.
+- Semantic recall.
 - **Activity-aware pacing** (spec 07) and the richer profile/ledger context
   (spec 05). The time-of-day scene (§3.4) is only the *clock* slice of that
   future work, pulled in early; spec 05 ratifies the `scene` field as the
@@ -422,6 +422,105 @@ persona-voiced builder — `buildNextTalkPrompt`, `buildNextTalksPrompt`,
   assertion; *whether the first line after a gap sounds like a host coming back
   on* is by ear (DESIGN §10.3).
 
+### 3.6 Stock lines — the opener set and the farewell (amended 2026-09-22)
+
+Measured cold start (`.dev/dev.log`, three runs): "checking the gear" to the
+first line on air was 24 s / 31 s / >=25 s. About 4-5 s of that is boot (TUI
+spawn, gear probes, bed); the remaining 20-26 s is ONE cold `nextTalks` batch
+with extended thinking on, plus beat 1's synthesis. At `/quit` the buffered
+clips are discarded and the sound simply stops — no sign-off.
+
+Thinking is NOT the lever here (a batch that thinks is the batch that sounds
+like the host). Instead the radio keeps **stock lines** on disk: text the host
+already said in its own voice, synthesized ahead of time, so the program can
+speak within ~1 s of launch and sign off on the way out.
+
+**One mechanism, two slots.** Under the cache root (rebuildable, never listener
+data) a `stock/` directory holds:
+
+- `opener.json` + `opener-1.wav` ... `opener-3.wav` — a set of THREE coherent
+  beats, the way the program opens a sitting.
+- `farewell.json` + `farewell.wav` — ONE line, the way it signs off.
+
+Each json is `{ texts, previous, generatedAt, fingerprint }`, where `previous`
+is the last generation's texts and `fingerprint` is `{ voice, language,
+persona }` — the voice identity, the output language, and a hash of the persona
+file. Nothing else is stored; the audio is the wav beside it.
+
+**Generation.** ONE brain call yields the whole set (three opener beats, plus
+the farewell when that slot is due), each rendered through the LIVE voice
+provider and copied next to its json. The prompt carries persona and profile
+only — the same renderers the talk prompts use — and states the rules the
+content must obey:
+
+- **Time-agnostic**: no time of day, no absence or "long time no see", no
+  reference to anything this or any session talked about. A stock line is
+  played at an unknown hour after an unknown gap.
+- Every opener beat is a **complete stopping point** on its own: the live batch
+  may catch up after beat 1, and the program must not sound cut off.
+- The previous generation's texts ride with the prompt under "say something
+  different this time". Difference is **prompt-enforced only** — no code
+  compares the texts.
+
+**Refresh cadence.** The refresh runs IN-SESSION, off the loop, single-flight,
+the way the profile fold (spec 05 §3.6) and the taste refresh (spec 14 §3.4)
+do. It is poked right after the FIRST LIVE beat airs, so even a short sitting
+leaves fresh stock behind. The opener refreshes **every session**; the farewell
+refreshes only when it is missing, older than `STOCK_FAREWELL_TTL` (3 days), or
+carrying a stale fingerprint. Both due = still one call. The `/quit` path makes
+**zero** model calls and spawns no daemon: it only plays a file that is already
+there.
+
+**Fingerprint.** A stock file whose fingerprint does not match the run's voice,
+language and persona is not played, and the in-session refresh replaces it.
+That rule is the whole invalidation story — no event wiring for a voice swap, a
+language change or a `/setup`.
+
+**Boot — the opener.** Opener beat 1 is played as soon as the run has settled
+the three things the fingerprint is made of — persona, language, endpoint —
+which is BEFORE the gear probes, the bed pull, the banner and `director.run`.
+Sound starts under a second and all of that runs underneath it. It plays
+through the engine (the bed ducks under it like any talk clip), never a raw
+`afplay`. It is recorded like any aired beat, so the recent window knows what
+was just said, but only once the banner has been drawn: admitting it sooner
+would move the store's own last-on-air and away readings, which the banner and
+the opening fact are built on.
+
+The remaining opener beats are handed to the Director as a queue **separate
+from `talkAhead`**, so the look-ahead's depth invariant is untouched. The cold
+batch is still fired at time 0 exactly as today. At each boundary:
+
+1. a live beat is ready -> air it (and log the hand-off);
+2. else a stock beat is left -> air it;
+3. else wait exactly as today.
+
+Aired stock beats go through `airBeat`, so they enter the recent window and the
+next prompt continues from them rather than repeating them. Because the session
+opened with stock lines, the opening fact (§3.5) is still rendered for the
+first LIVE batch — followed by the stock lines as what was already on the air —
+so the host carries on instead of opening the program twice. Whatever is left
+of the opener is dropped the moment a live beat airs: an OPENING line has no
+business in the middle of a sitting, and the refresh rewrites the very wavs
+those beats point at. A typed line discards the stock queue together with the
+look-ahead buffer (the existing steer path): both predate the listener's turn.
+If boot lands in an anchor window the anchor is still beat 1, unchanged.
+
+**Quit — the farewell.** `/quit` (and the first Ctrl-C, through the existing
+escalating SIGINT) cuts whatever is on the air as today, then plays
+`farewell.wav` over the ducked bed; the bed fades and the run ends. The
+shutdown compaction flush runs CONCURRENTLY with it, its 3 s cap unchanged, so
+the wait the listener feels is the farewell's own length. The front-end stays up
+until the farewell ends — the listener sees the radio sign off — then closes as
+today. A second `/quit` or Ctrl-C during the farewell cuts it and exits
+immediately.
+
+**Fallbacks — all silent, all identical to today.** First install (no stock
+yet), `STUB=1`, no voice configured, a missing or corrupt file, a fingerprint
+mismatch: no opener, no farewell. Nothing here ever blocks boot or quit.
+
+**Dev-log seam.** `stock.opener aired n=<k>`, `stock.handoff live at beat <k>`,
+`stock.refresh opener=<yes|no> farewell=<yes|no> <ms>`, `stock.farewell aired`.
+
 ---
 
 ## 4. Dependencies
@@ -492,6 +591,23 @@ persona-voiced builder — `buildNextTalkPrompt`, `buildNextTalksPrompt`,
     empty/unset value derives from the clock; a non-empty invalid value degrades
     to the clock (never raises). Verified with a fixed clock whose derived bucket
     differs from the override, so the env is proven to win.
+14. **§3.6 (stock storage):** a written slot reads back with its texts and
+    wavs; a fingerprint that does not match the run, a corrupt json, and a
+    missing wav each yield no playable beats (and never raise).
+15. **§3.6 (boundary hand-off):** a ready live beat is aired ahead of a
+    waiting stock beat; a stock beat airs while the cold batch is still in
+    flight instead of waiting on it; with the stock queue exhausted the
+    boundary waits exactly as today; the first live beat drops what is left of
+    the opener; a talkback steer discards the stock queue together with the
+    look-ahead. Verified on fakes.
+16. **§3.6 (refresh cadence):** the poke after the first live beat runs one
+    generation, single-flight; the opener is rewritten every session; the
+    farewell is rewritten only when missing, past `STOCK_FAREWELL_TTL`, or
+    carrying a stale fingerprint, and is otherwise left alone. Verified with an
+    injected clock.
+17. **§3.6 (quit):** the farewell is played on the way out with the
+    compaction flush running concurrently, and a run with no farewell file
+    exits exactly as today. Verified on fakes.
 
 ---
 
