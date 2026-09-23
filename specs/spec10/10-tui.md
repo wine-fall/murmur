@@ -1195,7 +1195,8 @@ provides them):
      with `isNewer` (`src/support/update.ts`) against `packageVersion()`. Each
      notice parses on its own: a bad entry is skipped, the rest survive;
      unknown fields are ignored. `MURMUR_NOTICES_URL` (dev only) points a
-     smoke at a scratch feed.
+     smoke at a scratch feed. A stub-brain run (`STUB=1`) fetches nothing
+     unless that override is set — the offline mode stays offline.
    - **Selection.** The first notice in file order that parses, has not
      expired, matches its version bounds, and is not dismissed. At most one
      per launch.
@@ -1215,7 +1216,8 @@ provides them):
      `bubble {id, text, hint?}` — `hint` is `type <command>` or the url.
      State, not replay: the host hands every attach the bubble still up until
      it is dismissed. TUI->engine `dismiss {id}`; the engine appends the id to
-     `dismissed`. The text is also logged as an info line so scrollback keeps
+     `dismissed`. The text is also logged as an info line, with the whole
+     hint in parentheses (the bubble may cut a long url), so scrollback keeps
      it; the plain host (TUI=0) shows only that line and has no dismiss.
    - **Client.** Wide sky: an absolute box right of the figure, clear of the
      figure's cell rectangle (so the kitty raster never covers it), its bottom
@@ -1228,7 +1230,10 @@ provides them):
      bubble > away greeting > microcopy. While it is up the pose is `wake`,
      as for the away greeting. It hides after 20 s or on Esc; Esc closes it
      client-side BEFORE any interrupt (after the menu, the pane editor and
-     the pane, §3.4) and sends `dismiss {id}`. Pure shape and placement live
+     the pane, §3.4) and sends `dismiss {id}` — but only while the bubble is
+     on screen: under a floor face (e.g. `/setup` within the first 20 s) it
+     is hidden, so Esc goes to the flow and the notice is not dismissed
+     unseen. Pure shape and placement live
      in `tui/src/bubble.ts`.
 
 **As built (2026-07-30)**, four decisions this section left open:

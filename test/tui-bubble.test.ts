@@ -9,6 +9,7 @@ import {
   bubbleBox,
   bubbleHint,
   bubbleLines,
+  bubbleShown,
   FIGURE_HALF_COLS,
   restPose,
   stripLead,
@@ -23,6 +24,10 @@ describe('bubbleLines', () => {
       'a newer murmur is out — the',
       'fixes are small but they…',
     ])
+    // An over-wide first word is cut too: the box is laid out for two lines.
+    const url = bubbleLines('https://example.com/maintenance-window Please read this', 30)
+    expect(url).toHaveLength(2)
+    for (const line of url) expect(cells(line)).toBeLessThanOrEqual(30)
     const long = bubbleLines('x'.repeat(10) + ' ' + 'y'.repeat(40), 20)
     expect(long).toHaveLength(2)
     for (const line of long) expect(cells(line)).toBeLessThanOrEqual(20)
@@ -62,6 +67,14 @@ describe('the strip and the pose while a bubble is up', () => {
     expect(stripLead({ greeting: 'back', microcopy: 'on' })).toBe('back')
     expect(stripLead({ microcopy: 'on' })).toBe('on')
     expect(stripLead({})).toBeUndefined()
+  })
+
+  it('is on screen only boxed, or on the strip with no floor face over it', () => {
+    expect(bubbleShown({ boxed: true, inStrip: false, floor: undefined })).toBe(true)
+    expect(bubbleShown({ boxed: false, inStrip: true, floor: undefined })).toBe(true)
+    // /setup hides the sky and its face takes the strip: Esc must reach the flow.
+    expect(bubbleShown({ boxed: false, inStrip: true, floor: 'setup' })).toBe(false)
+    expect(bubbleShown({ boxed: false, inStrip: false, floor: undefined })).toBe(false)
   })
 
   it('wakes the pet for the bubble exactly as the away greeting does', () => {

@@ -68,6 +68,7 @@ import {
   bubbleBox,
   bubbleHint,
   bubbleLines,
+  bubbleShown,
   restPose,
   stripLead,
   Z_BUBBLE,
@@ -356,8 +357,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // The startup notify bubble (§3.7.5): at most one, up for BUBBLE_HIDE_MS or
   // until Esc. Mirrored for the keyboard handler, like the pane's ref.
   const [bubble, setBubble] = useState<Bubble | null>(null)
-  const bubbleRef = useRef(bubble)
-  bubbleRef.current = bubble
+  // The bubble the keyboard may dismiss: only one on screen (bubbleShown).
+  const bubbleRef = useRef<Bubble | null>(null)
   useEffect(() => {
     if (bubble === null) return
     // The auto-hide is not a dismiss: the notice comes back next launch.
@@ -817,6 +818,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     return box === null ? null : { ...box, body, hint: bubbleHint(bubble.hint, inner) }
   })()
   const stripBubble = bubble !== null && bubbleAt === null ? bubble.text : undefined
+  bubbleRef.current =
+    bubble !== null && bubbleShown({ boxed: bubbleAt !== null, inStrip: stripBubble !== undefined, floor: floor?.strip })
+      ? bubble
+      : null
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.

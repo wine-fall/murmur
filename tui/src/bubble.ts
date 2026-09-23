@@ -35,7 +35,7 @@ export function bubbleLines(text: string, inner: number): string[] {
       line = next
       continue
     }
-    if (line !== '') lines.push(line)
+    if (line !== '') lines.push(fit(line, inner))
     line = words[at]!
     if (lines.length === BODY_LINES - 1) {
       const rest = words.slice(at).join(' ')
@@ -90,6 +90,14 @@ export function stripLead(parts: {
   microcopy?: string | null
 }): string | undefined {
   return parts.floor ?? parts.bubble ?? parts.greeting ?? parts.microcopy ?? undefined
+}
+
+// Whether the listener can see the bubble right now: beside the figure, or on
+// the strip with no floor face over it. Only a bubble on screen takes Esc —
+// one hidden under /setup must let Esc reach the flow, and must not be
+// dismissed unseen.
+export function bubbleShown(at: { boxed: boolean; inStrip: boolean; floor: string | undefined }): boolean {
+  return at.boxed || (at.inStrip && at.floor === undefined)
 }
 
 // The pet wakes to say the bubble, the same way it wakes for a returning
