@@ -59,6 +59,9 @@ const ENGINE_MESSAGES: EngineMessage[] = [
     footer: 'waiting for the scan · esc - cancel',
   },
   { v: 1, type: 'notice', title: '2/3 Bilibili — scan with the Bilibili app', body: [] },
+  // The startup notify bubble (spec 10 §3.7.5): `hint` is optional.
+  { v: 1, type: 'bubble', id: 'n1', text: 'a new murmur is out', hint: 'type /update' },
+  { v: 1, type: 'bubble', id: 'n2', text: 'still here' },
   { v: 1, type: 'mode', who: 'guide' },
   { v: 1, type: 'mode', who: 'report' },
   { v: 1, type: 'mode', who: 'radio' },
@@ -136,6 +139,7 @@ const TUI_MESSAGES: TuiMessage[] = [
   { v: 1, type: 'attach', protocol: PROTOCOL },
   { v: 1, type: 'line', text: '/quit' },
   { v: 1, type: 'interrupt' },
+  { v: 1, type: 'dismiss', id: 'n1' },
   { v: 1, type: 'vizSub', on: true, fps: 24 },
   { v: 1, type: 'vizSub', on: false },
   { v: 1, type: 'settingsSet', patch: { musicEnabled: false, gapSeconds: 3.5 } },

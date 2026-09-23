@@ -31,6 +31,7 @@ import {
   type SettingsSnapshot,
 } from './ipc.ts'
 import { statusMicrocopy } from '../prompts/status.ts'
+import type { Bubble } from '../support/notices.ts'
 
 // What a client that attaches mid-run is handed so it does not open on a blank
 // screen — and so the first-run/guide questions asked while it was still
@@ -70,6 +71,10 @@ export class IpcHost implements Host {
   private vizWanted: { on: boolean; fps: number | undefined } | null = null
   private settingsBridge: SettingsBridge | null = null
   private interruptHandler: (() => void) | null = null
+  private dismissHandler: ((id: string) => void) | null = null
+  // The notify bubble still up (spec 10 §3.7.5): state, not replay — every
+  // attach is handed it until the listener dismisses it.
+  private bubbled: Bubble | null = null
   private quitHandler: (() => void) | null = null
   private mode: FloorMode = 'radio'
   // The current invitation set (spec 14 §2.7); null until the Director has
@@ -184,6 +189,10 @@ export class IpcHost implements Host {
           this.mirror('tui', 'interrupt received with no flow to stop; ignored')
         }
       }
+      if (message.type === 'dismiss') {
+        if (this.bubbled?.id === message.id) this.bubbled = null
+        this.dismissHandler?.(message.id)
+      }
       if (message.type === 'vizSub') this.wantViz(message.on, message.fps)
       if (message.type === 'settingsSet') {
         // A successful set is broadcast by the store's own change event (the
@@ -225,6 +234,7 @@ export class IpcHost implements Host {
     // `hello` for the same reason: current state, never replay.
     this.sendSettings()
     if (this.invited !== null) this.write(socket, { v: 1, type: 'invitations', rows: [...this.invited] })
+    if (this.bubbled !== null) this.write(socket, { v: 1, type: 'bubble', ...this.bubbled })
   }
 
   // The handshake payload, built in one place so a client that attaches late
@@ -387,6 +397,17 @@ export class IpcHost implements Host {
 
   onQuit(handler: () => void): void {
     this.quitHandler = handler
+  }
+
+  // Straight to the client, NOT send(): the bubble is a state, and adopt()
+  // hands a later attach the one still up.
+  bubble(bubble: Bubble): void {
+    this.bubbled = bubble
+    if (this.client !== null) this.write(this.client, { v: 1, type: 'bubble', ...bubble })
+  }
+
+  onDismiss(handler: (id: string) => void): void {
+    this.dismissHandler = handler
   }
 
   onInterrupt(handler: (() => void) | null): void {

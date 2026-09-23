@@ -63,6 +63,16 @@ import {
 import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
 import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
+import {
+  BUBBLE_HIDE_MS,
+  bubbleBox,
+  bubbleHint,
+  bubbleLines,
+  restPose,
+  stripLead,
+  Z_BUBBLE,
+  type Bubble,
+} from './bubble.ts'
 import { accentFor, CARD, CARD_INK, CHIP, EMBER, hush, INK, mix, PERIWINKLE, QUIET, WARM, type Accent } from './palette.ts'
 import { cells, clock, fit, playedS, progressBar } from './progress.ts'
 import { adjust, languagePatch, paneFacts, paneItems } from './settings-pane.ts'
@@ -73,7 +83,6 @@ import {
   loadPoses,
   POSE_FPS,
   POSE_NAMES,
-  poseFor,
   splitNowPlaying,
   type PoseName,
   type Sprite,
@@ -344,6 +353,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // The notice card (§3.2-E), at most one: a sign-in code the listener reads
   // while the flow behind it waits. Not a queue and not replayed on attach.
   const [notice, setNotice] = useState<Notice | null>(null)
+  // The startup notify bubble (§3.7.5): at most one, up for BUBBLE_HIDE_MS or
+  // until Esc. Mirrored for the keyboard handler, like the pane's ref.
+  const [bubble, setBubble] = useState<Bubble | null>(null)
+  const bubbleRef = useRef(bubble)
+  bubbleRef.current = bubble
+  useEffect(() => {
+    if (bubble === null) return
+    // The auto-hide is not a dismiss: the notice comes back next launch.
+    const hide = setTimeout(() => setBubble(null), BUBBLE_HIDE_MS)
+    return () => clearTimeout(hide)
+  }, [bubble])
   const asksRef = useRef(asks)
   asksRef.current = asks
   const input = useRef<InputRenderable>(null)
@@ -451,6 +471,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           // it carries expires in minutes and the log outlives it. A second
           // notice REPLACES the one up; an empty body closes it.
           setNotice(message.body.length === 0 ? null : message)
+          break
+        case 'bubble':
+          setBubble({ id: message.id, text: message.text, ...(message.hint !== undefined && { hint: message.hint }) })
           break
         case 'askDrop':
           // The flow behind the cards was stopped (Esc): every pending
@@ -611,6 +634,13 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
       return
     }
     if (!open || snap === null) {
+      // The bubble is client-local, so Esc closes it before anything reaches
+      // the engine — and tells the engine to keep that notice quiet (§3.7.5).
+      const said = bubbleRef.current
+      if (key.name === 'escape' && said !== null) {
+        wire.send({ v: 1, type: 'dismiss', id: said.id })
+        return setBubble(null)
+      }
       // Esc with nothing client-local to close asks the engine to stop the
       // running flow (spec 10 §3.4) — the guide winds down like a coding
       // agent's; with nothing stoppable the engine treats it as noise.
@@ -674,7 +704,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // rows the card itself needs (spec 10 §3.2-B).
   const hushRef = useRef(hushed)
   hushRef.current = hushed
-  const pose = greeting !== null ? 'wake' : poseFor(state)
+  const pose = restPose(state, greeting, bubble)
   // The §6.1 breakpoint: wide terminals stack the sky as a full-width scene
   // band over the log (scene:log ≈ 2:1 — the listener is here for the radio,
   // not the transcript); narrow ones keep the classic bottom band. Same four
@@ -731,21 +761,6 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           : null
   const cardTopRef = useRef(cardTop)
   cardTopRef.current = cardTop
-  // In the sky composition the strip is one centred line over a full-width
-  // rule (concept 04), and now-playing lives under the scene; in the band
-  // composition the strip stays two-sided and carries now-playing itself.
-  const strip =
-    !wide
-      ? [floor?.strip ?? greeting ?? microcopy ?? 'warming up...', state?.nowPlaying]
-          .filter((part) => part !== undefined && part !== '')
-          .join('  ♪ ')
-      : [
-          floor?.strip ?? greeting ?? microcopy ?? 'murmur is on the air',
-          floor?.sub ?? state?.scene,
-          floor === null ? (state?.activity ?? 'here') : undefined,
-        ]
-          .filter((part) => part !== undefined && part !== '')
-          .join(' · ')
   // A track with a known length is the only thing that earns a rail: a live
   // stream (or an extractor that omits the duration) keeps the bare title.
   const track =
@@ -789,6 +804,40 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // setup walkthrough is paragraphs to read and act on, and the sky it would
   // be sharing the frame with is a radio that has stopped to wait for it.
   const sceneShown = wide && !paneOpen && floor?.yieldsBand !== true
+  // The bubble beside the figure when the sky has room for it and no card is
+  // up (§3.7.5); otherwise its words take the strip. Laid out twice: the width
+  // decides the wrap, the wrap decides the height.
+  const bubbleAt = (() => {
+    if (bubble === null || !sceneShown || asks.length > 0 || notice !== null) return null
+    const trial = bubbleBox({ gutter, sceneWidth, sceneRows, lines: 2 })
+    if (trial === null) return null
+    const inner = trial.width - 4
+    const body = bubbleLines(bubble.text, inner)
+    const box = bubbleBox({ gutter, sceneWidth, sceneRows, lines: body.length })
+    return box === null ? null : { ...box, body, hint: bubbleHint(bubble.hint, inner) }
+  })()
+  const stripBubble = bubble !== null && bubbleAt === null ? bubble.text : undefined
+  // In the sky composition the strip is one centred line over a full-width
+  // rule (concept 04), and now-playing lives under the scene; in the band
+  // composition the strip stays two-sided and carries now-playing itself.
+  const stripRight = [identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')
+  const bandStrip = [stripLead({ floor: floor?.strip, bubble: stripBubble, greeting, microcopy }) ?? 'warming up...', state?.nowPlaying]
+    .filter((part) => part !== undefined && part !== '')
+    .join('  ♪ ')
+  // A notice is up to 120 chars: in the band it keeps to its one row (the
+  // whole text is in the log), where a wrapped strip would push the band down.
+  const strip =
+    !wide
+      ? stripBubble === undefined
+        ? bandStrip
+        : fit(bandStrip, cols - 4 - cells(stripRight))
+      : [
+          stripLead({ floor: floor?.strip, bubble: stripBubble, greeting, microcopy }) ?? 'murmur is on the air',
+          floor?.sub ?? state?.scene,
+          floor === null ? (state?.activity ?? 'here') : undefined,
+        ]
+          .filter((part) => part !== undefined && part !== '')
+          .join(' · ')
   // How much of the station ident the wide composition can afford between the
   // scene band and the log. The figure is not in this trade — it holds the
   // scene band at every height; only the title steps down (spec 10 §3.3).
@@ -973,9 +1022,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           }}
         >
           <text style={{ fg: floor === null ? roomAccent.bright : lit(floor.ink) }}>{strip}</text>
-          <text style={{ fg: lit(INK.dim) }}>
-            {[identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')}
-          </text>
+          <text style={{ fg: lit(INK.dim) }}>{stripRight}</text>
         </box>
       ) : (
         <box style={{ flexDirection: 'column' }}>
@@ -1334,6 +1381,40 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
             </box>
           )
         })()}
+      {/* The notify bubble (§3.7.5): the pet says the launch notice. The
+          notice card's chrome, smaller, right of the figure's cells so the
+          kitty raster can never cover it; the tail hangs under its corner
+          toward the figure. */}
+      {bubbleAt !== null && (
+        <>
+          <box
+            style={{
+              border: true,
+              borderStyle: 'rounded',
+              borderColor: WARM,
+              flexDirection: 'column',
+              position: 'absolute',
+              left: bubbleAt.left,
+              top: bubbleAt.top,
+              zIndex: Z_BUBBLE,
+              width: bubbleAt.width,
+              paddingLeft: 1,
+              paddingRight: 1,
+              backgroundColor: CARD,
+            }}
+          >
+            {bubbleAt.body.map((line, at) => (
+              <text key={at} style={{ fg: INK.text }}>
+                {line}
+              </text>
+            ))}
+            <text style={{ fg: EMBER }}>{bubbleAt.hint}</text>
+          </box>
+          <box style={{ position: 'absolute', left: bubbleAt.tailCol, top: bubbleAt.tailRow, zIndex: Z_BUBBLE }}>
+            <text style={{ fg: WARM }}>╱</text>
+          </box>
+        </>
+      )}
       {asks.length > 0 &&
         (() => {
           const head = asks[0]!

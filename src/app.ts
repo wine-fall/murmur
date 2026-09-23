@@ -35,6 +35,7 @@ import {
   spawnClipboard,
 } from './support/deliver.ts'
 import { Director, openInBrowser, openInChrome, type DirectorDeps, type MusicWiring, type PacingWiring } from './director/director.ts'
+import { dismissNotice, runNotices } from './support/notices.ts'
 import { installLatest, isGlobalInstall, latestVersion, runUpdate } from './support/update.ts'
 import { AudioEngine } from './audio/engine.ts'
 import { ffmpegDecode, MIX_RATE, probeDurationS, probePlayableDurationS, probeStream } from './audio/ffmpeg.ts'
@@ -1227,6 +1228,19 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     brain: config.brain,
     voice: resolved.voice,
     ...(away !== undefined && { away }),
+  })
+  // The startup notify bubble (spec 10 §3.7.5): fetched off the boot path and
+  // never awaited. The text also lands in the log so scrollback keeps it — on
+  // the plain host that line is the whole feature. MURMUR_NOTICES_URL points a
+  // smoke at a scratch feed.
+  host.onDismiss?.((id) => dismissNotice(id))
+  void runNotices({
+    current: packageVersion(),
+    ...(process.env.MURMUR_NOTICES_URL && { url: process.env.MURMUR_NOTICES_URL }),
+    show: (bubble) => {
+      host.info(bubble.text)
+      host.bubble?.(bubble)
+    },
   })
   // Recorded only now (spec 04 §3.6): the beat has been audible since boot, but
   // admitting it any earlier would have moved the store's own last-on-air and

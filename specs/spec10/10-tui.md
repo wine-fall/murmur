@@ -221,6 +221,7 @@ Engine → TUI:
 | `info` | `{ text, tone? }` | host info lines — context, notices, and everything that is not a question (§3.2-B). `tone: 'flow'` marks a state-transition line (a stopped flow, the going-off ack): the client renders it in marked warm ink with a `■` marker so it cannot drown in tool output; the plain host prints it like any other line. Additive |
 | `ask` | `{ text, kind: 'question' \| 'consent', options?: [{ key, label, note?, checked?, action? }], multi?: boolean, back?: boolean, step?: { at, of } }` | a marked question wanting the next typed line (§3.2-B): the client pins it in the spotlight card above the input. `back: true` says a typed `/back` re-asks the previous step (spec 06 §3.4 — every first-run step but the first): the card names it in its action row, the plain host appends `(/back returns to the previous question)`; a list card never carries it. With `options` (2026-09-14, the /sources list — spec 14 §3.1) the card is rows to tick and the answer `line` is the ticked keys in row order, space-joined (`''` for none); the text still carries the same rows numbered (`>> 1) [x] NetEase - …`) so a client that ignores `options` reads the same card. `step` (2026-09-15) is the ask's 1-based place in a numbered run — `{ at: 2, of: 3 }` titles the card `murmur is asking · 2/3`, the plain host appends `(question 2 of 3)`. Only the engine walks the steps, so only the engine can number them: a step re-asked by `/back` comes back with its OWN number, and an ask outside a run (the /sources sign-in wait, a permission prompt) carries none rather than an invented one. The first-run seeds send it; the consent cards do not. `action: true` on an option (2026-09-16) says the row is a BUTTON, not a state: the /sources refresh row is "re-read them now", which a tick box cannot say — a listener reading `[ ] refresh` has no way to know whether unticking it turns something off (user report). The client draws such a row as `( refresh now )` with no box, never ticks it, and Space or Enter ON it submits at once — the current ticks and that key together, so the engine's own `parsePick` / diff is unchanged. Additive: a client that ignores it sees the row it always saw. `multi: false` is the same card with ONE answer (2026-09-15, the /sources sign-in card): space MOVES the single tick rather than clearing it — a single-pick list always answers with exactly one row, and a cleared one answered `''`, which the flow reads as the preselected row, handing back the row the listener had just un-ticked (`pickToggle` in `dock.ts`). Additive (2026-08-11) — no protocol bump. Version skew is not a live concern: the engine spawns the client from its own tree (`TUI_ENTRY`), so the pair is always lockstep; a future detached client (`murmur attach`, the daemon side-spec) owns its own negotiation, and an engine that must speak to unknown clients would need an `info` fallback then |
 | `notice` | `{ title, body: string[], footer? }` | a card the listener READS while a flow waits on it (§3.2-E): a sign-in QR. Additive (2026-09-15), replacing `Host.showPrivate`'s `info`-shaped delivery. Stateful — sending it again REPLACES what is up, an empty `body` closes it — and like `showPrivate` before it, straight to the live client only: **never mirrored into the dev log and never in the replay backlog**, because the code it carries expires in minutes. `body` lines are drawn VERBATIM: a wrapped QR cannot be scanned |
+| `bubble` | `{ id, text, hint? }` | the startup notify bubble (§3.7.5): at most one per launch; state, not replay — resent on attach until dismissed. Additive |
 | `askDrop` | `{}` | every pending ask just died with its flow (§3.4): the client closes its spotlight cards. Additive (2026-08-19), and deliberately NOT in the replay backlog: a live moment must not close a future attach's fresh cards |
 | `mode` | `{ who: 'radio' \| 'guide' }` | the floor changed hands mid-run (§3.4): the client repaints the three-point face. Stateful, not replayed — an attach reads the current mode from `hello` |
 | `busy` | `{ on: boolean }` | the floor-holder is working rather than waiting on the keyboard (§3.4): the client shows a live sign for as long as it is true. Additive (2026-09-01) — no protocol bump. Stateful and **not replayed**, unlike `mode`, and with no `hello` field either: a sign means "right now", so a backlog handed to a later attach would open it under a sign for a turn that has already ended, with nothing coming to clear it. A turn that began with no client attached simply has no sign |
@@ -233,6 +234,7 @@ TUI → Engine:
 |---|---|---|
 | `attach` | `{ protocol: 2 }` | must be first; version mismatch → engine replies `bye` |
 | `line` | `{ text }` | a submitted input line — talk-back, Q&A answers, and commands alike (`/quit` included; the engine owns all parsing, same as stdin today) |
+| `dismiss` | `{ id }` | Esc on the notify bubble (§3.7.5): that notice stays quiet on later launches. Additive |
 | `vizSub` | `{ on: boolean, fps?: number }` | subscribe/unsubscribe the viz stream |
 | `interrupt` | `{}` | Esc with nothing client-local to close (§3.4): the engine's Esc router decides what it means from where the flow stands — never more than cutting a turn or handing the floor back. An engine with no flow registered ignores it — the first-run seeds keep their cards |
 
@@ -1178,6 +1180,56 @@ provides them):
    radio-native): status microcopy is written in persona voice ("finding
    something for this hour…", not "loading"), sourced from a fixed local pool
    in `prompts.ts` — zero tokens (master §7 pillar 6).
+5. **The startup notify bubble** (added 2026-09-23): at launch the pet says
+   at most ONE maintainer notice in a speech bubble; Esc dismisses it.
+   - **Feed.** `assets/notices.json` on `main`, read live from
+     `raw.githubusercontent.com/wine-fall/murmur/main/assets/notices.json`
+     (the channel-manifest pattern, spec 14 §2.9). Shape
+     `{v:1, notices:[{id, text, until, command?, url?, below?, since?}]}` and
+     nothing else: `id` (required, stable; the dismiss key), `text` (required,
+     <=120 chars, English, persona voice), `until` (required, ISO date or
+     date-time; a bare date shows through that whole UTC day, expired = never
+     shown), `command` (a slash command, e.g. `/update`), `url` (a link; when
+     both are given `command` wins), `below` (show only when current version
+     < below), `since` (show only when current >= since). Versions compare
+     with `isNewer` (`src/support/update.ts`) against `packageVersion()`. Each
+     notice parses on its own: a bad entry is skipped, the rest survive;
+     unknown fields are ignored. `MURMUR_NOTICES_URL` (dev only) points a
+     smoke at a scratch feed.
+   - **Selection.** The first notice in file order that parses, has not
+     expired, matches its version bounds, and is not dismissed. At most one
+     per launch.
+   - **Local state.** `~/.murmur/cache/notices.json` =
+     `{fetchedAt, feed, dismissed: string[]}` — the last good feed (offline
+     launches use it) plus the dismissed ids. `cache/`, not `data/`: losing it
+     costs one repeat. **Pruning:** every successful fresh fetch cuts
+     `dismissed` to the ids that still appear in that feed, so an id the
+     maintainer removed is forgotten and the list never grows without bound.
+     A failed fetch or a cached fallback never prunes (an offline launch must
+     not forget a dismissal), and expiry alone never removes an id.
+   - **Lifecycle.** `runNotices` (`src/support/notices.ts`) runs after the
+     banner, never awaited, 5 s fetch timeout, never rejects. A notice
+     reappears every launch until the listener presses Esc on it, it expires,
+     or its version bounds stop matching. The 20 s auto-hide is NOT a dismiss.
+   - **Wire (additive, no protocol bump).** engine->TUI
+     `bubble {id, text, hint?}` — `hint` is `type <command>` or the url.
+     State, not replay: the host hands every attach the bubble still up until
+     it is dismissed. TUI->engine `dismiss {id}`; the engine appends the id to
+     `dismissed`. The text is also logged as an info line so scrollback keeps
+     it; the plain host (TUI=0) shows only that line and has no dismiss.
+   - **Client.** Wide sky: an absolute box right of the figure, clear of the
+     figure's cell rectangle (so the kitty raster never covers it), its bottom
+     at the figure's head — rounded WARM border, CARD ground, INK.text body
+     word-wrapped to <=2 lines (cut with an ellipsis), EMBER hint line
+     `type /update · esc dismiss` (or the url, or `esc dismiss`), <=36 cells,
+     a one-cell `╱` tail under its lower-left corner toward the figure. It
+     yields to any card. Narrow band (or a sky with no room beside the
+     figure): the text takes the status strip, precedence floor face >
+     bubble > away greeting > microcopy. While it is up the pose is `wake`,
+     as for the away greeting. It hides after 20 s or on Esc; Esc closes it
+     client-side BEFORE any interrupt (after the menu, the pane editor and
+     the pane, §3.4) and sends `dismiss {id}`. Pure shape and placement live
+     in `tui/src/bubble.ts`.
 
 **As built (2026-07-30)**, four decisions this section left open:
 
