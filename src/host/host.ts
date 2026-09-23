@@ -13,6 +13,7 @@ import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 
 import { packageVersion } from '../config.ts'
+import type { Bubble } from '../support/notices.ts'
 import type { AskOption, Invitation, ProgramState } from './ipc.ts'
 
 export interface Host {
@@ -82,6 +83,12 @@ export interface Host {
   // A host without this seam is told so rather than shown the code — the flow
   // refuses that mount.
   notice?: ((title: string, body: readonly string[], footer?: string) => void) | undefined
+  // The startup notify bubble (spec 10 §3.7.5): a front-end with a pet has it
+  // say the notice, and reports the listener's Esc back through onDismiss.
+  // Optional: the plain host has neither — the caller also logs the text as
+  // an info line, which is all the plain host shows.
+  bubble?(bubble: Bubble): void
+  onDismiss?(handler: (id: string) => void): void
   // `away` is seconds since murmur last heard anything (spec 10 §3.7.3), for a
   // front-end that greets the absence. Absent = no history to go on.
   banner(personaFirstLine: string, opts: { brain: string; voice: string; away?: number }): void

@@ -255,6 +255,11 @@ export const EngineMessageSchema = z.discriminatedUnion('type', [
     body: z.array(z.string()),
     footer: z.string().optional(),
   }),
+  // The startup notify bubble (spec 10 §3.7.5): at most one notice the pet
+  // says at launch. `hint` is the action ('type /update' or a url). Stateful,
+  // not replayed: the host hands every attach the one still up, until the
+  // listener dismisses it.
+  z.object({ v, type: z.literal('bubble'), id: z.string(), text: z.string(), hint: z.string().optional() }),
   // Who holds the floor (spec 10 §3.4, the conversation-partner boundary):
   // the client paints the switch — strip, identity line, input. Stateful, not
   // replayed: the host resends the current mode on every attach.
@@ -301,6 +306,9 @@ export const TuiMessageSchema = z.discriminatedUnion('type', [
   // setup/guide conversation) without ending the broadcast. An engine with no
   // stoppable flow ignores it.
   z.object({ v, type: z.literal('interrupt') }),
+  // Esc on the notify bubble (spec 10 §3.7.5): that notice stays quiet on
+  // later launches. The 20 s auto-hide sends nothing.
+  z.object({ v, type: z.literal('dismiss'), id: z.string() }),
 ])
 
 export type TuiMessage = z.infer<typeof TuiMessageSchema>

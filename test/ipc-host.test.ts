@@ -174,6 +174,33 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
     }
   })
 
+  it('a bubble is state, not replay: the live client and every later attach see it until dismissed (spec 10 §3.7.5)', async () => {
+    const dismissed: string[] = []
+    host.onDismiss((id) => dismissed.push(id))
+    host.bubble({ id: 'n1', text: 'a new murmur is out', hint: 'type /update' })
+    const first = await client()
+    first.attach()
+    await first.settle()
+    expect(first.received.filter((m) => m.type === 'bubble')).toEqual([
+      { v: 1, type: 'bubble', id: 'n1', text: 'a new murmur is out', hint: 'type /update' },
+    ])
+    first.close()
+    await first.settle()
+    const second = await client()
+    second.attach()
+    await second.settle()
+    expect(second.types()).toContain('bubble')
+    second.send(encode({ v: 1, type: 'dismiss', id: 'n1' }))
+    await second.settle()
+    expect(dismissed).toEqual(['n1'])
+    second.close()
+    await second.settle()
+    const third = await client()
+    third.attach()
+    await third.settle()
+    expect(third.types()).not.toContain('bubble')
+  })
+
   async function client(): Promise<FakeClient> {
     const c = await FakeClient.open(socketPath)
     clients.push(c)
