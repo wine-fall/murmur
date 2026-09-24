@@ -206,7 +206,7 @@ export function probeDurationS(
 
 // Pull-time playability probe (spec 03-01 §2.3 seam, owned here with the rest of
 // the ffmpeg boundary): does the source actually decode audio, and is there
-// any audio in it (see BLANK_KBPS)? Used by
+// any audio in it (see FFMPEG_BITRATE)? Used by
 // submit_pick so a resolved-but-dead stream (an intermittent 403) is rejected
 // while the model can still pick another candidate. Bounded: a probe that hangs
 // (a stalled stream open) is killed and reported unplayable — it must never
@@ -262,22 +262,72 @@ export async function probeStream(
   return (await playableProbe(source, ffmpegCmd, timeoutMs, headers, startS)) !== null
 }
 
-// ffmpeg's input header also states the file's average bitrate: its size over
-// its length, so it speaks for the WHOLE file, not the half second decoded.
+// ffmpeg's input header states the file's average bitrate. A blank upload (an
+// audio track of nothing) decodes cleanly and would air as five minutes of
+// silence; its encoder spends almost no bits on it (3 kb/s measured, against
+// 48+ for the leanest real audio format). But the figure is only a suspicion:
+// for a headerless stream ffmpeg estimates it from the first frames, so a
+// silent intro reads as 3 kb/s too — and a sparse real track can sit low.
 const FFMPEG_BITRATE = /^\s*Duration:.*\bbitrate:\s*(\d+)\s*kb\/s/m
-
-// A blank upload (an audio track of nothing) decodes cleanly and would air as
-// five minutes of silence; its encoder spends almost no bits on it (3 kb/s
-// measured, against 48+ for the leanest real audio format). A silent intro does
-// not trip it — the average is over the whole song.
-// ponytail: a whole-file average; a track muted only part-way still passes —
-// a volumedetect pass over a later window catches it, at a second decode.
 const BLANK_KBPS = 16
+
+// A suspect is only convicted by listening: ten seconds decoded half a minute
+// past where it will play, peak under SILENT_DB. Anything that does not answer
+// (a seek past a short file's end, a hang, a failed run) fails open.
+// ponytail: one window; a track silent there but not elsewhere is a second
+// window away, added when a false reject is ever measured.
+const FFMPEG_MAX_VOLUME = /max_volume:\s*(-?[\d.]+|-inf) dB/
+const SILENT_DB = -60
+
+export function blankCheckArgs(source: string, headers?: StreamHeaders, startS?: number): string[] {
+  // prettier-ignore
+  return ['-nostdin', ...headerArgs(headers), '-ss', String((startS ?? 0) + 30), '-i', source, '-t', '10', '-af', 'volumedetect', '-f', 'null', '-']
+}
+
+function isBlank(
+  source: string,
+  ffmpegCmd: string,
+  timeoutMs: number,
+  headers?: StreamHeaders,
+  startS?: number,
+): Promise<boolean> {
+  return new Promise((resolve) => {
+    const proc = spawn(ffmpegCmd, blankCheckArgs(source, headers, startS), { stdio: ['ignore', 'ignore', 'pipe'] })
+    let stderr = ''
+    proc.stderr.setEncoding('utf-8')
+    proc.stderr.on('data', (chunk: string) => (stderr += chunk))
+    const deadline = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
+    deadline.unref()
+    proc.on('exit', () => {
+      clearTimeout(deadline)
+      const peak = FFMPEG_MAX_VOLUME.exec(stderr)?.[1]
+      resolve(peak !== undefined && (peak === '-inf' || Number(peak) < SILENT_DB))
+    })
+    proc.on('error', () => {
+      clearTimeout(deadline)
+      resolve(false)
+    })
+  })
+}
 
 // The shared probe run: stderr of a half-second decode that exited clean and
 // is not blank; null for everything else (a failed decode, a hang past the
 // deadline, a binary that cannot spawn, a blank file).
-function playableProbe(
+async function playableProbe(
+  source: string,
+  ffmpegCmd: string,
+  timeoutMs: number,
+  headers?: StreamHeaders,
+  startS?: number,
+): Promise<string | null> {
+  const stderr = await decodesHead(source, ffmpegCmd, timeoutMs, headers, startS)
+  if (stderr === null) return null
+  const kbps = FFMPEG_BITRATE.exec(stderr)?.[1]
+  if (kbps === undefined || Number(kbps) >= BLANK_KBPS) return stderr
+  return (await isBlank(source, ffmpegCmd, timeoutMs, headers, startS)) ? null : stderr
+}
+
+function decodesHead(
   source: string,
   ffmpegCmd: string,
   timeoutMs: number,
@@ -293,8 +343,7 @@ function playableProbe(
     deadline.unref()
     proc.on('exit', (code) => {
       clearTimeout(deadline)
-      const kbps = FFMPEG_BITRATE.exec(stderr)?.[1]
-      resolve(code === 0 && !(kbps !== undefined && Number(kbps) < BLANK_KBPS) ? stderr : null)
+      resolve(code === 0 ? stderr : null)
     })
     proc.on('error', () => {
       clearTimeout(deadline)

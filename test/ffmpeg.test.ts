@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  blankCheckArgs,
   decodeArgs,
   framedChunks,
   ffmpegDecode,
@@ -93,9 +94,14 @@ async function stubFfmpeg(script: string): Promise<string> {
   return stub
 }
 
-// A probe stub: prints ffmpeg's input header with the given bitrate, decodes fine.
-const decodes = (bitrate: string) =>
-  stubFfmpeg(`#!/bin/sh\necho "  Duration: 00:05:14.66, start: 0.000000, bitrate: ${bitrate}" >&2\nexit 0\n`)
+// A probe stub that decodes fine: the head probe prints ffmpeg's input header
+// at `bitrate`; the blank check (the volumedetect run) prints `peak`, or
+// nothing — a seek past a short file's end.
+const decodes = (bitrate: string, peak?: string) =>
+  stubFfmpeg(
+    `#!/bin/sh\ncase "$*" in *volumedetect*) ${peak === undefined ? ':' : `echo "[Parsed_volumedetect_0] max_volume: ${peak} dB" >&2`} ;;\n` +
+      `*) echo "  Duration: 00:05:14.66, start: 0.000000, bitrate: ${bitrate}" >&2 ;;\nesac\nexit 0\n`,
+  )
 
 describe('probeStream', () => {
   it('kills a hung probe at the deadline and reports unplayable', async () => {
@@ -110,15 +116,29 @@ describe('probeStream', () => {
 
   // A blank upload (an audio track of nothing, measured at 3 kb/s and -91 dB)
   // decodes cleanly, so the exit code alone waved it through and a whole song
-  // aired as silence. The container's bitrate averages the WHOLE file, so a
-  // song with a silent intro still reads as music.
-  it('reports a stream whose whole file is near-empty as unplayable', async () => {
-    expect(await probeStream('src', await decodes('3 kb/s'))).toBe(false)
+  // aired as silence.
+  it('reports a near-empty stream that is silent past its head as unplayable', async () => {
+    expect(await probeStream('src', await decodes('3 kb/s', '-91.0'))).toBe(false)
+    expect(await probeStream('src', await decodes('3 kb/s', '-inf'))).toBe(false)
   })
 
-  it('passes real music and a stream with no stated bitrate', async () => {
-    expect(await probeStream('src', await decodes('143 kb/s'))).toBe(true)
-    expect(await probeStream('src', await decodes('N/A'))).toBe(true)
+  // A low bitrate is only a suspicion: ffmpeg estimates it off the first
+  // frames of a headerless stream, so a silent intro reads 3 kb/s, and a
+  // sparse real track sits low (codex review).
+  it('passes a low-bitrate stream that has sound, or whose check window answers nothing', async () => {
+    expect(await probeStream('src', await decodes('3 kb/s', '-17.4'))).toBe(true)
+    expect(await probeStream('src', await decodes('14 kb/s'))).toBe(true)
+  })
+
+  it('never runs the blank check on real music or a stream with no stated bitrate', async () => {
+    expect(await probeStream('src', await decodes('143 kb/s', '-91.0'))).toBe(true)
+    expect(await probeStream('src', await decodes('N/A', '-91.0'))).toBe(true)
+  })
+
+  it('checks the window half a minute past where the clip will play', () => {
+    expect(blankCheckArgs('src', undefined, 600)).toEqual([
+      '-nostdin', '-ss', '630', '-i', 'src', '-t', '10', '-af', 'volumedetect', '-f', 'null', '-',
+    ])
   })
 })
 
@@ -143,7 +163,7 @@ describe('probePlayableDurationS', () => {
   })
 
   it('is null for a blank stream, so the playability probe runs and rejects it', async () => {
-    expect(await probePlayableDurationS('src', await decodes('3 kb/s'))).toBeNull()
+    expect(await probePlayableDurationS('src', await decodes('3 kb/s', '-91.0'))).toBeNull()
   })
 
   it('is null for a stream with no stated duration, a hung probe, and a binary that cannot spawn', async () => {
