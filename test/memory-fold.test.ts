@@ -105,6 +105,18 @@ describe('compaction slice is listener-only (spec 05-01 §3.1)', () => {
     expect(store.compactionDue()).toBe(false)
   })
 
+  it('is due on the first admitted listener line by default', () => {
+    // A fact the listener states once ("I'm in Shanghai these days") must not
+    // wait for seven more lines or the next boot to reach the profile.
+    const c = clock(at('2026-09-01'))
+    const store = new PersistentMemoryStore({ dir: dir(), now: c.now })
+    store.record({ role: 'radio', text: 'the light is going gold out there' })
+    store.record({ role: 'user', text: 'ok' })
+    expect(store.compactionDue()).toBe(false)
+    store.record({ role: 'user', text: 'I live in Lisbon these days' })
+    expect(store.compactionDue()).toBe(true)
+  })
+
   it('counts admitted listener turns, not turns, towards the threshold', () => {
     const c = clock(at('2026-09-01'))
     const store = new PersistentMemoryStore({ dir: dir(), now: c.now, compactEvery: 2 })

@@ -181,7 +181,9 @@ type MemoryOps = {
 ### 2.3 Compaction surface (impl-level, spec 05 §2.1) — re-scoped
 
 - `compactionDue()` = admitted listener turns past the watermark ≥
-  `COMPACT_EVERY_USER_TURNS` (**8**; by-feel, spec 05 §6 posture).
+  `COMPACT_EVERY_USER_TURNS` (**1**: a durable fact the listener states once —
+  where they live — reaches the profile within the session, not at the next
+  boot's catch-up; the admission gate, not the count, keeps chatter out).
 - `compactionSlice()` returns only the **admitted listener turns and, for
   each, the host turn immediately before it** (the line it answered), oldest
   first, as `Turn[]` — the fold input. `throughTs` is still the newest history
@@ -199,7 +201,7 @@ the slice change. The stub Brain's no-op stands.
 
 | Name | Default | Where | Note |
 |---|---|---|---|
-| `COMPACT_EVERY_USER_TURNS` | 8 | `memory.ts` | replaces `COMPACT_EVERY_TURNS` |
+| `COMPACT_EVERY_USER_TURNS` | 1 | `memory.ts` | replaces `COMPACT_EVERY_TURNS` |
 | `FACT_FADE_DAYS` | 90 | `memory.ts` | a line unconfirmed this long fades |
 | `RECALL_LIMIT` | 5 | `director.ts` | hits handed to the model |
 | (exclusion) | `settings().recentWindow` | `director.ts` | trailing turns recall skips (§3.4) |
@@ -668,8 +670,7 @@ Unit (fakes / `tmp` dir, injected clock, model-free) unless noted:
 
 ### Open (build-time or by-ear; none blocking)
 
-- The `FACT_FADE_DAYS = 90` / `COMPACT_EVERY_USER_TURNS = 8` values are
-  starting guesses.
+- The `FACT_FADE_DAYS = 90` value is a starting guess.
 - Whether the model calls `recall_memory` when it should (and not when it
   should not) is stochastic: eval track, alongside the spec-11 steer
   tool-choice eval (#98).
