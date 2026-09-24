@@ -499,6 +499,35 @@ describe('the coda beat (spec 04 §3.3)', () => {
     await run
   })
 
+  // A recall parks the loop while the record plays out (spec 10 §3.4). A song
+  // that ended under the parked loop has no outro left to ride: the ride moment
+  // already passed with the loop away, and airing the coda "over the tail" of
+  // silence was seen live after a long /sources sign-in.
+  it('does not ride an outro that ended while a recall held the loop', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((r) => (release = r))
+    let inRecall = false
+    const { director, player, host, source } = codaBuild({
+      random: () => 0,
+      sourcesRecall: async () => {
+        inRecall = true
+        await gate
+      },
+    })
+    source.picks = [pickOf('https://stream/s1', { durationS: CODA_LEAD_MIN_S + 0.3 })]
+    const run = director.run(3) // talk, music, talk
+    await until(() => player.handles.length === 1, 'song on air')
+    host.type('/sources')
+    await until(() => inRecall, 'the recall opened')
+    await until(() => host.debugs.some((d) => d.includes('coda ready')), 'coda ready')
+    await sleep(400) // past the ride moment, with the loop parked
+    player.handles[0]!.end()
+    release()
+    await run
+    expect(host.debugs).not.toContain('coda rides the outro')
+    expect(host.radio.at(-1)).toBe('the coda') // it left through the post-song head
+  })
+
   it('falls back to the post-song head when the track length is unknown', async () => {
     const { director, player, host, source } = codaBuild({ random: () => 0 })
     source.picks = [pickOf('https://stream/s1')] // a live stream: no durationS
