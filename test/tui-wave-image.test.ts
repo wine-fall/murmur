@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest'
 
 import { INK } from '../tui/src/palette.ts'
-import { bandAt, encodeWavePng, ringLevel, waveGeomFor, waveRgba, waveRowsFor, WAVE_CYCLE } from '../tui/src/wave-image.ts'
+import { bandAt, clipWaveGeom, encodeWavePng, ringLevel, waveGeomFor, waveRgba, waveRowsFor, WAVE_CYCLE } from '../tui/src/wave-image.ts'
 
 // The user's real panel: 83x45 cells at 9x25 device px.
 const GEOM = waveGeomFor(83, 45, { width: 9, height: 25 })
@@ -215,5 +215,15 @@ describe('waveRowsFor (the ripple clips above the card)', () => {
     expect(waveRowsFor(false, 30, 3, 40)).toBe(26)
     expect(waveRowsFor(true, 30, 3, 40)).toBe(26) // ends above row 30
     expect(waveRowsFor(true, 6, 3, 40)).toBe(0) // a 2-row sliver is not a sky
+  })
+})
+
+// A clipped sky is the same ripple with its bottom cut off by the card, not a
+// smaller ripple re-centered in what is left: the figure stays where it is, so
+// a re-centered ring would float up and away from it (seen with the QR card).
+describe('clipWaveGeom (the card cuts the ripple, it does not move it)', () => {
+  it('keeps the circle and crops only the height', () => {
+    const clipped = clipWaveGeom(GEOM, 20, 25)
+    expect(clipped).toEqual({ ...GEOM, height: 20 * 25 })
   })
 })

@@ -60,7 +60,7 @@ import {
   placeFigure,
   stagePlan,
 } from './figure-image.ts'
-import { encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
+import { clipWaveGeom, encodeWavePng, waveGeomFor, waveRowsFor, WAVE_FPS } from './wave-image.ts'
 import { IDENT_LINE, identSize, TAGLINE, WORDMARK } from './logo.ts'
 import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
 import {
@@ -987,9 +987,9 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         const silent = levels.every((level) => level === 0)
         if (silent && wasSilent) return
         wasSilent = silent
-        // The clipped geometry ends the raster above the card; the hushed
+        // The clipped geometry cuts the raster off above the card; the hushed
         // color is the room's own step down, so the ripple dims with it.
-        const g = rows === sceneRows ? geom : waveGeomFor(sceneWidth, rows, cell)
+        const g = rows === sceneRows ? geom : clipWaveGeom(geom, rows, cell.height)
         const bright = hushedNow ? hush(accentRef.current.bright) : accentRef.current.bright
         rawOut.writeOut(placeFigure(encodeWavePng(levels, tick++, g, bright), row, col, 2, 0))
       }
