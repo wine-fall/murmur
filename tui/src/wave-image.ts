@@ -62,6 +62,12 @@ export function waveRowsFor(
   return rows < 4 ? 0 : rows
 }
 
+// The ripple under a floating panel: the same circle, its bottom rows cut off.
+// The figure does not move for the card, so neither does the ring around it.
+export function clipWaveGeom(geom: WaveGeom, rows: number, cellHeight: number): WaveGeom {
+  return { ...geom, height: rows * cellHeight }
+}
+
 export function waveGeomFor(
   cols: number,
   rows: number,
