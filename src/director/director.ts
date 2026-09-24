@@ -1641,6 +1641,15 @@ export class Director {
     // of waiting for silence. Armed once per track (re-armed on a handover, for
     // the new one), and cleared once it has been raced.
     let codaRide = track === undefined ? null : this.armCodaRide()
+    // Whether the track has already ended, readable at the moment the ride
+    // wins: a recall that parked the loop (spec 10 §3.4) can hand it back
+    // after both the ride moment and the song itself have passed.
+    const watchEnd = (handle: MusicHandle | undefined): { over: boolean } => {
+      const end = { over: false }
+      void handle?.wait().then(() => (end.over = true))
+      return end
+    }
+    let trackEnd = watchEnd(track)
     try {
       while (!this.quit) {
         if (steer === null) {
@@ -1676,6 +1685,8 @@ export class Director {
           }
           if (winner === 'coda') {
             codaRide = null // one ride per track, won or lost
+            // No outro left to ride: the song branch queues the coda instead.
+            if (trackEnd.over) continue
             const ride = this.takeCoda()
             if (ride === null) {
               this.deps.host.debug?.('coda not ready for the outro; it waits for the boundary')
@@ -1701,6 +1712,7 @@ export class Director {
               // A new track brought its own coda (startTrack fired one); the
               // ride belongs to ITS length, from ITS start.
               codaRide = track === undefined ? null : this.armCodaRide()
+              trackEnd = watchEnd(track)
             }
             continue
           }
