@@ -86,6 +86,17 @@ describe('ffmpegDecode', () => {
   })
 })
 
+async function stubFfmpeg(script: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'murmur-ffmpeg-'))
+  const stub = join(dir, 'ffmpeg-stub')
+  await writeFile(stub, script, { mode: 0o755 })
+  return stub
+}
+
+// A probe stub: prints ffmpeg's input header with the given bitrate, decodes fine.
+const decodes = (bitrate: string) =>
+  stubFfmpeg(`#!/bin/sh\necho "  Duration: 00:05:14.66, start: 0.000000, bitrate: ${bitrate}" >&2\nexit 0\n`)
+
 describe('probeStream', () => {
   it('kills a hung probe at the deadline and reports unplayable', async () => {
     // `yes` ignores the ffmpeg args and never exits — the stand-in for a
@@ -96,6 +107,19 @@ describe('probeStream', () => {
   it('reports false for a probe binary that cannot spawn', async () => {
     expect(await probeStream('src', '/nonexistent/ffmpeg-binary')).toBe(false)
   })
+
+  // A blank upload (an audio track of nothing, measured at 3 kb/s and -91 dB)
+  // decodes cleanly, so the exit code alone waved it through and a whole song
+  // aired as silence. The container's bitrate averages the WHOLE file, so a
+  // song with a silent intro still reads as music.
+  it('reports a stream whose whole file is near-empty as unplayable', async () => {
+    expect(await probeStream('src', await decodes('3 kb/s'))).toBe(false)
+  })
+
+  it('passes real music and a stream with no stated bitrate', async () => {
+    expect(await probeStream('src', await decodes('143 kb/s'))).toBe(true)
+    expect(await probeStream('src', await decodes('N/A'))).toBe(true)
+  })
 })
 
 // The netease trap and the playability probe used to be two separate opens of
@@ -103,13 +127,6 @@ describe('probeStream', () => {
 // half a second AND says how long the input is, so a duration coming back is
 // proof the stream really plays — which a container-only ffprobe read is not.
 describe('probePlayableDurationS', () => {
-  async function stubFfmpeg(script: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), 'murmur-ffmpeg-'))
-    const stub = join(dir, 'ffmpeg-stub')
-    await writeFile(stub, script, { mode: 0o755 })
-    return stub
-  }
-
   it('reads the length off a probe that decoded, and subtracts the offset', async () => {
     const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 02:05:06.50, start: 0.000000, bitrate: 128 kb/s" >&2\nexit 0\n')
     expect(await probePlayableDurationS('src', stub)).toBe(7506.5)
@@ -123,6 +140,10 @@ describe('probePlayableDurationS', () => {
   it('is null when the probe printed a length but did not decode', async () => {
     const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 00:01:00.00, bitrate: 128 kb/s" >&2\nexit 69\n')
     expect(await probePlayableDurationS('src', stub)).toBeNull()
+  })
+
+  it('is null for a blank stream, so the playability probe runs and rejects it', async () => {
+    expect(await probePlayableDurationS('src', await decodes('3 kb/s'))).toBeNull()
   })
 
   it('is null for a stream with no stated duration, a hung probe, and a binary that cannot spawn', async () => {

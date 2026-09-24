@@ -205,7 +205,8 @@ export function probeDurationS(
 }
 
 // Pull-time playability probe (spec 03-01 §2.3 seam, owned here with the rest of
-// the ffmpeg boundary): does the source actually decode audio? Used by
+// the ffmpeg boundary): does the source actually decode audio, and is there
+// any audio in it (see BLANK_KBPS)? Used by
 // submit_pick so a resolved-but-dead stream (an intermittent 403) is rejected
 // while the model can still pick another candidate. Bounded: a probe that hangs
 // (a stalled stream open) is killed and reported unplayable — it must never
@@ -236,13 +237,53 @@ export function parseFfmpegDuration(stderr: string): number | null {
 // second probeStream decodes, and take the length off the same run.
 // Null = no length to compare, for any reason including a stream that did not
 // play. The caller reads it as "unproven" and probes properly.
-export function probePlayableDurationS(
+export async function probePlayableDurationS(
   source: string,
   ffmpegCmd = 'ffmpeg',
   timeoutMs = 15_000,
   headers?: StreamHeaders,
   startS?: number,
 ): Promise<number | null> {
+  const stderr = await playableProbe(source, ffmpegCmd, timeoutMs, headers, startS)
+  if (stderr === null) return null
+  const total = parseFfmpegDuration(stderr)
+  if (total === null) return null
+  const remaining = total - (startS ?? 0)
+  return remaining > 0 ? remaining : null
+}
+
+export async function probeStream(
+  source: string,
+  ffmpegCmd = 'ffmpeg',
+  timeoutMs = 15_000,
+  headers?: StreamHeaders,
+  startS?: number,
+): Promise<boolean> {
+  return (await playableProbe(source, ffmpegCmd, timeoutMs, headers, startS)) !== null
+}
+
+// ffmpeg's input header also states the file's average bitrate: its size over
+// its length, so it speaks for the WHOLE file, not the half second decoded.
+const FFMPEG_BITRATE = /^\s*Duration:.*\bbitrate:\s*(\d+)\s*kb\/s/m
+
+// A blank upload (an audio track of nothing) decodes cleanly and would air as
+// five minutes of silence; its encoder spends almost no bits on it (3 kb/s
+// measured, against 48+ for the leanest real audio format). A silent intro does
+// not trip it — the average is over the whole song.
+// ponytail: a whole-file average; a track muted only part-way still passes —
+// a volumedetect pass over a later window catches it, at a second decode.
+const BLANK_KBPS = 16
+
+// The shared probe run: stderr of a half-second decode that exited clean and
+// is not blank; null for everything else (a failed decode, a hang past the
+// deadline, a binary that cannot spawn, a blank file).
+function playableProbe(
+  source: string,
+  ffmpegCmd: string,
+  timeoutMs: number,
+  headers?: StreamHeaders,
+  startS?: number,
+): Promise<string | null> {
   return new Promise((resolve) => {
     const proc = spawn(ffmpegCmd, probeArgs(source, headers, startS), { stdio: ['ignore', 'ignore', 'pipe'] })
     let stderr = ''
@@ -252,39 +293,12 @@ export function probePlayableDurationS(
     deadline.unref()
     proc.on('exit', (code) => {
       clearTimeout(deadline)
-      if (code !== 0) return resolve(null)
-      const total = parseFfmpegDuration(stderr)
-      if (total === null) return resolve(null)
-      const remaining = total - (startS ?? 0)
-      resolve(remaining > 0 ? remaining : null)
+      const kbps = FFMPEG_BITRATE.exec(stderr)?.[1]
+      resolve(code === 0 && !(kbps !== undefined && Number(kbps) < BLANK_KBPS) ? stderr : null)
     })
     proc.on('error', () => {
       clearTimeout(deadline)
       resolve(null)
-    })
-  })
-}
-
-export function probeStream(
-  source: string,
-  ffmpegCmd = 'ffmpeg',
-  timeoutMs = 15_000,
-  headers?: StreamHeaders,
-  startS?: number,
-): Promise<boolean> {
-  return new Promise((resolve) => {
-    const proc = spawn(ffmpegCmd, probeArgs(source, headers, startS), {
-      stdio: 'ignore',
-    })
-    const deadline = setTimeout(() => proc.kill('SIGKILL'), timeoutMs)
-    deadline.unref()
-    proc.on('exit', (code) => {
-      clearTimeout(deadline)
-      resolve(code === 0)
-    })
-    proc.on('error', () => {
-      clearTimeout(deadline)
-      resolve(false)
     })
   })
 }
