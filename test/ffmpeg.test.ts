@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 import {
+  blankCheckArgs,
   decodeArgs,
   framedChunks,
   ffmpegDecode,
@@ -86,6 +87,22 @@ describe('ffmpegDecode', () => {
   })
 })
 
+async function stubFfmpeg(script: string): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), 'murmur-ffmpeg-'))
+  const stub = join(dir, 'ffmpeg-stub')
+  await writeFile(stub, script, { mode: 0o755 })
+  return stub
+}
+
+// A probe stub that decodes fine: the head probe prints ffmpeg's input header
+// at `bitrate`; the blank check (the volumedetect run) prints `peak`, or
+// nothing — a seek past a short file's end.
+const decodes = (bitrate: string, peak?: string) =>
+  stubFfmpeg(
+    `#!/bin/sh\ncase "$*" in *volumedetect*) ${peak === undefined ? ':' : `echo "[Parsed_volumedetect_0] max_volume: ${peak} dB" >&2`} ;;\n` +
+      `*) echo "  Duration: 00:05:14.66, start: 0.000000, bitrate: ${bitrate}" >&2 ;;\nesac\nexit 0\n`,
+  )
+
 describe('probeStream', () => {
   it('kills a hung probe at the deadline and reports unplayable', async () => {
     // `yes` ignores the ffmpeg args and never exits — the stand-in for a
@@ -96,6 +113,33 @@ describe('probeStream', () => {
   it('reports false for a probe binary that cannot spawn', async () => {
     expect(await probeStream('src', '/nonexistent/ffmpeg-binary')).toBe(false)
   })
+
+  // A blank upload (an audio track of nothing, measured at 3 kb/s and -91 dB)
+  // decodes cleanly, so the exit code alone waved it through and a whole song
+  // aired as silence.
+  it('reports a near-empty stream that is silent past its head as unplayable', async () => {
+    expect(await probeStream('src', await decodes('3 kb/s', '-91.0'))).toBe(false)
+    expect(await probeStream('src', await decodes('3 kb/s', '-inf'))).toBe(false)
+  })
+
+  // A low bitrate is only a suspicion: ffmpeg estimates it off the first
+  // frames of a headerless stream, so a silent intro reads 3 kb/s, and a
+  // sparse real track sits low (codex review).
+  it('passes a low-bitrate stream that has sound, or whose check window answers nothing', async () => {
+    expect(await probeStream('src', await decodes('3 kb/s', '-17.4'))).toBe(true)
+    expect(await probeStream('src', await decodes('14 kb/s'))).toBe(true)
+  })
+
+  it('never runs the blank check on real music or a stream with no stated bitrate', async () => {
+    expect(await probeStream('src', await decodes('143 kb/s', '-91.0'))).toBe(true)
+    expect(await probeStream('src', await decodes('N/A', '-91.0'))).toBe(true)
+  })
+
+  it('checks the window half a minute past where the clip will play', () => {
+    expect(blankCheckArgs('src', undefined, 600)).toEqual([
+      '-nostdin', '-ss', '630', '-i', 'src', '-t', '10', '-af', 'volumedetect', '-f', 'null', '-',
+    ])
+  })
 })
 
 // The netease trap and the playability probe used to be two separate opens of
@@ -103,13 +147,6 @@ describe('probeStream', () => {
 // half a second AND says how long the input is, so a duration coming back is
 // proof the stream really plays — which a container-only ffprobe read is not.
 describe('probePlayableDurationS', () => {
-  async function stubFfmpeg(script: string): Promise<string> {
-    const dir = await mkdtemp(join(tmpdir(), 'murmur-ffmpeg-'))
-    const stub = join(dir, 'ffmpeg-stub')
-    await writeFile(stub, script, { mode: 0o755 })
-    return stub
-  }
-
   it('reads the length off a probe that decoded, and subtracts the offset', async () => {
     const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 02:05:06.50, start: 0.000000, bitrate: 128 kb/s" >&2\nexit 0\n')
     expect(await probePlayableDurationS('src', stub)).toBe(7506.5)
@@ -123,6 +160,10 @@ describe('probePlayableDurationS', () => {
   it('is null when the probe printed a length but did not decode', async () => {
     const stub = await stubFfmpeg('#!/bin/sh\necho "  Duration: 00:01:00.00, bitrate: 128 kb/s" >&2\nexit 69\n')
     expect(await probePlayableDurationS('src', stub)).toBeNull()
+  })
+
+  it('is null for a blank stream, so the playability probe runs and rejects it', async () => {
+    expect(await probePlayableDurationS('src', await decodes('3 kb/s', '-91.0'))).toBeNull()
   })
 
   it('is null for a stream with no stated duration, a hung probe, and a binary that cannot spawn', async () => {
