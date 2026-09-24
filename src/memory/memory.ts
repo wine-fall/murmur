@@ -157,8 +157,11 @@ const LAST_ON_AIR_TOPICS = 3
 
 // Compaction cadence (spec 05-01 §2.3): admitted LISTENER turns past the
 // watermark, not turns. A session the listener never typed in has nothing to
-// learn, so it never folds. By-feel tunable (spec 05-01 §6).
-const COMPACT_EVERY_USER_TURNS = 8
+// learn, so it never folds. One line is enough: a listener says where they
+// live once, and that fact belongs in the profile this session, not at the
+// next boot's catch-up. A line typed while a fold is in flight rides the next
+// segment's poke.
+const COMPACT_EVERY_USER_TURNS = 1
 
 // A fact unconfirmed this long fades out of the prompts (spec 05-01 §3.3).
 export const FACT_FADE_DAYS = 90
