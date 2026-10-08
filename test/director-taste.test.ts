@@ -3,10 +3,11 @@
 // blocks the air, and invitations go out once per change.
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import { EveryNCadence } from '../src/director/cadence.ts'
 import { Director, type DirectorDeps, steerFromLine } from '../src/director/director.ts'
+import { FEATURE_INVITE_AFTER_MS } from '../src/director/invitations.ts'
 import type { Invitation } from '../src/host/ipc.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import type { Moment } from '../src/music/sources/moment.ts'
@@ -296,16 +297,28 @@ describe('invitations (spec 14 §2.7/§5.10)', () => {
   })
 
   it('adds /feature-request at the session mark, from a one-shot timer', async () => {
-    const { brain, player, host, director } = setup({ taste: fakeTaste({ mountedIds: ['netease'] }), featureInviteAfterMs: 40 })
+    vi.useFakeTimers()
+    const { brain, player, host, director } = setup({ taste: fakeTaste({ mountedIds: ['netease'] }) })
     brain.batches = [['a']]
     player.auto = false
     const run = director.run()
-    await until(() => player.played.length === 1, 'first clip on air')
-    await until(() => host.invited.some((set) => set.some((r) => r.command === '/feature-request')), 'the mark')
-    expect(commands(host.invited).at(-1)).toEqual(['/feature-request'])
-    player.finish()
-    host.type('/quit')
-    await run
+    try {
+      await vi.advanceTimersByTimeAsync(0)
+      expect(player.played).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(FEATURE_INVITE_AFTER_MS - 1)
+      expect(commands(host.invited)).toEqual([[]])
+      await vi.advanceTimersByTimeAsync(1)
+      expect(commands(host.invited)).toEqual([[], ['/feature-request']])
+      await vi.advanceTimersByTimeAsync(FEATURE_INVITE_AFTER_MS)
+      expect(commands(host.invited)).toEqual([[], ['/feature-request']])
+    } finally {
+      director.requestQuit()
+      try {
+        await run
+      } finally {
+        vi.useRealTimers()
+      }
+    }
   })
 
   it('a run with no taste wiring still invites — /sources included, since nothing is mounted', async () => {

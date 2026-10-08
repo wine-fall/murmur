@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-09-22 (spec 03-03 §7.2, default female voice re-cloned from a real recording)_
+_Last updated: 2026-10-08 (spec 14 §5.10, controlled-clock coverage for the session invitation)_
 
 ## Where we are
 
@@ -46,7 +46,7 @@ hand: CI fails if this section points at an issue that is already closed.
 - **#293** (by-ear) The stock opener set and the farewell: count, genericness, variety — spec 04 §3.6.
 - **#290** (by-ear) Does the discovery change actually widen what plays — spec 14 §3.10's familiar share per 100 airs.
 - **#284** (eng) `CLOCK_USAGE` is a per-fact "reference only" rule — the one prompt rule spec 04 §3.5 forbids.
-- **#269** (bug, eng) The session-mark invitation test races a 40 ms timer against a 1 s poll budget — four CI occurrences, never reproduced locally.
+- **#269** (bug, eng) The session-mark invitation test uses a controlled clock; consecutive CI stability verification remains.
 - **#272** (bug, eng) A NetEase resolve costs 15-55 s — yt-dlp walks its quality levels one request at a time.
 - **#273** (bug, eng) Brain cadence never beats its own 8 s deadline, so every boundary falls back silently.
 - **#89** (eng) Second brain backend: Codex SDK — recorded direction, not scheduled.
