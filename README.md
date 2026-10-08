@@ -18,13 +18,9 @@ npm install -g murmur-radio && murmur
 
 **A companion radio — "a whole radio station, for an audience of one," with an agent for a brain.**
 
-<p align="center">
-  <a href="https://www.youtube.com/watch?v=DQ4YbSJF2XM">
-    <img src="https://i.ytimg.com/vi/DQ4YbSJF2XM/maxresdefault.jpg" alt="Watch the murmur demo on YouTube" width="100%">
-  </a>
-</p>
+https://github.com/user-attachments/assets/59a300a8-8d61-443f-b592-8677e12e2be4
 
-<p align="center"><strong><a href="https://www.youtube.com/watch?v=DQ4YbSJF2XM">Watch the 86-second demo on YouTube</a></strong><br><em>Sound on — meet the host, hear a real on-air moment, and see how you reply.</em><br><a href="https://github.com/user-attachments/assets/59d1f8f0-7eae-4dfb-8dd2-c046d3f559ab">Longer recording of the radio running (2:32)</a></p>
+<p align="center"><em><strong>Sound on</strong> — meet the host, hear a real on-air moment, and see how you reply in this 86-second demo.</em><br><a href="https://www.youtube.com/watch?v=DQ4YbSJF2XM">Watch on YouTube if the player does not load</a><br><a href="https://github.com/user-attachments/assets/59d1f8f0-7eae-4dfb-8dd2-c046d3f559ab">Longer recording of the radio running (2:32)</a></p>
 
 murmur is always on the air. It finds a topic and chats with you on its own, plays a song, comes back and keeps going; at the right times it says good morning / good night. It *broadcasts, never solicits* — it keeps going whether or not you say anything, and when you type back it chats for a bit, then eases back into the program. The host is **yours from the first minute** — a few questions when you first run it, and you have a character that stays who it is. What grows is how well it knows you. You talk to it with the **keyboard**; it answers with a **voice that sounds human**.
 
