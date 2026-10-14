@@ -1404,7 +1404,14 @@ export class Director {
         }
         const started = await this.steerableStart(pick)
         if (this.quit) return false
-        if (started === null) continue
+        if (started === null) {
+          this.deps.host.debug?.(`music.start dead ${JSON.stringify(trackLabel(pick))}`)
+          // The retry takes the next slot only if it is already in hand: the
+          // never-block rule above holds for every attempt, not just the first.
+          const next = this.pickQueue[0]
+          if (next !== undefined && !next.done()) return false
+          continue
+        }
         await this.runVoice(started.voice, started.handle)
         this.noteTrackEnd()
         return true

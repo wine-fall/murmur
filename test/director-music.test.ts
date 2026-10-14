@@ -618,6 +618,28 @@ describe('confirm real audio before committing (the announced-but-silent guard)'
     await run
   })
 
+  // A dead start must not turn into a wait on the slot behind it: that slot
+  // may be a full discovery still in flight, and the air would hold for it.
+  it('a dead start behind which the next pick is still resolving airs talk, not a wait', async () => {
+    const { director, player, host, source } = build()
+    player.nextHandles = [new FakeMusicHandle(false), new FakeMusicHandle(true)]
+    let resolvePick!: (p: ReturnType<typeof pickOf> | null) => void
+    const gated = new Promise<ReturnType<typeof pickOf> | null>((r) => (resolvePick = r))
+    source.nextTrack = async (ctx) => {
+      source.calls++
+      source.contexts.push(ctx)
+      return source.calls === 1 ? pickOf('https://stream/dead', { title: 'Dead One' }) : gated
+    }
+    const run = director.run(3)
+    await until(() => host.radio.length >= 2, 'talk aired past the dead start')
+    expect(player.handles.length).toBe(1)
+    expect(host.debugs.some((m) => m.includes('music.start dead') && m.includes('Dead One'))).toBe(true)
+    resolvePick(pickOf('https://stream/live'))
+    await until(() => player.handles.length === 2 || host.radio.length >= 3, 'run moved on')
+    player.handles[1]?.end()
+    await run
+  })
+
   it('all attempts dead degrades visibly to talk', async () => {
     const { director, player, host, source } = build()
     player.nextHandles = [new FakeMusicHandle(false), new FakeMusicHandle(false)]
