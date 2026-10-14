@@ -4,7 +4,7 @@
 // interim subprocess player is gone.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { basename, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
@@ -45,7 +45,7 @@ import { CliHost, type Host } from './host/host.ts'
 import { HostedVoice } from './voice/hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './host/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory/memory.ts'
-import { sentinelRoot } from './paths.ts'
+import { commandShimPath, sentinelRoot } from './paths.ts'
 import { personaFingerprint, signOff, StockLines, stockDir, type StockFingerprint } from './support/stock.ts'
 import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
@@ -81,7 +81,7 @@ import {
   readCrashWindow,
   uncleanExitNotice,
 } from './support/sentinel.ts'
-import { preflightBun, preflightFfmpeg, preflightYtdlp } from './setup/startup.ts'
+import { commandPin, preflightBun, preflightFfmpeg, preflightYtdlp } from './setup/startup.ts'
 import { VizFeed } from './audio/viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice/voice-config.ts'
 import { StubVoice } from './voice/voice.ts'
@@ -533,6 +533,12 @@ export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
 // voice.json mid-conversation, and the recheck has to read the world again.
 export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): SetupTargets {
   const saved = (): VoiceConfig | null => readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))
+  // The script node was launched with, through the bin symlink to dist/main.js.
+  const launched = process.argv[1]
+  const pin =
+    launched !== undefined && existsSync(launched)
+      ? commandPin(process.execPath, realpathSync(launched))
+      : null
   return {
     ytdlp: config.ytdlpCmd,
     ffmpeg: config.ffmpegCmd,
@@ -546,6 +552,7 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     // (issue #93). A configured endpoint or a recorded decline is what removes
     // it from the offer; it is an offer item, never a blocker.
     wantsVoice: true,
+    ...(pin !== null && { pin: { ...pin, shim: commandShimPath() } }),
     // Env/flags keep precedence over the file, exactly as parseCli layered it.
     voiceUrl: () => config.ttsUrl || (saved()?.ttsUrl ?? ''),
     // The file as written, for the run to wire itself from: a hosted endpoint

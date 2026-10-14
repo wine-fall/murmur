@@ -109,7 +109,8 @@ Each item records the **why**, to avoid re-litigating later.
   - The tool/skill **harness seam is introduced in spec 03-01** (music search & recommendation is its first capability); later specs (05/06/07) hang more capabilities on the same seam. Fast, latency-critical calls like `next_talk` stay tool-less **by choice** — a harness *configuration*, not a separate "crippled" brain.
 
 ### 3.3 Language / runtime: TypeScript on Node
-- The engine is **TypeScript on Node (≥24, native type-stripping)**, on
+- The engine is **TypeScript on Node (≥24 from source, native type-stripping;
+  the published package runs on `^22.16.0 || >=24`, spec 03-03 §7.5)**, on
   `@anthropic-ai/claude-agent-sdk` (issue #54; the original Python
   implementation served as the rewrite's behavior oracle and is deleted).
 - *Rationale (weighed, not a default)*:

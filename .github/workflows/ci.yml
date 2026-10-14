@@ -55,6 +55,48 @@ jobs:
           printf 'pcm.!default { type null }\nctl.!default { type null }\n' > ~/.asoundrc
           timeout 120 node src/main.ts --brain stub --voice stub --no-music --no-bed --max-segments 1
 
+  # The published floor (package.json engines) is proven, not assumed: build
+  # dist/ the way prepack does, then boot it on exactly the oldest Node the
+  # package admits. A source run needs 24 (type-stripping); the package does not.
+  node-floor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run prepack
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.16.0
+
+      - name: Boot the packed dist on the floor
+        run: |
+          printf 'pcm.!default { type null }\nctl.!default { type null }\n' > ~/.asoundrc
+          node --version
+          timeout 120 node dist/main.js --brain stub --voice stub --no-music --no-bed --max-segments 1
+
+      # The stub boot never reaches recall, the floor's tightest API: FTS5 over
+      # node:sqlite, with no experimental flag.
+      - name: Recall on the floor
+        run: |
+          node --input-type=module --eval "
+            import './dist/warnings.js'
+            const { RecallIndex } = await import('./dist/memory/recall.js')
+            const index = new RecallIndex(':memory:')
+            index.rebuild([{ ts: 1, role: 'user', text: 'a lantern by the window' }])
+            if (index.count() !== 1) process.exit(1)
+          "
+
   # The spec-10 TUI client is a separate Bun package on purpose (§2.2): it stays
   # outside the root package manager's workspace, so the root job above never
   # installs or checks it. Its own gate is tsc under Bun — the same static

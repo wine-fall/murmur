@@ -14,6 +14,9 @@
 // to fix itself by talking. runSetup is that offer — once per boot, actively,
 // covering every gap in one conversation.
 
+import { existsSync } from 'node:fs'
+import { dirname } from 'node:path'
+
 import { type CanUseTool, tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
@@ -31,10 +34,12 @@ import { expandUser } from '../paths.ts'
 import { HostedVoice } from '../voice/hosted-voice.ts'
 import { buildSetupPrompt, GUIDE_PERSONA, VISIT_PERSONA, type SetupCurrentState } from '../prompts/setup.ts'
 import {
+  type CommandPin,
   preflightBun,
   preflightMusic,
   preflightYtdlpFreshness,
   type PreflightResult,
+  shimScript,
 } from './startup.ts'
 import {
   createVoiceTool,
@@ -275,7 +280,7 @@ export function formatToolResult(output: string, isError: boolean): string {
 
 // --- conversational onboarding (spec 03-03 §7) ---------------------------- //
 
-export type GapKind = 'music' | 'ytdlp' | 'bun' | 'voice'
+export type GapKind = 'music' | 'ytdlp' | 'bun' | 'voice' | 'path'
 export type Gap = { readonly kind: GapKind; readonly reason: string }
 
 // The tier-3 ledger key for the onboarding offer's standing answer. A decline
@@ -301,6 +306,9 @@ export type SetupTargets = {
   readonly wantsBun: boolean
   readonly wantsVoice: boolean
   readonly voiceUrl: () => string
+  // Present iff the command can go missing (§7.5): an installed run on a
+  // switching version manager's node, and the stable path its shim belongs at.
+  readonly pin?: CommandPin & { readonly shim: string }
   // A configured endpoint that is refusing auth (fed by the Director's synth
   // failures): still a gap — issue #97's reopen path.
   readonly voiceFailing?: () => boolean
@@ -356,6 +364,14 @@ export async function detectGaps(
       gaps.push({ kind: 'voice', reason: 'the configured endpoint is failing auth' })
     }
   }
+  // The shim's presence, read fresh each detect so the recheck sees a write.
+  // Any file there closes it: murmur never becomes a second writer over it.
+  if (targets.pin !== undefined && !existsSync(targets.pin.shim)) {
+    gaps.push({
+      kind: 'path',
+      reason: `murmur runs on ${targets.pin.node}; no shim at ${targets.pin.shim}`,
+    })
+  }
   return gaps
 }
 
@@ -370,6 +386,7 @@ export type SetupOutcome = {
   readonly ytdlpFresh: boolean
   readonly bunOk: boolean
   readonly voiceOk: boolean
+  readonly pinOk: boolean
 }
 
 export type SetupRun = {
@@ -445,6 +462,7 @@ const PLAIN_ENGLISH: Record<GapKind, string> = {
   ytdlp: 'yt-dlp is getting stale, so fetching songs (Bilibili first) may fail until it is upgraded',
   bun: 'the terminal interface needs bun, so this is the plain text version',
   voice: 'the voice endpoint is missing or failing, so lines are shown instead of spoken',
+  path: 'murmur lives inside one Node version, so the command goes missing when a project switches Node',
 }
 
 const READY: Record<GapKind, string> = {
@@ -452,6 +470,7 @@ const READY: Record<GapKind, string> = {
   ytdlp: 'yt-dlp is current',
   bun: 'the terminal front-end runtime is ready',
   voice: 'the voice endpoint is configured',
+  path: 'the murmur command works whichever Node is active',
 }
 
 // The pre-broadcast checklist card (spec 10 §3.2-B spotlight): summary, ready
@@ -469,6 +488,7 @@ export function setupOfferText(targets: SetupTargets, gaps: Gap[], explicit = fa
     ['music', targets.wantsMusic],
     ['bun', targets.wantsBun],
     ['voice', targets.wantsVoice],
+    ['path', targets.pin !== undefined],
   ]
   for (const [kind, wants] of wanted) {
     if (wants && !has(kind)) rows.push(`ok ${kind.padEnd(NAME_COL)} - ${READY[kind]}`)
@@ -501,7 +521,8 @@ export function setupComplete(targets: SetupTargets, outcome: SetupOutcome): boo
   return (
     (!targets.wantsMusic || (outcome.musicOk && outcome.ytdlpFresh)) &&
     (!targets.wantsBun || outcome.bunOk) &&
-    (!targets.wantsVoice || outcome.voiceOk)
+    (!targets.wantsVoice || outcome.voiceOk) &&
+    (targets.pin === undefined || outcome.pinOk)
   )
 }
 
@@ -512,6 +533,7 @@ function outcomeFrom(targets: SetupTargets, gaps: Gap[]): SetupOutcome {
     ytdlpFresh: targets.wantsMusic && !has('ytdlp'),
     bunOk: targets.wantsBun && !has('bun'),
     voiceOk: targets.wantsVoice && !has('voice'),
+    pinOk: targets.pin !== undefined && !has('path'),
   }
 }
 
@@ -776,6 +798,13 @@ async function runSetupFlow(
       ytdlp: targets.ytdlp,
       ffmpeg: targets.ffmpeg,
       bunCmd: targets.bunCmd,
+      ...(targets.pin !== undefined && {
+        pin: {
+          shim: targets.pin.shim,
+          script: shimScript(targets.pin.node, targets.pin.entry),
+          onPath: (process.env.PATH ?? '').split(':').includes(dirname(targets.pin.shim)),
+        },
+      }),
       current: currentState(targets, run.settings),
     }),
     model: GUIDE_MODEL,
