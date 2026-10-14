@@ -40,7 +40,7 @@ describe('parseCli', () => {
     expect(config.cadenceMode).toBe('every_n')
     expect(config.musicEveryN).toBe(2)
     expect(config.ytdlpCmd).toBe('yt-dlp')
-    expect(config.musicModel).toBe('claude-sonnet-5')
+    expect(config.musicModel).toBe('claude-sonnet-5-5')
   })
 
   it('layers flags over defaults and coerces numbers', () => {
@@ -292,7 +292,7 @@ describe('memory config', () => {
 
   it('defaults compactModel to the capable tier, not a cheap one', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.compactModel).toBe('claude-opus-5')
+    expect(config.compactModel).toBe('claude-opus-5-5')
   })
 })
 
@@ -303,16 +303,16 @@ describe('memory config', () => {
 describe('Claude model tiers', () => {
   it('runs the heard and the permanent on opus', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.model).toBe('claude-opus-5')
-    expect(config.compactModel).toBe('claude-opus-5')
+    expect(config.model).toBe('claude-opus-5-5')
+    expect(config.compactModel).toBe('claude-opus-5-5')
     // The guide is not a config knob, and it is held to the same tier.
-    expect(GUIDE_MODEL).toBe('claude-opus-5')
+    expect(GUIDE_MODEL).toBe('claude-opus-5-5')
   })
 
   it('runs the reversible background picks on sonnet', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.musicModel).toBe('claude-sonnet-5')
-    expect(config.rwtModel).toBe('claude-sonnet-5')
+    expect(config.musicModel).toBe('claude-sonnet-5-5')
+    expect(config.rwtModel).toBe('claude-sonnet-5-5')
   })
 })
 
