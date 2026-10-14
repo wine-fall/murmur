@@ -780,6 +780,47 @@ describe('the stale-ytdlp task (spec 03-03 §7.1)', () => {
   })
 })
 
+// spec 03-03 §7.5: the pin is a file murmur already composed — the guide's job
+// is to put it in place without trampling anything, and to make sure the dir
+// it lands in is actually on PATH.
+describe('the command-pin task (spec 03-03 §7.5)', () => {
+  const prompt = (onPath: boolean): string =>
+    buildSetupPrompt({
+      gaps: [{ kind: 'path', reason: 'murmur runs on /n/node' }],
+      ytdlp: 'yt-dlp',
+      ffmpeg: 'ffmpeg',
+      bunCmd: 'bun',
+      pin: { shim: '/h/.local/bin/murmur', script: '#!/bin/sh\nexec PINNED\n', onPath },
+    })
+
+  it('hands over the exact shim and where it goes, verified by running it', () => {
+    const text = prompt(true)
+    expect(text).toContain('murmur runs on /n/node')
+    expect(text).toContain('/h/.local/bin/murmur')
+    expect(text).toContain('exec PINNED')
+    expect(text).toContain('/h/.local/bin/murmur --version')
+  })
+
+  it('never overwrites a file already at that path', () => {
+    expect(prompt(true).toLowerCase()).toContain('never overwrite')
+  })
+
+  // codex review: macOS bash login shells read ~/.bash_profile, not ~/.bashrc;
+  // and a shim checked by its absolute path proves nothing about PATH.
+  it('targets the profile the login shell really reads, verified by a fresh login shell', () => {
+    const off = prompt(false)
+    expect(off).toContain('~/.bash_profile')
+    expect(off).toContain('command -v murmur')
+  })
+
+  it('asks before touching a shell profile, and only when the dir is off PATH', () => {
+    expect(prompt(true)).not.toContain('export PATH=')
+    const off = prompt(false)
+    expect(off).toContain('export PATH="/h/.local/bin:$PATH"')
+    expect(off.toLowerCase()).toContain('ask')
+  })
+})
+
 // spec 12 §3.9: the settings override never edits persona.md. It rides as one
 // directive appended to the persona, so clearing it restores the persona's own
 // word and a hand-edited persona is never clobbered.

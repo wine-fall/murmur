@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -178,6 +178,57 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
       bun: async () => NO_BUN,
     })
     expect(gaps.map((g) => g.kind)).toEqual(['music', 'bun', 'voice'])
+  })
+})
+
+// spec 03-03 §7.5: an installed murmur on a switching version manager's node
+// loses its command whenever a project picks another node. The gap is the
+// shim's absence — re-read on every detect, so the post-conversation recheck
+// sees what the guide wrote.
+describe('detectGaps — the command pin', () => {
+  const probes = { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => OK }
+  const pin = (shim: string, onPath = true) => ({
+    shim,
+    node: '/n/.nvm/versions/node/v22/bin/node',
+    entry: '/e/dist/main.js',
+    onPath: () => onPath,
+  })
+  const voiced = { voiceUrl: () => 'https://tts.example' }
+
+  it('a missing shim is a path gap', async () => {
+    const shim = join(mkdtempSync(join(tmpdir(), 'murmur-pin-')), 'murmur')
+    const gaps = await detectGaps(targets({ ...voiced, pin: pin(shim) }), probes)
+    expect(gaps.map((g) => g.kind)).toEqual(['path'])
+    expect(gaps[0]!.reason).toContain('/n/.nvm/versions/node/v22/bin/node')
+  })
+
+  it('an existing file at the shim path closes it — never a second writer over it', async () => {
+    const shim = join(mkdtempSync(join(tmpdir(), 'murmur-pin-')), 'murmur')
+    writeFileSync(shim, '#!/bin/sh\n')
+    expect(await detectGaps(targets({ ...voiced, pin: pin(shim) }), probes)).toEqual([])
+  })
+
+  // codex review: a shim the shell cannot find is not a fixed command — the
+  // file alone must not close the gap, or a skipped PATH step reads as done.
+  it('a shim whose dir is off PATH is still a gap, and says why', async () => {
+    const shim = join(mkdtempSync(join(tmpdir(), 'murmur-pin-')), 'murmur')
+    writeFileSync(shim, '#!/bin/sh\n')
+    const gaps = await detectGaps(targets({ ...voiced, pin: pin(shim, false) }), probes)
+    expect(gaps.map((g) => g.kind)).toEqual(['path'])
+    expect(gaps[0]!.reason).toContain('not on PATH')
+  })
+
+  it('no pin wanted, no gap', async () => {
+    expect(await detectGaps(targets(voiced), probes)).toEqual([])
+  })
+
+  it('the card names it with its consequence, and setupComplete counts it', () => {
+    const shim = '/nowhere/murmur'
+    const t = targets({ ...voiced, pin: pin(shim) })
+    expect(setupOfferText(t, [{ kind: 'path', reason: 'x' }])).toContain('-- path')
+    const ok = { musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: true }
+    expect(setupComplete(t, { ...ok, pinOk: false })).toBe(false)
+    expect(setupComplete(t, { ...ok, pinOk: true })).toBe(true)
   })
 })
 
@@ -532,7 +583,7 @@ describe('runSetup — the once-per-boot offer', () => {
       ledger: fakeLedger(),
       probes: { music: async () => OK, bun: async () => NO_BUN, ytdlpFresh: async () => OK },
     })
-    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: true })
+    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: true, pinOk: false })
   })
 
   it('a gap the session does not want is not reported as ok', async () => {
@@ -545,7 +596,7 @@ describe('runSetup — the once-per-boot offer', () => {
       ledger: fakeLedger(),
       probes: { music: async () => OK, bun: async () => OK },
     })
-    expect(outcome).toEqual({ musicOk: false, ytdlpFresh: false, bunOk: false, voiceOk: false })
+    expect(outcome).toEqual({ musicOk: false, ytdlpFresh: false, bunOk: false, voiceOk: false, pinOk: false })
   })
 
   it('no gaps = no offer, no conversation — only the checking notice', async () => {
@@ -563,7 +614,7 @@ describe('runSetup — the once-per-boot offer', () => {
     expect(requests).toEqual([])
     expect(infos).toHaveLength(1)
     expect(infos[0]).toContain('checking')
-    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: true })
+    expect(outcome).toEqual({ musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: true, pinOk: false })
   })
 
   it('streams the guide text to the host as it arrives', async () => {
@@ -766,9 +817,9 @@ describe('runSetup — the explicit entry with nothing to fix', () => {
 describe('setupComplete — one verdict shared by make setup and /setup', () => {
   it('true only when every WANTED surface is ok', () => {
     const t = targets({ wantsMusic: true, wantsBun: false, wantsVoice: false })
-    expect(setupComplete(t, { musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: false })).toBe(true)
-    expect(setupComplete(t, { musicOk: true, ytdlpFresh: false, bunOk: true, voiceOk: true })).toBe(false)
-    expect(setupComplete(targets(), { musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: false })).toBe(false)
+    expect(setupComplete(t, { musicOk: true, ytdlpFresh: true, bunOk: false, voiceOk: false, pinOk: false })).toBe(true)
+    expect(setupComplete(t, { musicOk: true, ytdlpFresh: false, bunOk: true, voiceOk: true, pinOk: true })).toBe(false)
+    expect(setupComplete(targets(), { musicOk: true, ytdlpFresh: true, bunOk: true, voiceOk: false, pinOk: true })).toBe(false)
   })
 })
 

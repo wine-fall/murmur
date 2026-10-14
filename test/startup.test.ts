@@ -1,15 +1,18 @@
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import {
+  commandPin,
   preflightBun,
   preflightFfmpeg,
   preflightMusic,
   preflightYtdlp,
   preflightYtdlpFreshness,
+  shimScript,
 } from '../src/setup/startup.ts'
 
 // Stand-in binaries (spec 03-03 §5 testing): tiny executable scripts standing
@@ -136,5 +139,57 @@ describe('preflightYtdlpFreshness', () => {
     expect((await preflightYtdlpFreshness(standIn('echo weird-build'), now)).ok).toBe(true)
     expect((await preflightYtdlpFreshness(standIn('exit 1'), now)).ok).toBe(true)
     expect((await preflightYtdlpFreshness('/nonexistent/yt-dlp', now)).ok).toBe(true)
+  })
+})
+
+// A global npm install lives inside ONE Node version under a version manager:
+// a project's .nvmrc switching node takes `murmur` off PATH with it. The pin is
+// only wanted for an installed run on a switching manager's node.
+describe('commandPin', () => {
+  const ENTRY = '/u/.nvm/versions/node/v22.23.2/lib/node_modules/murmur-radio/dist/main.js'
+
+  it('pins an installed run on a switching version manager to its own node', () => {
+    for (const node of [
+      '/u/.nvm/versions/node/v22.23.2/bin/node',
+      '/u/.local/share/fnm/node-versions/v22.23.2/installation/bin/node',
+      '/u/.asdf/installs/nodejs/22.23.2/bin/node',
+      '/u/.local/share/mise/installs/node/22.23.2/bin/node',
+    ]) {
+      expect(commandPin(node, ENTRY), node).toEqual({ node, entry: ENTRY })
+    }
+  })
+
+  it('wants no pin where the command cannot go missing', () => {
+    // A system or Homebrew node keeps one global bin.
+    expect(commandPin('/opt/homebrew/bin/node', ENTRY)).toBeNull()
+    // Volta already pins a global tool to the node it was installed with.
+    expect(commandPin('/u/.volta/tools/image/node/22.23.2/bin/node', ENTRY)).toBeNull()
+    // A source run is a developer's checkout, not an installed command.
+    expect(commandPin('/u/.nvm/versions/node/v24.14.0/bin/node', '/repo/src/main.ts')).toBeNull()
+  })
+})
+
+describe('shimScript', () => {
+  it('runs the pinned entry on the pinned node, passing every argument through', () => {
+    const dir = mkdtempSync(join(tmpdir(), "murmur-shim-it's-"))
+    const entry = join(dir, 'main.js')
+    writeFileSync(entry, 'console.log(JSON.stringify(process.argv.slice(2)))\n')
+    const shim = join(dir, 'murmur')
+    writeFileSync(shim, shimScript(process.execPath, entry), { mode: 0o755 })
+    const run = spawnSync(shim, ['--version', 'two words'], { encoding: 'utf8' })
+    expect(run.status).toBe(0)
+    expect(JSON.parse(run.stdout)).toEqual(['--version', 'two words'])
+  })
+
+  // codex review: /update spawns `npm` from PATH. Under the shim that must be
+  // the pinned install's npm, or the update lands in whichever Node is active.
+  it("puts the pinned node's bin first on PATH, so its npm is the one children find", () => {
+    const dir = mkdtempSync(join(tmpdir(), 'murmur-shim-path-'))
+    const entry = join(dir, 'main.js')
+    writeFileSync(entry, "console.log(process.env.PATH.split(':')[0])\n")
+    const shim = join(dir, 'murmur')
+    writeFileSync(shim, shimScript(process.execPath, entry), { mode: 0o755 })
+    const run = spawnSync(shim, [], { encoding: 'utf8' })
+    expect(run.stdout.trim()).toBe(dirname(process.execPath))
   })
 })

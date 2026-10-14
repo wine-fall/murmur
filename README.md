@@ -10,7 +10,7 @@
 [![npm version](https://img.shields.io/npm/v/murmur-radio)](https://www.npmjs.com/package/murmur-radio)
 [![npm downloads](https://img.shields.io/npm/dm/murmur-radio)](https://www.npmjs.com/package/murmur-radio)
 [![license: MIT](https://img.shields.io/badge/license-MIT-a9b665)](LICENSE)
-[![node >=24](https://img.shields.io/badge/node-%3E%3D24-d8a657)](package.json)
+[![node 22.16+ | 24+](https://img.shields.io/badge/node-22.16%2B%20%7C%2024%2B-d8a657)](package.json)
 
 ```bash
 npm install -g murmur-radio && murmur
@@ -35,7 +35,7 @@ murmur is always on the air. It picks a topic and talks, plays a song, comes bac
 
 You need:
 
-- **Node.js ≥ 24**
+- **Node.js 22.16+ or 24+**
 - **Claude Code**, logged in with your subscription — the brain is your own Claude session, so there is no API key to manage.
 - A **free [fish.audio](https://fish.audio) API key** for the voice. You don't need it up front: the first run walks you through signing up and pasting it in.
 
@@ -44,7 +44,7 @@ npm install -g murmur-radio
 murmur
 ```
 
-The first run is a short conversation. It asks a few questions to shape your host, then offers to set up whatever is missing — the voice key, `ffmpeg` + `yt-dlp` for music, `bun` for the full-screen UI. Say no and it plays anyway, just with less: talk-only without the music tools, lines on screen instead of spoken without a voice. `murmur --setup` reopens that conversation any time.
+The first run is a short conversation. It asks a few questions to shape your host, then offers to set up whatever is missing — the voice key, `ffmpeg` + `yt-dlp` for music, `bun` for the full-screen UI, and, if your Node comes from nvm, fnm, asdf or mise, a small `~/.local/bin/murmur` shim so the command doesn't vanish when a project switches Node. Say no and it plays anyway, just with less: talk-only without the music tools, lines on screen instead of spoken without a voice. `murmur --setup` reopens that conversation any time.
 
 ## Using it
 
@@ -67,7 +67,7 @@ Every code spec is built. What remains is acceptance by ear — pacing over a re
 
 ## Development
 
-Running from a checkout needs **pnpm** as well (`corepack enable pnpm`). One command sets up and runs the app; a second terminal tails a live debug log:
+Running from a checkout needs **Node 24+** (it runs the TypeScript directly) and **pnpm** (`corepack enable pnpm`). One command sets up and runs the app; a second terminal tails a live debug log:
 
 ```bash
 make dev      # sync deps, report what is missing, launch the app either way

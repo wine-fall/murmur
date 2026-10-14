@@ -58,8 +58,13 @@ describe('package manifest (the npm-install contract)', () => {
     for (const needed of ['dist', 'assets', 'tui/src']) expect(pkg.files).toContain(needed)
   })
 
-  it('declares the Node floor native type-stripping needs', () => {
-    expect(pkg.engines?.node).toBe('>=24')
+  // The published floor is what dist/ needs, not what a source run needs:
+  // node:sqlite with FTS5 (22.16+ and 24+, absent from 23), Set methods,
+  // getBuiltinModule, node-web-audio-api's own >= 22. src/node-floor.ts
+  // checks the same range at the door; CI's node-floor job boots the packed
+  // dist on 22.16.0. A source run's type-stripping needs 24 (the Makefile).
+  it('declares the Node floor the compiled package needs', () => {
+    expect(pkg.engines?.node).toBe('^22.16.0 || >=24')
   })
 })
 

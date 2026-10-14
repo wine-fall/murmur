@@ -4,8 +4,8 @@
 // interim subprocess player is gone.
 
 import { spawn, spawnSync } from 'node:child_process'
-import { existsSync, readFileSync, rmSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 
 import { AudioContext } from 'node-web-audio-api'
 
@@ -45,7 +45,7 @@ import { CliHost, type Host } from './host/host.ts'
 import { HostedVoice } from './voice/hosted-voice.ts'
 import { IpcHost, spawnTuiClient } from './host/ipc-host.ts'
 import { InProcessMemoryStore, PersistentMemoryStore } from './memory/memory.ts'
-import { sentinelRoot } from './paths.ts'
+import { commandShimPath, sentinelRoot } from './paths.ts'
 import { personaFingerprint, signOff, StockLines, stockDir, type StockFingerprint } from './support/stock.ts'
 import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
@@ -81,7 +81,7 @@ import {
   readCrashWindow,
   uncleanExitNotice,
 } from './support/sentinel.ts'
-import { preflightBun, preflightFfmpeg, preflightYtdlp } from './setup/startup.ts'
+import { commandPin, preflightBun, preflightFfmpeg, preflightYtdlp } from './setup/startup.ts'
 import { VizFeed } from './audio/viz.ts'
 import { readVoiceConfig, type VoiceConfig, VOICE_CONFIG_FILE } from './voice/voice-config.ts'
 import { StubVoice } from './voice/voice.ts'
@@ -531,8 +531,22 @@ export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
 // What the setup conversation is allowed to look at and repair this run
 // (spec 03-03 §7.1). The voice readers are thunks: the guide may write
 // voice.json mid-conversation, and the recheck has to read the world again.
-export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): SetupTargets {
+// How this process was started: the node, and the script it ran (through the
+// bin symlink to dist/main.js on an installed run). The command pin reads it.
+export type Launch = { readonly node: string; readonly script: string | undefined }
+const THIS_LAUNCH: Launch = { node: process.execPath, script: process.argv[1] }
+
+export function setupTargets(
+  config: Config,
+  over: Partial<SetupTargets> = {},
+  launch: Launch = THIS_LAUNCH,
+): SetupTargets {
   const saved = (): VoiceConfig | null => readVoiceConfig(join(config.home, VOICE_CONFIG_FILE))
+  const pin =
+    launch.script !== undefined && existsSync(launch.script)
+      ? commandPin(launch.node, realpathSync(launch.script))
+      : null
+  const shim = commandShimPath()
   return {
     ytdlp: config.ytdlpCmd,
     ffmpeg: config.ffmpegCmd,
@@ -546,6 +560,13 @@ export function setupTargets(config: Config, over: Partial<SetupTargets> = {}): 
     // (issue #93). A configured endpoint or a recorded decline is what removes
     // it from the offer; it is an offer item, never a blocker.
     wantsVoice: true,
+    ...(pin !== null && {
+      pin: {
+        ...pin,
+        shim,
+        onPath: () => (process.env.PATH ?? '').split(':').includes(dirname(shim)),
+      },
+    }),
     // Env/flags keep precedence over the file, exactly as parseCli layered it.
     voiceUrl: () => config.ttsUrl || (saved()?.ttsUrl ?? ''),
     // The file as written, for the run to wire itself from: a hosted endpoint
@@ -643,6 +664,17 @@ export function voiceChanged(a: Config, b: Config): boolean {
   )
 }
 
+// `--setup-music` covers the music binaries and nothing else — the command pin
+// included (spec 03-03 §7.5), however this run was launched.
+export function musicSetupTargets(config: Config, launch: Launch = THIS_LAUNCH): SetupTargets {
+  const { pin: _pin, ...music } = setupTargets(
+    config,
+    { wantsMusic: true, wantsBun: false, wantsVoice: false },
+    launch,
+  )
+  return music
+}
+
 // The explicit setup entries (spec 03-03 §7.1): `murmur --setup` walks the whole
 // onboarding surface and `murmur --setup-music` just the music binaries — each a
 // separate serial conversation, never woven into a first run. No broadcast.
@@ -652,10 +684,7 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
     host.info('the setup guide needs the real brain: run again without --brain stub.')
     return false
   }
-  const targets = setupTargets(
-    config,
-    musicOnly ? { wantsMusic: true, wantsBun: false, wantsVoice: false } : {},
-  )
+  const targets = musicOnly ? musicSetupTargets(config) : setupTargets(config)
   // The explicit entries run the same conversation, so they get the same
   // civilized Ctrl-C: fire the latch, let the reads decline through.
   const quit = quitLatch()

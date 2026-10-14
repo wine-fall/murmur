@@ -65,6 +65,13 @@ export function tuiSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(runRoot(env), 'tui.sock')
 }
 
+// Where the command pin's shim goes (spec 03-03 §7.5): the XDG user bin dir —
+// outside murmur's home, and outside every Node version's own prefix, which is
+// the point. Not $MURMUR_HOME-relative: a command lives where the shell looks.
+export function commandShimPath(): string {
+  return join(homedir(), '.local', 'bin', 'murmur')
+}
+
 // The guide-written voice endpoint (spec 03-03 §7.2). It sits at the home root
 // rather than under data/ because it is configuration the user can re-obtain,
 // not irreplaceable state — and because it is the one file the setup

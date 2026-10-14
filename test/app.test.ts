@@ -30,6 +30,7 @@ import {
   resolvePersonaPath,
   runBootstrapProfileCli,
   runSetupCli,
+  musicSetupTargets,
   setupTargets,
   voiceAfterSetup,
   voiceChanged,
@@ -314,6 +315,26 @@ describe('voiceAfterSetup (issue #93)', () => {
 // spec 03-03 §7.1: what the setup conversation is allowed to look at is derived
 // from the session's own config — it never probes for something unwanted.
 describe('setup targets', () => {
+  // spec 03-03 §7.5: the pin follows the launch — node + the script it ran.
+  const installedLaunch = () => {
+    const dir = join(mkdtempSync(join(tmpdir(), 'murmur-launch-')), 'dist')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(join(dir, 'main.js'), '')
+    return { node: '/u/.nvm/versions/node/v22.16.0/bin/node', script: join(dir, 'main.js') }
+  }
+
+  it('wants the command pin for an installed run on a switching node', () => {
+    const t = setupTargets(config([], { MURMUR_HOME: emptyHome() }), {}, installedLaunch())
+    expect(t.pin?.node).toBe('/u/.nvm/versions/node/v22.16.0/bin/node')
+    expect(t.pin?.entry.endsWith('/dist/main.js')).toBe(true)
+  })
+
+  it('the music-only entry never carries the pin (codex review)', () => {
+    const t = musicSetupTargets(config([], { MURMUR_HOME: emptyHome() }), installedLaunch())
+    expect(t).toMatchObject({ wantsMusic: true, wantsBun: false, wantsVoice: false })
+    expect(t.pin).toBeUndefined()
+  })
+
   it('wants exactly what this session is configured to use', () => {
     const full = setupTargets(config(['--voice', 'hosted'], { MURMUR_TTS_URL: 'https://x' }))
     expect(full).toMatchObject({ wantsMusic: true, wantsBun: true, wantsVoice: true })

@@ -86,8 +86,16 @@ Please:
 
 // One gap the deterministic probes found, in the shape the prompt renders.
 export type SetupGapInput = {
-  readonly kind: 'music' | 'ytdlp' | 'bun' | 'voice'
+  readonly kind: 'music' | 'ytdlp' | 'bun' | 'voice' | 'path'
   readonly reason: string
+}
+
+// The command pin's facts (§7.5): the shim murmur composed, where it goes, and
+// whether that dir is already on the listener's PATH.
+export type SetupPinInput = {
+  readonly shim: string
+  readonly script: string
+  readonly onPath: boolean
 }
 
 export type SetupPromptInput = {
@@ -95,6 +103,8 @@ export type SetupPromptInput = {
   readonly ytdlp: string
   readonly ffmpeg: string
   readonly bunCmd: string
+  // Present iff a path gap can be: an installed run on a switching node.
+  readonly pin?: SetupPinInput
   // What the run's knobs are set to right now (§7.2). Optional: a caller with
   // nothing configured has nothing to report.
   readonly current?: SetupCurrentState
@@ -180,6 +190,38 @@ output, which works but is not what it is supposed to look like.
 
 The official installer is \`curl -fsSL https://bun.sh/install | bash\`. Say
 what it does, run it, and afterwards verify with \`${bunCmd} --version\`.`
+}
+
+function pinSection(pin: SetupPinInput | undefined, reason: string): string {
+  if (pin === undefined) return ''
+  const dir = pin.shim.slice(0, pin.shim.lastIndexOf('/'))
+  const path = pin.onPath
+    ? `\`${dir}\` is already on their PATH, so the shim works as soon as it exists.`
+    : `\`${dir}\` is NOT on their PATH yet. Ask before touching a shell profile; on a
+yes, append this one line to the file their shell actually reads at startup:
+  export PATH="${dir}:$PATH"
+Find that file first, never assume it: zsh reads \`~/.zshrc\`; a bash login shell
+(every macOS terminal) reads the first of \`~/.bash_profile\`, \`~/.bash_login\`,
+\`~/.profile\` that exists, and \`~/.bashrc\` only if that file sources it.
+Verify the way a new terminal would see it — \`$SHELL -lic 'command -v murmur'\`
+must print \`${pin.shim}\` — and tell them it takes effect in a new terminal.`
+  return `**The \`murmur\` command goes missing when a project switches Node.**
+A quick automated check reported:
+  ${reason}
+
+murmur was installed inside one Node version of a version manager, and that
+version's commands are only on PATH while it is the active one. A small shim
+pinned to that Node keeps \`murmur\` working everywhere. murmur composed it
+already; write it, unchanged, to \`${pin.shim}\` (create the directory if needed)
+and make it executable:
+
+\`\`\`sh
+${pin.script}\`\`\`
+
+Never overwrite a file already at that path — if one exists, say so and leave it.
+${path}
+
+Verify by running \`${pin.shim} --version\`: it prints murmur's version.`
 }
 
 // The language murmur speaks is a settings knob (spec 12 \u00a73.9), not a voice:
@@ -322,7 +364,7 @@ When they are done, say so in one short sentence and stop.
 `
 }
 
-export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd, current }: SetupPromptInput): string {
+export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd, pin, current }: SetupPromptInput): string {
   if (gaps.length === 0) return healthyMachinePrompt(current)
   const sections = gaps.map((gap) => {
     switch (gap.kind) {
@@ -334,6 +376,8 @@ export function buildSetupPrompt({ gaps, ytdlp, ffmpeg, bunCmd, current }: Setup
         return bunSection(bunCmd, gap.reason)
       case 'voice':
         return voiceSection()
+      case 'path':
+        return pinSection(pin, gap.reason)
     }
   })
   const plural = gaps.length === 1 ? 'one piece' : `${String(gaps.length)} pieces`

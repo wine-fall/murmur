@@ -416,3 +416,53 @@ the full real-SDK conversation is a user/dispatcher run (§5.3's posture).
   guide can only set the pace and not see it. The API key is never in that
   block: everything in the prompt is sent to the model and kept in the session
   transcript (§7.2's credential rule).
+
+### 7.5 The command pin (built 2026-10-14)
+
+**Problem.** `npm i -g murmur-radio` under a version manager (nvm, fnm, asdf,
+mise) installs into ONE Node version's prefix, and that prefix's `bin` is on
+PATH only while that version is active. A project's `.nvmrc` switching Node
+takes the `murmur` command with it (`command not found`), although the install
+is intact.
+
+**Contract.**
+- `startup.ts::commandPin(execPath, entry)` is the deterministic predicate: a
+  pin is wanted iff the run is the installed package (`entry` ends in
+  `/dist/main.js`) AND `execPath` sits under a switching manager. Volta is
+  excluded — it already pins a global tool to its install node. A system or
+  Homebrew node, and every source run, want no pin.
+- The shim lives at `paths.ts::commandShimPath()` = `~/.local/bin/murmur` (the
+  XDG user bin dir: outside murmur's home and outside every Node prefix).
+  `startup.ts::shimScript` composes it: `PATH='<node bin>':"$PATH" exec
+  '<node>' '<entry>' "$@"`, shell-quoted. The node's bin leads PATH so a child
+  `npm` (`/update`) is the pinned install's, not the active Node's.
+- It is one more gap in the §7.1 aggregated offer, kind `path`: present iff a
+  pin is wanted AND either no file exists at the shim path, or the shim's dir
+  is not on PATH (a shim the shell cannot find has fixed nothing). Any existing
+  file counts as the shim — murmur never overwrites one. The recheck re-reads
+  both, so the outcome (`pinOk`) is the filesystem's and PATH's word, not the
+  guide's; a profile edit lands in a NEW terminal, so the run that made it
+  still reports the gap, and the next boot from a new terminal clears it.
+- `--setup-music` never carries the pin (`app.ts::musicSetupTargets`): that
+  entry covers the music binaries only.
+- The guide writes the composed shim unchanged and verifies it with
+  `<shim> --version`. When the shim's dir is off PATH, it asks before appending
+  one `export PATH=...` line to the file the shell really reads (zsh:
+  `~/.zshrc`; a bash login shell: the first of `~/.bash_profile`,
+  `~/.bash_login`, `~/.profile`), verified by `$SHELL -lic 'command -v murmur'`.
+
+**Node floor.** The published package's floor is what `dist/` needs, not what a
+source run needs: `^22.16.0 || >=24` (package.json `engines`). The binding
+constraint is `node:sqlite` with FTS5 (recall, spec 05-01 §3.4) — measured
+present on 22.16.0 and 24.0.0, absent on 22.13-22.15 and 23.x. npm only warns on
+an engines mismatch, so `src/node-floor.ts` checks the same range at the door
+and prints one line instead of a mid-broadcast crash. CI's `node-floor` job
+boots the packed dist and opens a recall index on exactly 22.16.0. A source run
+still needs 24 (native type-stripping; the Makefile guards it).
+
+**Acceptance.**
+9. An installed murmur under nvm, with no `~/.local/bin/murmur`, names the
+   `path` gap; after a y, the shim exists and `murmur --version` works from a
+   directory whose `.nvmrc` selects another Node.
+10. On Node 22.16.0 the packed dist boots and recall opens; on 22.15 or 23.x the
+    entry prints the floor line and exits 1.

@@ -112,3 +112,42 @@ export async function preflightMusic(opts: {
   return { ok: false, reason: reasons.join(' | ') }
 }
 
+
+// --- the command pin (spec 03-03 §7.5) ------------------------------------ //
+//
+// `npm i -g` under a version manager installs into ONE Node version's prefix,
+// and that prefix's bin is on PATH only while that version is active: a
+// project's .nvmrc switching node takes `murmur` with it. A shim in a stable
+// bin dir, pinned to the node murmur was installed with, keeps the command.
+
+// Managers whose active version (and so global bin) follows the directory.
+// Volta is absent on purpose: it already pins a global tool to its install node.
+const SWITCHING_NODE = [
+  '/.nvm/versions/node/',
+  '/fnm/node-versions/',
+  '/.asdf/installs/nodejs/',
+  '/mise/installs/node/',
+]
+
+export type CommandPin = { readonly node: string; readonly entry: string }
+
+// What a shim would pin, or null when the command cannot go missing: a system
+// node keeps one global bin, and a source run (src/main.ts) is a checkout.
+export function commandPin(node: string, entry: string): CommandPin | null {
+  if (!entry.endsWith('/dist/main.js')) return null
+  return SWITCHING_NODE.some((marker) => node.includes(marker)) ? { node, entry } : null
+}
+
+const shellQuote = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`
+
+// The node's bin leads PATH too: /update spawns `npm`, which has to be the
+// pinned install's, not whichever Node the shell has active.
+export function shimScript(node: string, entry: string): string {
+  const bin = node.slice(0, node.lastIndexOf('/'))
+  return [
+    '#!/bin/sh',
+    '# murmur, pinned to the node it was installed with, so switching node keeps the command.',
+    `PATH=${shellQuote(bin)}:"$PATH" exec ${shellQuote(node)} ${shellQuote(entry)} "$@"`,
+    '',
+  ].join('\n')
+}
