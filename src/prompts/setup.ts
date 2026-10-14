@@ -198,9 +198,13 @@ function pinSection(pin: SetupPinInput | undefined, reason: string): string {
   const path = pin.onPath
     ? `\`${dir}\` is already on their PATH, so the shim works as soon as it exists.`
     : `\`${dir}\` is NOT on their PATH yet. Ask before touching a shell profile; on a
-yes, append this one line to the profile their login shell reads (\`~/.zshrc\` for
-zsh, \`~/.bashrc\` for bash), and tell them it takes effect in a new terminal:
-  export PATH="${dir}:$PATH"`
+yes, append this one line to the file their shell actually reads at startup:
+  export PATH="${dir}:$PATH"
+Find that file first, never assume it: zsh reads \`~/.zshrc\`; a bash login shell
+(every macOS terminal) reads the first of \`~/.bash_profile\`, \`~/.bash_login\`,
+\`~/.profile\` that exists, and \`~/.bashrc\` only if that file sources it.
+Verify the way a new terminal would see it — \`$SHELL -lic 'command -v murmur'\`
+must print \`${pin.shim}\` — and tell them it takes effect in a new terminal.`
   return `**The \`murmur\` command goes missing when a project switches Node.**
 A quick automated check reported:
   ${reason}

@@ -805,6 +805,14 @@ describe('the command-pin task (spec 03-03 §7.5)', () => {
     expect(prompt(true).toLowerCase()).toContain('never overwrite')
   })
 
+  // codex review: macOS bash login shells read ~/.bash_profile, not ~/.bashrc;
+  // and a shim checked by its absolute path proves nothing about PATH.
+  it('targets the profile the login shell really reads, verified by a fresh login shell', () => {
+    const off = prompt(false)
+    expect(off).toContain('~/.bash_profile')
+    expect(off).toContain('command -v murmur')
+  })
+
   it('asks before touching a shell profile, and only when the dir is off PATH', () => {
     expect(prompt(true)).not.toContain('export PATH=')
     const off = prompt(false)

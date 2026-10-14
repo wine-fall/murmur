@@ -140,11 +140,14 @@ export function commandPin(node: string, entry: string): CommandPin | null {
 
 const shellQuote = (s: string): string => `'${s.replaceAll("'", `'\\''`)}'`
 
+// The node's bin leads PATH too: /update spawns `npm`, which has to be the
+// pinned install's, not whichever Node the shell has active.
 export function shimScript(node: string, entry: string): string {
+  const bin = node.slice(0, node.lastIndexOf('/'))
   return [
     '#!/bin/sh',
     '# murmur, pinned to the node it was installed with, so switching node keeps the command.',
-    `exec ${shellQuote(node)} ${shellQuote(entry)} "$@"`,
+    `PATH=${shellQuote(bin)}:"$PATH" exec ${shellQuote(node)} ${shellQuote(entry)} "$@"`,
     '',
   ].join('\n')
 }

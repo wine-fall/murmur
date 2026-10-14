@@ -187,7 +187,12 @@ describe('detectGaps (spec 03-03 §7.1 — the deterministic probes, 0 tokens)',
 // sees what the guide wrote.
 describe('detectGaps — the command pin', () => {
   const probes = { music: async () => OK, bun: async () => OK, ytdlpFresh: async () => OK }
-  const pin = (shim: string) => ({ shim, node: '/n/.nvm/versions/node/v22/bin/node', entry: '/e/dist/main.js' })
+  const pin = (shim: string, onPath = true) => ({
+    shim,
+    node: '/n/.nvm/versions/node/v22/bin/node',
+    entry: '/e/dist/main.js',
+    onPath: () => onPath,
+  })
   const voiced = { voiceUrl: () => 'https://tts.example' }
 
   it('a missing shim is a path gap', async () => {
@@ -201,6 +206,16 @@ describe('detectGaps — the command pin', () => {
     const shim = join(mkdtempSync(join(tmpdir(), 'murmur-pin-')), 'murmur')
     writeFileSync(shim, '#!/bin/sh\n')
     expect(await detectGaps(targets({ ...voiced, pin: pin(shim) }), probes)).toEqual([])
+  })
+
+  // codex review: a shim the shell cannot find is not a fixed command — the
+  // file alone must not close the gap, or a skipped PATH step reads as done.
+  it('a shim whose dir is off PATH is still a gap, and says why', async () => {
+    const shim = join(mkdtempSync(join(tmpdir(), 'murmur-pin-')), 'murmur')
+    writeFileSync(shim, '#!/bin/sh\n')
+    const gaps = await detectGaps(targets({ ...voiced, pin: pin(shim, false) }), probes)
+    expect(gaps.map((g) => g.kind)).toEqual(['path'])
+    expect(gaps[0]!.reason).toContain('not on PATH')
   })
 
   it('no pin wanted, no gap', async () => {

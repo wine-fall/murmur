@@ -308,7 +308,9 @@ export type SetupTargets = {
   readonly voiceUrl: () => string
   // Present iff the command can go missing (§7.5): an installed run on a
   // switching version manager's node, and the stable path its shim belongs at.
-  readonly pin?: CommandPin & { readonly shim: string }
+  // `onPath` is read fresh, like voiceUrl: a shim the shell cannot find has
+  // fixed nothing, so its dir being on PATH is part of the gap.
+  readonly pin?: CommandPin & { readonly shim: string; readonly onPath: () => boolean }
   // A configured endpoint that is refusing auth (fed by the Director's synth
   // failures): still a gap — issue #97's reopen path.
   readonly voiceFailing?: () => boolean
@@ -364,13 +366,16 @@ export async function detectGaps(
       gaps.push({ kind: 'voice', reason: 'the configured endpoint is failing auth' })
     }
   }
-  // The shim's presence, read fresh each detect so the recheck sees a write.
-  // Any file there closes it: murmur never becomes a second writer over it.
-  if (targets.pin !== undefined && !existsSync(targets.pin.shim)) {
-    gaps.push({
-      kind: 'path',
-      reason: `murmur runs on ${targets.pin.node}; no shim at ${targets.pin.shim}`,
-    })
+  // Read fresh each detect so the recheck sees a write. Any file at the shim
+  // path counts as the shim (murmur never writes over one), but it closes the
+  // gap only once the shell can find it.
+  if (targets.pin !== undefined) {
+    const { node, shim, onPath } = targets.pin
+    if (!existsSync(shim)) {
+      gaps.push({ kind: 'path', reason: `murmur runs on ${node}; no shim at ${shim}` })
+    } else if (!onPath()) {
+      gaps.push({ kind: 'path', reason: `the shim at ${shim} exists, but ${dirname(shim)} is not on PATH` })
+    }
   }
   return gaps
 }
@@ -802,7 +807,7 @@ async function runSetupFlow(
         pin: {
           shim: targets.pin.shim,
           script: shimScript(targets.pin.node, targets.pin.entry),
-          onPath: (process.env.PATH ?? '').split(':').includes(dirname(targets.pin.shim)),
+          onPath: targets.pin.onPath(),
         },
       }),
       current: currentState(targets, run.settings),

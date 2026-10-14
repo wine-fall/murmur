@@ -433,15 +433,23 @@ is intact.
   Homebrew node, and every source run, want no pin.
 - The shim lives at `paths.ts::commandShimPath()` = `~/.local/bin/murmur` (the
   XDG user bin dir: outside murmur's home and outside every Node prefix).
-  `startup.ts::shimScript` composes it: `exec '<node>' '<entry>' "$@"`, shell-
-  quoted.
+  `startup.ts::shimScript` composes it: `PATH='<node bin>':"$PATH" exec
+  '<node>' '<entry>' "$@"`, shell-quoted. The node's bin leads PATH so a child
+  `npm` (`/update`) is the pinned install's, not the active Node's.
 - It is one more gap in the §7.1 aggregated offer, kind `path`: present iff a
-  pin is wanted AND no file exists at the shim path. Any existing file closes it
-  — murmur never overwrites one. The recheck re-reads the file, so the outcome
-  (`pinOk`) is the filesystem's word, not the guide's.
+  pin is wanted AND either no file exists at the shim path, or the shim's dir
+  is not on PATH (a shim the shell cannot find has fixed nothing). Any existing
+  file counts as the shim — murmur never overwrites one. The recheck re-reads
+  both, so the outcome (`pinOk`) is the filesystem's and PATH's word, not the
+  guide's; a profile edit lands in a NEW terminal, so the run that made it
+  still reports the gap, and the next boot from a new terminal clears it.
+- `--setup-music` never carries the pin (`app.ts::musicSetupTargets`): that
+  entry covers the music binaries only.
 - The guide writes the composed shim unchanged and verifies it with
   `<shim> --version`. When the shim's dir is off PATH, it asks before appending
-  one `export PATH=...` line to the login shell's profile.
+  one `export PATH=...` line to the file the shell really reads (zsh:
+  `~/.zshrc`; a bash login shell: the first of `~/.bash_profile`,
+  `~/.bash_login`, `~/.profile`), verified by `$SHELL -lic 'command -v murmur'`.
 
 **Node floor.** The published package's floor is what `dist/` needs, not what a
 source run needs: `^22.16.0 || >=24` (package.json `engines`). The binding
