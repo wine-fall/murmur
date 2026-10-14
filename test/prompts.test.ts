@@ -578,6 +578,14 @@ describe('seed-persona prompt (spec 06 §2.2/§3.3)', () => {
     expect(p).toMatch(/hours they keep/i)
   })
 
+  // A listener asking for "a friend to chat with" must still get a broadcaster:
+  // the generated persona is what every later beat speaks from.
+  it('writes a broadcaster, never a host who asks for replies', () => {
+    const p = buildSeedPersonaPrompt(answers, 'English')
+    expect(p).toMatch(/broadcast/i)
+    expect(p).toMatch(/never asks/i)
+  })
+
   it('drops skipped questions rather than sending blanks', () => {
     const p = buildSeedPersonaPrompt(
       [
@@ -1302,5 +1310,23 @@ describe('hostSystemPrompt', () => {
     const p = hostSystemPrompt('PERSONA TEXT')
     expect(p.startsWith('PERSONA TEXT')).toBe(true)
     expect(p).toContain(HOST_CRAFT)
+  })
+
+  // DESIGN §2.2: a broadcast, never soliciting. It lives in the craft, not only
+  // in the bundled seed, because most listeners run a generated persona — and
+  // an older seed told the host to "turn to them and ask something small",
+  // which aired as a question followed by "no need to answer".
+  it('frames the program as a broadcast the listener only has to listen to', () => {
+    expect(HOST_CRAFT).toMatch(/broadcast/i)
+    expect(HOST_CRAFT).toMatch(/never wait/i)
+    expect(HOST_CRAFT).toMatch(/question/i)
+  })
+
+  // codex review: the same system prompt carries the reply turn, where the
+  // listener opened the exchange — and end_broadcast must ask to confirm
+  // (spec 11). The broadcast frame bounds what the host starts, not that.
+  it('leaves a listener-opened exchange free to ask what acting on it needs', () => {
+    expect(HOST_CRAFT).toMatch(/on your own/i)
+    expect(HOST_CRAFT).toMatch(/ask whatever you need/i)
   })
 })
