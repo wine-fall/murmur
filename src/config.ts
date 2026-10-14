@@ -60,7 +60,7 @@ export const ConfigSchema = z.object({
   voiceExplicit: z.boolean().default(false),
   // Model id for the core loop — the voice the listener actually hears, so it
   // takes the top tier (spec 08).
-  model: z.string().default('claude-opus-5'),
+  model: z.string().default('claude-opus-5-5'),
   personaPath: z.string().default(DEFAULT_PERSONA_PATH),
   // Natural pause between talk segments, seconds (spec 01 §3.4). A by-ear knob
   // that also bounds the talk rate so testing does not drain the subscription.
@@ -96,7 +96,7 @@ export const ConfigSchema = z.object({
   // The music-discovery task and the opt-in brain cadence run a tier below the
   // host's own voice: they run often, in the background, and a pick that misses
   // is over by the next song.
-  musicModel: z.string().default('claude-sonnet-5'),
+  musicModel: z.string().default('claude-sonnet-5-5'),
   // Where a found song is PLAYED from (spec 14 §2.13), best first. Finding and
   // playing are two decisions: the model picks the song, this picks the CDN.
   playOrder: z.array(z.enum(PLAY_ORDER)).default([...PLAY_ORDER]),
@@ -120,7 +120,7 @@ export const ConfigSchema = z.object({
   // --- listening taste (spec 14 §2.1/§2.2) -------------------------------- //
   sourcesPath: z.string().default(() => sourcesConfigPath()),
   tasteDir: z.string().default(() => tasteDir()),
-  rwtModel: z.string().default('claude-sonnet-5'),
+  rwtModel: z.string().default('claude-sonnet-5-5'),
   rwtP: z.coerce.number().min(0).max(1).default(0.35),
   rwtMinGap: z.coerce.number().int().nonnegative().default(1),
   rwtMaxGap: z.coerce.number().int().nonnegative().default(4),
@@ -183,7 +183,7 @@ export const ConfigSchema = z.object({
   // verbatim to outlive every session, so the fold takes the top tier despite
   // running in the background: a fact it gets wrong is read back into every
   // pack until the listener notices it.
-  compactModel: z.string().default('claude-opus-5'),
+  compactModel: z.string().default('claude-opus-5-5'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>
