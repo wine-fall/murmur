@@ -1321,4 +1321,12 @@ describe('hostSystemPrompt', () => {
     expect(HOST_CRAFT).toMatch(/never wait/i)
     expect(HOST_CRAFT).toMatch(/question/i)
   })
+
+  // codex review: the same system prompt carries the reply turn, where the
+  // listener opened the exchange — and end_broadcast must ask to confirm
+  // (spec 11). The broadcast frame bounds what the host starts, not that.
+  it('leaves a listener-opened exchange free to ask what acting on it needs', () => {
+    expect(HOST_CRAFT).toMatch(/on your own/i)
+    expect(HOST_CRAFT).toMatch(/ask whatever you need/i)
+  })
 })
