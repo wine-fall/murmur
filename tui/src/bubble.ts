@@ -24,13 +24,29 @@ const MORE = 'tab more'
 // past it, so the raster placement can never land on the bubble's cells.
 export const FIGURE_HALF_COLS = 13
 
+// A word wider than the bubble, broken into pieces that each fit, so a long
+// url wraps instead of losing its tail.
+const GRAPHEMES = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
+function pieces(word: string, inner: number): string[] {
+  if (cells(word) <= inner) return [word]
+  const out = ['']
+  for (const { segment } of GRAPHEMES.segment(word)) {
+    if (cells(out.at(-1)! + segment) > inner) out.push('')
+    out[out.length - 1] += segment
+  }
+  return out
+}
+
 // Word-wrapped to `inner` cells, at most `max` lines (two until Tab opens the
 // bubble); a cut last line ends in an ellipsis. The whole text is in the
 // program log either way.
 export function bubbleLines(text: string, inner: number, max = BODY_LINES): string[] {
   const lines: string[] = []
   let line = ''
-  const words = text.split(/\s+/).filter((word) => word !== '')
+  const words = text
+    .split(/\s+/)
+    .filter((word) => word !== '')
+    .flatMap((word) => pieces(word, inner))
   for (let at = 0; at < words.length; at++) {
     const next = line === '' ? words[at]! : `${line} ${words[at]}`
     if (cells(next) <= inner) {
@@ -54,6 +70,12 @@ export function bubbleLines(text: string, inner: number, max = BODY_LINES): stri
   }
   if (line !== '') lines.push(fit(line, inner))
   return lines
+}
+
+// The most body lines an opened bubble may take: the box (body + two border
+// rows + hint) and its tail must end above the now-playing row under the sky.
+export function bubbleRoom(sceneRows: number): number {
+  return Math.max(BODY_LINES, sceneRows - 4)
 }
 
 // Whether two lines cut the text — the only time Tab has more to show.

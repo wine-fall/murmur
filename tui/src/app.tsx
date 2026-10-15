@@ -69,6 +69,7 @@ import {
   bubbleCut,
   bubbleHint,
   bubbleLines,
+  bubbleRoom,
   bubbleShown,
   restPose,
   stripLead,
@@ -825,7 +826,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     if (trial === null) return null
     const inner = trial.width - 4
     const more = !bubbleOpen && bubbleCut(bubble.text, inner)
-    const body = bubbleLines(bubble.text, inner, bubbleOpen ? Infinity : undefined)
+    const body = bubbleLines(bubble.text, inner, bubbleOpen ? bubbleRoom(sceneRows) : undefined)
     const box = bubbleBox({ gutter, sceneWidth, sceneRows, lines: body.length })
     return box === null ? null : { ...box, body, more, hint: bubbleHint(bubble.hint, inner, more) }
   })()

@@ -10,6 +10,7 @@ import {
   bubbleCut,
   bubbleHint,
   bubbleLines,
+  bubbleRoom,
   bubbleShown,
   FIGURE_HALF_COLS,
   restPose,
@@ -25,7 +26,7 @@ describe('bubbleLines', () => {
       'a newer murmur is out — the',
       'fixes are small but they…',
     ])
-    // An over-wide first word is cut too: the box is laid out for two lines.
+    // An over-wide first word wraps in pieces, still inside two lines.
     const url = bubbleLines('https://example.com/maintenance-window Please read this', 30)
     expect(url).toHaveLength(2)
     for (const line of url) expect(cells(line)).toBeLessThanOrEqual(30)
@@ -40,6 +41,23 @@ describe('bubbleLines', () => {
     expect(all).toEqual(['a newer murmur is out — the', 'fixes are small but they', 'matter, come get them'])
     expect(all.join(' ')).toBe(text)
   })
+
+  it('breaks an over-wide word across lines rather than losing its tail', () => {
+    const url = 'https://example.com/maintenance-window'
+    const all = bubbleLines(`${url} Please read this`, 29, Infinity)
+    for (const line of all) expect(cells(line)).toBeLessThanOrEqual(29)
+    expect(all.join('').replaceAll(' ', '')).toBe(`${url}Pleasereadthis`)
+  })
+})
+
+describe('bubbleRoom', () => {
+  it('keeps the opened bubble, tail included, above the now-playing row', () => {
+    for (const sceneRows of [8, 12, 20]) {
+      const box = bubbleBox({ gutter: 0, sceneWidth: 150, sceneRows, lines: bubbleRoom(sceneRows) })!
+      // Scene rows are 2 .. 2 + sceneRows - 1; now-playing sits on 2 + sceneRows.
+      expect(box.tailRow).toBeLessThan(2 + sceneRows)
+    }
+  })
 })
 
 describe('bubbleCut', () => {
@@ -47,6 +65,10 @@ describe('bubbleCut', () => {
     expect(bubbleCut('a short one', 30)).toBe(false)
     expect(bubbleCut('one two three four', 12)).toBe(false)
     expect(bubbleCut('one two three four five six', 12)).toBe(true)
+    // An over-wide word wraps in pieces, so it is cut exactly when its pieces
+    // need a third line.
+    expect(bubbleCut('https://example.com/maintenance-window Please read this', 29)).toBe(false)
+    expect(bubbleCut(`https://example.com/${'x'.repeat(50)} tail`, 29)).toBe(true)
   })
 })
 
