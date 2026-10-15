@@ -1626,10 +1626,16 @@ export class Director {
       () => true,
       () => false,
     )
+    // A quit (Ctrl-C's requestQuit, which types no line) ends the gap at once
+    // rather than after it: shutdown must not wait out a pause.
+    const quit = this.quitting.then(() => true)
     while (true) {
       const line = this.deps.host.peekLine().then(() => false)
-      const finished = await Promise.race([slept, line])
-      if (finished) return
+      const finished = await Promise.race([slept, line, quit])
+      if (finished) {
+        ac.abort()
+        return
+      }
       const steer = this.takeSteer()
       // A line the report floor ate is not a reason to cut the gap short:
       // writing out a bug description must not make the radio talk more often.

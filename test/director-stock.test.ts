@@ -91,6 +91,17 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     expect(host.states.map((s) => s.kind)[0]).toBe('gap')
   })
 
+  it('a quit during the gap after boot\'s beat ends the run without waiting it out', async () => {
+    const stock = fakeStock(stockBeats('stock two'))
+    const { brain, director } = setup({ stock, gapSeconds: 5 })
+    brain.batches = [['live one', 'live two']]
+    const started = Date.now()
+    const run = director.run(1)
+    setTimeout(() => director.requestQuit(), 20)
+    await run
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
   it('waits out the beat boot put on the air before airing anything over it', async () => {
     let done!: () => void
     const playing = new Promise<void>((resolve) => (done = resolve))
