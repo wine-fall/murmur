@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest'
 import {
   BUBBLE_MAX_COLS,
   bubbleBox,
+  bubbleCut,
   bubbleHint,
   bubbleLines,
   bubbleShown,
@@ -32,12 +33,30 @@ describe('bubbleLines', () => {
     expect(long).toHaveLength(2)
     for (const line of long) expect(cells(line)).toBeLessThanOrEqual(20)
   })
+
+  it('opened (Tab), lays out the whole text over as many lines as it takes', () => {
+    const text = 'a newer murmur is out — the fixes are small but they matter, come get them'
+    const all = bubbleLines(text, 29, Infinity)
+    expect(all).toEqual(['a newer murmur is out — the', 'fixes are small but they', 'matter, come get them'])
+    expect(all.join(' ')).toBe(text)
+  })
+})
+
+describe('bubbleCut', () => {
+  it('is true only when two lines cannot hold the text', () => {
+    expect(bubbleCut('a short one', 30)).toBe(false)
+    expect(bubbleCut('one two three four', 12)).toBe(false)
+    expect(bubbleCut('one two three four five six', 12)).toBe(true)
+  })
 })
 
 describe('bubbleHint', () => {
   it('pairs the action with the way out, or says only the way out', () => {
     expect(bubbleHint('type /update', 40)).toBe('type /update · esc dismiss')
     expect(bubbleHint(undefined, 40)).toBe('esc dismiss')
+    // A cut text offers the rest first; the action shows once it is opened.
+    expect(bubbleHint('type /update', 32, true)).toBe('tab more · esc dismiss')
+    expect(bubbleHint(undefined, 32, true)).toBe('tab more · esc dismiss')
     expect(cells(bubbleHint('https://example.test/a/very/long/path/indeed', 30))).toBeLessThanOrEqual(30)
   })
 })

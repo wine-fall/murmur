@@ -1224,7 +1224,14 @@ provides them):
      at the figure's head — rounded WARM border, CARD ground, INK.text body
      word-wrapped to <=2 lines (cut with an ellipsis), EMBER hint line
      `type /update · esc dismiss` (or the url, or `esc dismiss`), <=36 cells,
-     a one-cell `╱` tail under its lower-left corner toward the figure. It
+     a one-cell `╱` tail under its lower-left corner toward the figure.
+     **Tab opens a cut bubble** (added 2026-10-15, user-asked): when two lines
+     cut the text, the hint row reads `tab more · esc dismiss` instead (the row
+     has no room for the action as well); Tab — after the command menu, which
+     keeps Tab while it is up — re-lays the bubble over the WHOLE text at the
+     same width, growing it upward, puts the action hint back, and restarts the
+     20 s auto-hide. A fresh `bubble` message starts closed. On the strip Tab is
+     a no-op: the strip is one line and the whole text is already in the log. It
      yields to any card. Narrow band (or a sky with no room beside the
      figure): the text takes the status strip, precedence floor face >
      bubble > away greeting > microcopy. While it is up the pose is `wake`,

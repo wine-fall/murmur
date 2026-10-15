@@ -66,6 +66,7 @@ import { busyLine, COMPOSER_KEYS, composerRows, floorFace } from './floor.ts'
 import {
   BUBBLE_HIDE_MS,
   bubbleBox,
+  bubbleCut,
   bubbleHint,
   bubbleLines,
   bubbleShown,
@@ -359,12 +360,17 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   const [bubble, setBubble] = useState<Bubble | null>(null)
   // The bubble the keyboard may dismiss: only one on screen (bubbleShown).
   const bubbleRef = useRef<Bubble | null>(null)
+  // Tab opened the bubble to its whole text. A fresh bubble starts closed.
+  const [bubbleOpen, setBubbleOpen] = useState(false)
+  // Whether Tab has anything to open: boxed beside the figure, cut, still closed.
+  const bubbleMore = useRef(false)
   useEffect(() => {
     if (bubble === null) return
     // The auto-hide is not a dismiss: the notice comes back next launch.
+    // Opening it restarts the clock: the listener asked to read it.
     const hide = setTimeout(() => setBubble(null), BUBBLE_HIDE_MS)
     return () => clearTimeout(hide)
-  }, [bubble])
+  }, [bubble, bubbleOpen])
   const asksRef = useRef(asks)
   asksRef.current = asks
   const input = useRef<InputRenderable>(null)
@@ -474,6 +480,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
           setNotice(message.body.length === 0 ? null : message)
           break
         case 'bubble':
+          setBubbleOpen(false)
           setBubble({ id: message.id, text: message.text, ...(message.hint !== undefined && { hint: message.hint }) })
           break
         case 'askDrop':
@@ -605,6 +612,10 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         return retype(menu.current.selected)
       }
     }
+    // Tab opens a cut bubble to its whole text (§3.7.5) — after the menu,
+    // which owns Tab while it is up. On the strip it is a no-op: the strip is
+    // one line, and the whole text is already in the log.
+    if (!pane.current.open && key.name === 'tab' && bubbleMore.current) return setBubbleOpen(true)
     // Nothing on screen claimed the arrows, so the wheel gets them: with
     // mouse reporting off, alternate-scroll mode (armed in main.tsx) delivers
     // a notch as an arrow, and the log creeps a row. A floor's composer is the
@@ -813,10 +824,12 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
     const trial = bubbleBox({ gutter, sceneWidth, sceneRows, lines: 2 })
     if (trial === null) return null
     const inner = trial.width - 4
-    const body = bubbleLines(bubble.text, inner)
+    const more = !bubbleOpen && bubbleCut(bubble.text, inner)
+    const body = bubbleLines(bubble.text, inner, bubbleOpen ? Infinity : undefined)
     const box = bubbleBox({ gutter, sceneWidth, sceneRows, lines: body.length })
-    return box === null ? null : { ...box, body, hint: bubbleHint(bubble.hint, inner) }
+    return box === null ? null : { ...box, body, more, hint: bubbleHint(bubble.hint, inner, more) }
   })()
+  bubbleMore.current = bubbleAt?.more === true
   const stripBubble = bubble !== null && bubbleAt === null ? bubble.text : undefined
   bubbleRef.current =
     bubble !== null && bubbleShown({ boxed: bubbleAt !== null, inStrip: stripBubble !== undefined, floor: floor?.strip })

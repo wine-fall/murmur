@@ -17,15 +17,17 @@ export const BUBBLE_HIDE_MS = 20_000
 export const Z_BUBBLE = 90
 const BODY_LINES = 2
 const DISMISS = 'esc dismiss'
+const MORE = 'tab more'
 
 // Half the figure's widest footprint in cells, halo included: the text sprite
 // is ~24 cells wide as drawn, the kitty raster ~16. The bubble starts a cell
 // past it, so the raster placement can never land on the bubble's cells.
 export const FIGURE_HALF_COLS = 13
 
-// Word-wrapped to `inner` cells, at most two lines; a cut second line ends in
-// an ellipsis. The whole text is in the program log either way.
-export function bubbleLines(text: string, inner: number): string[] {
+// Word-wrapped to `inner` cells, at most `max` lines (two until Tab opens the
+// bubble); a cut last line ends in an ellipsis. The whole text is in the
+// program log either way.
+export function bubbleLines(text: string, inner: number, max = BODY_LINES): string[] {
   const lines: string[] = []
   let line = ''
   const words = text.split(/\s+/).filter((word) => word !== '')
@@ -37,7 +39,7 @@ export function bubbleLines(text: string, inner: number): string[] {
     }
     if (line !== '') lines.push(fit(line, inner))
     line = words[at]!
-    if (lines.length === BODY_LINES - 1) {
+    if (lines.length === max - 1) {
       const rest = words.slice(at).join(' ')
       if (cells(rest) <= inner) return [...lines, rest]
       // Cut on a word where one fits, so the ellipsis never splits a word.
@@ -54,7 +56,15 @@ export function bubbleLines(text: string, inner: number): string[] {
   return lines
 }
 
-export function bubbleHint(hint: string | undefined, inner: number): string {
+// Whether two lines cut the text — the only time Tab has more to show.
+export function bubbleCut(text: string, inner: number): boolean {
+  return bubbleLines(text, inner, Infinity).length > BODY_LINES
+}
+
+// A cut bubble offers the rest of the text before the action: the hint row
+// has no room for both, and the opened bubble shows the action anyway.
+export function bubbleHint(hint: string | undefined, inner: number, more = false): string {
+  if (more) return `${MORE} · ${DISMISS}`
   return hint === undefined ? DISMISS : `${fit(hint, inner - cells(DISMISS) - 3)} · ${DISMISS}`
 }
 
