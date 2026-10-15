@@ -181,10 +181,13 @@ export class FakeVoice {
   // of the program is fine" case, which failTimes (positional) cannot express.
   failFor: string | null = null
   failWith = 'synth down'
+  // A synthesis that takes this long — a long beat on a remote endpoint.
+  delayMs = 0
 
   async start(): Promise<void> {}
 
   async synthesize(text: string): Promise<AudioClip> {
+    if (this.delayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.delayMs))
     if (this.failFor !== null && text === this.failFor) throw new Error(this.failWith)
     if (this.failTimes > 0) {
       this.failTimes--

@@ -438,7 +438,7 @@ speak within ~1 s of launch and sign off on the way out.
 **One mechanism, two slots.** Under the cache root (rebuildable, never listener
 data) a `stock/` directory holds:
 
-- `opener.json` + `opener-1.wav` ... `opener-3.wav` — a set of THREE coherent
+- `opener.json` + `opener-1.wav` ... `opener-5.wav` — a set of FIVE coherent
   beats, the way the program opens a sitting.
 - `farewell.json` + `farewell.wav` — ONE line, the way it signs off.
 
@@ -447,7 +447,7 @@ is the last generation's texts and `fingerprint` is `{ voice, language,
 persona }` — the voice identity, the output language, and a hash of the persona
 file. Nothing else is stored; the audio is the wav beside it.
 
-**Generation.** ONE brain call yields the whole set (three opener beats, plus
+**Generation.** ONE brain call yields the whole set (five opener beats, plus
 the farewell when that slot is due), each rendered through the LIVE voice
 provider and copied next to its json. The prompt carries persona and profile
 only — the same renderers the talk prompts use — and states the rules the
@@ -504,9 +504,19 @@ The remaining opener beats are handed to the Director as a queue **separate
 from `talkAhead`**, so the look-ahead's depth invariant is untouched. The cold
 batch is still fired at time 0 exactly as today. At each boundary:
 
-1. a live beat is ready -> air it (and log the hand-off);
+1. a live beat is ready -> air it (and log the hand-off). Ready means its
+   AUDIO has settled, not only its text: a beat whose synthesis is still out
+   would hold the air open (measured ~14 s on a long first beat) while a
+   pre-synthesized stock beat sat unused;
 2. else a stock beat is left -> air it;
 3. else wait exactly as today.
+
+Boot's beat is followed by the ordinary inter-segment gap before the first
+boundary — it aired outside the loop, so without that the second beat would
+start the instant the first ended, at a different rhythm from every beat after.
+The set is FIVE beats because the measured launch-to-first-live-audio is
+25-40 s; what is left once a live beat airs is dropped, so the extra beats cost
+only their share of the one generation call.
 
 Aired stock beats go through `airBeat`, so they enter the recent window and the
 next prompt continues from them rather than repeating them. An opener beat that
@@ -614,9 +624,10 @@ a missing or corrupt file, a fingerprint mismatch: no opener, no farewell. Nothi
     missing wav each yield no playable beats (and never raise).
 15. **§3.6 (boundary hand-off):** a ready live beat is aired ahead of a
     waiting stock beat; a stock beat airs while the cold batch is still in
-    flight instead of waiting on it; with the stock queue exhausted the
-    boundary waits exactly as today; the first live beat drops what is left of
-    the opener; an unaired opener beat never reaches the refill's context; the
+    flight instead of waiting on it, and while a live beat's audio is still
+    being synthesized; boot's beat is followed by the ordinary gap; with the
+    stock queue exhausted the boundary waits exactly as today; the first live
+    beat drops what is left of the opener; an unaired opener beat never reaches the refill's context; the
     first boundary waits out the beat boot put on the air while the cold batch
     runs underneath it; a talkback steer discards the stock queue together with
     the look-ahead. Verified on fakes.
