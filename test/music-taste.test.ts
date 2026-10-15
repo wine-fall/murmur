@@ -26,21 +26,74 @@ function jars(mounted: CookieSource[] = ['youtube', 'bilibili', 'netease', 'qqmu
 const hit = JSON.stringify({ title: 'Song', webpage_url: 'https://www.bilibili.com/video/BV1', uploader: 'up', duration: 200 })
 
 describe('YtDlpMusicProvider with mounted sources', () => {
-  // Every search is anonymous: a signed-in bilisearch answers 412 (Bilibili
-  // risk control on the search API) where the same query with no cookie
-  // returns hits, and a YouTube search never needed one (spec 14 §2.5).
+  // Every search starts anonymous: a signed-in bilisearch can answer 412
+  // (Bilibili risk control on the search API) where the same query with no
+  // cookie returns hits, and a YouTube search never needed one (spec 14 §2.5).
   it('searches both catalogues with no cookie, mounted or not', async () => {
     const calls: string[][] = []
     const { cookies, released } = jars()
     const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies })
     const found = await provider.search('city pop', 5, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', '--flat-playlist', 'bilisearch5:city pop'])
+    expect(calls[0]).toEqual(['--dump-json', 'bilisearch5:city pop'])
     expect(found[0]).toMatchObject({ catalogue: 'bilibili', ref: 'https://www.bilibili.com/video/BV1' })
     await provider.search('city pop', 5)
     expect(calls[1]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch5:city pop'])
     await provider.search('city pop', 5, 'youtube')
     expect(calls[2]).toEqual(calls[1])
     expect(released).toEqual([]) // no search ever leases a jar
+  })
+
+  // A flat bilisearch entry carries an id and a url but no title, duration or
+  // uploader (measured, yt-dlp 2026.08.19), so a flat page parses to nothing
+  // the pick could judge: Bilibili searches with full extraction.
+  it('searches Bilibili with full extraction, since a flat entry has no title', async () => {
+    const flat = JSON.stringify({ _type: 'url', ie_key: 'BiliBili', id: '61386883', url: 'http://www.bilibili.com/video/av61386883', webpage_url: 'http://www.bilibili.com/video/av61386883' })
+    const provider = new YtDlpMusicProvider({ run: async (args) => (args.includes('--flat-playlist') ? flat : hit) })
+    expect(await provider.search('city pop', 5, 'bilibili')).toHaveLength(1)
+  })
+
+  // Bilibili's risk control turns either way: the anonymous bilisearch can be
+  // the one answered 412 while the signed-in query returns hits, so a 412 is
+  // worth one more call with the mounted jar (spec 14 §2.5).
+  it('retries a 412 Bilibili search once with the jar, and nothing else', async () => {
+    const calls: string[][] = []
+    const { cookies, released } = jars()
+    const failing = (stderr: string) =>
+      new YtDlpMusicProvider({
+        run: async (args) => {
+          calls.push(args)
+          if (args.includes('--cookies')) return hit
+          throw Object.assign(new Error('Command failed: yt-dlp'), { stderr })
+        },
+        cookies,
+      })
+    const blocked = 'ERROR: city pop: Unable to download JSON metadata: HTTP Error 412: Precondition Failed'
+    expect((await failing(blocked).search('city pop', 5, 'bilibili'))[0]).toMatchObject({ catalogue: 'bilibili' })
+    expect(calls).toEqual([
+      ['--dump-json', 'bilisearch5:city pop'],
+      ['--cookies', '/jar/bilibili', '--dump-json', 'bilisearch5:city pop'],
+    ])
+    expect(released).toEqual(['bilibili'])
+    // Any other failure, and any YouTube search, stays one anonymous call.
+    calls.length = 0
+    await expect(failing('ERROR: HTTP Error 500').search('city pop', 5, 'bilibili')).rejects.toThrow(/Command failed/)
+    await expect(failing(blocked).search('city pop', 5, 'youtube')).rejects.toThrow(/Command failed/)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('does not repeat a 412 Bilibili search when no Bilibili jar can be leased', async () => {
+    for (const cookies of [jars(['youtube']).cookies, undefined]) {
+      const calls: string[][] = []
+      const provider = new YtDlpMusicProvider({
+        run: async (args) => {
+          calls.push(args)
+          throw Object.assign(new Error('Command failed: yt-dlp'), { stderr: 'ERROR: HTTP Error 412: Precondition Failed' })
+        },
+        ...(cookies !== undefined && { cookies }),
+      })
+      await expect(provider.search('city pop', 5, 'bilibili')).rejects.toThrow(/Command failed/)
+      expect(calls).toHaveLength(1)
+    }
   })
 
   it('netease search goes through the client, and is refused when no client is wired', async () => {

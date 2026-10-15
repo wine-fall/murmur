@@ -8,10 +8,12 @@
 // measured ~10-17s per search; flat is ~2s) whose entries still carry the
 // judging signal (title, uploader, duration, view_count), so the brain can
 // reject junk (hour-long loops, low-quality re-uploads) and prefer official
-// audio. Bilibili searches the same way through `bilisearch{limit}:`; NetEase
+// audio. Bilibili searches through `bilisearch{limit}:` with full extraction,
+// because its flat entries carry none of that signal; NetEase
 // has no yt-dlp search, so a mounted NetEase client answers that catalogue
 // (spec 14 §2.8). Searching is anonymous for both — Bilibili's risk control
-// answers a signed-in search 412 — and so is YouTube PLAYBACK: under a
+// can answer a signed-in search 412, and a 412 on the anonymous one is retried
+// once with the jar — and so is YouTube PLAYBACK: under a
 // signed-in web client yt-dlp skips the formats it can hand ffmpeg and the
 // URL it prints answers 403. The jar stays where it earns its keep: the
 // taste reads, and Bilibili/NetEase playback (spec 14 §2.5). resolve runs `-f bestaudio/best` with `--print` and returns a
@@ -250,12 +252,22 @@ export class YtDlpMusicProvider implements MusicProvider {
       if (client === undefined) throw new Error(`${catalogue} is not mounted`)
       return client.search(query, limit)
     }
-    // Both catalogues search anonymously: a signed-in `bilisearch` can answer
-    // "HTTP Error 412: Precondition Failed" (Bilibili's risk control on the
-    // search API) where the same query with no cookie returns hits, and a
-    // YouTube search never wanted one.
-    const spec = `${catalogue === 'bilibili' ? 'bilisearch' : 'ytsearch'}${limit}:${query}`
-    const stdout = await this.run(['--dump-json', '--flat-playlist', spec])
+    // Both catalogues search anonymously first: a YouTube search never wanted
+    // a cookie, and Bilibili's risk control on the search API answers
+    // "HTTP Error 412: Precondition Failed" to whichever side it is leaning
+    // on — the signed-in query one day, the anonymous one the next. So a 412
+    // on the anonymous bilisearch earns one more call with the mounted jar.
+    // A flat bilisearch entry carries no title, duration or uploader, so
+    // Bilibili pays for full extraction (~12 s for five hits, measured) where
+    // YouTube's flat page already holds the judging signal.
+    const args =
+      catalogue === 'bilibili' ? ['--dump-json', `bilisearch${limit}:${query}`] : ['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`]
+    const stdout = await this.run(args).catch(async (err: unknown) => {
+      if (catalogue !== 'bilibili' || !/\b412\b/.test(ytdlpFailureText(err))) throw err
+      const lease = await this.leaseFor('bilibili')
+      if (lease === null) throw err
+      return this.withLease('bilibili', lease, (cookie) => this.run([...cookie, ...args]))
+    })
     return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
   }
 
