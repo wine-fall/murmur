@@ -393,7 +393,13 @@ export type DirectorDeps = {
 
 // A look-ahead entry: the beat with its synthesis already running (spec 04
 // §3.3) — consuming it awaits a usually-settled clip, never starts one.
-type BufferedBeat = { beat: TalkBeat; clip: Promise<AudioClip | null> }
+// `ready` = the clip has settled, so airing it now costs no wait.
+type BufferedBeat = { beat: TalkBeat; clip: Promise<AudioClip | null>; ready: () => boolean }
+
+function buffered(beat: TalkBeat, clip: Promise<AudioClip | null>): BufferedBeat {
+  const tracked = pending(clip)
+  return { beat, clip: tracked.promise, ready: tracked.done }
+}
 
 export class Director {
   private quit = false
@@ -678,12 +684,15 @@ export class Director {
   // Boot's opener beat plays through the same voice channel every segment uses,
   // and the engine mixes it rather than queueing behind it — so the first
   // boundary waits for it. Raced against the quit so a listener who leaves
-  // mid-line is not held by it, and awaited at most once.
+  // mid-line is not held by it, and awaited at most once. It is followed by
+  // the same gap as any other segment: boot aired it outside the loop, so the
+  // loop's own gap never ran behind it.
   private async awaitBootBeat(): Promise<void> {
     const playing = this.bootPlaying
     if (playing === null) return
     this.bootPlaying = null
     await Promise.race([playing, this.quitting])
+    if (!this.quit) await this.gap()
   }
 
   // --- presence, anchors (spec 07) ----------------------------------------- //
@@ -1051,9 +1060,10 @@ export class Director {
     }
     // Stock before waiting (spec 04 §3.6): a live beat that is already primed
     // wins, but a boundary with nothing ready says a pre-generated line rather
-    // than holding the air open for a batch that is still thinking. The refill
-    // is fired by talkSegment behind it, exactly as it is behind a live beat.
-    if (this.talkAhead.length === 0) {
+    // than holding the air open for a batch that is still thinking — or for a
+    // live beat whose audio is still being synthesized. The refill is fired by
+    // talkSegment behind it, exactly as it is behind a live beat.
+    if (this.talkAhead[0]?.ready() !== true) {
       const stock = this.stockAhead.shift()
       if (stock !== undefined) {
         this.prefetchMusic(priorLine(stock.text))
@@ -1085,7 +1095,7 @@ export class Director {
     // Beat 1's synth first (it airs next), the look-ahead synths right behind
     // it — all in flight together on a concurrent backend.
     const firstClip = this.synthesizeOrSkip(first.text)
-    this.talkAhead = beats.map((beat) => ({ beat, clip: this.synthesizeOrSkip(beat.text) }))
+    this.talkAhead = beats.map((beat) => buffered(beat, this.synthesizeOrSkip(beat.text)))
     const clip = await firstClip
     return clip === null ? null : { beat: first, clip }
   }
@@ -1121,7 +1131,7 @@ export class Director {
     if (epoch !== this.talkEpoch) return
     for (const beat of beats) {
       if (this.talkAhead.length >= TALK_LOOKAHEAD) break
-      this.talkAhead.push({ beat, clip: this.synthesizeOrSkip(beat.text) })
+      this.talkAhead.push(buffered(beat, this.synthesizeOrSkip(beat.text)))
     }
     this.deps.host.debug?.(`talk.refill got=${beats.length} depth=${this.talkAhead.length}`)
   }
@@ -1185,7 +1195,7 @@ export class Director {
     const coda = this.coda
     if (coda === null) return
     this.coda = null
-    this.talkAhead.unshift({ beat: coda.beat, clip: Promise.resolve(coda.clip) })
+    this.talkAhead.unshift(buffered(coda.beat, Promise.resolve(coda.clip)))
     this.deps.host.debug?.(`coda queued depth=${this.talkAhead.length}`)
   }
 
@@ -1616,10 +1626,16 @@ export class Director {
       () => true,
       () => false,
     )
+    // A quit (Ctrl-C's requestQuit, which types no line) ends the gap at once
+    // rather than after it: shutdown must not wait out a pause.
+    const quit = this.quitting.then(() => true)
     while (true) {
       const line = this.deps.host.peekLine().then(() => false)
-      const finished = await Promise.race([slept, line])
-      if (finished) return
+      const finished = await Promise.race([slept, line, quit])
+      if (finished) {
+        ac.abort()
+        return
+      }
       const steer = this.takeSteer()
       // A line the report floor ate is not a reason to cut the gap short:
       // writing out a bug description must not make the radio talk more often.

@@ -61,12 +61,45 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     const stock = fakeStock(stockBeats('stock two', 'stock three'))
     const { brain, host, director } = setup({ stock, gapSeconds: 0.1 })
     brain.batches = [['live one', 'live two'], ['live three']]
-    brain.nextTalksDelayMs = 20 // a cold batch thinks; that is what the stock covers
+    brain.nextTalksDelayMs = 150 // a cold batch thinks past boot's gap; that is what the stock covers
     await director.run(2)
     // Boundary 1 has no live beat yet (the batch is only fired behind the stock
     // beat); boundary 2 does, so the stock's third beat is never spent.
     expect(host.radio).toEqual(['stock two', 'live one'])
     expect(host.debugs).toContain('stock.handoff live at beat 3')
+  })
+
+  it('a live beat still synthesizing does not beat the stock queue', async () => {
+    const stock = fakeStock(stockBeats('stock two', 'stock three'))
+    const { brain, voice, host, director } = setup({ stock, gapSeconds: 0.05 })
+    brain.batches = [['live one', 'live two'], ['live three']]
+    brain.nextTalksDelayMs = 10
+    // The text lands fast; its audio does not. Waiting on it would hold the air
+    // open while a pre-synthesized beat sits unused.
+    voice.delayMs = 150
+    await director.run(3)
+    expect(host.radio).toEqual(['stock two', 'stock three', 'live one'])
+  })
+
+  it('leaves the same gap after boot\'s beat as between any two beats', async () => {
+    const stock = fakeStock(stockBeats('stock two'))
+    const { brain, host, director } = setup({ stock, gapSeconds: 0.05 })
+    brain.batches = [['live one', 'live two']]
+    brain.nextTalksDelayMs = 40
+    await director.run(1)
+    // Boot's beat aired outside the loop; the first boundary still pauses after it.
+    expect(host.states.map((s) => s.kind)[0]).toBe('gap')
+  })
+
+  it('a quit during the gap after boot\'s beat ends the run without waiting it out', async () => {
+    const stock = fakeStock(stockBeats('stock two'))
+    const { brain, director } = setup({ stock, gapSeconds: 5 })
+    brain.batches = [['live one', 'live two']]
+    const started = Date.now()
+    const run = director.run(1)
+    setTimeout(() => director.requestQuit(), 20)
+    await run
+    expect(Date.now() - started).toBeLessThan(1000)
   })
 
   it('waits out the beat boot put on the air before airing anything over it', async () => {
@@ -106,7 +139,7 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     // third boundary — and an OPENING line must not air in the middle of a
     // sitting (nor read audio the refresh is busy rewriting under it).
     brain.batches = [['live one'], [], ['live two']]
-    brain.nextTalksDelayMs = 20
+    brain.nextTalksDelayMs = 150
     await director.run(3)
     expect(host.radio).toEqual(['stock two', 'live one', 'live two'])
   })
@@ -159,14 +192,14 @@ describe('the stock hand-off (spec 04 §3.6)', () => {
     const stockOnly = fakeStock(stockBeats('stock two', 'stock three'))
     const a = setup({ stock: stockOnly, gapSeconds: 0.1 })
     a.brain.batches = [['live one', 'live two']]
-    a.brain.nextTalksDelayMs = 20
+    a.brain.nextTalksDelayMs = 150
     await a.director.run(1)
     expect(stockOnly.refreshes).toBe(0)
 
     const reachesLive = fakeStock(stockBeats('stock two'))
     const b = setup({ stock: reachesLive, gapSeconds: 0.1 })
     b.brain.batches = [['live one', 'live two']]
-    b.brain.nextTalksDelayMs = 20
+    b.brain.nextTalksDelayMs = 150
     await b.director.run(2)
     expect(reachesLive.refreshes).toBe(1)
   })

@@ -1,4 +1,4 @@
-// Stock lines (spec 04 §3.6): the three opener beats and the one farewell the
+// Stock lines (spec 04 §3.6): the opener beats and the one farewell the
 // radio keeps on disk, so it can speak within a second of launch and sign off
 // on the way out instead of stopping mid-air.
 //
@@ -15,10 +15,10 @@ import { z } from 'zod'
 import type { AudioClip, Player, VoiceProvider } from '../contracts.ts'
 import { cacheRoot } from '../paths.ts'
 
-// How many beats an opener set holds. Three is a by-ear starting point: enough
-// to cover a cold batch that thinks, short enough that the program does not
-// spend its whole opening on canned text.
-export const OPENER_BEATS = 3
+// How many beats an opener set holds: enough to cover a cold batch that thinks
+// plus its first synthesis (measured 25-40 s from launch). Whatever is left
+// once a live beat airs is dropped, so a long set costs only its generation.
+export const OPENER_BEATS = 5
 
 // The farewell is the same line for a while on purpose — a sign-off is a
 // signature, not a fresh thought — but not forever.
