@@ -257,16 +257,29 @@ export class YtDlpMusicProvider implements MusicProvider {
     // "HTTP Error 412: Precondition Failed" to whichever side it is leaning
     // on — the signed-in query one day, the anonymous one the next. So a 412
     // on the anonymous bilisearch earns one more call with the mounted jar.
+    if (catalogue !== 'bilibili') {
+      const stdout = await this.run(['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`])
+      return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
+    }
     // A flat bilisearch entry carries no title, duration or uploader, so
     // Bilibili pays for full extraction (~12 s for five hits, measured) where
-    // YouTube's flat page already holds the judging signal.
-    const args =
-      catalogue === 'bilibili' ? ['--dump-json', `bilisearch${limit}:${query}`] : ['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`]
-    const stdout = await this.run(args).catch(async (err: unknown) => {
-      if (catalogue !== 'bilibili' || !/\b412\b/.test(ytdlpFailureText(err))) throw err
+    // YouTube's flat page already holds the judging signal. Full extraction
+    // makes each hit its own request: --no-playlist keeps a multi-part upload
+    // to one entry instead of every part crowding out the other hits, and
+    // --ignore-errors lets one dead video fail alone — the exit status is
+    // still non-zero, so the hits it did print are read off the failure.
+    const args = ['--dump-json', '--no-playlist', '--ignore-errors', `bilisearch${limit}:${query}`]
+    const search = (cookie: string[]): Promise<string> =>
+      this.run([...cookie, ...args]).catch((err: unknown) => {
+        const printed = typeof err === 'object' && err !== null && 'stdout' in err && typeof err.stdout === 'string' ? err.stdout : ''
+        if (parseSearchOutput(printed, limit).length > 0) return printed
+        throw err
+      })
+    const stdout = await search([]).catch(async (err: unknown) => {
+      if (!/HTTP Error 412\b/.test(ytdlpFailureText(err))) throw err
       const lease = await this.leaseFor('bilibili')
       if (lease === null) throw err
-      return this.withLease('bilibili', lease, (cookie) => this.run([...cookie, ...args]))
+      return this.withLease('bilibili', lease, search)
     })
     return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
   }

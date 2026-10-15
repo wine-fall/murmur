@@ -34,7 +34,7 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const { cookies, released } = jars()
     const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies })
     const found = await provider.search('city pop', 5, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', 'bilisearch5:city pop'])
+    expect(calls[0]).toEqual(['--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'])
     expect(found[0]).toMatchObject({ catalogue: 'bilibili', ref: 'https://www.bilibili.com/video/BV1' })
     await provider.search('city pop', 5)
     expect(calls[1]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch5:city pop'])
@@ -50,6 +50,25 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const flat = JSON.stringify({ _type: 'url', ie_key: 'BiliBili', id: '61386883', url: 'http://www.bilibili.com/video/av61386883', webpage_url: 'http://www.bilibili.com/video/av61386883' })
     const provider = new YtDlpMusicProvider({ run: async (args) => (args.includes('--flat-playlist') ? flat : hit) })
     expect(await provider.search('city pop', 5, 'bilibili')).toHaveLength(1)
+  })
+
+  // Full extraction makes each hit its own request: one deleted or
+  // region-locked video fails yt-dlp's exit status while the rest of the page
+  // is already on stdout, and those hits are still worth judging.
+  it('keeps the hits a Bilibili search printed when one entry failed', async () => {
+    const provider = new YtDlpMusicProvider({
+      run: async () => {
+        throw Object.assign(new Error('Command failed: yt-dlp'), { stdout: `${hit}\n`, stderr: 'ERROR: [BiliBili] 1: This video is unavailable' })
+      },
+    })
+    expect(await provider.search('city pop', 5, 'bilibili')).toHaveLength(1)
+    // A failure that printed nothing is still a failure.
+    const empty = new YtDlpMusicProvider({
+      run: async () => {
+        throw Object.assign(new Error('Command failed: yt-dlp'), { stdout: '', stderr: 'ERROR: HTTP Error 500' })
+      },
+    })
+    await expect(empty.search('city pop', 5, 'bilibili')).rejects.toThrow(/Command failed/)
   })
 
   // Bilibili's risk control turns either way: the anonymous bilisearch can be
@@ -70,15 +89,18 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const blocked = 'ERROR: city pop: Unable to download JSON metadata: HTTP Error 412: Precondition Failed'
     expect((await failing(blocked).search('city pop', 5, 'bilibili'))[0]).toMatchObject({ catalogue: 'bilibili' })
     expect(calls).toEqual([
-      ['--dump-json', 'bilisearch5:city pop'],
-      ['--cookies', '/jar/bilibili', '--dump-json', 'bilisearch5:city pop'],
+      ['--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
+      ['--cookies', '/jar/bilibili', '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
     ])
     expect(released).toEqual(['bilibili'])
     // Any other failure, and any YouTube search, stays one anonymous call.
     calls.length = 0
     await expect(failing('ERROR: HTTP Error 500').search('city pop', 5, 'bilibili')).rejects.toThrow(/Command failed/)
+    // The query is echoed into yt-dlp's error line: a search for "412" that
+    // failed some other way is not risk control.
+    await expect(failing('ERROR: 412: Unable to download JSON metadata: HTTP Error 500').search('412', 5, 'bilibili')).rejects.toThrow(/Command failed/)
     await expect(failing(blocked).search('city pop', 5, 'youtube')).rejects.toThrow(/Command failed/)
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(3)
   })
 
   it('does not repeat a 412 Bilibili search when no Bilibili jar can be leased', async () => {
