@@ -2,6 +2,8 @@
 // only — the planner's brief for each lives with the prompts
 // (src/prompts/program.ts), and the schedule draws over these ids.
 
+import { readFileSync } from 'node:fs'
+
 import { z } from 'zod'
 
 export const PROGRAM_IDS = ['puzzle', 'today', 'record', 'poem', 'origin'] as const
@@ -32,6 +34,23 @@ export const PROGRAMS: Readonly<Record<ProgramId, ProgramShape>> = {
   // The reading and its layers; a song after each.
   poem: { title: 'Read One', targetMin: 30, points: 4, beats: [2, 3], cooldownDays: 180 },
   origin: { title: 'Where It Comes From', targetMin: 30, points: 5, beats: [3, 4], cooldownDays: 90 },
+}
+
+// The listener's own names for a Chinese air (spec 15 §2.2), shipped as data
+// beside this file: no CJK in source, and a name the planner renders drifts.
+const CHINESE_NAMES = z
+  .record(z.enum(PROGRAM_IDS), z.string())
+  .parse(JSON.parse(readFileSync(new URL('./names.json', import.meta.url), 'utf8')))
+
+// Han script without kana: what a generated persona's prose sample looks like
+// when the air is Chinese and the language was never named.
+const HAN = /\p{Script=Han}/u
+const KANA = /[\p{Script=Hiragana}\p{Script=Katakana}]/u
+
+// ponytail: Chinese is the one shipped table; a second language adds a file.
+export function fixedName(language: string, id: ProgramId): string | undefined {
+  const chinese = /chinese|mandarin/i.test(language) || (HAN.test(language) && !KANA.test(language))
+  return chinese ? CHINESE_NAMES[id] : undefined
 }
 
 // `today` airs commentary on real-world items and needs at least this many

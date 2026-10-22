@@ -46,7 +46,7 @@
     "tui/tsconfig.json"
   ],
   "scripts": {
-    "prepack": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/prompts && cp src/prompts/persona-seed.md dist/prompts/",
+    "prepack": "rm -rf dist && tsc -p tsconfig.build.json && mkdir -p dist/prompts dist/programs && cp src/prompts/persona-seed.md dist/prompts/ && cp src/programs/names.json dist/programs/",
     "start": "node src/main.ts",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src test scripts .github/scripts",

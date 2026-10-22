@@ -4,7 +4,7 @@
 // lives here, so the talk loop only ever sees a cue.
 
 import type { Harness, MemoryStore, ProgramCue } from '../contracts.ts'
-import { PROGRAM_IDS, PROGRAMS, type Plan, type ProgramId, type RunState, TODAY_MIN_ITEMS } from './catalogue.ts'
+import { fixedName, PROGRAM_IDS, PROGRAMS, type Plan, type ProgramId, type RunState, TODAY_MIN_ITEMS } from './catalogue.ts'
 import { planTask, type PlanRequest } from './plan.ts'
 import { drawProgram, GAP, type ProgramFile } from './schedule.ts'
 import { cooldownKeys } from './subject.ts'
@@ -282,7 +282,7 @@ export class ProgramDesk {
     const items = this.items(id)
     const language = this.deps.language()
     for (let attempt = 0; attempt < PLAN_ATTEMPTS && epoch === this.epoch; attempt++) {
-      const name = this.deps.file.name(language, id)
+      const name = this.deps.file.name(language, id) ?? fixedName(language, id)
       const req: PlanRequest = {
         id,
         persona: this.deps.persona(),
@@ -315,7 +315,7 @@ export class ProgramDesk {
         continue
       }
       if (name === undefined && plan.name !== '') this.deps.file.setName(language, id, plan.name)
-      const frozen = this.deps.file.name(language, id) ?? plan.name
+      const frozen = name ?? this.deps.file.name(language, id) ?? plan.name
       return { id, plan: { ...plan, name: frozen }, next: 0, opened: false, requested, updatedAt: this.now() }
     }
     return null

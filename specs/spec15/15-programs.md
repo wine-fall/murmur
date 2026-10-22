@@ -88,8 +88,12 @@ about osmanthus three times. Three causes, one shape:
 
 ### 2.2 Names on the air
 
-The catalogue holds English canonical titles. The air speaks the listener's
-language, so the first plan of a program in a given language returns its
+The catalogue holds English canonical titles. A Chinese air (the language
+names Chinese or Mandarin, or is a persona prose sample in Han script without
+kana) uses the shipped names in `src/programs/names.json` — the listener's
+chosen titles, kept as data because source carries no CJK — and freezes
+nothing (`fixedName` in `catalogue.ts`; the package build copies the file).
+Any other language: the first plan of a program in a given language returns its
 `name` as a short, literal rendering of the canonical title, written the way
 a program title is written in that language (its title marks included). Code
 freezes it per (language, program) in the schedule file; every later plan is

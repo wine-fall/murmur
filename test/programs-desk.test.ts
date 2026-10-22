@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Harness, Task } from '../src/contracts.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
-import type { Plan, ProgramId } from '../src/programs/catalogue.ts'
+import { fixedName, type Plan, type ProgramId } from '../src/programs/catalogue.ts'
 import { ProgramDesk, RESUME_WINDOW_MS, type DeskDeps } from '../src/programs/desk.ts'
 import { ProgramFile } from '../src/programs/schedule.ts'
 import { PlanHarness } from './fakes.ts'
@@ -92,6 +92,28 @@ describe('ProgramDesk — planning (spec 15 §2.4)', () => {
     await d.ready()
     expect(d.current()?.id).not.toBe('origin')
     expect(harness.prompts).toHaveLength(3)
+  })
+
+  it('a Chinese air uses the shipped names, never the planner rendering', async () => {
+    const harness = new PlanHarness(() => plan('s', { name: 'DRIFTED' }))
+    const { d, path } = desk({ harness, language: () => 'Chinese (Mandarin)' })
+    d.ensure()
+    await d.ready()
+    const shipped = fixedName('Chinese (Mandarin)', 'origin')
+    expect(shipped).toMatch(/\p{Script=Han}/u)
+    expect(d.current()?.plan.name).toBe(shipped)
+    expect(harness.prompts[0]).toContain(`name on your air is ${shipped}`)
+    // Nothing is frozen: the shipped table stays the source.
+    expect(new ProgramFile({ path }).name('Chinese (Mandarin)', 'origin')).toBeUndefined()
+  })
+
+  it('a name the listener froze by hand still wins over the shipped one', async () => {
+    const path = weightsFile(only('origin'))
+    new ProgramFile({ path }).setName('Chinese', 'origin', 'MINE')
+    const { d } = desk({ path, language: () => 'Chinese' })
+    d.ensure()
+    await d.ready()
+    expect(d.current()?.plan.name).toBe('MINE')
   })
 
   it('freezes the name the first plan gave, and hands it to the next plan', async () => {
