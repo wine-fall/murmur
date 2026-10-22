@@ -224,7 +224,14 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
         },
         async (args) => {
           const before = programs.current()
-          programs.request(args.program, args.subject?.trim() || undefined)
+          if (!programs.request(args.program, args.subject?.trim() || undefined)) {
+            return reply({
+              ok: false,
+              status:
+                'that program cannot air right now (it needs fresh real-world items and there are not ' +
+                'enough yet); say so briefly and carry on with the program on the air',
+            })
+          }
           return reply({
             ok: true,
             status:

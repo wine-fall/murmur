@@ -434,3 +434,26 @@ describe('the program ledger', () => {
     expect(store.recentPrograms(1000)).toHaveLength(600)
   })
 })
+
+describe('the program ledger — review findings', () => {
+  it('keeps every program row inside the longest cooldown, however many there are', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    for (let i = 0; i < 6000; i++) {
+      a.recordProgram(program(`p${i}`))
+      c.advance(1800) // one every half hour: 6000 rows is 125 days
+    }
+    expect(opened(path, c).recentPrograms(Number.MAX_SAFE_INTEGER)).toHaveLength(6000)
+  })
+
+  it('forget still scrubs the legacy topic rows an older murmur wrote', () => {
+    const c = clock()
+    const path = dir()
+    appendFileSync(join(path, 'ledger.jsonl'), `${JSON.stringify({ ts: 1, kind: 'topic', key: 'the hospital week' })}\n`)
+    const a = opened(path, c)
+    a.record({ role: 'radio', text: 'x' })
+    a.forget('hospital')
+    expect(readFileSync(join(path, 'ledger.jsonl'), 'utf-8')).not.toContain('hospital')
+  })
+})

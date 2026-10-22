@@ -1165,7 +1165,10 @@ export class Director {
   private async nextProgramClip(): Promise<{ beat: TalkBeat; clip: AudioClip; point?: PointMeta } | null> {
     if (this.talkAhead.length === 0) {
       this.deps.host.debug?.('program.point cold; writing inline')
-      await this.fillProgram()
+      // Registered like any fill, so a prefetch in the meantime waits on this
+      // one instead of writing the same point twice.
+      this.talkFill = pending(this.fillProgram())
+      await this.talkFill.promise
     }
     const primed = this.talkAhead.shift()
     if (primed === undefined) return null
@@ -1449,6 +1452,14 @@ export class Director {
     return this.airing === null ? queued : [trackLabel(this.airing), ...queued]
   }
 
+  // A pick nothing prefetched: the program still has its say (spec 15 §2.10)
+  // — for the song after a point, about that point.
+  private coldPickContext(): MusicContext {
+    const hint = this.deps.programs?.musicHint(this.songOwed)
+    const base = this.musicContext(hint?.request === true)
+    return hint === undefined ? base : { ...base, situation: `${base.situation}\n${hint.line}` }
+  }
+
   // `extraLine` is a pre-rendered situation line (the airing beat, or a
   // listener request from switch_music).
   private prefetchMusic(extraLine?: string, request = false): void {
@@ -1461,7 +1472,7 @@ export class Director {
     this.pickQueue = this.pickQueue.filter((slot) => !slot.done() || slot.value() !== null)
     // The program's word on the pick (spec 15 §2.10): a record asks for one
     // exact track, so the queue holds just that one; the others lend a mood.
-    const hint = this.deps.programs?.musicHint()
+    const hint = this.deps.programs?.musicHint(this.songOwed)
     const single = hint?.request === true
     if (this.pickQueue.length >= (single ? 1 : PICK_LOOKAHEAD)) return
     // One search at a time: the next slot's avoid-list is built from the labels
@@ -1527,7 +1538,7 @@ export class Director {
   // the refill's avoid-list already carries the song it is standing behind.
   private takePick(): Promise<TrackPick | null> {
     const head = this.pickQueue.shift()
-    const pick = head === undefined ? this.deps.music!.source.nextTrack(this.musicContext()) : head.promise
+    const pick = head === undefined ? this.deps.music!.source.nextTrack(this.coldPickContext()) : head.promise
     return pick.then((taken) => {
       this.airing = taken
       return taken
@@ -1978,14 +1989,29 @@ export class Director {
 
   // The run on the air ends now; its unsaid points go with the buffer, and
   // the reply being composed is its line or two of wrap (spec 15 §2.8).
-  private requestProgram(id: ProgramId, subject?: string): void {
-    this.deps.programs!.request(id, subject)
+  private requestProgram(id: ProgramId, subject?: string): boolean {
+    if (!this.deps.programs!.request(id, subject)) {
+      this.deps.host.debug?.(`program.request ${id} refused: not available now`)
+      return false
+    }
+    this.clearProgramAir()
+    this.programRequested = true
+    this.deps.host.debug?.(`program.request ${id}${subject === undefined ? '' : ' with a subject'}`)
+    return true
+  }
+
+  private resetPrograms(): void {
+    this.deps.programs!.reset()
+    this.clearProgramAir()
+    this.deps.host.debug?.('program.reset after a forget')
+  }
+
+  // Everything the Director holds of the run that just ended.
+  private clearProgramAir(): void {
     this.discardTalkAhead()
     this.songOwed = false
     this.pointProgress = null
     this.foldedAnchor = null
-    this.programRequested = true
-    this.deps.host.debug?.(`program.request ${id}${subject === undefined ? '' : ' with a subject'}`)
   }
 
   // Compose + synthesize the reply, merging any line that lands before the
@@ -2156,6 +2182,10 @@ export class Director {
             const gone = this.deps.memoryOps!.forget(what, this.pendingUserLines)
             // Counts only — never `what`, for the same reason as above.
             this.deps.host.debug?.(`memory.forget -> ${gone.rows} rows, ${gone.lines} lines`)
+            // An outline is a copy of what the planner was told: the program
+            // on the air and the one behind it go with what was erased, and the
+            // next one is planned from the cleaned store (spec 15 §2.6).
+            if (gone.rows + gone.lines > 0 && this.deps.programs !== undefined) this.resetPrograms()
             return gone
           },
         },
@@ -2165,9 +2195,9 @@ export class Director {
       ...(this.deps.programs !== undefined && {
         programs: {
           request: (id: ProgramId, subject?: string) => {
-            if (!live()) return
+            if (!live()) return false
             acted.value = true
-            this.requestProgram(id, subject)
+            return this.requestProgram(id, subject)
           },
           current: () => this.deps.programs!.label(),
         },

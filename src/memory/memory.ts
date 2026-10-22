@@ -62,9 +62,9 @@ function programRows(entries: readonly LedgerEntry[], n: number): (ProgramRecord
 // What forget matches a program row on: the words it aired under.
 const programLabel = (key: string): string => parseProgram(key)?.label ?? ''
 
-// The programs tail outlives the other kinds: a 180-day cooldown (spec 15
-// §2.1) must still see the program that set it.
-const PROGRAM_TAIL = 4096
+// The programs tail is kept by AGE, not count: every row inside the longest
+// cooldown (spec 15 §2.1, 180 days) stays, however busy the station is.
+const PROGRAM_RETENTION_S = 200 * 86_400
 
 // The songs aired at or after `sinceTs`, newest-last, capped.
 function songsSince(songs: readonly LedgerEntry[], sinceTs: number, cap: number): string[] {
@@ -983,7 +983,11 @@ export class PersistentMemoryStore implements MemoryStore {
         return true
       }
       const row = ledgerRowSchema.safeParse(parsed)
-      return !(row.success && row.data.kind === 'program' && hit(programLabel(row.data.key)))
+      if (!row.success) return true
+      // A `topic` row is what an older murmur ledgered per beat: no longer
+      // read, but still words the listener may ask to erase.
+      if (row.data.kind === 'topic') return !hit(row.data.key)
+      return !(row.data.kind === 'program' && hit(programLabel(row.data.key)))
     })
     if (kept.length === lines.length) return 0
     atomicWrite(this.ledgerPath, kept.join('\n'))
@@ -1135,8 +1139,12 @@ export class PersistentMemoryStore implements MemoryStore {
                   : null
     if (target === null) return
     target.push({ key, ts })
-    const tail = target === this.programs ? PROGRAM_TAIL : LEDGER_TAIL
-    if (target.length > tail) target.splice(0, target.length - tail)
+    if (target === this.programs) {
+      const drop = target.findIndex((e) => e.ts >= ts - PROGRAM_RETENTION_S)
+      if (drop > 0) target.splice(0, drop)
+      return
+    }
+    if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)
   }
 
   // Parse a JSONL file's lines, zod-validating each against `schema`; skips

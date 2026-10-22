@@ -22,6 +22,9 @@ const TODAY_ITEMS = 3
 const PLAN_ATTEMPTS = 2
 // Categories tried per plan before the desk gives up for now.
 const DRAW_ATTEMPTS = 3
+// An outline shorter than this is not a program (and would plan its own
+// successor before it had even opened).
+const MIN_POINTS = 2
 
 const DAY_S = 86_400
 
@@ -166,13 +169,25 @@ export class ProgramDesk {
 
   // The listener asked for a program (spec 15 §2.8): the run on the air ends
   // now — its unsaid points are dropped — and the request is planned at once.
-  request(id: ProgramId, subject?: string): void {
+  // False = it cannot air right now (a today without its items); nothing
+  // changes and the reply says so.
+  request(id: ProgramId, subject?: string): boolean {
+    if (!this.eligible(id)) return false
+    this.reset()
+    this.prepare({ id, ...(subject !== undefined && { subject }) })
+    return true
+  }
+
+  // Drop the run on the air, the plan behind it and the persisted copy. A
+  // forget (spec 05-01 §3.5) lands here: an outline is a copy of what the
+  // planner was told, and nothing a listener erased may come back from it.
+  reset(): void {
+    this.epoch++
     this.run = null
     this.resumed = false
     this.planned = null
     this.upcoming = null
     this.deps.file.saveRun(undefined)
-    this.prepare({ id, ...(subject !== undefined && { subject }) })
   }
 
   // `name - subject - n/total` (middle-dot separated) for the status line, while a program is on.
@@ -185,10 +200,12 @@ export class ProgramDesk {
 
   // What the next pick is told (spec 15 §2.10): a record asks for the track
   // its current point plays, as a request; the others only lend a mood.
-  musicHint(): { line: string; request: boolean } | undefined {
+  // `afterPoint` = the song that follows the point just aired, which `next`
+  // has already moved past.
+  musicHint(afterPoint = false): { line: string; request: boolean } | undefined {
     const run = this.run
     if (run === null) return undefined
-    const track = run.plan.points[run.next]?.track
+    const track = run.plan.points[afterPoint ? run.next - 1 : run.next]?.track
     if (run.id === 'record' && track !== undefined) {
       return { line: `- the program on the air plays this track next: ${track.artist} — ${track.title}`, request: true }
     }
@@ -200,7 +217,7 @@ export class ProgramDesk {
 
   private prepare(request?: Request): void {
     const epoch = ++this.epoch
-    const work = this.plan(request).then(
+    const work = this.plan(epoch, request).then(
       (run) => {
         if (epoch !== this.epoch) return null
         this.planned = run
@@ -216,10 +233,12 @@ export class ProgramDesk {
     this.upcoming = work
   }
 
-  private async plan(request?: Request): Promise<RunState | null> {
-    if (request !== undefined) return this.planOne(request.id, request.subject, true)
+  // Every step checks the epoch first: a plan a request or a forget has
+  // superseded spends no further call and changes nothing on the way out.
+  private async plan(epoch: number, request?: Request): Promise<RunState | null> {
+    if (request !== undefined) return this.planOne(epoch, request.id, request.subject, true)
     const tried = new Set<ProgramId>()
-    for (let draw = 0; draw < DRAW_ATTEMPTS; draw++) {
+    for (let draw = 0; draw < DRAW_ATTEMPTS && epoch === this.epoch; draw++) {
       const recent = this.deps.memory.recentPrograms(GAP).flatMap((r) => (isProgramId(r.id) ? [r.id] : []))
       const eligible = PROGRAM_IDS.filter((id) => !tried.has(id) && this.eligible(id))
       const id = drawProgram({
@@ -229,7 +248,7 @@ export class ProgramDesk {
         random: this.deps.random ?? Math.random,
       })
       if (id === null) return null
-      const run = await this.planOne(id, undefined, false)
+      const run = await this.planOne(epoch, id, undefined, false)
       if (run !== null) return run
       tried.add(id)
     }
@@ -248,12 +267,17 @@ export class ProgramDesk {
   // One category: up to PLAN_ATTEMPTS calls. A subject the listener named
   // bypasses the cooldown; otherwise a returned subject in cooldown is
   // replanned with it added to the avoid list.
-  private async planOne(id: ProgramId, subject: string | undefined, requested: boolean): Promise<RunState | null> {
+  private async planOne(
+    epoch: number,
+    id: ProgramId,
+    subject: string | undefined,
+    requested: boolean,
+  ): Promise<RunState | null> {
     const cooldown = this.cooldown(id)
     const avoid = [...cooldown.labels]
     const items = this.items(id)
     const language = this.deps.language()
-    for (let attempt = 0; attempt < PLAN_ATTEMPTS; attempt++) {
+    for (let attempt = 0; attempt < PLAN_ATTEMPTS && epoch === this.epoch; attempt++) {
       const name = this.deps.file.name(language, id)
       const req: PlanRequest = {
         id,
@@ -268,11 +292,19 @@ export class ProgramDesk {
         ...(subject !== undefined && { subject }),
       }
       const plan: Plan | null = await this.deps.harness.runTask(planTask(req, this.deps.model))
-      if (plan === null) {
-        this.log(`program.plan ${id} returned nothing (attempt ${attempt + 1})`)
+      if (epoch !== this.epoch) return null
+      if (plan === null || plan.points.length < MIN_POINTS) {
+        this.log(`program.plan ${id} returned no usable outline (attempt ${attempt + 1})`)
         continue
       }
-      const hit = subject === undefined && cooldownKeys(id, plan).some((k) => cooldown.keys.has(k))
+      const keys = cooldownKeys(id, plan)
+      // A dedupable program must be rememberable: a puzzle without its lead
+      // thinkers would slip every cooldown.
+      if (PROGRAMS[id].cooldownDays > 0 && keys.length === 0) {
+        this.log(`program.plan ${id} returned no cooldown key (attempt ${attempt + 1})`)
+        continue
+      }
+      const hit = subject === undefined && keys.some((k) => cooldown.keys.has(k))
       if (hit) {
         this.log(`program.plan ${id} subject in cooldown (attempt ${attempt + 1})`)
         avoid.push(...(id === 'puzzle' ? (plan.leads ?? []) : [plan.subject]))

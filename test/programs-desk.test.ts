@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
+import type { Harness, Task } from '../src/contracts.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import type { Plan, ProgramId } from '../src/programs/catalogue.ts'
 import { ProgramDesk, RESUME_WINDOW_MS, type DeskDeps } from '../src/programs/desk.ts'
@@ -35,13 +36,13 @@ const only = (id: ProgramId): Record<ProgramId, number> => ({ puzzle: 0, today: 
 type DeskOver = Partial<Omit<DeskDeps, 'memory' | 'harness'>> & {
   path?: string
   memory?: InProcessMemoryStore
-  harness?: PlanHarness
+  harness?: Harness
 }
 
 function desk(over: DeskOver = {}) {
   const path = over.path ?? weightsFile(only('origin'))
   const memory = over.memory ?? new InProcessMemoryStore()
-  const harness = over.harness ?? new PlanHarness(() => plan('osmanthus'))
+  const harness = (over.harness ?? new PlanHarness(() => plan('osmanthus'))) as PlanHarness
   const d = new ProgramDesk({
     file: new ProgramFile({ path }),
     memory,
@@ -231,7 +232,12 @@ describe('ProgramDesk — real-world items and music', () => {
 
   it('a record asks for the point track; the others hand over a mood hint', async () => {
     const harness = new PlanHarness(() =>
-      plan('An Artist', { points: [{ title: 't1', content: 'c', track: { artist: 'An Artist', title: 'Song One' } }] }),
+      plan('An Artist', {
+        points: [
+          { title: 't1', content: 'c', track: { artist: 'An Artist', title: 'Song One' } },
+          { title: 't2', content: 'c', track: { artist: 'An Artist', title: 'Song Two' } },
+        ],
+      }),
     )
     const { d } = desk({ harness, path: weightsFile(only('record')) })
     d.ensure()
@@ -241,5 +247,93 @@ describe('ProgramDesk — real-world items and music', () => {
     other.d.ensure()
     await other.d.ready()
     expect(other.d.musicHint()).toEqual({ line: expect.stringContaining('osmanthus'), request: false })
+  })
+})
+
+// Closing review (codex) findings, each pinned.
+describe('ProgramDesk — review findings', () => {
+  it('a puzzle without leads, or a dedupable plan with no usable key, is replanned', async () => {
+    const harness = new PlanHarness((_, call) => (call === 1 ? plan('why work') : plan('why work', { leads: ['Zhuangzi'] })))
+    const { d } = desk({ harness, path: weightsFile(only('puzzle')) })
+    d.ensure()
+    await d.ready()
+    expect(harness.prompts).toHaveLength(2)
+    expect(d.current()?.plan.leads).toEqual(['Zhuangzi'])
+  })
+
+  it('a one-point outline is not a program', async () => {
+    const harness = new PlanHarness((_, call) =>
+      call === 1 ? plan('thin', { points: [{ title: 'only', content: 'c' }] }) : plan('full'),
+    )
+    const { d } = desk({ harness })
+    d.ensure()
+    await d.ready()
+    expect(d.current()?.plan.subject).toBe('full')
+  })
+
+  it('refuses a today request without two fresh items, and keeps the run on the air', async () => {
+    const rwt = { fresh: () => [{ title: 'A', gist: 'a' }], take: () => [] }
+    const { d, harness } = desk({ rwt })
+    d.ensure()
+    await d.ready()
+    expect(d.request('today')).toBe(false)
+    expect(d.current()?.plan.subject).toBe('osmanthus')
+    expect(harness.prompts).toHaveLength(1)
+    expect(d.request('poem')).toBe(true)
+  })
+
+  it('a superseded plan neither freezes a name nor keeps planning', async () => {
+    // The first planning call is held until the request's plan has landed.
+    const gates: (() => void)[] = []
+    const prompts: string[] = []
+    const gated: Harness = {
+      async runTask<T>(task: Task<T>): Promise<T | null> {
+        prompts.push(task.prompt)
+        const n = prompts.length
+        if (n === 1) await new Promise<void>((r) => gates.push(r))
+        let captured: T | null = null
+        const [submit] = task.tools((v) => (captured = v))
+        await submit!.handler(plan('x', { name: `N${n}` }), {})
+        return captured
+      },
+    }
+    const { d, path } = desk({ harness: gated })
+    d.ensure()
+    await new Promise((r) => setTimeout(r, 5))
+    d.request('origin')
+    await d.ready()
+    gates[0]!()
+    await new Promise((r) => setTimeout(r, 20))
+    expect(new ProgramFile({ path }).name('English', 'origin')).toBe('N2')
+    expect(d.current()?.plan.name).toBe('N2')
+    expect(prompts).toHaveLength(2)
+  })
+
+  it('reset drops the run on the air, the plan behind it, and the persisted copy', async () => {
+    const { d, path } = desk()
+    d.ensure()
+    await d.ready()
+    d.opened()
+    d.reset()
+    expect(d.current()).toBeNull()
+    expect(JSON.parse(readFileSync(path, 'utf-8')).current).toBeUndefined()
+  })
+
+  it('the music hint for the song after a point names that point, not the next one', async () => {
+    const harness = new PlanHarness(() =>
+      plan('A', {
+        points: [
+          { title: 't1', content: 'c', track: { artist: 'A', title: 'One' } },
+          { title: 't2', content: 'c', track: { artist: 'A', title: 'Two' } },
+        ],
+      }),
+    )
+    const { d } = desk({ harness, path: weightsFile(only('record')) })
+    d.ensure()
+    await d.ready()
+    d.opened()
+    d.pointAired(0)
+    expect(d.musicHint(true)?.line).toContain('One')
+    expect(d.musicHint()?.line).toContain('Two')
   })
 })

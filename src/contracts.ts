@@ -461,7 +461,8 @@ export type MemoryOps = {
 // A listener's program request (spec 15 §2.8): the run on the air ends and
 // the asked-for program is planned at once. Absent = no programs wired.
 export type SteerProgramActions = {
-  request(id: ProgramId, subject?: string): void
+  // False = the program cannot air right now (a today without its items).
+  request(id: ProgramId, subject?: string): boolean
   // The program on the air, as the status line names it; undefined = none.
   current(): string | undefined
 }

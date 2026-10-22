@@ -172,7 +172,15 @@ returns `min..max` beats.
 - **Two gates**: the planning prompt lists the category's in-cooldown labels
   to avoid; the returned keys are matched exactly against the in-cooldown
   keys. A hit → replan once with the hit added; a second hit → draw another
-  category. No judge call.
+  category. No judge call. A dedupable plan with no usable key (a puzzle
+  without `leads`) and an outline of fewer than two points are replanned the
+  same way.
+- The `program` rows are kept by age (200 days, past the longest cooldown),
+  never truncated by count, so a busy station cannot outrun a cooldown.
+- **Forget**: a forget that erased anything resets the desk — the run on the
+  air, the plan behind it and the persisted copy are dropped (an outline is a
+  copy of what the planner was told) and the next program is planned from the
+  cleaned store. Legacy `topic` rows are still scrubbed by forget.
 - `lastOnAir.topics` (spec 05 §3.4) reads the previous sitting's program
   labels.
 
@@ -201,7 +209,10 @@ an explicit subject → bypasses cooldown; maps to no category → the tool is
 not called, the reply is just a chat reply and the program goes on. On a
 call the current program ends at once (its unsaid points dropped; the reply
 is its line or two of wrap), the requested program is planned immediately,
-and it ledgers `requested: true`.
+and it ledgers `requested: true`. A request that cannot air now (*This Thing
+Today* without two fresh items) is refused: nothing changes and the tool
+result tells the reply to say so. A superseded plan (by a request or a
+reset) spends no further call and freezes no name.
 
 ### 2.9 The status line
 

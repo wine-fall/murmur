@@ -56,6 +56,8 @@ class PointBrain implements Brain {
 const threePoints = (subject: string): Plan => ({
   name: 'NAME',
   subject,
+  // A puzzle the gap may draw needs its leads, or the desk replans it.
+  leads: [`lead of ${subject}`],
   angle: 'angle',
   points: [
     { title: 'a', content: 'ca' },
@@ -250,6 +252,55 @@ describe('replies and requests inside a program', () => {
     expect(after[0]).toBe('a requested poem:P0.1')
     expect(after.some((t) => t.startsWith('s1:'))).toBe(false)
     expect(memory.recentPrograms(9).at(-1)).toMatchObject({ label: 'a requested poem', requested: true })
+  })
+})
+
+describe('review findings (codex)', () => {
+  it('a forget that erased something drops the run, and the next beat opens a freshly planned program', async () => {
+    const steer: SteerBrain = {
+      respond: async (_text, _ctx, a) => {
+        a.memory?.forget('osmanthus')
+        return 'forgotten'
+      },
+    }
+    const memoryOps = { recall: () => [], forget: () => ({ rows: 1, lines: 0 }), markSteered: () => {} }
+    const { brain, host, player, director } = build({ steer, memoryOps, subjects: ['s1', 's2'] })
+    player.auto = false
+    const run = director.run(3)
+    await until(() => host.radio.length === 1, 'first beat')
+    host.type('forget the osmanthus')
+    await until(() => host.radio.includes('forgotten'), 'the reply')
+    await pumped(player, run)
+    const after = host.radio.slice(host.radio.indexOf('forgotten') + 1)
+    expect(after[0]).toBe('s2:P0.1')
+    expect(brain.cues().find((c) => c.subject === 's2')).toMatchObject({ index: 0, opening: true })
+  })
+
+  it("a cold pick for the song after a record point asks for that point's track", async () => {
+    const harness = new PlanHarness(() => ({
+      name: 'REC',
+      subject: 'An Artist',
+      angle: 'a',
+      points: [
+        { title: 't1', content: 'c', track: { artist: 'An Artist', title: 'Song One' } },
+        { title: 't2', content: 'c', track: { artist: 'An Artist', title: 'Song Two' } },
+      ],
+    }))
+    const memory = new InProcessMemoryStore()
+    const programs = new ProgramDesk({
+      file: new ProgramFile({ path: programsFile('record') }),
+      memory,
+      harness,
+      model: 'm',
+      persona: () => 'p',
+      language: () => 'English',
+    })
+    const { source, director } = build({ withMusic: true, programs, memory })
+    // Every search comes back empty, so the song after point 0 is a cold pick.
+    source.picks = []
+    await director.run(4)
+    const afterPoint = source.contexts.filter((c) => c.situation.includes('plays this track next'))
+    expect(afterPoint.some((c) => c.situation.includes('Song One'))).toBe(true)
   })
 })
 

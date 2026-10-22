@@ -268,13 +268,13 @@ describe('request_program', () => {
 
   it('is offered only when programs are wired', () => {
     expect(steerTools({ shutdown }, () => {}).some((t) => t.name === 'request_program')).toBe(false)
-    const programs = { request: () => {}, current: () => undefined }
+    const programs = { request: () => true, current: () => undefined }
     expect(steerTools({ shutdown, programs }, () => {}).some((t) => t.name === 'request_program')).toBe(true)
   })
 
   it('passes the category and the subject through, and says the program ends now', async () => {
     const asked: [string, string | undefined][] = []
-    const programs = { request: (id: string, subject?: string) => void asked.push([id, subject]), current: () => 'NAME · s · 2/5' }
+    const programs = { request: (id: string, subject?: string) => (asked.push([id, subject]), true), current: () => 'NAME · s · 2/5' }
     const tools = steerTools({ shutdown, programs }, () => {})
     const withSubject = await callTool(tools, 'request_program', { program: 'poem', subject: 'Li Bai' })
     expect(withSubject.ok).toBe(true)
@@ -286,8 +286,15 @@ describe('request_program', () => {
     ])
   })
 
+  it('says so when the program cannot air now', async () => {
+    const programs = { request: () => false, current: () => 'NAME · s · 2/5' }
+    const result = await callTool(steerTools({ shutdown, programs }, () => {}), 'request_program', { program: 'today' })
+    expect(result.ok).toBe(false)
+    expect(String(result.status)).toContain('cannot air right now')
+  })
+
   it('names every program in its description so free text can be mapped', () => {
-    const programs = { request: () => {}, current: () => undefined }
+    const programs = { request: () => true, current: () => undefined }
     const tool = steerTools({ shutdown, programs }, () => {}).find((t) => t.name === 'request_program')!
     for (const title of ["Things I Can't Figure Out", 'This Thing Today', 'One Record', 'Read One', 'Where It Comes From']) {
       expect(tool.description).toContain(title)
