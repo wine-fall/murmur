@@ -154,6 +154,7 @@ export class MusicProgrammer implements TrackSource {
     // hot-slower-than-cold term (spec 04 §3.3 measurement).
     debug?.(`music.pick start situation=${ctx.situation.length}ch`)
     const pick = await this.deps.brain.runTask<TrackPick>({
+      category: 'music',
       systemPrompt,
       prompt: `${instruction}\n\n${situationBlock}`,
       model: this.deps.model,

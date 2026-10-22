@@ -307,6 +307,7 @@ export function cleanTopics(raw: z.infer<typeof topicShape.topics>): FetchedTopi
 // termination rule). Neutral framing: the researcher, never the host.
 export function fetchTopicsTask(req: FetchTopicsRequest, model: string): Task<FetchedTopic[]> {
   return {
+    category: 'rwt',
     systemPrompt: RWT_FETCH_SYSTEM_PROMPT,
     prompt: buildFetchTopicsPrompt(req),
     model,

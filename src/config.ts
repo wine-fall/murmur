@@ -58,8 +58,9 @@ export const ConfigSchema = z.object({
   // an endpoint arriving mid-boot (spec 03-03 §7.2), while a stub that merely
   // fell out of "no endpoint configured" does not.
   voiceExplicit: z.boolean().default(false),
-  // Model id for the core loop — the voice the listener actually hears, so it
-  // takes the top tier (spec 08).
+  // The one Claude model id: every call — the host's voice, the pick, the
+  // cadence, the real-world fetch, the profile fold — runs on it (DESIGN §7
+  // row 3). One tier, so nothing heard or kept is written a tier down.
   model: z.string().default('claude-opus-5-5'),
   personaPath: z.string().default(DEFAULT_PERSONA_PATH),
   // Natural pause between talk segments, seconds (spec 01 §3.4). A by-ear knob
@@ -93,10 +94,6 @@ export const ConfigSchema = z.object({
   // --- music (specs 03-01/03-02) ----------------------------------------- //
   musicEnabled: z.boolean().default(true),
   ytdlpCmd: z.string().default('yt-dlp'),
-  // The music-discovery task and the opt-in brain cadence run a tier below the
-  // host's own voice: they run often, in the background, and a pick that misses
-  // is over by the next song.
-  musicModel: z.string().default('claude-sonnet-5-5'),
   // Where a found song is PLAYED from (spec 14 §2.13), best first. Finding and
   // playing are two decisions: the model picks the song, this picks the CDN.
   playOrder: z.array(z.enum(PLAY_ORDER)).default([...PLAY_ORDER]),
@@ -112,15 +109,13 @@ export const ConfigSchema = z.object({
 
   // --- real-world topics (spec 13 §2.6) ----------------------------------- //
   // On/off is a settings-layer knob (file < flag, anchorsEnabled's shape); the
-  // numbers are env-only by-ear knobs. The fetch rides the same background
-  // tier as the music pick: frequent, and wrong is reversible.
+  // numbers are env-only by-ear knobs.
   rwtEnabled: z.boolean().default(true),
   rwtPoolPath: z.string().default(() => rwtPoolPath()),
 
   // --- listening taste (spec 14 §2.1/§2.2) -------------------------------- //
   sourcesPath: z.string().default(() => sourcesConfigPath()),
   tasteDir: z.string().default(() => tasteDir()),
-  rwtModel: z.string().default('claude-sonnet-5-5'),
   rwtP: z.coerce.number().min(0).max(1).default(0.35),
   rwtMinGap: z.coerce.number().int().nonnegative().default(1),
   rwtMaxGap: z.coerce.number().int().nonnegative().default(4),
@@ -179,11 +174,6 @@ export const ConfigSchema = z.object({
   // Home of the three persistent tiers (spec 05 §2.3) — under the one murmur
   // home, relocatable via MURMUR_HOME.
   memoryDir: z.string().default(() => join(dataRoot(), 'memory')),
-  // The profile is the one artefact a model writes and the code stores
-  // verbatim to outlive every session, so the fold takes the top tier despite
-  // running in the background: a fact it gets wrong is read back into every
-  // pack until the listener notices it.
-  compactModel: z.string().default('claude-opus-5-5'),
 })
 
 export type Config = z.infer<typeof ConfigSchema>

@@ -308,6 +308,7 @@ async function opening(
   if (said === '' || dropped()) return said
   try {
     return await deps.guide.runGuide({
+      category: 'report',
       systemPrompt: reportSystemPrompt(kind),
       prompt: `${REPORT_PROMPT}\n\n${said}`,
       model: deps.model,

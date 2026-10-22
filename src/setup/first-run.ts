@@ -350,6 +350,7 @@ export async function runProfileBootstrap(deps: BootstrapDeps): Promise<boolean>
   try {
     const root = deps.ccRoot ?? claudeCodeRoot()
     const result = await deps.harness.runTask<ProfileBootstrap>({
+      category: 'bootstrap',
       systemPrompt: BOOTSTRAP_PROFILE_SYSTEM_PROMPT,
       prompt: BOOTSTRAP_PROFILE_INSTRUCTION,
       model: deps.model,

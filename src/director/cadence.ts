@@ -116,6 +116,7 @@ export class BrainCadence implements CadencePolicy {
       // cancelled) but nothing waits on it.
       const kind = await Promise.race([
         this.opts.brain.runTask<SegmentKind>({
+          category: 'cadence',
           systemPrompt: '',
           prompt,
           model: this.opts.model,

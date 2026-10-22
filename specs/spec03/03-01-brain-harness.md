@@ -56,7 +56,7 @@ async def run_task(
     prompt: str,                   # first user turn: instruction + volatile context
     *,
     tools: list[BrainTool],        # exactly one has terminal=True
-    model: str,                    # tier per task (music search -> Haiku)
+    model: str,                    # the one model (DESIGN §7 row 3)
     max_turns: int,                # hard bound on the tool-use loop
 ) -> dict[str, Any] | None: ...
 ```
@@ -151,7 +151,7 @@ This mechanism is what 03-01 builds and tests; *which* fields ride in `situation
 4. `next_track` returns the resolved `AudioClip` (or None if nothing suitable resolves within `max_turns`). What happens to that clip next — scheduling, announce, playback — is 03-02.
 
 ### 3.3 Token economy (master §7)
-- **Haiku** for the music-search loop (pillar 3, tiered models); **Opus** stays for `next_talk`/`respond` (the soul). A song is minutes of zero-token airtime, so a few cheap Haiku turns per song amortize well.
+- ~~**Haiku** for the music-search loop (pillar 3, tiered models)~~ *(Amended 2026-10-15: tiering is withdrawn — the search loop runs on the one `model`, `claude-opus-5-5`, like every other call; DESIGN §7 row 3.)*
 - The stable prefix (persona) is cache-friendly (pillar 4) on repeated calls.
 - `max_turns` hard-bounds the loop so a pathological search can't burn tokens unbounded.
 

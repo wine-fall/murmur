@@ -10,6 +10,7 @@
 // schema-validated args, never scraped free text.
 
 import { readFileSync } from 'node:fs'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import {
   createSdkMcpServer,
@@ -34,6 +35,7 @@ import type {
   TalkBeat,
   Task,
   Turn,
+  UsageCategory,
 } from '../contracts.ts'
 import { buildSeedPersonaPrompt, DEFAULT_PERSONA_PATH, hostSystemPrompt, SEED_PERSONA_SYSTEM_PROMPT } from '../prompts/persona.ts'
 import { buildCompactionPrompt, COMPACTION_SYSTEM_PROMPT } from '../prompts/profile.ts'
@@ -106,6 +108,7 @@ export function isolatedOptions(systemPrompt: string, model: string): Options {
     mcpServers: {},
     skills: [],
     maxTurns: 1,
+    includePartialMessages: true, // the final usage rides the stream (UsageMeter)
     extraArgs: { 'disable-slash-commands': null },
   }
 }
@@ -136,6 +139,7 @@ export function agenticOptions(
     mcpServers: { murmur: server },
     skills: [],
     maxTurns,
+    includePartialMessages: true,
     ...(thinking === 'disabled' && { thinking: { type: 'disabled' as const } }),
     extraArgs: { 'disable-slash-commands': null },
   }
@@ -227,9 +231,96 @@ export function guideOptions(req: GuideRequest): Options {
     hooks: { PreToolUse: [{ hooks: [secretGuard] }] },
     ...(req.canUseTool !== undefined && { canUseTool: req.canUseTool }),
     maxTurns: req.maxTurns,
+    includePartialMessages: true,
     extraArgs: { 'disable-slash-commands': null },
   }
 }
+
+// What one Claude call spent, from the SDK's per-API-call usage (DESIGN §7
+// row 3). Report only: nothing reads it back to cap or steer.
+export type Usage = { input: number; output: number; cacheRead: number; cacheWrite: number }
+export type UsageRecord = Usage & { category: UsageCategory; model: string }
+export type UsageSink = (record: UsageRecord) => void
+
+const UsageFieldsSchema = z.object({
+  input_tokens: z.number().nullish(),
+  output_tokens: z.number().nullish(),
+  cache_read_input_tokens: z.number().nullish(),
+  cache_creation_input_tokens: z.number().nullish(),
+})
+
+// Sums usage over one query, one entry per API call. The partial stream is
+// the authority: message_start opens a call with its input and cache counts,
+// and message_delta carries the final output — the assistant messages only
+// ever hold the usage as of message_start, so their output reads near zero.
+// Read off the stream rather than the result, because a task breaks the
+// moment its tool finishes and never sees a result. Every field merges at its
+// largest, so the assistant message for the same call never undercounts it.
+export class UsageMeter {
+  private calls = new Map<string, Usage>()
+  private open: string | null = null
+
+  observe(message: SDKMessage): void {
+    if (message.type === 'stream_event') {
+      const event = message.event
+      if (event.type === 'message_start') {
+        this.open = event.message.id
+        this.merge(this.open, event.message.usage)
+      } else if (event.type === 'message_delta' && this.open !== null) {
+        this.merge(this.open, event.usage)
+      } else if (event.type === 'message_stop') {
+        this.open = null
+      }
+      return
+    }
+    if (message.type === 'assistant') this.merge(message.message.id ?? `call-${this.calls.size}`, message.message.usage)
+  }
+
+  private merge(id: string, raw: unknown): void {
+    const fields = UsageFieldsSchema.safeParse(raw)
+    if (!fields.success) return
+    const f = fields.data
+    const prev = this.calls.get(id)
+    const max = (a: number | null | undefined, b: number | undefined) => Math.max(a ?? 0, b ?? 0)
+    this.calls.set(id, {
+      input: max(f.input_tokens, prev?.input),
+      output: max(f.output_tokens, prev?.output),
+      cacheRead: max(f.cache_read_input_tokens, prev?.cacheRead),
+      cacheWrite: max(f.cache_creation_input_tokens, prev?.cacheWrite),
+    })
+  }
+
+  // No API call is mid-stream: the last one opened has closed, so its final
+  // usage is in. Always true on a query without partial messages.
+  settled(): boolean {
+    return this.open === null
+  }
+
+  // The total since the last drain, or null when no call was seen.
+  drain(): Usage | null {
+    if (this.calls.size === 0) return null
+    const total: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
+    for (const u of this.calls.values()) {
+      total.input += u.input
+      total.output += u.output
+      total.cacheRead += u.cacheRead
+      total.cacheWrite += u.cacheWrite
+    }
+    this.calls.clear()
+    return total
+  }
+}
+
+export function formatUsage(r: UsageRecord): string {
+  return `usage category=${r.category} model=${r.model} in=${r.input} out=${r.output} cache_read=${r.cacheRead} cache_write=${r.cacheWrite}`
+}
+
+type OnUsage = (usage: Usage) => void
+
+// How long a finished task waits for its call's final usage before it hands
+// the result over anyway (measured: the delta trails the tool call by well
+// under a second).
+const USAGE_TAIL_MS = 2_000
 
 type QueryFn = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>
@@ -247,7 +338,12 @@ const userMessage = (text: string): SDKUserMessage => ({
 // Always streaming input: the multi-turn reply loop needs it, and the
 // permission callback only works in that mode (the seam that bit the Python
 // build as a unit-green regression).
-export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Promise<string> {
+export async function runGuideSession(queryFn: QueryFn, req: GuideRequest, onUsage?: OnUsage): Promise<string> {
+  const meter = new UsageMeter()
+  const report = (): void => {
+    const usage = meter.drain()
+    if (usage !== null) onUsage?.(usage)
+  }
   // Turn-end coordination between the two async flows: the message loop fires
   // when a turn's result arrives; the input stream then pulls the user's reply.
   const waiters: (() => void)[] = []
@@ -306,6 +402,7 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
       if (step === INTERRUPTED) break
       if (step.done === true) break
       const message = step.value
+      meter.observe(message)
       if (message.type === 'assistant') {
         for (const block of message.message.content) {
           if (block.type === 'text' && block.text) {
@@ -327,10 +424,12 @@ export async function runGuideSession(queryFn: QueryFn, req: GuideRequest): Prom
           }
         }
       } else if (message.type === 'result') {
+        report()
         turnEnded.fire()
       }
     }
   } finally {
+    report() // a turn cut by /quit still spent what it spent
     void iterator.return?.().catch(() => {})
   }
   return parts.join('\n').trim()
@@ -352,34 +451,72 @@ function toolResultText(content: string | { type: string; text?: string }[] | un
     .join('\n')
 }
 
+// The harness (spec 03-01 §2.1): a bounded tool-use loop over murmur's OWN
+// in-process tools, capability-agnostic — music discovery and brain cadence
+// ride the same entry point. The task ends as soon as a tool calls `finish`;
+// breaking the iteration closes the query subprocess. The SDK runs a tool as
+// its tool_use block closes, ahead of the message_delta carrying the call's
+// final usage, so the break waits for that call to close. Factored over an
+// injectable query like the guide loop.
+export async function runHarnessTask<T>(
+  queryFn: QueryFn,
+  task: Task<T>,
+  onUsage?: OnUsage,
+  tailMs = USAGE_TAIL_MS,
+): Promise<T | null> {
+  let captured: T | null = null
+  const tools = task.tools((value) => (captured = value))
+  const server = createSdkMcpServer({ name: 'murmur', tools })
+  const allowed = tools.map((t) => `mcp__murmur__${t.name}`)
+  const meter = new UsageMeter()
+  const q = queryFn({
+    prompt: task.prompt,
+    options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins, task.thinking),
+  })
+  const iterator = q[Symbol.asyncIterator]()
+  // Once the result is in, the usage tail is best-effort: bounded by a
+  // deadline, and a stream that dies in it never costs the result.
+  let deadline: Promise<'late'> | null = null
+  try {
+    while (true) {
+      if (captured !== null && deadline === null) deadline = sleep(tailMs, 'late' as const, { ref: false })
+      const step = deadline === null ? await iterator.next() : await Promise.race([iterator.next(), deadline])
+      if (step === 'late' || step.done === true) break
+      meter.observe(step.value)
+      if (captured !== null && meter.settled()) break
+    }
+  } catch (err) {
+    if (captured === null) throw err
+  } finally {
+    void iterator.return?.().catch(() => {})
+    const usage = meter.drain()
+    if (usage !== null) onUsage?.(usage)
+  }
+  return captured
+}
+
 export class ClaudeBrain implements Brain, Harness, GuideCapable {
   private model: string
+  private onUsage: UsageSink | undefined
 
-  constructor(model: string) {
+  // `onUsage` receives one record per Claude call this brain makes (DESIGN §7
+  // row 3); absent, the usage is simply not reported.
+  constructor(model: string, onUsage?: UsageSink) {
     this.model = model
+    this.onUsage = onUsage
   }
 
-  // The harness (spec 03-01 §2.1): a bounded tool-use loop over murmur's OWN
-  // in-process tools, capability-agnostic — music discovery and brain cadence
-  // ride the same entry point. The task ends as soon as a tool calls `finish`;
-  // breaking the iteration closes the query subprocess.
+  private tap(category: UsageCategory, model: string): OnUsage {
+    return (usage) => this.onUsage?.({ category, model, ...usage })
+  }
+
   async runTask<T>(task: Task<T>): Promise<T | null> {
-    let captured: T | null = null
-    const tools = task.tools((value) => (captured = value))
-    const server = createSdkMcpServer({ name: 'murmur', tools })
-    const allowed = tools.map((t) => `mcp__murmur__${t.name}`)
-    const q = query({
-      prompt: task.prompt,
-      options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins, task.thinking),
-    })
-    for await (const _message of q) {
-      if (captured !== null) break
-    }
-    return captured
+    return runHarnessTask(query, task, this.tap(task.category, task.model))
   }
 
   async nextTalks(ctx: ContextPack, count: number): Promise<TalkBeat[]> {
     const beats = await this.runTask<TalkBeat[]>({
+      category: 'beat',
       systemPrompt: hostSystemPrompt(ctx.persona),
       prompt: buildNextTalksPrompt(ctx, count),
       model: this.model,
@@ -389,31 +526,31 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     if (beats !== null) return beats
     // The model never made the terminal call. Degrade to one plain-text beat
     // rather than skip the segment into dead air (spec 04 §3.2).
-    return [{ text: await this.generate(hostSystemPrompt(ctx.persona), buildNextTalkPrompt(ctx)) }]
+    return [{ text: await this.generate('beat', hostSystemPrompt(ctx.persona), buildNextTalkPrompt(ctx)) }]
   }
 
   async respond(userText: string, ctx: ContextPack): Promise<string> {
-    return this.generate(hostSystemPrompt(ctx.persona), buildRespondPrompt(userText, ctx))
+    return this.generate('reply', hostSystemPrompt(ctx.persona), buildRespondPrompt(userText, ctx))
   }
 
   // The setup/repair capability (spec 03-03): the native Claude Code agent
   // with built-in tools, the entry-authorization permission policy, and the
   // multi-turn user-reply loop — a different harness from runTask.
   async runGuide(req: GuideRequest): Promise<string> {
-    return runGuideSession(query, req)
+    return runGuideSession(query, req, this.tap(req.category, req.model))
   }
 
   // A plain tool-less generation under a neutral system framing — bookkeeping,
   // not the host speaking. The Compactor runs this off the live loop.
   async compactProfile(profile: string, transcript: readonly Turn[]): Promise<string> {
-    return this.generate(COMPACTION_SYSTEM_PROMPT, buildCompactionPrompt(profile, transcript))
+    return this.generate('compact', COMPACTION_SYSTEM_PROMPT, buildCompactionPrompt(profile, transcript))
   }
 
   // One tool-less fold of the onboarding answers into a persona, on the good
   // tier: it happens once per install and every later beat inherits it (spec
   // 06 §3.3).
   async seedPersona(answers: readonly SeedAnswer[], language: string, signal?: AbortSignal): Promise<string> {
-    return this.generate(SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language), signal)
+    return this.generate('seed', SEED_PERSONA_SYSTEM_PROMPT, buildSeedPersonaPrompt(answers, language), signal)
   }
 
   // The real-world fetch (spec 13 §2.2): the same bounded loop, with WebSearch
@@ -423,8 +560,8 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
     return (await this.runTask(fetchTopicsTask(req, this.model))) ?? []
   }
 
-  private generate(persona: string, prompt: string, signal?: AbortSignal): Promise<string> {
-    return generateText(query, persona, prompt, this.model, signal)
+  private generate(category: UsageCategory, persona: string, prompt: string, signal?: AbortSignal): Promise<string> {
+    return generateText(query, persona, prompt, this.model, signal, this.tap(category, this.model))
   }
 }
 
@@ -437,6 +574,7 @@ export async function generateText(
   prompt: string,
   model: string,
   signal?: AbortSignal,
+  onUsage?: OnUsage,
 ): Promise<string> {
   const aborted = () => (signal?.reason instanceof Error ? signal.reason : new Error('generation aborted'))
   // A signal already cut before the call: no listener would ever fire, so
@@ -445,11 +583,19 @@ export async function generateText(
   const abortController = new AbortController()
   signal?.addEventListener('abort', () => abortController.abort(signal.reason), { once: true })
   const parts: string[] = []
-  for await (const message of queryFn({ prompt, options: { ...isolatedOptions(persona, model), abortController } })) {
-    if (message.type !== 'assistant') continue
-    for (const block of message.message.content) {
-      if (block.type === 'text' && block.text) parts.push(block.text)
+  const meter = new UsageMeter()
+  try {
+    for await (const message of queryFn({ prompt, options: { ...isolatedOptions(persona, model), abortController } })) {
+      meter.observe(message)
+      if (message.type !== 'assistant') continue
+      for (const block of message.message.content) {
+        if (block.type === 'text' && block.text) parts.push(block.text)
+      }
     }
+  } finally {
+    // A call that failed or was cut still spent what it spent.
+    const usage = meter.drain()
+    if (usage !== null) onUsage?.(usage)
   }
   if (signal?.aborted) throw aborted()
   const text = parts.join('').trim()

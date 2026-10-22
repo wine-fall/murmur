@@ -158,7 +158,8 @@ interface Brain {
   reaches anything else. The default stays `[]`: the music pick and the steer
   task are exactly what they were.
 - **The fetch task** passes `builtins: ['WebSearch']`, `maxTurns` 12, the
-  cheap tier (`rwtModel`, default Haiku), and one terminal tool
+  one model (`model`; the separate `rwtModel` tier is withdrawn, DESIGN §7
+  row 3), and one terminal tool
   `submit_topics({ topics: [{ title, gist, category }] })` (zod; 1–8 items;
   title ≤ 120 chars, gist ≤ 600, category ≤ 40).
 - **System prompt**: `RWT_FETCH_SYSTEM_PROMPT` — "You gather real-world

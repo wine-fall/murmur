@@ -795,6 +795,7 @@ async function runSetupFlow(
   // the radio still launches (spec 03-03): absorb, say so once, re-probe.
   try {
     await guide.runGuide({
+      category: 'guide',
     // Nothing to repair means nothing was authorized: the visit persona asks
     // before it touches anything, where the repair persona is pre-authorized.
     systemPrompt: gaps.length === 0 ? VISIT_PERSONA : GUIDE_PERSONA,

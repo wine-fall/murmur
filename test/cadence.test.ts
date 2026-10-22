@@ -54,16 +54,16 @@ describe('BrainCadence', () => {
       expect(tools.map((t) => t.name)).toEqual(['choose_segment'])
       await callTool(tools, 'choose_segment', { kind: 'music' })
     })
-    const cadence = new BrainCadence({ brain: harness, model: 'haiku' })
+    const cadence = new BrainCadence({ brain: harness, model: 'model-x' })
     expect(await cadence.nextKind({ talksSinceMusic: 0, situation: 'quiet' })).toBe('music')
     expect(harness.lastTask!.prompt).toContain('quiet')
-    expect(harness.lastTask!.model).toBe('haiku')
+    expect(harness.lastTask!.model).toBe('model-x')
   })
 
   it('falls back to the local policy when the model never decides', async () => {
     const cadence = new BrainCadence({
       brain: new FakeHarness(),
-      model: 'haiku',
+      model: 'model-x',
       fallback: new EveryNCadence(1),
     })
     expect(await cadence.nextKind({ talksSinceMusic: 1 })).toBe('music')
@@ -73,7 +73,7 @@ describe('BrainCadence', () => {
     const harness = new FakeHarness(async () => {
       throw new Error('model down')
     })
-    const cadence = new BrainCadence({ brain: harness, model: 'haiku', fallback: new EveryNCadence(9) })
+    const cadence = new BrainCadence({ brain: harness, model: 'model-x', fallback: new EveryNCadence(9) })
     expect(await cadence.nextKind({ talksSinceMusic: 1 })).toBe('talk')
   })
 
@@ -81,7 +81,7 @@ describe('BrainCadence', () => {
     const harness = new FakeHarness(() => new Promise(() => {})) // never settles
     const cadence = new BrainCadence({
       brain: harness,
-      model: 'haiku',
+      model: 'model-x',
       fallback: new EveryNCadence(1),
       timeoutMs: 20,
     })
@@ -93,7 +93,7 @@ describe('buildCadence', () => {
   it('constructs the configured mode', () => {
     expect(buildCadence('every_n', { everyN: 3 })).toBeInstanceOf(EveryNCadence)
     expect(buildCadence('random', { everyN: 3 })).toBeInstanceOf(RandomCadence)
-    expect(buildCadence('brain', { everyN: 3, brain: new FakeHarness(), model: 'haiku' })).toBeInstanceOf(
+    expect(buildCadence('brain', { everyN: 3, brain: new FakeHarness(), model: 'model-x' })).toBeInstanceOf(
       BrainCadence,
     )
   })
