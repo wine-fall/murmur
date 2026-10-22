@@ -1300,6 +1300,13 @@ describe('hostSystemPrompt', () => {
     expect(HOST_CRAFT).toMatch(/on your own/i)
     expect(HOST_CRAFT).toMatch(/ask whatever you need/i)
   })
+
+  // spec 15 §3.1: the prepared presenter, as whole-role framing.
+  it('frames the host as coming to the air prepared, talking from notes', () => {
+    expect(HOST_CRAFT).toMatch(/prepared/i)
+    expect(HOST_CRAFT).toMatch(/program/i)
+    expect(HOST_CRAFT).toMatch(/notes/i)
+  })
 })
 
 // spec 15 §2.5: one outline point per beat call, the program named and the
