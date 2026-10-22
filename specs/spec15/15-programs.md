@@ -58,8 +58,10 @@ about osmanthus three times. Three causes, one shape:
 
 ### Out of scope
 
-- The lieflat rewrite of program beats (decision 16): tested offline in
-  `scratch/` only; wiring waits for the user's verdict.
+- An AI-tone pass (lieflat-less-ai-tone) on program beats: rejected after two
+  offline tests, a post-hoc rewrite and the skill in the first-draft prompt.
+  Neither changed the beats enough to hear, and the first-draft variant turned
+  numbers into digits the voice may misread, at about 26% more per 1000 chars.
 - A slash command for requests: requests are typed as ordinary lines.
 - Time-of-day slots: the user rejected them; no time boundary cuts a program.
 - An LLM judge for subject duplicates: normalization + exact match only.
