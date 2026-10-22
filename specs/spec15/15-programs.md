@@ -195,7 +195,10 @@ returns `min..max` beats.
   that boundary folds into it and is marked fired when it airs). It **ends**
   when its last point has aired; the last point carries the closing flag.
 - The **next plan** is drawn and fired in the background as the current
-  program's last point is generated — no dead air.
+  program's second-to-last point is generated: a plan took over a minute on
+  the box music smoke, longer than one point, and starting at the last point
+  left ~40 s of dead air when no song followed it. The run on the air counts
+  in the successor's gap and cooldown even before its first beat ledgers it.
 - **Resume**: on boot, a persisted run with `next < points` and `updatedAt`
   within 6 h resumes at `next` with `resumed`; older is dropped (what aired
   already counts for cooldown).

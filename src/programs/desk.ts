@@ -107,16 +107,17 @@ export class ProgramDesk {
     return this.upcoming !== null && this.planned === null
   }
 
-  // The point to say next, with its flags. Writing the last point is the
-  // moment the next program starts being prepared, so no air goes dead
-  // between them.
+  // The point to say next, with its flags. Writing the second-to-last point
+  // is the moment the next program starts being prepared: a plan takes over a
+  // minute (measured on the box smoke), longer than one point, so starting at
+  // the last one left dead air between programs.
   cue(flags: Pick<ProgramCue, 'returning' | 'afterSong' | 'anchor'>): ProgramCue | null {
     const run = this.current()
     if (run === null) return null
     const { plan, next: index } = run
     const total = plan.points.length
     const point = plan.points[index]!
-    if (index === total - 1 && this.upcoming === null) this.prepare()
+    if (index >= total - 2 && this.upcoming === null && this.planned === null) this.prepare()
     return {
       name: plan.name,
       subject: plan.subject,
@@ -239,7 +240,10 @@ export class ProgramDesk {
     if (request !== undefined) return this.planOne(epoch, request.id, request.subject, true)
     const tried = new Set<ProgramId>()
     for (let draw = 0; draw < DRAW_ATTEMPTS && epoch === this.epoch; draw++) {
-      const recent = this.deps.memory.recentPrograms(GAP).flatMap((r) => (isProgramId(r.id) ? [r.id] : []))
+      // The run on the air counts even before its first beat has ledgered it:
+      // a successor planned at its opening must not repeat it.
+      const unopened = this.run !== null && !this.run.opened ? [this.run.id] : []
+      const recent = [...this.deps.memory.recentPrograms(GAP).flatMap((r) => (isProgramId(r.id) ? [r.id] : [])), ...unopened]
       const eligible = PROGRAM_IDS.filter((id) => !tried.has(id) && this.eligible(id))
       const id = drawProgram({
         weights: this.deps.file.weights(),
@@ -324,9 +328,16 @@ export class ProgramDesk {
     if (days === 0) return { keys: new Set(), labels: [] }
     const since = this.now() / 1000 - days * DAY_S
     const rows = this.deps.memory.recentPrograms(Number.MAX_SAFE_INTEGER).filter((r) => r.id === id && r.ts >= since)
+    // The run on the air, if it has not ledgered itself yet, is in cooldown too.
+    const run = this.run
+    const own =
+      run !== null && !run.opened && run.id === id
+        ? [{ keys: cooldownKeys(id, run.plan), leads: run.plan.leads, label: run.plan.subject }]
+        : []
+    const all = [...rows, ...own]
     return {
-      keys: new Set(rows.flatMap((r) => r.keys)),
-      labels: [...new Set(rows.flatMap((r) => (id === 'puzzle' ? (r.leads ?? []) : [r.label])))],
+      keys: new Set(all.flatMap((r) => r.keys)),
+      labels: [...new Set(all.flatMap((r) => (id === 'puzzle' ? (r.leads ?? []) : [r.label])))],
     }
   }
 

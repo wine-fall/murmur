@@ -117,7 +117,7 @@ describe('ProgramDesk — planning (spec 15 §2.4)', () => {
 })
 
 describe('ProgramDesk — the run (spec 15 §2.7)', () => {
-  it('cues each point with its flags, and plans the next program while the last point is being written', async () => {
+  it('cues each point with its flags, and plans the next program while the second-to-last point is being written', async () => {
     const { d, harness } = desk()
     d.ensure()
     await d.ready()
@@ -129,12 +129,15 @@ describe('ProgramDesk — the run (spec 15 §2.7)', () => {
     expect(first.closing).toBeUndefined()
     d.opened()
     d.pointAired(0)
+    expect(harness.prompts).toHaveLength(1)
+    // Box music smoke: a plan takes over a minute, longer than one point; it
+    // starts a point earlier so the change of program has no dead air.
     expect(d.cue({ returning: true, afterSong: true })).toMatchObject({ index: 1, returning: true, afterSong: true })
+    expect(harness.prompts).toHaveLength(2) // the next program, planned ahead
     expect(d.cue({})?.opening).toBeUndefined()
     d.pointAired(1)
-    expect(harness.prompts).toHaveLength(1)
     expect(d.cue({})).toMatchObject({ index: 2, closing: true })
-    expect(harness.prompts).toHaveLength(2) // the next program, planned ahead
+    expect(harness.prompts).toHaveLength(2)
     d.pointAired(2)
     await d.ready()
     expect(d.current()?.plan.subject).toBe('osmanthus')
@@ -251,6 +254,20 @@ describe('ProgramDesk — real-world items and music', () => {
 })
 
 // Closing review (codex) findings, each pinned.
+describe('ProgramDesk — planning ahead of a run not yet opened', () => {
+  it('a two-point program plans its successor at the opening, counting itself in the gap and the cooldown', async () => {
+    const two = (subject: string): Plan => ({ ...plan(subject), points: [{ title: 'a', content: 'c' }, { title: 'b', content: 'c' }] })
+    const harness = new PlanHarness((title, call) => two(call <= 2 && title === 'Where It Comes From' ? 'osmanthus' : `s${call}`))
+    const { d } = desk({ harness, path: weightsFile({ ...only('origin'), poem: 0.0001 }) })
+    d.ensure()
+    await d.ready()
+    expect(d.cue({})).toMatchObject({ index: 0, opening: true })
+    await d.ready()
+    // The successor is not origin: the run about to open holds the gap.
+    expect(harness.prompts.at(-1)).toContain('"Read One"')
+  })
+})
+
 describe('ProgramDesk — review findings', () => {
   it('a puzzle without leads, or a dedupable plan with no usable key, is replanned', async () => {
     const harness = new PlanHarness((_, call) => (call === 1 ? plan('why work') : plan('why work', { leads: ['Zhuangzi'] })))
