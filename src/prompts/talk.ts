@@ -3,9 +3,10 @@
 // status, transcript), the beat-shaped grounding rules, and the next-beat(s)
 // builders. reply.ts reuses the shared renderers for the typed-line turns.
 
-import type { ContextPack } from '../contracts.ts'
+import type { ContextPack, ProgramCue } from '../contracts.ts'
 import type { StockRequest } from '../support/stock.ts'
 import { ABOUT_HEADER, PROFILE_TAGS, STYLE_HEADER } from './profile.ts'
+import { programBlock } from './program.ts'
 
 // Output discipline appended to every Brain call: the result is fed straight
 // to TTS, so it must be clean spoken text with no markup or stage directions.
@@ -98,8 +99,11 @@ export const MUSIC_OUTLASTS_RULE =
 // one spelling.
 export const CODA_CUE = 'coda'
 
+// A program point written as a song ends (spec 15 §2.10) is the coda's heir:
+// its first beat answers the song, so the outlast rule cannot bind it either.
 function groundingRules(ctx: ContextPack): string {
-  return ctx.cue === CODA_CUE ? GROUNDING_RULES : `${GROUNDING_RULES} ${MUSIC_OUTLASTS_RULE}`
+  const answersSong = ctx.cue === CODA_CUE || ctx.program?.afterSong === true
+  return answersSong ? GROUNDING_RULES : `${GROUNDING_RULES} ${MUSIC_OUTLASTS_RULE}`
 }
 
 // Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
@@ -238,6 +242,9 @@ function carryOn(ctx: ContextPack, transcript: string): string {
 // Prompt for a single self-initiated talk segment (the fallback path when the
 // batched tool call degrades — spec 04 §3.2).
 export function buildNextTalkPrompt(ctx: ContextPack): string {
+  if (ctx.program !== undefined) {
+    return buildProgramBeatsPrompt(ctx, ctx.program, `Say only the next beat of this point.\n${OUTPUT_RULES}`)
+  }
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next beat.`
@@ -245,10 +252,35 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
+// One program point (spec 15 §2.5): the same stable blocks and program facts
+// as a free beat, but the head is the program — its outline and this point's
+// notes — instead of "carry on".
+function buildProgramBeatsPrompt(ctx: ContextPack, program: ProgramCue, tail: string): string {
+  const transcript = renderTranscript(ctx)
+  const head = !transcript
+    ? openingBlock(ctx)
+    : ctx.opening === true
+      ? `${openingBlock(ctx)}\n\n(Already on the air, just now)\n${transcript}`
+      : `(The program so far)\n${transcript}`
+  const activity = ACTIVITY_GUIDANCE[ctx.activity ?? '']
+  return (
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}\n\n` +
+    `${programBlock(program, program.anchor === undefined ? undefined : CUE_GUIDANCE[program.anchor])}` +
+    `${sceneLine(ctx)}${musicLine(ctx)}${activity === undefined ? '' : `\n${activity}`}\n` +
+    `${groundingRules(ctx)}\n${tail}`
+  )
+}
+
+const PROGRAM_BEATS_TAIL =
+  'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
+  'no markup, labels, or stage directions). Return them in order by calling ' +
+  'the emit_talk_beats tool.'
+
 // Prompt for the next `count` self-initiated beats in one call. The beats come
 // back via the emit_talk_beats tool (structured output — see talk-tools.ts),
 // so the shape lives in that tool's schema, not here.
 export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
+  if (ctx.program !== undefined) return buildProgramBeatsPrompt(ctx, ctx.program, PROGRAM_BEATS_TAIL)
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next ${count} beats.`

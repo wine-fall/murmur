@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ContextPack } from '../src/contracts.ts'
+import type { ContextPack, ProgramCue } from '../src/contracts.ts'
 import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION } from '../src/prompts/music.ts'
 import { buildSeedPersonaPrompt, PERSONA_CHAR_CAP, SEED_QUESTIONS, withLanguage } from '../src/prompts/persona.ts'
 import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP, PROFILE_LINE_CAP } from '../src/prompts/profile.ts'
@@ -1326,5 +1326,70 @@ describe('hostSystemPrompt', () => {
   it('leaves a listener-opened exchange free to ask what acting on it needs', () => {
     expect(HOST_CRAFT).toMatch(/on your own/i)
     expect(HOST_CRAFT).toMatch(/ask whatever you need/i)
+  })
+})
+
+// spec 15 §2.5: one outline point per beat call, the program named and the
+// point's prepared material in front of the host.
+describe('the program beat prompt', () => {
+  const cue = (over: Partial<ProgramCue> = {}): ProgramCue => ({
+    name: 'NAME',
+    subject: 'osmanthus',
+    angle: 'why it smells like October',
+    outline: ['the tree', 'the word', 'the festival'],
+    index: 1,
+    point: { title: 'the word', content: 'NOTES: the character first appears in ...' },
+    beats: [3, 4],
+    ...over,
+  })
+  const ask = (program: ProgramCue, more: Partial<ContextPack> = {}) =>
+    buildNextTalksPrompt({ persona: 'p', recent: [{ role: 'radio', text: 'said before' }], program, ...more }, 4)
+
+  it('names the program and the point, shows the outline, and carries the notes', () => {
+    const p = ask(cue())
+    expect(p).toContain('NAME')
+    expect(p).toContain('osmanthus')
+    expect(p).toContain('why it smells like October')
+    expect(p).toMatch(/1\. the tree[^\n]*\n[^\n]*2\. the word[^\n]*now/)
+    expect(p).toContain('NOTES: the character first appears in ...')
+    expect(p).toContain('3-4 beats')
+    expect(p).toContain('said before')
+    expect(p).toContain('emit_talk_beats')
+    expect(p).not.toContain('Now continue')
+  })
+
+  it('opens with the name, folds an anchor in, and closes with it', () => {
+    const open = ask(cue({ index: 0, opening: true, anchor: 'anchor:morning' }))
+    expect(open).toContain('opens the program')
+    expect(open).toContain('good-morning')
+    expect(ask(cue({ index: 2, closing: true }))).toContain('ends the program')
+    expect(ask(cue())).not.toContain('opens the program')
+  })
+
+  it('says where it left off after a relaunch, and comes back after a reply or a song', () => {
+    expect(ask(cue({ resumed: true }))).toContain('where you left off')
+    expect(ask(cue({ returning: true }))).toContain('come back to this point')
+    const song = ask(cue({ afterSong: true }), { music: { kind: 'playing', track: 'X — Y' } })
+    expect(song).toContain('as the song')
+    // The first beat answers the song, so the outlast rule cannot bind it.
+    expect(song).not.toContain('turns false when the music')
+  })
+
+  it('a program point carries no free-talk opener and no do-not-repeat list', () => {
+    const p = ask(cue())
+    expect(p).not.toContain("don't repeat")
+  })
+})
+
+describe('the single-beat fallback keeps the program', () => {
+  it('says the next beat of the point, in plain text', () => {
+    const p = buildNextTalkPrompt({
+      persona: 'p',
+      recent: [],
+      program: { name: 'N', subject: 'S', angle: 'A', outline: ['x'], index: 0, point: { title: 'x', content: 'C' }, beats: [3, 4] },
+    })
+    expect(p).toContain('(Your program: N')
+    expect(p).toContain('Say only the next beat of this point.')
+    expect(p).not.toContain('emit_talk_beats')
   })
 })

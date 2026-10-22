@@ -3,6 +3,7 @@
 // (the host system prompt), so the outline is already in the language and
 // manner the air will use.
 
+import type { ProgramCue } from '../contracts.ts'
 import { PROGRAMS, type ProgramId } from '../programs/catalogue.ts'
 
 // What each program is, for the planner. Whole-shape descriptions, not rules.
@@ -108,5 +109,40 @@ export function buildPlanPrompt(input: PlanPromptInput): string {
     'on the air, quotations in their original language.\n' +
     `${nameLine(input)}\n` +
     'Hand the plan over by calling submit_plan.'
+  )
+}
+
+// The program and the point in front of the host (spec 15 §2.5). The outline
+// is shown whole so a point knows what it is not — what came before was said,
+// what comes after is still to come — and the notes are the material this
+// point is said from.
+export function programBlock(cue: ProgramCue, anchorLine: string | undefined): string {
+  const outline = cue.outline
+    .map((title, i) => `${i + 1}. ${title}${i < cue.index ? ' (said)' : i === cue.index ? '  <- now' : ''}`)
+    .join('\n')
+  const flags = [
+    cue.opening === true
+      ? 'This point opens the program: name it and today\'s subject in your own words — a different way every time, never a formula.'
+      : undefined,
+    cue.opening === true && anchorLine !== undefined ? `It also falls at a time-of-day moment: ${anchorLine} Fold that into the opening in a line.` : undefined,
+    cue.closing === true
+      ? 'This point ends the program: bring it to a close and name the program as you leave it, in your own words.'
+      : undefined,
+    cue.resumed === true
+      ? 'The program was cut off earlier and picks up again now: one line on where you left off, then carry on.'
+      : undefined,
+    cue.returning === true ? 'You have just answered the listener; come back to this point.' : undefined,
+    cue.afterSong === true
+      ? 'Your first beat goes out as the song on the air ends: come out of it and back to the program. The beats after it air once the song is over.'
+      : undefined,
+  ].filter((line): line is string => line !== undefined)
+  return (
+    `(Your program: ${cue.name} — today: ${cue.subject})\n` +
+    `Your angle: ${cue.angle}\n` +
+    `(The outline)\n${outline}\n` +
+    `(Your notes for this point: ${cue.point.title})\n${cue.point.content}\n` +
+    (flags.length === 0 ? '' : `\n${flags.join('\n')}\n`) +
+    `\nSay this point in ${cue.beats[0]}-${cue.beats[1]} beats, from your notes, carrying on from what is ` +
+    'already on the air. Never say again what you have already said.'
   )
 }
