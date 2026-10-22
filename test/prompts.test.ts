@@ -213,13 +213,12 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
     expect(p.indexOf('likes jazz')).toBeLessThan(p.indexOf('The program so far'))
   })
 
-  it('renders the covered-topics do-not-repeat line', () => {
-    const p = buildNextTalksPrompt(
-      { persona: 'p', recent: [], coveredTopics: ['rain', 'coffee'] },
-      2,
-    )
-    expect(p).toContain('rain, coffee')
-    expect(p).toContain("don't repeat")
+  // spec 15 §2.6: the 12-tag "recently covered" line pushed the host off its
+  // own thread and never matched a paraphrased repeat; it is gone.
+  it('carries no covered-topics do-not-repeat line', () => {
+    const p = buildNextTalksPrompt({ persona: 'p', recent: [{ role: 'radio', text: 'x' }] }, 2)
+    expect(p).not.toContain("don't repeat")
+    expect(p).not.toContain('Recently covered')
   })
 
   it('renders a scene cue for a known bucket', () => {
@@ -227,12 +226,11 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
     expect(p).toContain('late at night')
   })
 
-  it('empty profile/topics and an unknown scene render nothing', () => {
+  it('an empty profile and an unknown scene render nothing', () => {
     const p = buildNextTalkPrompt({
       persona: 'p',
       recent: [],
       profile: '  ',
-      coveredTopics: [],
       scene: 'lunar',
     })
     expect(p).not.toContain('What you know about the listener')

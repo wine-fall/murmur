@@ -874,8 +874,7 @@ export class Director {
   }
 
   // Printed + recorded at air time, so an interjection's reply sees this
-  // segment in context. The topic tag (when the model provided one) feeds the
-  // cross-day anti-repeat ledger (spec 05 §3.9).
+  // segment in context.
   private airBeat(beat: TalkBeat, stock = false): void {
     this.recordBeat(beat)
     this.emitState('talk')
@@ -905,7 +904,6 @@ export class Director {
   private recordBeat(beat: TalkBeat): void {
     this.deps.host.onRadioSegment(beat.text)
     this.deps.memory.record({ role: 'radio', text: beat.text })
-    if (beat.topic !== undefined) this.deps.memory.recordEvent('topic', beat.topic)
   }
 
   // What the program is doing, for a front-end with a status region (spec 10
@@ -937,9 +935,8 @@ export class Director {
   }
 
   // The real clock lives here; currentScene applies a MURMUR_SCENE override
-  // (by-ear) over the pure, unit-tested bucketing. Profile + recent topics come
-  // from the persistent store (spec 05 §3.5): profile is the stable-prefix
-  // block, coveredTopics the cross-day anti-repeat cue.
+  // (by-ear) over the pure, unit-tested bucketing. The profile comes from the
+  // persistent store as the stable-prefix block (spec 05 §3.5).
   // `queued` are look-ahead beats already generated but not yet aired (spec 04
   // §3.3): appended as the host's own prior turns so a refill continues AFTER
   // them instead of regenerating the same beat — the buffered text lives here
@@ -966,7 +963,6 @@ export class Director {
       ...(scene === sceneFor(now) && { time: formatClock(now) }),
       ...(music !== undefined && { music }),
       profile: this.deps.memory.profile(),
-      coveredTopics: this.deps.memory.recentTopics(window),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
       ...(rwt !== undefined && { rwt }),

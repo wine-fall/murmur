@@ -177,14 +177,6 @@ export function aboutSection(profile: string): string {
   return (end === -1 ? body : body.slice(0, end)).replaceAll(PROFILE_TAGS, '').trim()
 }
 
-// A single volatile "recently covered — don't repeat" cue from the tier-③
-// ledger (spec 05 §3.5). Ledger-backed and cross-day, so it holds even when the
-// transcript is empty (the issue-#44 cold-open case). Empty -> nothing.
-function coveredLine(ctx: ContextPack): string {
-  if (ctx.coveredTopics === undefined || ctx.coveredTopics.length === 0) return ''
-  return `\n(Recently covered — don't repeat these: ${ctx.coveredTopics.join(', ')})`
-}
-
 // One real-world item on the desk for this stretch (spec 13 §2.5). A host
 // names the thing — the title, who, where, when — says what happened and what
 // they make of it, and carries on; what a host does NOT do is switch into a
@@ -250,7 +242,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next beat.`
     : `${openingBlock(ctx)} Open naturally with your first beat.`
-  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
@@ -262,7 +254,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `${carryOn(ctx, transcript)} — say your next ${count} beats.`
     : `${openingBlock(ctx)} Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
     `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +

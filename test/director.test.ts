@@ -726,20 +726,19 @@ describe('Director — prepare-then-barge-in interjection', () => {
 })
 
 describe('Director — memory wiring (spec 05)', () => {
-  it('assembles the pack from the store: profile, covered topics, scene', async () => {
+  it('assembles the pack from the store: profile and scene, and no covered-topics cue (spec 15 §2.6)', async () => {
     const store = new PersistentMemoryStore({ dir: mkdtempSync(join(tmpdir(), 'murmur-dir-')) })
     // The bootstrap write-through, not a fold: a fold now has to cite the
     // listener lines it learned from (spec 05-01 §3.3).
     store.writeProfile('(About the listener)\nknows jazz')
-    store.recordEvent('topic', 'rain')
-    store.recordEvent('topic', 'coffee')
+    store.recordProgram({ id: 'origin', label: 'rain', keys: ['rain'] })
     const { brain, director } = setup({ memory: store })
     brain.batches = [['a']]
     await director.run(1)
     const ctx = brain.talkContexts.at(-1)!
     // Dated on load by the spec 05-01 §3.3 post-pass.
     expect(ctx.profile).toContain('knows jazz')
-    expect(ctx.coveredTopics).toEqual(['rain', 'coffee'])
+    expect(ctx).not.toHaveProperty('coveredTopics')
     expect(SCENES).toContain(ctx.scene)
   })
 
@@ -750,7 +749,7 @@ describe('Director — memory wiring (spec 05)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'murmur-dir-'))
     const c = { t: 1_000_000 }
     const first = new PersistentMemoryStore({ dir, now: () => c.t })
-    first.recordEvent('topic', 'night walks')
+    first.recordProgram({ id: 'origin', label: 'night walks', keys: ['nightwalks'] })
     first.record({ role: 'radio', text: 'the last thing said' })
     c.t += 3 * 86_400
     const store = new PersistentMemoryStore({ dir, now: () => c.t })
@@ -771,12 +770,12 @@ describe('Director — memory wiring (spec 05)', () => {
     expect(brain.talkContexts.at(-1)!.lastOnAir?.topics).toEqual([])
   })
 
-  it('ledgers a beat topic at air time; untagged beats ledger nothing', async () => {
+  it('ledgers no per-beat topic: anti-repeat lives at the program level (spec 15 §2.6)', async () => {
     const { brain, memory, director } = setup()
-    brain.batches = [[{ text: 'tagged', topic: 'night walks' }, { text: 'plain' }]]
+    brain.batches = [[{ text: 'one' }, { text: 'two' }]]
     await director.run(2)
-    expect(memory.recentTopics(10)).toEqual(['night walks'])
-    expect(memory.recent(10).map((t) => t.text)).toEqual(['tagged', 'plain'])
+    expect(memory.recentPrograms(10)).toEqual([])
+    expect(memory.recent(10).map((t) => t.text)).toEqual(['one', 'two'])
   })
 
   it('pokes the compactor once per segment boundary', async () => {

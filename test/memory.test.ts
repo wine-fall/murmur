@@ -6,6 +6,10 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { InProcessMemoryStore, PersistentMemoryStore } from '../src/memory/memory.ts'
 
+// A program ledger row (spec 15 §2.6), keyed by its label for these tests.
+const program = (label: string) => ({ id: 'origin', label, keys: [label] })
+const labels = (rows: readonly { label: string }[]) => rows.map((r) => r.label)
+
 describe('InProcessMemoryStore', () => {
   it('returns the last n turns oldest-first', () => {
     const store = new InProcessMemoryStore()
@@ -32,20 +36,20 @@ describe('InProcessMemoryStore', () => {
   it('starts with an empty profile and empty ledger views', () => {
     const store = new InProcessMemoryStore()
     expect(store.profile()).toBe('')
-    expect(store.recentTopics(5)).toEqual([])
+    expect(labels(store.recentPrograms(5))).toEqual([])
     expect(store.recentSongs(5)).toEqual([])
   })
 
   it('routes ledger events by kind, tails in order', () => {
     const store = new InProcessMemoryStore()
-    store.recordEvent('topic', 'night walks')
+    store.recordProgram(program('night walks'))
     store.recordEvent('song', 'A — B')
-    store.recordEvent('topic', 'coffee')
-    store.recordEvent('topic', 'rain')
-    expect(store.recentTopics(2)).toEqual(['coffee', 'rain'])
-    expect(store.recentTopics(9)).toEqual(['night walks', 'coffee', 'rain'])
+    store.recordProgram(program('coffee'))
+    store.recordProgram(program('rain'))
+    expect(labels(store.recentPrograms(2))).toEqual(['coffee', 'rain'])
+    expect(labels(store.recentPrograms(9))).toEqual(['night walks', 'coffee', 'rain'])
     expect(store.recentSongs(9)).toEqual(['A — B'])
-    expect(store.recentTopics(0)).toEqual([])
+    expect(labels(store.recentPrograms(0))).toEqual([])
   })
 
   // spec 13 §3.7: a real-world item told on air is a ledger footprint of its
@@ -53,11 +57,11 @@ describe('InProcessMemoryStore', () => {
   it('keeps real-world topics as their own kind', () => {
     const store = new InProcessMemoryStore()
     store.recordEvent('rwt', 'Typhoon season opens early')
-    store.recordEvent('topic', 'rain')
+    store.recordProgram(program('rain'))
     store.recordEvent('rwt', 'A late equaliser at Anfield')
     expect(store.recentRwt(1)).toEqual(['A late equaliser at Anfield'])
     expect(store.recentRwt(9)).toEqual(['Typhoon season opens early', 'A late equaliser at Anfield'])
-    expect(store.recentTopics(9)).toEqual(['rain'])
+    expect(labels(store.recentPrograms(9))).toEqual(['rain'])
     expect(store.recentRwt(0)).toEqual([])
   })
 })
@@ -108,10 +112,10 @@ describe('PersistentMemoryStore', () => {
     const c = clock()
     const path = dir()
     const a = opened(path, c)
-    a.recordEvent('topic', 'the first one')
-    a.recordEvent('topic', 'rain')
-    a.recordEvent('topic', 'night walks')
-    a.recordEvent('topic', 'coffee')
+    a.recordProgram(program('the first one'))
+    a.recordProgram(program('rain'))
+    a.recordProgram(program('night walks'))
+    a.recordProgram(program('coffee'))
     a.record({ role: 'radio', text: 'stale' })
     const lastTs = c.now()
 
@@ -124,7 +128,7 @@ describe('PersistentMemoryStore', () => {
     expect(b.lastOnAir()?.topics).toEqual(['rain', 'night walks', 'coffee'])
     // What the session records afterwards does not move the fact it opened with.
     b.record({ role: 'radio', text: 'fresh' })
-    b.recordEvent('topic', 'the new one')
+    b.recordProgram(program('the new one'))
     expect(b.lastOnAir()?.topics).toEqual(['rain', 'night walks', 'coffee'])
     expect(b.recent(10).map((t) => t.text)).toEqual(['fresh'])
   })
@@ -155,12 +159,12 @@ describe('PersistentMemoryStore', () => {
     const c = clock()
     const path = dir()
     const a = opened(path, c)
-    a.recordEvent('topic', 'a month ago')
+    a.recordProgram(program('a month ago'))
     a.record({ role: 'radio', text: 'long gone' })
 
     c.advance(30 * 86_400)
     const b = opened(path, c)
-    b.recordEvent('topic', 'last night')
+    b.recordProgram(program('last night'))
     b.record({ role: 'radio', text: 'yesterday' })
 
     c.advance(22 * 3600)
@@ -173,8 +177,8 @@ describe('PersistentMemoryStore', () => {
     const c = clock()
     const path = dir()
     const a = opened(path, c)
-    a.recordEvent('topic', 'the hospital week')
-    a.recordEvent('topic', 'rain')
+    a.recordProgram(program('the hospital week'))
+    a.recordProgram(program('rain'))
     a.record({ role: 'radio', text: 'about the hospital week' })
 
     c.advance(2 * 3600)
@@ -192,13 +196,13 @@ describe('PersistentMemoryStore', () => {
     const c = clock()
     const path = dir()
     const a = opened(path, c)
-    a.recordEvent('topic', 'rain')
+    a.recordProgram(program('rain'))
     a.recordEvent('song', 'X — Y')
-    a.recordEvent('topic', 'coffee')
+    a.recordProgram(program('coffee'))
 
     const b = opened(path, c)
-    expect(b.recentTopics(10)).toEqual(['rain', 'coffee'])
-    expect(b.recentTopics(1)).toEqual(['coffee'])
+    expect(labels(b.recentPrograms(10))).toEqual(['rain', 'coffee'])
+    expect(labels(b.recentPrograms(1))).toEqual(['coffee'])
     expect(b.recentSongs(10)).toEqual(['X — Y'])
   })
 
@@ -207,10 +211,10 @@ describe('PersistentMemoryStore', () => {
     const path = dir()
     const a = opened(path, c)
     a.recordEvent('rwt', 'Typhoon season opens early')
-    a.recordEvent('topic', 'rain')
+    a.recordProgram(program('rain'))
     const b = opened(path, c)
     expect(b.recentRwt(10)).toEqual(['Typhoon season opens early'])
-    expect(b.recentTopics(10)).toEqual(['rain'])
+    expect(labels(b.recentPrograms(10))).toEqual(['rain'])
   })
 
   it('skips corrupt jsonl lines and malformed rows, warns, and keeps booting', () => {
@@ -218,7 +222,7 @@ describe('PersistentMemoryStore', () => {
     const path = dir()
     const a = opened(path, c)
     a.record({ role: 'radio', text: 'good' })
-    a.recordEvent('topic', 'kept')
+    a.recordProgram(program('kept'))
     appendFileSync(join(path, 'history.jsonl'), '{"ts": 1, "role": "radio", "te\n')
     appendFileSync(join(path, 'history.jsonl'), '{"ts": "nope", "role": "radio", "text": "bad"}\n')
     appendFileSync(join(path, 'ledger.jsonl'), 'garbage\n')
@@ -226,7 +230,7 @@ describe('PersistentMemoryStore', () => {
     const warnings: string[] = []
     const b = opened(path, c, { log: (m: string) => warnings.push(m) })
     expect(b.recent(10).map((t) => t.text)).toEqual(['good'])
-    expect(b.recentTopics(10)).toEqual(['kept'])
+    expect(labels(b.recentPrograms(10))).toEqual(['kept'])
     expect(warnings.length).toBe(3)
   })
 
@@ -403,5 +407,30 @@ describe('recentSongsSince — the time-windowed avoid list', () => {
       '\u534a\u58f6\u7eb1 — \u5218\u73c2\u77e3',
       'Five Days Ago — Someone',
     ])
+  })
+})
+
+// spec 15 §2.6: the program ledger is what cooldowns and the two-program gap
+// read, across sessions.
+describe('the program ledger', () => {
+  it('reads back whole records with their time, newest last, skipping a malformed key', () => {
+    const c = clock()
+    const path = dir()
+    const a = opened(path, c)
+    a.recordProgram({ id: 'poem', label: 'Li Bai · Quiet Night', keys: ['libaiquietnight'] })
+    a.recordEvent('program', 'not json')
+    c.advance(60)
+    a.recordProgram({ id: 'today', label: 'two stories', keys: [], requested: true })
+    const b = opened(path, c)
+    const rows = b.recentPrograms(10)
+    expect(rows.map((r) => r.id)).toEqual(['poem', 'today'])
+    expect(rows[1]).toMatchObject({ label: 'two stories', keys: [], requested: true })
+    expect(rows[1]!.ts - rows[0]!.ts).toBeCloseTo(60, 0)
+  })
+
+  it('keeps a long tail: a 180-day cooldown outlives the 256-row tail of the other kinds', () => {
+    const store = new InProcessMemoryStore()
+    for (let i = 0; i < 600; i++) store.recordProgram(program(`p${i}`))
+    expect(store.recentPrograms(1000)).toHaveLength(600)
   })
 })

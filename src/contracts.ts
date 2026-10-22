@@ -42,11 +42,10 @@ export type Turn = {
   readonly cite?: number
 }
 
-// One self-initiated talk beat from the batched call (spec 04 §3.2). `topic`
-// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4).
+// One self-initiated talk beat from the batched call (spec 04 §3.2).
+// Anti-repeat lives at the program level, never per beat (spec 15 §2.6).
 export type TalkBeat = {
   readonly text: string
-  readonly topic?: string
 }
 
 // The program's real music status at context-build time (spec 04 bugfix): the
@@ -70,9 +69,8 @@ export type MusicState =
 // The compact context handed to the Brain per call (master §6). Beyond the
 // spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
 // spec 05 §2.2) and `time` the real local clock rendered for the prompt;
-// `music` is the program's live music status (spec 04 bugfix); `profile` and
-// `coveredTopics` are the tier-①/③ memory reads (spec 05 §3.5 —
-// coveredTopics is cross-day, the issue-#44 anti-repeat).
+// `music` is the program's live music status (spec 04 bugfix); `profile` is
+// the tier-① memory read (spec 05 §3.5).
 // `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
 // and `cue` the per-call intent the Director asks the prompt to carry (an
 // anchor — spec 07 §3.4).
@@ -84,7 +82,6 @@ export type ContextPack = {
   readonly time?: string
   readonly music?: MusicState
   readonly profile?: string
-  readonly coveredTopics?: readonly string[]
   readonly activity?: Activity
   readonly cue?: string
   // One real-world item offered to this batch (spec 13 §2.5): material, not
@@ -189,7 +186,18 @@ export type BedPosition = { track: string; offsetS: number }
 // the same gaps quiet instead of re-opening the conversation.
 // 'forget' keys one honoured forget request (spec 05-01 §3.5) — the time only,
 // never the text: an event that kept what was forgotten would defeat the point.
-export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup' | 'forget' | 'rwt'
+// 'program' keys one program that opened (spec 15 §2.6): what the cooldowns and
+// the two-program gap read, across sessions.
+export type LedgerKind = 'program' | 'song' | 'anchor' | 'setup' | 'forget' | 'rwt'
+
+// A program's ledger row (spec 15 §2.6): its id, the label it aired under,
+// the normalized cooldown keys, and whether the listener asked for it.
+export type ProgramRecord = {
+  readonly id: string
+  readonly label: string
+  readonly keys: readonly string[]
+  readonly requested?: boolean
+}
 
 // Where a recalled line came from (spec 05-01 §2.1): a history row's speaker,
 // or 'faded' for a profile fact that has aged out of the prompts but is still
@@ -204,7 +212,7 @@ export type RecallHit = {
 }
 
 // The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
-// profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
+// profile read (tier ①) and the anti-repeat ledger (tier ③). recentPrograms /
 // recentSongs / recentAnchors span sessions and days on the persistent store
 // (issue #44; spec 07 §2.4). spec 05-01 adds retrieval over the whole log and
 // removal on request.
@@ -213,10 +221,12 @@ export interface MemoryStore {
   recent(n: number): Turn[]
   profile(): string
   recordEvent(kind: LedgerKind, key: string): void
-  recentTopics(n: number): string[]
+  recordProgram(record: ProgramRecord): void
+  // The last n programs that opened, oldest first, each with its time.
+  recentPrograms(n: number): (ProgramRecord & { readonly ts: number })[]
   recentSongs(n: number): string[]
-  // When the program was last on the air BEFORE this boot, with the handful of
-  // topics it touched (spec 05 §3.4). undefined on a first run and inside the
+  // When the program was last on the air BEFORE this boot, with the labels of
+  // the programs it aired (spec 05 §3.4, spec 15 §2.6). undefined on a first run and inside the
   // same sitting, where the recent window already carries the continuity.
   lastOnAir(): { ts: number; topics: readonly string[] } | undefined
   // The avoid-list read (spec 05 §3.5): the songs aired at or after `sinceTs`

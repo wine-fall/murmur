@@ -13,7 +13,6 @@ const ctx: ContextPack = {
   recent: [],
   scene: 'afternoon',
   profile: '',
-  coveredTopics: [],
 }
 
 function actions(armed = false): SteerActions {
