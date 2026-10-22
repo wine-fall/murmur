@@ -334,7 +334,7 @@ export type TaskTool = Omit<SdkMcpToolDefinition, 'inputSchema' | 'handler'> & {
 }
 
 // What a Claude call is for, so its usage line in the dev log can be summed by
-// purpose (programs decision 15): the host's own beats, a reply, the pick, the
+// purpose (DESIGN §7 row 3): the host's own beats, a reply, the pick, the
 // cadence judgment, the real-world fetch, the profile fold, onboarding, stock
 // lines, the setup guide, a bug report.
 export type UsageCategory =

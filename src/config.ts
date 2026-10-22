@@ -59,8 +59,8 @@ export const ConfigSchema = z.object({
   // fell out of "no endpoint configured" does not.
   voiceExplicit: z.boolean().default(false),
   // The one Claude model id: every call — the host's voice, the pick, the
-  // cadence, the real-world fetch, the profile fold — runs on it (programs
-  // decision 14). One tier, so nothing heard or kept is written a tier down.
+  // cadence, the real-world fetch, the profile fold — runs on it (DESIGN §7
+  // row 3). One tier, so nothing heard or kept is written a tier down.
   model: z.string().default('claude-opus-5-5'),
   personaPath: z.string().default(DEFAULT_PERSONA_PATH),
   // Natural pause between talk segments, seconds (spec 01 §3.4). A by-ear knob

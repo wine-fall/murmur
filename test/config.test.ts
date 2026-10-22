@@ -290,7 +290,7 @@ describe('memory config', () => {
   })
 })
 
-// One tier (programs decision 14): every Claude call — the host's voice, the
+// One tier (DESIGN §7 row 3): every Claude call — the host's voice, the
 // pick, the cadence, the fetch, the fold, the guide — runs on opus through the
 // one `model` knob. There is no per-task tier field left to drift below it.
 describe('Claude model tier', () => {

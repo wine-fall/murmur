@@ -100,8 +100,8 @@ export function buildMemory(config: Config, log: (message: string) => void = () 
 // its model call overlaps the boot instead of the first segment, and a profile
 // it lands is read by the first pack that is built after it (the profile is
 // read at fetch time). It never blocks: the fold is unawaited.
-// The real brain, on the one model (programs decision 14), with every call's
-// usage mirrored into the dev log by category (decision 15).
+// The real brain, on the one model (DESIGN §7 row 3), with every call's
+// usage mirrored into the dev log by category (DESIGN §7 row 3).
 function claudeBrain(config: Config, host: Pick<Host, 'debug'>): ClaudeBrain {
   return new ClaudeBrain(config.model, (record) => host.debug?.(formatUsage(record)))
 }

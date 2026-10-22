@@ -656,7 +656,7 @@ describe('generateText under an AbortSignal (spec 06 §3.4: the seed call is int
   })
 })
 
-// Per-call usage by category (programs decision 15): report only, read off the
+// Per-call usage by category (DESIGN §7 row 3): report only, read off the
 // SDK's own per-call usage so an early break (a task that finished on its tool
 // call) still counts what it spent.
 describe('usage metering', () => {

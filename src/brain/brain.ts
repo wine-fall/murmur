@@ -236,8 +236,8 @@ export function guideOptions(req: GuideRequest): Options {
   }
 }
 
-// What one Claude call spent, from the SDK's per-API-call usage (programs
-// decision 15). Report only: nothing reads it back to cap or steer.
+// What one Claude call spent, from the SDK's per-API-call usage (DESIGN §7
+// row 3). Report only: nothing reads it back to cap or steer.
 export type Usage = { input: number; output: number; cacheRead: number; cacheWrite: number }
 export type UsageRecord = Usage & { category: UsageCategory; model: string }
 export type UsageSink = (record: UsageRecord) => void
@@ -499,8 +499,8 @@ export class ClaudeBrain implements Brain, Harness, GuideCapable {
   private model: string
   private onUsage: UsageSink | undefined
 
-  // `onUsage` receives one record per Claude call this brain makes (programs
-  // decision 15); absent, the usage is simply not reported.
+  // `onUsage` receives one record per Claude call this brain makes (DESIGN §7
+  // row 3); absent, the usage is simply not reported.
   constructor(model: string, onUsage?: UsageSink) {
     this.model = model
     this.onUsage = onUsage
