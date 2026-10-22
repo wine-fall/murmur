@@ -258,7 +258,8 @@ export class ProgramDesk {
       const req: PlanRequest = {
         id,
         persona: this.deps.persona(),
-        today: new Date(this.now()).toISOString().slice(0, 10),
+        // en-CA is the one locale whose short date is ISO YYYY-MM-DD, local.
+        today: new Date(this.now()).toLocaleDateString('en-CA'),
         avoid,
         about: this.deps.about?.() ?? '',
         taste: this.deps.taste?.() ?? '',

@@ -51,6 +51,8 @@ import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
 import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool } from './brain/rwt.ts'
+import { ProgramDesk } from './programs/desk.ts'
+import { ProgramFile } from './programs/schedule.ts'
 import { MusicProgrammer } from './music/music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './support/report.ts'
 import { SteerResponder } from './brain/steer-responder.ts'
@@ -461,8 +463,9 @@ export function rwtLanguage(override: string | undefined, persona: string): stri
   return `the language this is written in: "${(prose ?? persona).slice(0, PERSONA_SAMPLE_CHARS)}"`
 }
 
-// Real-world topics (spec 13): the pool under cache/, the roll from the env
-// knobs, the fetch on the cheap tier. `language` and the profile's About
+// Real-world topics (spec 13): the pool under cache/, the fetch on the one
+// model, the items read by the programs that plan with them (spec 15 §2.1).
+// `language` and the profile's About
 // section are read at fetch time, so an override or a compaction lands on
 // the next refresh; region is the system timezone, in the prompt only, never
 // stored.
@@ -1168,6 +1171,25 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
           memory,
         )
 
+  // The programs (spec 15) ride the real brain only: planning is a harness
+  // task, and a stub run keeps its canned free talk.
+  const programs =
+    claude === null
+      ? undefined
+      : new ProgramDesk({
+          file: new ProgramFile({ path: config.programsPath }),
+          memory,
+          harness: claude,
+          model: config.model,
+          persona: () => withLanguage(persona, settings.current().language),
+          language: () => rwtLanguage(settings.current().language, persona),
+          about: () => aboutSection(memory.profile()),
+          taste: () => taste?.forDirector.digest() ?? '',
+          ...(rwt !== undefined && { rwt }),
+          rwtEnabled: () => settings.current().rwtEnabled,
+          ...(host.debug !== undefined && { log: host.debug.bind(host) }),
+        })
+
   const director = new Director({
     persona,
     brain,
@@ -1187,6 +1209,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
     ...(steer !== undefined && { steer }),
     ...(compactor !== undefined && { compactor }),
     ...(rwt !== undefined && { rwt }),
+    ...(programs !== undefined && { programs }),
     ...(setupRecall !== undefined && { setupRecall }),
     // The stock lines (spec 04 §3.6): what boot did not air itself, and the
     // in-session refresh the loop pokes once a live beat has gone out.

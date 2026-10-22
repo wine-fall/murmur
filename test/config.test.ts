@@ -197,6 +197,7 @@ describe('real-world topics config', () => {
   it('places the pool under cache/ and seeds no policy file', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
     expect(config.rwtPoolPath).toBe('/tmp/mh/cache/rwt.json')
+    expect(config.programsPath).toBe('/tmp/mh/data/programs.json')
     expect(config).not.toHaveProperty('rwtPolicyPath')
   })
 

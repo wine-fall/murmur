@@ -19,6 +19,7 @@ import {
   dataRoot,
   homeRoot,
   musicPolicyPath,
+  programsPath,
   rwtPoolPath,
   sourcesConfigPath,
   tasteDir,
@@ -112,6 +113,8 @@ export const ConfigSchema = z.object({
   // numbers are env-only by-ear knobs.
   rwtEnabled: z.boolean().default(true),
   rwtPoolPath: z.string().default(() => rwtPoolPath()),
+  // The program schedule (spec 15 §2.3): weights, frozen names, the run on air.
+  programsPath: z.string().default(() => programsPath()),
 
   // --- listening taste (spec 14 §2.1/§2.2) -------------------------------- //
   sourcesPath: z.string().default(() => sourcesConfigPath()),
@@ -349,6 +352,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     memoryDir: join(dataRoot(env), 'memory'),
     musicPolicyPath: musicPolicyPath(env),
     rwtPoolPath: rwtPoolPath(env),
+    programsPath: programsPath(env),
     sourcesPath: sourcesConfigPath(env),
     tasteDir: tasteDir(env),
     ...rwtFromEnv(env),
