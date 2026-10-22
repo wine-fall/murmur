@@ -50,6 +50,9 @@ export const ProgramStateSchema = z.object({
   startedAt: z.number().optional(),
   scene: z.string().optional(),
   activity: z.enum(ACTIVITIES).optional(),
+  // The program on the air (spec 15 §2.9), as the engine renders it:
+  // name, subject and n/total, middle-dot separated. Absent between programs and without them.
+  program: z.string().optional(),
 })
 
 export type ProgramState = z.infer<typeof ProgramStateSchema>

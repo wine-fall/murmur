@@ -22,9 +22,10 @@ export const PROGRAM_BRIEFS: Readonly<Record<ProgramId, string>> = {
     'program in `leads`.',
   today:
     'Commentary on the real-world items below, two or three of them: for each, ' +
-    'what happened and what you make of it. Not a newsreader\'s rundown — a host ' +
-    'who has read the story and has a view. The subject is a short label for ' +
-    'the set.',
+    'name the thing — the title, who, where, when — say what happened and what ' +
+    'you make of it. Not a newsreader\'s rundown, not a "here is the news" ' +
+    'frame — a host who has read the story and has a view. The subject is a ' +
+    'short label for the set.',
   record:
     'One artist or one album. The outline walks through it a track at a time: ' +
     'each point is one track, named in `track` (artist and title exactly as ' +

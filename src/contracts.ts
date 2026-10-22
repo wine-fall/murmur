@@ -12,6 +12,7 @@ import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropi
 
 import type { Activity } from './director/activity.ts'
 import type { Settings, SettingsPatch } from './host/ipc.ts'
+import type { ProgramId } from './programs/catalogue.ts'
 
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
@@ -84,10 +85,6 @@ export type ContextPack = {
   readonly profile?: string
   readonly activity?: Activity
   readonly cue?: string
-  // One real-world item offered to this batch (spec 13 §2.5): material, not
-  // an assignment. Absent on most batches — the roll decides — and always
-  // absent on an anchor or coda beat.
-  readonly rwt?: { readonly title: string; readonly gist: string }
   // The taste digest (spec 14 §2.3): what the listener keeps on the platforms
   // they mounted, as background the host knows. '' or absent renders nothing.
   readonly taste?: string
@@ -461,11 +458,20 @@ export type MemoryOps = {
   markSteered(): void
 }
 
+// A listener's program request (spec 15 §2.8): the run on the air ends and
+// the asked-for program is planned at once. Absent = no programs wired.
+export type SteerProgramActions = {
+  request(id: ProgramId, subject?: string): void
+  // The program on the air, as the status line names it; undefined = none.
+  current(): string | undefined
+}
+
 export type SteerActions = {
   readonly music?: SteerMusicActions
   readonly shutdown: SteerShutdownActions
   readonly settings?: SteerSettingsActions
   readonly memory?: SteerMemoryActions
+  readonly programs?: SteerProgramActions
 }
 
 // The agentic reply capability (spec 11 §2.2): resolves to the reply text the

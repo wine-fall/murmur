@@ -30,6 +30,7 @@ import type { AskChoices, AskKind, FloorMode, Host } from '../src/host/host.ts'
 import type { Invitation, ProgramState } from '../src/host/ipc.ts'
 import { LineQueue } from '../src/host/host.ts'
 import { parseSegmentRef } from '../src/music/music.ts'
+import type { Plan } from '../src/programs/catalogue.ts'
 
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
 // returned object to exercise hot application.
@@ -425,4 +426,24 @@ export async function until(cond: () => boolean, what = 'condition'): Promise<vo
     await sleep(5)
   }
   throw new Error(`timed out waiting for ${what}`)
+}
+
+// Answers every planning call (spec 15 §2.4) with the plan `answer` returns for
+// the program it was asked to prepare, read off the prompt's quoted title.
+export class PlanHarness implements Harness {
+  prompts: string[] = []
+  private answer: (title: string, call: number) => Plan | null
+  constructor(answer: (title: string, call: number) => Plan | null) {
+    this.answer = answer
+  }
+  async runTask<T>(task: Task<T>): Promise<T | null> {
+    this.prompts.push(task.prompt)
+    const title = /Prepare your next program: "([^"]+)"/.exec(task.prompt)?.[1] ?? ''
+    const plan = this.answer(title, this.prompts.length)
+    if (plan === null) return null
+    let captured: T | null = null
+    const [submit] = task.tools((v) => (captured = v))
+    await submit!.handler(plan, {})
+    return captured
+  }
 }

@@ -29,6 +29,7 @@ import type {
   MusicState,
   Player,
   MemoryOps,
+  ProgramCue,
   SteerActions,
   SteerSettingsActions,
   SteerBrain,
@@ -37,7 +38,6 @@ import type {
   TrackSource,
   Turn,
   VoiceProvider,
-  RwtTopic,
 } from '../contracts.ts'
 import type { Host } from '../host/host.ts'
 import { COMMANDS, type ProgramState, type Settings } from '../host/ipc.ts'
@@ -50,6 +50,8 @@ import type { SourceId } from '../music/sources/taste.ts'
 import type { ReportSession } from '../support/report.ts'
 import type { StockBeat } from '../support/stock.ts'
 import { INSTALL_COMMAND } from '../support/update.ts'
+import type { ProgramId } from '../programs/catalogue.ts'
+import type { ProgramDesk } from '../programs/desk.ts'
 import { buildMusicSituation } from '../prompts/music.ts'
 import { withLanguage } from '../prompts/persona.ts'
 import { CODA_CUE } from '../prompts/talk.ts'
@@ -324,10 +326,13 @@ export type DirectorDeps = {
   // boundary. Absent = disabled (stub runs, tests). The Director only pokes;
   // scheduling, single-flight, and failure posture live in the Compactor.
   compactor?: { maybeSchedule(): boolean }
-  // Real-world material (spec 13 §2.4): one synchronous offer per ordinary
-  // talk batch, and a refresh poked at every boundary that runs off the loop
-  // like the compactor's fold. Absent = never offered (stub runs, tests).
-  rwt?: { offer(): RwtTopic | null; maybeRefresh(): boolean }
+  // Real-world material (spec 13 §2.4): the pool's refresh, poked at every
+  // boundary and run off the loop like the compactor's fold. The items reach
+  // the air only through the programs that use them (spec 15 §2.1).
+  rwt?: { maybeRefresh(): boolean }
+  // The program desk (spec 15): when wired, every self-initiated beat is a
+  // point of a program. Absent (stub runs, tests) = the free-talk loop.
+  programs?: ProgramDesk
   // The mid-broadcast recall (spec 10 §3.4): a typed /setup parks the talk
   // loop inside this call — the engine keeps playing — and the loop resumes
   // when it returns. Absent (stub runs): /setup answers with the shell pointer.
@@ -391,14 +396,25 @@ export type DirectorDeps = {
   random?: () => number
 }
 
+// Where a program beat sits in its point (spec 15 §2.5): the point's index,
+// and whether this beat opens or ends what the call returned for it.
+type PointMeta = { index: number; first: boolean; last: boolean }
+
 // A look-ahead entry: the beat with its synthesis already running (spec 04
 // §3.3) — consuming it awaits a usually-settled clip, never starts one.
-// `ready` = the clip has settled, so airing it now costs no wait.
-type BufferedBeat = { beat: TalkBeat; clip: Promise<AudioClip | null>; ready: () => boolean }
+// `ready` = the clip has settled, so airing it now costs no wait; `value` is
+// the settled clip, for the outro ride that cannot wait.
+type BufferedBeat = {
+  beat: TalkBeat
+  clip: Promise<AudioClip | null>
+  ready: () => boolean
+  value: () => AudioClip | null | undefined
+  point?: PointMeta
+}
 
-function buffered(beat: TalkBeat, clip: Promise<AudioClip | null>): BufferedBeat {
+function buffered(beat: TalkBeat, clip: Promise<AudioClip | null>, point?: PointMeta): BufferedBeat {
   const tracked = pending(clip)
-  return { beat, clip: tracked.promise, ready: tracked.done }
+  return { beat, clip: tracked.promise, ready: tracked.done, value: tracked.value, ...(point !== undefined && { point }) }
 }
 
 export class Director {
@@ -437,6 +453,16 @@ export class Director {
   private coda: { beat: TalkBeat; clip: AudioClip } | null = null
   private codaEpoch = 0
   private talksSinceMusic = 0
+  // spec 15: a point has just ended, so a song is owed before the next one
+  // (§2.10); the flags the next point's cue carries; how far into the point
+  // on the air the listener got before a reply cut it; and an anchor folded
+  // into an opening that has not aired yet.
+  private songOwed = false
+  private afterSong = false
+  private returning = false
+  private programRequested = false
+  private pointProgress: { index: number; aired: number } | null = null
+  private foldedAnchor: AnchorId | null = null
   // spec 07: the boundary's clock and presence reading, taken once per segment
   // (§3.2) and refreshed when a typed line proves the listener is back.
   private now = new Date()
@@ -642,6 +668,8 @@ export class Director {
     // (plus any prior-session ledger) is enough to choose by; staleness is
     // the accepted spec 04 §3.1 trade.
     this.prefetchMusic()
+    // The first program is prepared from the first moment (spec 15 §2.7).
+    this.deps.programs?.ensure()
     // With boot's opener on the air (spec 04 §3.6) the cold batch is fired HERE
     // rather than inline at the first boundary, so it thinks underneath the
     // beat the loop is about to wait out instead of behind it.
@@ -652,10 +680,13 @@ export class Director {
       if (this.quit) break
       this.beginBoundary()
       // The scheduler stays constructed; the live flag decides at the fire
-      // site (spec 12 §3.2), so an anchors toggle needs no restart.
-      const anchor = this.deps.settings().anchorsEnabled
-        ? (this.deps.pacing?.scheduler?.due(this.now) ?? null)
-        : null
+      // site (spec 12 §3.2), so an anchors toggle needs no restart. With
+      // programs on, an anchor never takes a boundary of its own: it folds
+      // into the next program's opening (spec 15 §2.7).
+      const anchor =
+        this.deps.programs === undefined && this.deps.settings().anchorsEnabled
+          ? (this.deps.pacing?.scheduler?.due(this.now) ?? null)
+          : null
       // An anchor is checked BEFORE cadence, so it always wins the boundary it
       // is due at (spec 07 §2.3).
       if (anchor !== null) {
@@ -875,8 +906,9 @@ export class Director {
 
   // Printed + recorded at air time, so an interjection's reply sees this
   // segment in context.
-  private airBeat(beat: TalkBeat, stock = false): void {
+  private airBeat(beat: TalkBeat, stock = false, point?: PointMeta): void {
     this.recordBeat(beat)
+    if (point !== undefined) this.notePoint(point)
     this.emitState('talk')
     this.beatsAired++
     if (stock) {
@@ -895,6 +927,39 @@ export class Director {
     // Off the loop, single-flight, once a live beat proves the sitting is real
     // — the same posture as the profile fold and the taste refresh.
     this.deps.stock?.maybeRefresh()
+  }
+
+  // A program beat aired (spec 15 §2.7): the program opens with its first beat
+  // (an anchor folded into that opening is spent with it), the point's last
+  // beat ends the point and owes the song after it.
+  private notePoint(point: PointMeta): void {
+    const desk = this.deps.programs
+    if (desk === undefined) return
+    if (point.index === 0) {
+      const opening = desk.current()?.opened === false
+      desk.opened()
+      if (opening) {
+        this.deps.host.debug?.(`program.open ${desk.current()?.id ?? '?'}`)
+        if (this.foldedAnchor !== null) {
+          this.deps.pacing?.scheduler?.markFired(this.foldedAnchor, this.now)
+          this.deps.host.debug?.(`anchor ${this.foldedAnchor} folded into the opening`)
+          this.foldedAnchor = null
+        }
+        // A record plays its own tracks: whatever the queue picked before it
+        // opened is not one of them (spec 15 §2.10).
+        if (desk.current()?.id === 'record') {
+          this.pickQueue = []
+          this.prefetchMusic()
+        }
+      }
+    }
+    const aired = this.pointProgress?.index === point.index ? this.pointProgress.aired + 1 : 1
+    this.pointProgress = { index: point.index, aired }
+    if (point.last) {
+      desk.pointAired(point.index)
+      this.pointProgress = null
+      this.songOwed = true
+    }
   }
 
   // Everything airing a beat means EXCEPT claiming the segment: a coda riding a
@@ -927,10 +992,12 @@ export class Director {
   // line refreshed presence). Deliberately not emitState('talk'): a reply
   // during a song is ducked over it, so the track has to stay named.
   private restate(): void {
+    const program = this.deps.programs?.label()
     this.deps.host.onState?.({
       ...this.segment,
       scene: currentScene(this.now),
       ...(this.activity !== undefined && { activity: this.activity }),
+      ...(program !== undefined && { program }),
     })
   }
 
@@ -942,11 +1009,7 @@ export class Director {
   // them instead of regenerating the same beat — the buffered text lives here
   // in the Director, so the stateless Brain is told what is already scheduled,
   // not only what has aired and been recorded.
-  private context(
-    queued: readonly string[] = [],
-    cue?: string,
-    rwt?: ContextPack['rwt'],
-  ): ContextPack {
+  private context(queued: readonly string[] = [], cue?: string, program?: ProgramCue): ContextPack {
     const window = this.deps.settings().recentWindow
     const recent = this.deps.memory.recent(window)
     const turns: Turn[] = queued.map((text) => ({ role: 'radio', text }))
@@ -965,7 +1028,7 @@ export class Director {
       profile: this.deps.memory.profile(),
       ...(this.activity !== undefined && { activity: this.activity }),
       ...(cue !== undefined && { cue }),
-      ...(rwt !== undefined && { rwt }),
+      ...(program !== undefined && { program }),
       ...(taste !== '' && { taste }),
       // The sitting opened on stock lines and no live beat has answered them
       // yet (spec 04 §3.6): the opening fact is still owed, even though the
@@ -1032,7 +1095,7 @@ export class Director {
   private async talkSegment(): Promise<void> {
     const aired = await this.steerable(this.nextTalkClip())
     if (aired === null) return // quit won, or generation/synthesis degraded; the loop decides
-    this.airBeat(aired.beat, aired.stock === true)
+    this.airBeat(aired.beat, aired.stock === true, aired.point)
     // Refill AFTER recording, so the top-up's context already carries this
     // just-aired beat and its Brain+synth overlap the playback below.
     this.prefetchTalk()
@@ -1044,7 +1107,7 @@ export class Director {
   // one batched nextTalks, air beat 1, buffer the rest (spec 04 §3.3). An
   // in-flight refill is awaited over a cold call so the two never
   // double-generate; a refill that degraded to nothing falls through cold.
-  private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip; stock?: true } | null> {
+  private async nextTalkClip(): Promise<{ beat: TalkBeat; clip: AudioClip; stock?: true; point?: PointMeta } | null> {
     // Nobody around: yield the whole boundary to music/bed (spec 07 §3.2 —
     // "music/bed only"). Checked BEFORE the buffer is touched, so pre-synthesized
     // beats are kept for the moment the listener returns rather than spent on an
@@ -1069,6 +1132,7 @@ export class Director {
     if (this.talkAhead.length === 0 && this.talkFill !== null && !this.talkFill.done()) {
       await this.talkFill.promise
     }
+    if (this.deps.programs !== undefined) return this.nextProgramClip()
     const primed = this.talkAhead.shift()
     if (primed !== undefined) {
       this.deps.host.debug?.(`talk.buffer warm depth=${this.talkAhead.length + 1}`)
@@ -1096,12 +1160,80 @@ export class Director {
     return clip === null ? null : { beat: first, clip }
   }
 
+  // The next program beat (spec 15 §2.5): from the point already written, or
+  // cold — which, before the first program is planned, waits for the plan.
+  private async nextProgramClip(): Promise<{ beat: TalkBeat; clip: AudioClip; point?: PointMeta } | null> {
+    if (this.talkAhead.length === 0) {
+      this.deps.host.debug?.('program.point cold; writing inline')
+      await this.fillProgram()
+    }
+    const primed = this.talkAhead.shift()
+    if (primed === undefined) return null
+    this.prefetchMusic(priorLine(primed.beat.text))
+    const clip = await primed.clip
+    return clip === null ? null : { beat: primed.beat, clip, ...(primed.point !== undefined && { point: primed.point }) }
+  }
+
+  // Write the program's next point: ONE beat call returns all of its beats
+  // (spec 15 §2.5). A reply that cut the point asks only for the rest of it.
+  // Total — a failed call leaves the buffer empty and the next prefetch retries.
+  private async fillProgram(): Promise<void> {
+    const desk = this.deps.programs!
+    const epoch = this.talkEpoch
+    if (desk.current() === null) {
+      desk.ensure()
+      await desk.ready()
+      if (epoch !== this.talkEpoch || this.quit) return
+      if (desk.current() === null) {
+        this.deps.host.debug?.('program.none: nothing planned yet')
+        return
+      }
+    }
+    const run = desk.current()!
+    const anchor =
+      run.next === 0 && !run.opened && this.deps.settings().anchorsEnabled
+        ? (this.deps.pacing?.scheduler?.due(new Date()) ?? null)
+        : null
+    const cue = desk.cue({
+      ...(this.returning && { returning: true as const }),
+      ...(this.afterSong && { afterSong: true as const }),
+      ...(anchor !== null && { anchor: `anchor:${anchor}` }),
+    })
+    if (cue === null) return
+    this.returning = false
+    this.afterSong = false
+    const said = this.pointProgress?.index === cue.index ? this.pointProgress.aired : 0
+    const beats: [number, number] = said === 0 ? [cue.beats[0], cue.beats[1]] : [1, Math.max(1, cue.beats[1] - said)]
+    this.deps.host.debug?.(`program.point ${cue.index + 1}/${cue.outline.length} beats=${beats[0]}-${beats[1]}`)
+    const got = await this.generateTalks(beats[1], [], undefined, { ...cue, beats })
+    if (epoch !== this.talkEpoch || got.length === 0) return
+    if (anchor !== null) this.foldedAnchor = anchor
+    this.talkAhead = got.map((beat, i) =>
+      buffered(beat, this.synthesizeOrSkip(beat.text), { index: cue.index, first: i === 0 && said === 0, last: i === got.length - 1 }),
+    )
+  }
+
+  // Music on and wired: what the program's song-after-each-point needs.
+  private musicOn(): boolean {
+    return this.deps.music !== undefined && this.deps.settings().musicEnabled
+  }
+
   // spec 04 §3.3: keep the look-ahead topped up to TALK_LOOKAHEAD — fire-and-
   // forget, at most one refill in flight (mirrors prefetchMusic). Fired after
   // a consumed beat is recorded and at a music segment's start, so the buffer
   // stays full and the refill's work overlaps whatever is on air.
   private prefetchTalk(): void {
     if (this.gated()) return // no batch, no parallel synthesis, no spend (§3.3)
+    if (this.deps.programs !== undefined) {
+      // A program holds one point at a time; the next is written once this
+      // one has aired — and, when a song comes between them, as the song
+      // starts, so its first beat can answer the song (spec 15 §2.10).
+      if (this.talkAhead.length > 0) return
+      if (this.talkFill !== null && !this.talkFill.done()) return
+      if (this.songOwed && this.musicOn()) return
+      this.talkFill = pending(this.fillProgram())
+      return
+    }
     if (this.talkAhead.length >= TALK_LOOKAHEAD) return
     if (this.talkFill !== null && !this.talkFill.done()) return
     this.talkFill = pending(this.fillTalk())
@@ -1215,7 +1347,16 @@ export class Director {
   // The coda, if there is one to go out over the outro RIGHT NOW. Null = not
   // generated (or not synthesized) yet — the ride is lost and the beat leaves
   // through the post-song path, or not at all.
-  private takeCoda(): { beat: TalkBeat; clip: AudioClip } | null {
+  private takeCoda(): { beat: TalkBeat; clip: AudioClip; point?: PointMeta } | null {
+    // With programs the way out of a song is the next point's first beat,
+    // written as the song started (spec 15 §2.10): it rides when it is ready.
+    if (this.deps.programs !== undefined) {
+      const head = this.talkAhead[0]
+      const clip = head?.ready() === true && head.point?.first === true ? head.value() : undefined
+      if (head === undefined || clip === undefined || clip === null) return null
+      this.talkAhead.shift()
+      return { beat: head.beat, clip, ...(head.point !== undefined && { point: head.point }) }
+    }
     const coda = this.coda
     if (coda === null) return null
     this.coda = null
@@ -1234,6 +1375,11 @@ export class Director {
     // A due switch owns the boundary (spec 11 §2.3): the listener asked, so the
     // cadence policy is bypassed until a track airs or the pick comes back empty.
     if (this.switchDue) return true
+    // A program owns the talk/music ratio (spec 15 §2.10): a song after each
+    // point. While the first program is being prepared, music holds the air.
+    // The settings cadence below is the rule only without programs.
+    const desk = this.deps.programs
+    if (desk !== undefined) return desk.current() === null || this.songOwed
     const recent = this.deps.memory.recent(this.deps.settings().recentWindow)
     const situation = recent.map((t) => `- ${t.role}: ${t.text}`).join('\n')
     const kind = await music.cadence.nextKind({
@@ -1313,7 +1459,11 @@ export class Director {
     // head. Compacted here rather than at resolution: a due switch still needs
     // an empty result to race, so it can say so instead of waiting out the song.
     this.pickQueue = this.pickQueue.filter((slot) => !slot.done() || slot.value() !== null)
-    if (this.pickQueue.length >= PICK_LOOKAHEAD) return
+    // The program's word on the pick (spec 15 §2.10): a record asks for one
+    // exact track, so the queue holds just that one; the others lend a mood.
+    const hint = this.deps.programs?.musicHint()
+    const single = hint?.request === true
+    if (this.pickQueue.length >= (single ? 1 : PICK_LOOKAHEAD)) return
     // One search at a time: the next slot's avoid-list is built from the labels
     // of the slots in front of it (queuedLabels), and a pick still in flight
     // has no label yet. Serializing them is also what keeps the queue from
@@ -1322,9 +1472,9 @@ export class Director {
     // The live off switch gates the SPEND, not just the airtime (spec 12 §3.2):
     // a disabled session must not pay discovery calls it will never play.
     if (!this.deps.settings().musicEnabled) return
-    const base = this.musicContext(request)
-    const ctx =
-      extraLine === undefined ? base : { ...base, situation: `${base.situation}\n${extraLine}` }
+    const base = this.musicContext(request || single)
+    const lines = [extraLine, hint?.line].filter((line): line is string => line !== undefined)
+    const ctx = lines.length === 0 ? base : { ...base, situation: `${base.situation}\n${lines.join('\n')}` }
     // A failed prefetch degrades like an empty pick at the boundary. One
     // two-handler then (not catch-then-then): the resolution stamps pickFailed
     // so the prompt's music status tracks the latest search's real outcome
@@ -1350,7 +1500,7 @@ export class Director {
     // epoch means this slot was discarded while it resolved — the search that
     // replaced it owns the top-up.
     void slot.promise.then((pick) => {
-      if (pick !== null && epoch === this.pickEpoch && !this.quit) this.prefetchMusic()
+      if (pick !== null && epoch === this.pickEpoch && !this.quit && !single) this.prefetchMusic()
     })
   }
 
@@ -1520,7 +1670,14 @@ export class Director {
     }
     // The way out of this song is written now, while it plays: the beat that
     // airs after it (or over its outro) is the one that knows it happened.
-    this.prefetchCoda()
+    // With programs that beat opens the next point (spec 15 §2.10).
+    if (this.deps.programs !== undefined) {
+      this.songOwed = false
+      this.afterSong = true
+      this.prefetchTalk()
+    } else {
+      this.prefetchCoda()
+    }
     // And so is the way into the next one (spec 04 §3.1): takePick emptied the
     // slot to air this track, so without this the pick after it would pay a
     // full cold discovery at the boundary — the dead air between songs. Fired
@@ -1560,18 +1717,11 @@ export class Director {
     count: number,
     queued: readonly string[] = [],
     cue?: string,
+    program?: ProgramCue,
   ): Promise<TalkBeat[]> {
-    // One roll per batch, before the retry loop: a retried batch is the same
-    // batch, not a second chance at a topic. Anchors and the coda have a job
-    // of their own and are never offered one (spec 13 §2.4).
-    const offered = cue === undefined && this.deps.settings().rwtEnabled ? this.deps.rwt?.offer() : undefined
-    // Ledgered with the take, not the air (spec 13 §3.7): the pool has already
-    // spent it, and the ledger is what outlives the pool's 48 h.
-    if (offered != null) this.deps.memory.recordEvent('rwt', offered.title)
-    const rwt = offered == null ? undefined : { title: offered.title, gist: offered.gist }
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        return await this.deps.brain.nextTalks(this.context(queued, cue, rwt), count)
+        return await this.deps.brain.nextTalks(this.context(queued, cue, program), count)
       } catch (err) {
         if (attempt < ATTEMPTS) {
           this.deps.host.debug?.(`talk.next_talks failed (attempt ${attempt}/${ATTEMPTS}); retrying`)
@@ -1715,6 +1865,7 @@ export class Director {
             // Recorded, not aired as a segment: the song is still on air under
             // it, so the front-end keeps naming the track (see recordBeat).
             this.recordBeat(ride.beat)
+            if (ride.point !== undefined) this.notePoint(ride.point)
             current = onAir(this.deps.player.play(ride.clip))
             continue
           }
@@ -1786,6 +1937,12 @@ export class Director {
         this.discardTalkAhead() // buffered look-ahead predates this user turn -> stale
         const composed = await this.compose(steer.text)
         steer = null
+        // Back to the point the reply cut into — unless the reply asked for a
+        // different program, which opens fresh (spec 15 §2.8).
+        if (this.deps.programs !== undefined) {
+          this.returning = !this.programRequested && this.deps.programs.current() !== null
+          this.programRequested = false
+        }
         if (this.quit) return // a merged-in line was /quit
         if (composed === null) continue // reply degraded; keep racing current audio
         if (current !== null && !current.done()) await this.deps.player.stop()
@@ -1817,6 +1974,18 @@ export class Director {
         if (track !== undefined) await track.stop()
       }
     }
+  }
+
+  // The run on the air ends now; its unsaid points go with the buffer, and
+  // the reply being composed is its line or two of wrap (spec 15 §2.8).
+  private requestProgram(id: ProgramId, subject?: string): void {
+    this.deps.programs!.request(id, subject)
+    this.discardTalkAhead()
+    this.songOwed = false
+    this.pointProgress = null
+    this.foldedAnchor = null
+    this.programRequested = true
+    this.deps.host.debug?.(`program.request ${id}${subject === undefined ? '' : ' with a subject'}`)
   }
 
   // Compose + synthesize the reply, merging any line that lands before the
@@ -1989,6 +2158,18 @@ export class Director {
             this.deps.host.debug?.(`memory.forget -> ${gone.rows} rows, ${gone.lines} lines`)
             return gone
           },
+        },
+      }),
+      // A program request (spec 15 §2.8). The epoch guard applies: an orphaned
+      // attempt must not end a program the listener's newer turn kept.
+      ...(this.deps.programs !== undefined && {
+        programs: {
+          request: (id: ProgramId, subject?: string) => {
+            if (!live()) return
+            acted.value = true
+            this.requestProgram(id, subject)
+          },
+          current: () => this.deps.programs!.label(),
         },
       }),
       shutdown: {

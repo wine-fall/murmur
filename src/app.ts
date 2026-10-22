@@ -50,7 +50,7 @@ import { personaFingerprint, signOff, StockLines, stockDir, type StockFingerprin
 import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
 import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
-import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool, RwtRoll } from './brain/rwt.ts'
+import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool } from './brain/rwt.ts'
 import { MusicProgrammer } from './music/music-programmer.ts'
 import { startReport, type ReportDeps, type ReportSession } from './support/report.ts'
 import { SteerResponder } from './brain/steer-responder.ts'
@@ -480,7 +480,6 @@ export function buildRwt(
       staleHours: config.rwtStaleHours,
       ...(host.debug !== undefined && { log: host.debug.bind(host) }),
     }),
-    roll: new RwtRoll({ p: config.rwtP, minGap: config.rwtMinGap, maxGap: config.rwtMaxGap }),
     brain,
     request: () => ({
       language: language(),

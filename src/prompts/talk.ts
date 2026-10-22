@@ -181,27 +181,6 @@ export function aboutSection(profile: string): string {
   return (end === -1 ? body : body.slice(0, end)).replaceAll(PROFILE_TAGS, '').trim()
 }
 
-// One real-world item on the desk for this stretch (spec 13 §2.5). A host
-// names the thing — the title, who, where, when — says what happened and what
-// they make of it, and carries on; what a host does NOT do is switch into a
-// newsreader's rundown. The line draws on register, never on content: an item
-// with its names scrubbed out is the cozy-imagery attractor (#44) wearing a
-// fig leaf. The anchor beats and the coda have a job of their own and never
-// carry one, even if a pack arrives with it. Absent -> nothing.
-function rwtLine(ctx: ContextPack): string {
-  const rwt = ctx.rwt
-  if (rwt === undefined) return ''
-  const cue = ctx.cue ?? ''
-  if (cue === CODA_CUE || cue.startsWith('anchor:')) return ''
-  return (
-    `\n(On the desk for this stretch, from today: ${rwt.title} — ${rwt.gist})\n` +
-    'Bring it in the way a host does: name the thing — the title, who, where, ' +
-    'when — say what happened in a sentence or two and what you make of it, ' +
-    'then carry on. One item, in your own voice. Not a newsreader\'s rundown, ' +
-    'not a "here is the news" frame, not a list.'
-  )
-}
-
 // Render recent turns as a transcript. The host's own prior lines are "You";
 // the listener's lines are "Listener".
 export function renderTranscript(ctx: ContextPack, dropTrailingUser?: string): string {
@@ -249,7 +228,7 @@ export function buildNextTalkPrompt(ctx: ContextPack): string {
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next beat.`
     : `${openingBlock(ctx)} Open naturally with your first beat.`
-  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
 
 // One program point (spec 15 §2.5): the same stable blocks and program facts
@@ -286,7 +265,7 @@ export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
     ? `${carryOn(ctx, transcript)} — say your next ${count} beats.`
     : `${openingBlock(ctx)} Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n` +
     `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +

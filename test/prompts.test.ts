@@ -1051,38 +1051,11 @@ describe('the persona a setup conversation runs under', () => {
 
 // --- real-world topics (spec 13) ------------------------------------------ //
 
-describe('rwt rendering (spec 13 §2.5)', () => {
-  const base = { persona: 'p', recent: [] }
-  const rwt = { title: 'Typhoon season opens early', gist: 'The first storm came in a month ahead of the usual.' }
-
-  // The line is drawn on register, never on content: a host names the thing
-  // and carries on; a newsreader reads a rundown. Scrubbing the names out is
-  // the #44 attractor again, so the prompt must ask for them, not forbid them.
-  it('renders the item on the desk with the host-not-newsreader usage, on both talk builders', () => {
-    for (const p of [buildNextTalkPrompt({ ...base, rwt }), buildNextTalksPrompt({ ...base, rwt }, 2)]) {
-      expect(p).toContain('Typhoon season opens early')
-      expect(p).toContain('a month ahead of the usual')
-      expect(p).toMatch(/name the thing — the title, who, where, when/)
-      expect(p).toMatch(/not a newsreader's rundown/i)
-      expect(p).toMatch(/not a list/i)
-      expect(p).not.toMatch(/never a headline/i)
-      expect(p).not.toMatch(/leave it/i)
-    }
-  })
-
-  it('renders nothing without an item', () => {
-    expect(buildNextTalkPrompt(base)).not.toMatch(/on the desk for this stretch/i)
-  })
-
-  it('never rides an anchor or coda beat, even if the pack carries one', () => {
-    for (const cue of ['anchor:morning', CODA_CUE]) {
-      const p = buildNextTalkPrompt({ ...base, rwt, cue })
-      expect(p).not.toContain('Typhoon season opens early')
-    }
-  })
-
-  it('the reply path does not carry it — a reply answers the listener', () => {
-    expect(buildRespondPrompt('hey', { ...base, rwt })).not.toContain('Typhoon season opens early')
+// spec 15 §2.1: a free beat never carries a desk item; real-world items reach
+// the air only through the programs that plan with them.
+describe('no desk item on a free beat', () => {
+  it('renders no on-the-desk line', () => {
+    expect(buildNextTalkPrompt({ persona: 'p', recent: [] })).not.toMatch(/on the desk for this stretch/i)
   })
 })
 

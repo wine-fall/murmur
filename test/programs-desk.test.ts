@@ -4,33 +4,13 @@ import { join } from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
-import type { Harness, Task } from '../src/contracts.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import type { Plan, ProgramId } from '../src/programs/catalogue.ts'
 import { ProgramDesk, RESUME_WINDOW_MS, type DeskDeps } from '../src/programs/desk.ts'
 import { ProgramFile } from '../src/programs/schedule.ts'
+import { PlanHarness } from './fakes.ts'
 
 const HOUR = 3_600_000
-
-// Answers every planning call with the plan `answer` returns for the program
-// it was asked to prepare (read off the prompt's quoted title).
-class PlanHarness implements Harness {
-  prompts: string[] = []
-  private answer: (title: string, call: number) => Plan | null
-  constructor(answer: (title: string, call: number) => Plan | null) {
-    this.answer = answer
-  }
-  async runTask<T>(task: Task<T>): Promise<T | null> {
-    this.prompts.push(task.prompt)
-    const title = /Prepare your next program: "([^"]+)"/.exec(task.prompt)?.[1] ?? ''
-    const plan = this.answer(title, this.prompts.length)
-    if (plan === null) return null
-    let captured: T | null = null
-    const [submit] = task.tools((v) => (captured = v))
-    await submit!.handler(plan, {})
-    return captured
-  }
-}
 
 const plan = (subject: string, over: Partial<Plan> = {}): Plan => ({
   name: 'NAME',
