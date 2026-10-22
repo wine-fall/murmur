@@ -232,6 +232,16 @@ describe('BilibiliWeb.playUrl', () => {
     expect(play).toContain('fnval=16')
   })
 
+  // yt-dlp's Bilibili extractor honours `?p=N`; so must this, or a second
+  // part plays as the first and the probe cannot tell (codex review).
+  it('plays the part a ?p= ref names, and leaves a part the list lacks to yt-dlp', async () => {
+    const { web, calls } = fakeWeb(answers)
+    expect(await web.playUrl('https://www.bilibili.com/video/BV1x?p=2')).toMatchObject({ durationS: 90 })
+    expect(calls.find((c) => c.url.includes('/x/player/playurl'))?.url).toContain('cid=124')
+    await expect(web.playUrl('https://www.bilibili.com/video/BV1x?p=3')).rejects.toThrow(/part 3/)
+    expect(await web.playUrl('https://www.bilibili.com/video/BV1x')).toMatchObject({ durationS: 281 })
+  })
+
   it('refuses a ref it cannot read a bvid from without touching the network', async () => {
     const { web, calls } = fakeWeb(answers)
     for (const ref of ['https://www.bilibili.com/video/av1', 'https://b23.tv/abc', 'https://music.163.com/#/song?id=5']) {

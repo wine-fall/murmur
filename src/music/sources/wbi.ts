@@ -77,7 +77,7 @@ const SearchRowSchema = z.object({
   tag: z.string().nullish().catch(null),
 })
 const SearchSchema = z.object({ code: z.number(), data: z.object({ result: z.array(z.unknown()).nullish() }).nullish() })
-const PagelistSchema = z.object({ code: z.number(), data: z.array(z.object({ cid: z.number(), duration: z.number().nullish() })).nullish() })
+const PagelistSchema = z.object({ code: z.number(), data: z.array(z.object({ cid: z.number(), page: z.number(), duration: z.number().nullish() })).nullish() })
 const AudioSchema = z.object({ baseUrl: z.string(), bandwidth: z.number().nullish() })
 const PlayUrlSchema = z.object({ code: z.number(), data: z.object({ dash: z.object({ audio: z.array(z.unknown()).nullish() }).nullish() }).nullish() })
 
@@ -189,17 +189,20 @@ export class BilibiliWeb {
     return found
   }
 
-  // The anonymous stream behind a watch ref (spec 14 §2.5): the first part's
-  // cid from pagelist, then the best dash audio tier from playurl. 192 kbps
-  // AAC is the anonymous ceiling; the tiers a login unlocks stay on the
-  // yt-dlp road. Throws on anything short of a url, so the caller falls back.
+  // The anonymous stream behind a watch ref (spec 14 §2.5): the named part's
+  // cid from pagelist (`?p=N`, as yt-dlp reads it; the first part otherwise),
+  // then the best dash audio tier from playurl. 192 kbps AAC is the anonymous
+  // ceiling; the tiers a login unlocks stay on the yt-dlp road. Throws on
+  // anything short of a url, so the caller falls back.
   async playUrl(ref: string): Promise<PlayUrl> {
     const bvid = /\/video\/(BV[0-9A-Za-z]+)/.exec(ref)?.[1]
     if (bvid === undefined) throw new Error(`bilibili play: no bvid in ${ref}`)
+    const part = Number(new URL(ref).searchParams.get('p') ?? '1') || 1
     const { cookie } = await this.open()
     const pages = PagelistSchema.parse(await this.get(`${API}/x/player/pagelist?bvid=${bvid}`, cookie, BILIBILI_REFERER))
-    const first = pages.data?.[0]
-    if (pages.code !== 0 || first === undefined) throw new Error(`bilibili pagelist ${bvid}: code ${pages.code}`)
+    if (pages.code !== 0) throw new Error(`bilibili pagelist ${bvid}: code ${pages.code}`)
+    const first = pages.data?.find((page) => page.page === part)
+    if (first === undefined) throw new Error(`bilibili pagelist ${bvid}: no part ${part}`)
     // fnval=16: the dash answer, which is where the audio-only tiers live.
     const play = PlayUrlSchema.parse(await this.get(`${API}/x/player/playurl?bvid=${bvid}&cid=${first.cid}&fnval=16`, cookie, `${BILIBILI_REFERER}video/${bvid}`))
     if (play.code !== 0) throw new Error(`bilibili playurl ${bvid}: code ${play.code}`)
