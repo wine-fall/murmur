@@ -333,10 +333,28 @@ export type TaskTool = Omit<SdkMcpToolDefinition, 'inputSchema' | 'handler'> & {
   handler: (args: any, extra: unknown) => ReturnType<SdkMcpToolDefinition['handler']>
 }
 
+// What a Claude call is for, so its usage line in the dev log can be summed by
+// purpose (programs decision 15): the host's own beats, a reply, the pick, the
+// cadence judgment, the real-world fetch, the profile fold, onboarding, stock
+// lines, the setup guide, a bug report.
+export type UsageCategory =
+  | 'beat'
+  | 'reply'
+  | 'music'
+  | 'cadence'
+  | 'rwt'
+  | 'compact'
+  | 'seed'
+  | 'bootstrap'
+  | 'stock'
+  | 'guide'
+  | 'report'
+
 export type Task<T> = {
+  readonly category: UsageCategory
   readonly systemPrompt: string // stable, cacheable prefix
   readonly prompt: string // first turn: instruction + volatile context
-  readonly model: string // tier per task (music search -> Haiku)
+  readonly model: string
   readonly maxTurns: number // hard bound on the tool-use loop
   readonly tools: (finish: (value: T) => void) => TaskTool[]
   // Built-in SDK tools the task may use beside murmur's own (spec 13 §2.2).
@@ -432,6 +450,7 @@ export interface SteerBrain {
 // permission callback allows within it, and the secret guard rides a
 // PreToolUse hook (spec 03-03 §3).
 export type GuideRequest = {
+  readonly category: UsageCategory
   readonly systemPrompt: string // behavior-shaping persona (investigate → explain → ask → fix)
   readonly prompt: string // the high-level task; never prescribes the remedy
   readonly model: string

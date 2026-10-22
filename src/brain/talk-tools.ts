@@ -83,6 +83,7 @@ const STOCK_MAX_TURNS = 2
 
 export function stockLinesTask(req: StockRequest, model: string): Task<StockSet> {
   return {
+    category: 'stock',
     systemPrompt: hostSystemPrompt(req.persona),
     prompt: buildStockLinesPrompt(req),
     model,

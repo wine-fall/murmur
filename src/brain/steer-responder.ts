@@ -29,6 +29,7 @@ export class SteerResponder implements SteerBrain {
 
   async respond(userText: string, ctx: ContextPack, actions: SteerActions): Promise<string | null> {
     return this.deps.brain.runTask<string>({
+      category: 'reply',
       systemPrompt: hostSystemPrompt(ctx.persona),
       prompt: buildSteerPrompt(userText, ctx, {
         musicWired: actions.music !== undefined,

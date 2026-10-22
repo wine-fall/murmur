@@ -5,7 +5,19 @@ import { fileURLToPath } from 'node:url'
 import type { SDKAssistantMessage, SDKMessage, SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import { describe, expect, it } from 'vitest'
 
-import { agenticOptions, generateText, GUIDE_BUILTINS, guideOptions, isolatedOptions, runGuideSession, StubBrain } from '../src/brain/brain.ts'
+import {
+  agenticOptions,
+  formatUsage,
+  generateText,
+  GUIDE_BUILTINS,
+  guideOptions,
+  isolatedOptions,
+  runGuideSession,
+  runHarnessTask,
+  StubBrain,
+  UsageMeter,
+  type Usage,
+} from '../src/brain/brain.ts'
 import type { ContextPack, GuideRequest, GuideSession } from '../src/contracts.ts'
 import { renderPersona } from '../src/brain/persona.ts'
 import { DEFAULT_PERSONA_PATH } from '../src/prompts/persona.ts'
@@ -100,11 +112,19 @@ describe('agenticOptions', () => {
     expect(o.tools).toEqual(['WebSearch'])
     expect(o.allowedTools).toEqual(['mcp__murmur__submit_topics', 'WebSearch'])
   })
+
+  it('every query path streams partial messages, which is where the final usage is', () => {
+    const server = { type: 'sdk', name: 'murmur' } as never
+    expect(agenticOptions('s', 'm', server, [], 2).includePartialMessages).toBe(true)
+    expect(isolatedOptions('s', 'm').includePartialMessages).toBe(true)
+    expect(guideOptions(guideReq()).includePartialMessages).toBe(true)
+  })
 })
 
 // --- guide harness (spec 03-03) ------------------------------------------- //
 
 const guideReq = (over: Partial<GuideRequest> = {}): GuideRequest => ({
+  category: 'guide',
   systemPrompt: 'guide persona',
   prompt: 'fix it',
   model: 'model-x',
@@ -633,5 +653,157 @@ describe('generateText under an AbortSignal (spec 06 §3.4: the seed call is int
         yield assistant('there')
       })()
     expect(await generateText(fakeQuery as never, 'sys', 'prompt', 'model-x')).toBe('hello there')
+  })
+})
+
+// Per-call usage by category (programs decision 15): report only, read off the
+// SDK's own per-call usage so an early break (a task that finished on its tool
+// call) still counts what it spent.
+describe('usage metering', () => {
+  const call = (id: string, usage: Partial<Record<string, number>>, text = 'x'): SDKAssistantMessage =>
+    ({
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: { id, content: [{ type: 'text', text }], usage },
+    }) as unknown as SDKAssistantMessage
+  const u = (input: number, output: number, read = 0, write = 0) => ({
+    input_tokens: input,
+    output_tokens: output,
+    cache_read_input_tokens: read,
+    cache_creation_input_tokens: write,
+  })
+
+  it('counts each API call once, however many streamed messages carry it, and sums across calls', () => {
+    const meter = new UsageMeter()
+    meter.observe(call('a', u(10, 1, 100, 5)))
+    meter.observe(call('a', u(10, 40, 100, 5))) // the same call, later block: output grew
+    meter.observe(call('b', u(3, 7, 200, 0)))
+    expect(meter.drain()).toEqual({ input: 13, output: 47, cacheRead: 300, cacheWrite: 5 })
+    // Drained: the next turn starts from nothing.
+    expect(meter.drain()).toBeNull()
+  })
+
+  // The assistant messages carry the usage as of message_start, so output is
+  // near zero there (measured: a two-beat batch read out=2..33). The final
+  // count rides the partial stream's message_delta.
+  it('takes the final output from the stream: message_start opens a call, message_delta closes it', () => {
+    const event = (e: object) => ({ type: 'stream_event', parent_tool_use_id: null, event: e }) as unknown as SDKMessage
+    const meter = new UsageMeter()
+    meter.observe(event({ type: 'message_start', message: { id: 'a', usage: u(4, 1, 600, 1800) } }))
+    meter.observe(call('a', u(4, 1, 600, 1800)))
+    meter.observe(event({ type: 'message_delta', usage: { output_tokens: 312 } }))
+    meter.observe(event({ type: 'message_start', message: { id: 'b', usage: u(2, 1, 2400, 90) } }))
+    meter.observe(event({ type: 'message_delta', usage: { output_tokens: 15, cache_read_input_tokens: 2400 } }))
+    expect(meter.drain()).toEqual({ input: 6, output: 327, cacheRead: 3000, cacheWrite: 1890 })
+  })
+
+  it('ignores messages that carry no usage (a fake, a tool result)', () => {
+    const meter = new UsageMeter()
+    meter.observe({ type: 'result', subtype: 'success' } as SDKResultMessage)
+    meter.observe({ type: 'assistant', message: { content: [] } } as unknown as SDKAssistantMessage)
+    expect(meter.drain()).toBeNull()
+  })
+
+  it('formats one greppable dev-log line per call', () => {
+    expect(formatUsage({ category: 'beat', model: 'm', input: 1, output: 2, cacheRead: 3, cacheWrite: 4 })).toBe(
+      'usage category=beat model=m in=1 out=2 cache_read=3 cache_write=4',
+    )
+  })
+
+  it('generateText reports what the call spent', async () => {
+    const seen: Usage[] = []
+    const fakeQuery = () =>
+      (async function* () {
+        yield call('a', u(5, 9, 50, 2), 'hello')
+      })()
+    await generateText(fakeQuery as never, 'sys', 'prompt', 'model-x', undefined, (usage) => seen.push(usage))
+    expect(seen).toEqual([{ input: 5, output: 9, cacheRead: 50, cacheWrite: 2 }])
+  })
+
+  it('runHarnessTask reports the task even when it breaks on the finishing tool call', async () => {
+    const seen: Usage[] = []
+    let finish: ((value: string) => void) | undefined
+    const fakeQuery = () =>
+      (async function* () {
+        yield call('a', u(20, 30, 400, 10))
+        finish?.('done') // the tool handler fires between messages
+        yield call('b', u(1, 1))
+        yield call('c', u(999, 999)) // never reached: the loop broke
+      })()
+    const value = await runHarnessTask(
+      fakeQuery as never,
+      {
+        category: 'music',
+        systemPrompt: 's',
+        prompt: 'p',
+        model: 'model-x',
+        maxTurns: 2,
+        tools: (f) => {
+          finish = f
+          return []
+        },
+      },
+      (usage) => seen.push(usage),
+    )
+    expect(value).toBe('done')
+    expect(seen).toEqual([{ input: 21, output: 31, cacheRead: 400, cacheWrite: 10 }])
+  })
+
+  // The SDK runs a tool as soon as its tool_use block closes — before the
+  // message_delta that carries the call's final output (smoke-measured: a
+  // two-beat batch read out=6). The loop holds until the call's message_stop.
+  it('runHarnessTask holds the break until the finishing call has closed', async () => {
+    const event = (e: object) => ({ type: 'stream_event', parent_tool_use_id: null, event: e }) as unknown as SDKMessage
+    const seen: Usage[] = []
+    let finish: ((value: string) => void) | undefined
+    const fakeQuery = () =>
+      (async function* () {
+        yield event({ type: 'message_start', message: { id: 'a', usage: u(3, 1, 500, 40) } })
+        finish?.('done') // the tool ran on content_block_stop
+        yield call('a', u(3, 1, 500, 40))
+        yield event({ type: 'message_delta', usage: { output_tokens: 280 } })
+        yield event({ type: 'message_stop' })
+        yield event({ type: 'message_start', message: { id: 'b', usage: u(999, 999) } }) // never reached
+      })()
+    await runHarnessTask(
+      fakeQuery as never,
+      {
+        category: 'beat',
+        systemPrompt: 's',
+        prompt: 'p',
+        model: 'model-x',
+        maxTurns: 2,
+        tools: (f) => {
+          finish = f
+          return []
+        },
+      },
+      (usage) => seen.push(usage),
+    )
+    expect(seen).toEqual([{ input: 3, output: 280, cacheRead: 500, cacheWrite: 40 }])
+  })
+
+  it('runGuideSession reports once per turn', async () => {
+    const seen: Usage[] = []
+    const fakeQuery = () =>
+      (async function* () {
+        yield call('a', u(1, 2))
+        yield { type: 'result', subtype: 'success' } as SDKResultMessage
+        yield call('b', u(3, 4))
+        yield { type: 'result', subtype: 'success' } as SDKResultMessage
+      })()
+    let turns = 0
+    await runGuideSession(fakeQuery as never, {
+      category: 'guide',
+      systemPrompt: 's',
+      prompt: 'p',
+      model: 'model-x',
+      maxTurns: 3,
+      nextUserInput: async () => (++turns < 2 ? 'again' : null),
+    }, (usage) => seen.push(usage))
+    expect(seen).toEqual([
+      { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 },
+      { input: 3, output: 4, cacheRead: 0, cacheWrite: 0 },
+    ])
   })
 })

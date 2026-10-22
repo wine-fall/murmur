@@ -228,7 +228,7 @@ store writes into. This spec's build adds `memory/` beneath `data_root()`.
 
 ```
 memory_dir: Path      # default: paths.data_root() / "memory"
-compact_model: str    # cheap tier for compaction (default = the haiku id, master §7 pillar 3)
+# compact_model is withdrawn: the fold runs on the one `model` (DESIGN §7 row 3)
 recent_window: int    # existing knob, unchanged (pack tail size)
 ```
 

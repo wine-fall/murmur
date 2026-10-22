@@ -40,7 +40,6 @@ describe('parseCli', () => {
     expect(config.cadenceMode).toBe('every_n')
     expect(config.musicEveryN).toBe(2)
     expect(config.ytdlpCmd).toBe('yt-dlp')
-    expect(config.musicModel).toBe('claude-sonnet-5-5')
   })
 
   it('layers flags over defaults and coerces numbers', () => {
@@ -289,30 +288,22 @@ describe('memory config', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
     expect(config.memoryDir).toBe('/tmp/mh/data/memory')
   })
-
-  it('defaults compactModel to the capable tier, not a cheap one', () => {
-    const { config } = parseCli([], NO_ENV)
-    expect(config.compactModel).toBe('claude-opus-5-5')
-  })
 })
 
-// Two tiers, split by what a mistake costs (spec 08). What the listener hears
-// in the host's own voice, or keeps forever, runs on opus; the high-frequency
-// background work whose misses are reversible runs on sonnet. Nothing runs
-// below sonnet.
-describe('Claude model tiers', () => {
-  it('runs the heard and the permanent on opus', () => {
+// One tier (programs decision 14): every Claude call — the host's voice, the
+// pick, the cadence, the fetch, the fold, the guide — runs on opus through the
+// one `model` knob. There is no per-task tier field left to drift below it.
+describe('Claude model tier', () => {
+  it('runs everything on opus through the one model knob', () => {
     const { config } = parseCli([], NO_ENV)
     expect(config.model).toBe('claude-opus-5-5')
-    expect(config.compactModel).toBe('claude-opus-5-5')
     // The guide is not a config knob, and it is held to the same tier.
     expect(GUIDE_MODEL).toBe('claude-opus-5-5')
   })
 
-  it('runs the reversible background picks on sonnet', () => {
+  it('carries no per-task tier field', () => {
     const { config } = parseCli([], NO_ENV)
-    expect(config.musicModel).toBe('claude-sonnet-5-5')
-    expect(config.rwtModel).toBe('claude-sonnet-5-5')
+    for (const field of ['musicModel', 'rwtModel', 'compactModel']) expect(config).not.toHaveProperty(field)
   })
 })
 

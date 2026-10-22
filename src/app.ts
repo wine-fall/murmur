@@ -20,7 +20,7 @@ import {
   writeBedPosition,
   ytdlpDownload,
 } from './audio/bed.ts'
-import { ClaudeBrain, StubBrain } from './brain/brain.ts'
+import { ClaudeBrain, formatUsage, StubBrain } from './brain/brain.ts'
 import { LiveCadence, PacingCadence } from './director/cadence.ts'
 import { Compactor } from './memory/compaction.ts'
 import { packageVersion, type Config, ttsFromFile } from './config.ts'
@@ -100,6 +100,12 @@ export function buildMemory(config: Config, log: (message: string) => void = () 
 // its model call overlaps the boot instead of the first segment, and a profile
 // it lands is read by the first pack that is built after it (the profile is
 // read at fetch time). It never blocks: the fold is unawaited.
+// The real brain, on the one model (programs decision 14), with every call's
+// usage mirrored into the dev log by category (decision 15).
+function claudeBrain(config: Config, host: Pick<Host, 'debug'>): ClaudeBrain {
+  return new ClaudeBrain(config.model, (record) => host.debug?.(formatUsage(record)))
+}
+
 export function buildCompactor(
   memory: MemoryStore,
   brain: Pick<Brain, 'compactProfile'>,
@@ -382,7 +388,7 @@ function buildMusic(
   const source = new MusicProgrammer({
     brain: harness,
     provider,
-    model: config.musicModel,
+    model: config.model,
     probe: (s, headers, startS) => probeStream(s, config.ffmpegCmd, undefined, headers, startS),
     // The taste paragraph rides the instruction only while a digest exists.
     instruction: () =>
@@ -421,7 +427,7 @@ function buildMusic(
   const configured = new LiveCadence({
     settings: () => settings.current(),
     brain: harness,
-    model: config.musicModel,
+    model: config.model,
   })
   // Gating composes with the chosen cadence rather than replacing it (spec 07
   // §2.5): an empty room gets music/bed, everything else is the user's policy.
@@ -519,7 +525,7 @@ export async function runBootstrapProfileCli(config: Config): Promise<boolean> {
   host.info('reading your Claude Code history to build a first listener profile...')
   const memory = new PersistentMemoryStore({ dir: config.memoryDir, log: (m) => host.info(m) })
   const ok = await runProfileBootstrap({
-    harness: new ClaudeBrain(config.model),
+    harness: claudeBrain(config, host),
     memory,
     host,
     model: config.model,
@@ -693,7 +699,7 @@ export async function runSetupCli(config: Config, { musicOnly = false } = {}): P
   try {
     outcome = await runSetup({
       host,
-      guide: new ClaudeBrain(config.model),
+      guide: claudeBrain(config, host),
       targets,
       explicit: true,
       quit,
@@ -781,12 +787,10 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
   const persistent = config.brain === 'claude'
   // The harnessed brain drives music discovery; the stub has no harness, so a
   // stub session is talk-only by construction.
-  const claude = config.brain === 'claude' ? new ClaudeBrain(config.model) : null
+  const claude = config.brain === 'claude' ? claudeBrain(config, host) : null
   const brain = claude ?? new StubBrain()
   const memory = buildMemory(config, (m) => host.info(m))
-  const compactor = buildCompactor(memory, new ClaudeBrain(config.compactModel), (m) =>
-    host.info(m),
-  )
+  const compactor = buildCompactor(memory, claude ?? claudeBrain(config, host), (m) => host.info(m))
 
   // The device decides the real rate (a 44.1 kHz headset ignores the request);
   // the decoder follows it, and the log names the clock the air runs on.
@@ -1159,7 +1163,7 @@ export async function runApp(config: Config, maxSegments?: number): Promise<void
       ? undefined
       : buildRwt(
           config,
-          new ClaudeBrain(config.rwtModel),
+          claude,
           () => rwtLanguage(settings.current().language, persona),
           host,
           memory,

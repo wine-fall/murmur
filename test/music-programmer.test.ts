@@ -43,7 +43,7 @@ describe('MusicProgrammer.nextTrack', () => {
       })
     })
 
-    const pick = await new MusicProgrammer({ brain: harness, provider: music, model: 'haiku' }).nextTrack(ctx)
+    const pick = await new MusicProgrammer({ brain: harness, provider: music, model: 'model-x' }).nextTrack(ctx)
 
     expect(searched).toEqual({
       candidates: [
@@ -65,12 +65,12 @@ describe('MusicProgrammer.nextTrack', () => {
     await new MusicProgrammer({
       brain: harness,
       provider: provider(),
-      model: 'haiku',
+      model: 'model-x',
       instruction: () => 'FIND-MUSIC-INSTRUCTION',
     }).nextTrack(ctx)
 
     const task = harness.lastTask!
-    expect(task.model).toBe('haiku')
+    expect(task.model).toBe('model-x')
     expect(task.systemPrompt).toBe(ctx.persona)
     expect(task.prompt).toContain('FIND-MUSIC-INSTRUCTION')
     expect(task.prompt).toContain(ctx.situation)
@@ -85,7 +85,7 @@ describe('MusicProgrammer.nextTrack', () => {
   // policy already spells out. The task asks for it off.
   it('asks for no extended thinking — the pick is a bounded judgment, not an essay', async () => {
     const harness = new FakeHarness()
-    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
+    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'model-x' }).nextTrack(ctx)
     expect(harness.lastTask!.thinking).toBe('disabled')
   })
 
@@ -97,7 +97,7 @@ describe('MusicProgrammer.nextTrack', () => {
     const programmer = new MusicProgrammer({
       brain: harness,
       provider: provider(),
-      model: 'haiku',
+      model: 'model-x',
       instruction: () => policy,
     })
 
@@ -114,7 +114,7 @@ describe('MusicProgrammer.nextTrack', () => {
     const harness = new FakeHarness(async (tools: TaskTool[]) => {
       names = tools.map((t) => t.name)
     })
-    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
+    await new MusicProgrammer({ brain: harness, provider: provider(), model: 'model-x' }).nextTrack(ctx)
     expect(names).toEqual(['search_music', 'submit_pick'])
   })
 })
@@ -131,7 +131,7 @@ describe('the pick task, when a candidate does not hold up', () => {
       results.push(await callTool(tools, 'submit_pick', { ref: 'good', why: 'better', title: 'Zelkova Hour', artist: 'Nine Lantern' }))
     })
 
-    const pick = await new MusicProgrammer({ brain: harness, provider: music, model: 'haiku' }).nextTrack(ctx)
+    const pick = await new MusicProgrammer({ brain: harness, provider: music, model: 'model-x' }).nextTrack(ctx)
 
     expect(results[0]).toMatchObject({ ok: false })
     expect(results[0]!.error).toMatch(/cannot resolve loop/)
@@ -149,7 +149,7 @@ describe('the pick task, when a candidate does not hold up', () => {
     const pick = await new MusicProgrammer({
       brain: harness,
       provider: provider(),
-      model: 'haiku',
+      model: 'model-x',
       probe: async (source) => {
         probed.push(source)
         return false
@@ -166,14 +166,14 @@ describe('the pick task, when a candidate does not hold up', () => {
         ok: false,
       })
     })
-    expect(await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)).toBeNull()
+    expect(await new MusicProgrammer({ brain: harness, provider: provider(), model: 'model-x' }).nextTrack(ctx)).toBeNull()
   })
 
   it('returns null when the task ends with no pick', async () => {
     const harness = new FakeHarness(async (tools) => {
       await callTool(tools, 'search_music', { query: 'anything' })
     })
-    expect(await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)).toBeNull()
+    expect(await new MusicProgrammer({ brain: harness, provider: provider(), model: 'model-x' }).nextTrack(ctx)).toBeNull()
   })
 })
 
@@ -189,7 +189,7 @@ describe('discovery instrumentation', () => {
     await new MusicProgrammer({
       brain: harness,
       provider: provider(),
-      model: 'haiku',
+      model: 'model-x',
       probe: async () => true,
       debug: (m) => lines.push(m),
     }).nextTrack(ctx)
@@ -219,7 +219,7 @@ describe('discovery instrumentation', () => {
     await new MusicProgrammer({
       brain: harness,
       provider: music,
-      model: 'haiku',
+      model: 'model-x',
       probe: async (_source, _headers, startS) => (offsets.push(startS), true),
       debug: () => {},
     }).nextTrack(ctx)
@@ -238,7 +238,7 @@ describe('discovery instrumentation', () => {
     const pick = await new MusicProgrammer({
       brain: harness,
       provider: music,
-      model: 'haiku',
+      model: 'model-x',
       probe: async () => false,
       debug: (m) => lines.push(m),
     }).nextTrack(ctx)
@@ -253,7 +253,7 @@ describe('discovery instrumentation', () => {
     const harness = new FakeHarness(async (tools) => {
       await callTool(tools, 'submit_pick', { ref: 'good', why: 'fits', title: 'Zelkova Hour', artist: 'Nine Lantern' })
     })
-    const pick = await new MusicProgrammer({ brain: harness, provider: provider(), model: 'haiku' }).nextTrack(ctx)
+    const pick = await new MusicProgrammer({ brain: harness, provider: provider(), model: 'model-x' }).nextTrack(ctx)
     expect(pick).not.toBeNull() // instrumentation is optional and changes nothing
   })
 })
@@ -273,7 +273,7 @@ describe('the submit_pick avoid-guard follows the listener policy', () => {
     const pick = await new MusicProgrammer({
       brain: harness,
       provider: provider(),
-      model: 'haiku',
+      model: 'model-x',
       ...(instruction !== undefined && { instruction: () => instruction }),
     }).nextTrack(AVOIDED)
     return { submitted, pick }
