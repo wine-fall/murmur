@@ -1,11 +1,11 @@
 // Real-world topics (spec 13): a small file-backed pool of things that actually
-// happened, fetched OFF the live loop and read from at talk-generation time.
+// happened, fetched OFF the live loop and read from when a program is planned
+// (spec 15 §2.1).
 //
-// Three pieces, each the shape of something already here: the pool is a
-// cache file with expiry; the roll is RandomCadence one rung down (a
-// probability with guardrails over a counter); the feed launches the fetch the
-// way the Compactor launches a fold — single-flight, unawaited, total. The
-// talk path only ever touches `offer()`, a synchronous read.
+// Two pieces, each the shape of something already here: the pool is a cache
+// file with expiry; the feed launches the fetch the way the Compactor launches
+// a fold — single-flight, unawaited, total. The planner only ever touches
+// `fresh()` and `take()`, synchronous reads.
 
 import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
@@ -103,14 +103,18 @@ export class RwtPool {
     return this.file.entries.filter((e) => this.fresh(e)).map((e) => e.title)
   }
 
+  unused(): RwtTopic[] {
+    return this.file.entries.filter((e) => !e.used && this.fresh(e))
+  }
+
   counts(): { fresh: number; used: number } {
     const live = this.file.entries.filter((e) => this.fresh(e))
     const used = live.filter((e) => e.used).length
     return { fresh: live.length - used, used }
   }
 
-  // The oldest fresh unused entry, marked used at TAKE time: a beat generated
-  // and then discarded still burns its topic (a repeat costs more than a miss).
+  // The oldest fresh unused entry, marked used at TAKE time: a program planned
+  // and then dropped still burns its items (a repeat costs more than a miss).
   take(): RwtTopic | null {
     const index = this.file.entries.findIndex((e) => !e.used && this.fresh(e))
     if (index === -1) return null
@@ -142,47 +146,10 @@ export class RwtPool {
   }
 }
 
-// --- the roll (§2.3) ------------------------------------------------------ //
-
-export type RwtRollOptions = {
-  p?: number
-  minGap?: number
-  maxGap?: number
-  // Injected so tests are deterministic.
-  random?: () => number
-}
-
-// Probability p per talk batch, guarded: never before minGap batches since the
-// last offer, always by maxGap — an item on every batch is a ticker, and a
-// fresh pool ignored forever is a wasted fetch.
-export class RwtRoll {
-  private p: number
-  private minGap: number
-  private maxGap: number
-  private random: () => number
-  private since = 0
-
-  constructor({ p = 0.35, minGap = 1, maxGap = 4, random = Math.random }: RwtRollOptions = {}) {
-    this.p = p
-    this.minGap = Math.max(0, minGap)
-    this.maxGap = Math.max(this.minGap, maxGap)
-    this.random = random
-  }
-
-  roll(): boolean {
-    this.since++
-    if (this.since < this.minGap) return false
-    const hit = this.since >= this.maxGap || this.random() < this.p
-    if (hit) this.since = 0
-    return hit
-  }
-}
-
 // --- the feed (§2.4 / §3.1) ----------------------------------------------- //
 
 export type RealWorldTopicsDeps = {
   pool: RwtPool
-  roll: RwtRoll
   brain: Pick<Brain, 'fetchTopics'>
   // Resolved at fetch time, so a language change lands on the next refresh.
   request: () => Omit<FetchTopicsRequest, 'avoid'>
@@ -194,7 +161,7 @@ export type RealWorldTopicsDeps = {
 
 // How many ledgered titles the fetch is told to avoid. The music avoid list
 // settled at 32 after 8 brought a favourite back every other session; a
-// topic is offered far less often than a song plays, so 32 here spans weeks
+// topic airs far less often than a song plays, so 32 here spans weeks
 // of sessions — enough to outlast a running story — at one prompt line each,
 // on a background task.
 export const RWT_AVOID_DEPTH = 32
@@ -209,15 +176,23 @@ export class RealWorldTopics {
     this.deps = deps
   }
 
-  // The talk path's one call: roll, then take. An empty pool does not consume
-  // the roll, so the first item after a refresh is not owed to an old miss.
-  offer(): RwtTopic | null {
-    if (this.deps.pool.counts().fresh === 0) return null
-    if (!this.deps.roll.roll()) return null
-    const taken = this.deps.pool.take()
-    if (taken === null) return null
-    this.log(`rwt.offer ${taken.id}`)
-    this.logPool()
+  // What a program may plan with (spec 15 §2.1): the fresh, unused items,
+  // oldest first, NOT spent — a puzzle only looks at them.
+  fresh(): RwtTopic[] {
+    return this.deps.pool.unused()
+  }
+
+  // Spend up to n items for a program that airs them (a today): marked used at
+  // the take, like every take (a repeat costs more than a miss).
+  take(n: number): RwtTopic[] {
+    const taken: RwtTopic[] = []
+    for (let i = 0; i < n; i++) {
+      const topic = this.deps.pool.take()
+      if (topic === null) break
+      taken.push(topic)
+      this.log(`rwt.take ${topic.id}`)
+    }
+    if (taken.length > 0) this.logPool()
     return taken
   }
 

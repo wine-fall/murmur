@@ -216,6 +216,12 @@ not a config knob — deepen only if measurement shows a remaining gap (§6).
 
 ### 3.3 Talk look-ahead — TS realization (2026-07-28)
 
+> **Amended 2026-10-15 (spec 15 §2.5).** With programs wired (every
+> real-brain run), the look-ahead holds **one outline point** — the 3–4 beats
+> one beat call returns for it — not a depth of `TALK_LOOKAHEAD`. The next
+> point is written once the current one has aired, or as the song after it
+> starts. The depth-`N` refill below is the stub/no-program path only.
+
 The TS Director implements §3.2 with the same behavior contract; the deltas are
 mechanical, driven by JS promise semantics and the TS codebase's seams:
 
@@ -297,6 +303,13 @@ mechanical, driven by JS promise semantics and the TS codebase's seams:
   runs (~10 s each).
 
 ### 3.3-C The coda — the way out of a song (amended 2026-09-03)
+
+> **Amended 2026-10-15 (spec 15 §2.10).** With programs wired the coda is no
+> longer its own call: the next outline point is generated when the song
+> starts, with the song in the music status, and that point's first beat is
+> the transition out of the song. It rides the outro with the mechanics below
+> (`CODA_RIDE_P`, the lead window); when it does not ride, it simply heads the
+> point. The separate one-beat coda call is the stub/no-program path only.
 
 §3.3 removed the music→talk *dead air*: the post-song beat airs warm off the
 look-ahead. It did not make that beat **about** the song, and could not: the

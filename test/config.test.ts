@@ -197,6 +197,7 @@ describe('real-world topics config', () => {
   it('places the pool under cache/ and seeds no policy file', () => {
     const { config } = parseCli([], { MURMUR_HOME: '/tmp/mh' })
     expect(config.rwtPoolPath).toBe('/tmp/mh/cache/rwt.json')
+    expect(config.programsPath).toBe('/tmp/mh/data/programs.json')
     expect(config).not.toHaveProperty('rwtPolicyPath')
   })
 
@@ -206,18 +207,20 @@ describe('real-world topics config', () => {
     expect(config.tasteDir).toBe('/tmp/mh/data/taste')
   })
 
-  it('reads the roll and freshness numbers from env, and ignores a bad one with a warning', () => {
-    const { config } = parseCli(
-      [],
-      isolated({ MURMUR_RWT_P: '0.5', MURMUR_RWT_MIN_GAP: '2', MURMUR_RWT_MAX_GAP: '6', MURMUR_RWT_STALE_HOURS: '3', MURMUR_RWT_TTL_HOURS: '24' }),
-    )
-    expect([config.rwtP, config.rwtMinGap, config.rwtMaxGap, config.rwtStaleHours, config.rwtTtlHours]).toEqual([
-      0.5, 2, 6, 3, 24,
-    ])
+  it('reads the freshness numbers from env, and ignores a bad one with a warning', () => {
+    const { config } = parseCli([], isolated({ MURMUR_RWT_STALE_HOURS: '3', MURMUR_RWT_TTL_HOURS: '24' }))
+    expect([config.rwtStaleHours, config.rwtTtlHours]).toEqual([3, 24])
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(parseCli([], isolated({ MURMUR_RWT_P: 'often' })).config.rwtP).toBe(0.35)
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('MURMUR_RWT_P'))
+    expect(parseCli([], isolated({ MURMUR_RWT_TTL_HOURS: 'often' })).config.rwtTtlHours).toBe(48)
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('MURMUR_RWT_TTL_HOURS'))
     warn.mockRestore()
+  })
+
+  // spec 15 §2.1: items reach the air only through the programs that use
+  // them, so the per-batch roll and its knobs are gone.
+  it('carries no per-batch roll knobs', () => {
+    const { config } = parseCli([], isolated({}))
+    for (const field of ['rwtP', 'rwtMinGap', 'rwtMaxGap']) expect(config).not.toHaveProperty(field)
   })
 })
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import type { ContextPack } from '../src/contracts.ts'
+import type { ContextPack, ProgramCue } from '../src/contracts.ts'
 import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION } from '../src/prompts/music.ts'
 import { buildSeedPersonaPrompt, PERSONA_CHAR_CAP, SEED_QUESTIONS, withLanguage } from '../src/prompts/persona.ts'
 import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP, PROFILE_LINE_CAP } from '../src/prompts/profile.ts'
@@ -213,13 +213,12 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
     expect(p.indexOf('likes jazz')).toBeLessThan(p.indexOf('The program so far'))
   })
 
-  it('renders the covered-topics do-not-repeat line', () => {
-    const p = buildNextTalksPrompt(
-      { persona: 'p', recent: [], coveredTopics: ['rain', 'coffee'] },
-      2,
-    )
-    expect(p).toContain('rain, coffee')
-    expect(p).toContain("don't repeat")
+  // spec 15 §2.6: the 12-tag "recently covered" line pushed the host off its
+  // own thread and never matched a paraphrased repeat; it is gone.
+  it('carries no covered-topics do-not-repeat line', () => {
+    const p = buildNextTalksPrompt({ persona: 'p', recent: [{ role: 'radio', text: 'x' }] }, 2)
+    expect(p).not.toContain("don't repeat")
+    expect(p).not.toContain('Recently covered')
   })
 
   it('renders a scene cue for a known bucket', () => {
@@ -227,12 +226,11 @@ describe('memory + scene rendering (spec 05 §3.5)', () => {
     expect(p).toContain('late at night')
   })
 
-  it('empty profile/topics and an unknown scene render nothing', () => {
+  it('an empty profile and an unknown scene render nothing', () => {
     const p = buildNextTalkPrompt({
       persona: 'p',
       recent: [],
       profile: '  ',
-      coveredTopics: [],
       scene: 'lunar',
     })
     expect(p).not.toContain('What you know about the listener')
@@ -1053,38 +1051,11 @@ describe('the persona a setup conversation runs under', () => {
 
 // --- real-world topics (spec 13) ------------------------------------------ //
 
-describe('rwt rendering (spec 13 §2.5)', () => {
-  const base = { persona: 'p', recent: [] }
-  const rwt = { title: 'Typhoon season opens early', gist: 'The first storm came in a month ahead of the usual.' }
-
-  // The line is drawn on register, never on content: a host names the thing
-  // and carries on; a newsreader reads a rundown. Scrubbing the names out is
-  // the #44 attractor again, so the prompt must ask for them, not forbid them.
-  it('renders the item on the desk with the host-not-newsreader usage, on both talk builders', () => {
-    for (const p of [buildNextTalkPrompt({ ...base, rwt }), buildNextTalksPrompt({ ...base, rwt }, 2)]) {
-      expect(p).toContain('Typhoon season opens early')
-      expect(p).toContain('a month ahead of the usual')
-      expect(p).toMatch(/name the thing — the title, who, where, when/)
-      expect(p).toMatch(/not a newsreader's rundown/i)
-      expect(p).toMatch(/not a list/i)
-      expect(p).not.toMatch(/never a headline/i)
-      expect(p).not.toMatch(/leave it/i)
-    }
-  })
-
-  it('renders nothing without an item', () => {
-    expect(buildNextTalkPrompt(base)).not.toMatch(/on the desk for this stretch/i)
-  })
-
-  it('never rides an anchor or coda beat, even if the pack carries one', () => {
-    for (const cue of ['anchor:morning', CODA_CUE]) {
-      const p = buildNextTalkPrompt({ ...base, rwt, cue })
-      expect(p).not.toContain('Typhoon season opens early')
-    }
-  })
-
-  it('the reply path does not carry it — a reply answers the listener', () => {
-    expect(buildRespondPrompt('hey', { ...base, rwt })).not.toContain('Typhoon season opens early')
+// spec 15 §2.1: a free beat never carries a desk item; real-world items reach
+// the air only through the programs that plan with them.
+describe('no desk item on a free beat', () => {
+  it('renders no on-the-desk line', () => {
+    expect(buildNextTalkPrompt({ persona: 'p', recent: [] })).not.toMatch(/on the desk for this stretch/i)
   })
 })
 
@@ -1328,5 +1299,86 @@ describe('hostSystemPrompt', () => {
   it('leaves a listener-opened exchange free to ask what acting on it needs', () => {
     expect(HOST_CRAFT).toMatch(/on your own/i)
     expect(HOST_CRAFT).toMatch(/ask whatever you need/i)
+  })
+
+  // spec 15 §3.1: the prepared presenter, as whole-role framing.
+  it('frames the host as coming to the air prepared, talking from notes', () => {
+    expect(HOST_CRAFT).toMatch(/prepared/i)
+    expect(HOST_CRAFT).toMatch(/program/i)
+    expect(HOST_CRAFT).toMatch(/notes/i)
+  })
+})
+
+// spec 15 §2.5: one outline point per beat call, the program named and the
+// point's prepared material in front of the host.
+describe('the program beat prompt', () => {
+  const cue = (over: Partial<ProgramCue> = {}): ProgramCue => ({
+    name: 'NAME',
+    subject: 'osmanthus',
+    angle: 'why it smells like October',
+    outline: ['the tree', 'the word', 'the festival'],
+    index: 1,
+    point: { title: 'the word', content: 'NOTES: the character first appears in ...' },
+    beats: [3, 4],
+    ...over,
+  })
+  const ask = (program: ProgramCue, more: Partial<ContextPack> = {}) =>
+    buildNextTalksPrompt({ persona: 'p', recent: [{ role: 'radio', text: 'said before' }], program, ...more }, 4)
+
+  it('names the program and the point, shows the outline, and carries the notes', () => {
+    const p = ask(cue())
+    expect(p).toContain('NAME')
+    expect(p).toContain('osmanthus')
+    expect(p).toContain('why it smells like October')
+    expect(p).toMatch(/1\. the tree[^\n]*\n[^\n]*2\. the word[^\n]*now/)
+    expect(p).toContain('NOTES: the character first appears in ...')
+    expect(p).toContain('3-4 beats')
+    expect(p).toContain('said before')
+    expect(p).toContain('emit_talk_beats')
+    expect(p).not.toContain('Now continue')
+  })
+
+  it('opens with the name, folds an anchor in, and closes with it', () => {
+    const open = ask(cue({ index: 0, opening: true, anchor: 'anchor:morning' }))
+    expect(open).toContain('opens the program')
+    expect(open).toContain('good-morning')
+    expect(ask(cue({ index: 2, closing: true }))).toContain('ends the program')
+    expect(ask(cue())).not.toContain('opens the program')
+  })
+
+  it('says where it left off after a relaunch, and comes back after a reply or a song', () => {
+    expect(ask(cue({ resumed: true }))).toContain('where you left off')
+    expect(ask(cue({ returning: true }))).toContain('come back to this point')
+    const song = ask(cue({ afterSong: true }), { music: { kind: 'playing', track: 'X — Y' } })
+    expect(song).toContain('as the song')
+    // The first beat answers the song, so the outlast rule cannot bind it.
+    expect(song).not.toContain('turns false when the music')
+  })
+
+  it('a program point carries no free-talk opener and no do-not-repeat list', () => {
+    const p = ask(cue())
+    expect(p).not.toContain("don't repeat")
+  })
+})
+
+describe('the single-beat fallback keeps the program', () => {
+  it('says the next beat of the point, in plain text', () => {
+    const p = buildNextTalkPrompt({
+      persona: 'p',
+      recent: [],
+      program: { name: 'N', subject: 'S', angle: 'A', outline: ['x'], index: 0, point: { title: 'x', content: 'C' }, beats: [3, 4] },
+    })
+    expect(p).toContain('(Your program: N')
+    expect(p).toContain('Say only the next beat of this point.')
+    expect(p).not.toContain('emit_talk_beats')
+  })
+})
+
+describe('the steer prompt offers program requests only when wired (spec 15 §2.8)', () => {
+  const opts = { musicWired: false, shutdownArmed: false, settingsWired: false, memoryWired: false }
+  it('names request_program when programs are wired', () => {
+    const p = buildSteerPrompt('read me a poem', { persona: 'p', recent: [] }, { ...opts, programsWired: true })
+    expect(p).toContain('request_program')
+    expect(buildSteerPrompt('read me a poem', { persona: 'p', recent: [] }, opts)).not.toContain('request_program')
   })
 })

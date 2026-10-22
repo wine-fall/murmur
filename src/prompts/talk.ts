@@ -3,9 +3,10 @@
 // status, transcript), the beat-shaped grounding rules, and the next-beat(s)
 // builders. reply.ts reuses the shared renderers for the typed-line turns.
 
-import type { ContextPack } from '../contracts.ts'
+import type { ContextPack, ProgramCue } from '../contracts.ts'
 import type { StockRequest } from '../support/stock.ts'
 import { ABOUT_HEADER, PROFILE_TAGS, STYLE_HEADER } from './profile.ts'
+import { programBlock } from './program.ts'
 
 // Output discipline appended to every Brain call: the result is fed straight
 // to TTS, so it must be clean spoken text with no markup or stage directions.
@@ -98,8 +99,11 @@ export const MUSIC_OUTLASTS_RULE =
 // one spelling.
 export const CODA_CUE = 'coda'
 
+// A program point written as a song ends (spec 15 §2.10) is the coda's heir:
+// its first beat answers the song, so the outlast rule cannot bind it either.
 function groundingRules(ctx: ContextPack): string {
-  return ctx.cue === CODA_CUE ? GROUNDING_RULES : `${GROUNDING_RULES} ${MUSIC_OUTLASTS_RULE}`
+  const answersSong = ctx.cue === CODA_CUE || ctx.program?.afterSong === true
+  return answersSong ? GROUNDING_RULES : `${GROUNDING_RULES} ${MUSIC_OUTLASTS_RULE}`
 }
 
 // Presence cue (spec 07 §2.2). Written so the host adjusts its MANNER and never
@@ -177,35 +181,6 @@ export function aboutSection(profile: string): string {
   return (end === -1 ? body : body.slice(0, end)).replaceAll(PROFILE_TAGS, '').trim()
 }
 
-// A single volatile "recently covered — don't repeat" cue from the tier-③
-// ledger (spec 05 §3.5). Ledger-backed and cross-day, so it holds even when the
-// transcript is empty (the issue-#44 cold-open case). Empty -> nothing.
-function coveredLine(ctx: ContextPack): string {
-  if (ctx.coveredTopics === undefined || ctx.coveredTopics.length === 0) return ''
-  return `\n(Recently covered — don't repeat these: ${ctx.coveredTopics.join(', ')})`
-}
-
-// One real-world item on the desk for this stretch (spec 13 §2.5). A host
-// names the thing — the title, who, where, when — says what happened and what
-// they make of it, and carries on; what a host does NOT do is switch into a
-// newsreader's rundown. The line draws on register, never on content: an item
-// with its names scrubbed out is the cozy-imagery attractor (#44) wearing a
-// fig leaf. The anchor beats and the coda have a job of their own and never
-// carry one, even if a pack arrives with it. Absent -> nothing.
-function rwtLine(ctx: ContextPack): string {
-  const rwt = ctx.rwt
-  if (rwt === undefined) return ''
-  const cue = ctx.cue ?? ''
-  if (cue === CODA_CUE || cue.startsWith('anchor:')) return ''
-  return (
-    `\n(On the desk for this stretch, from today: ${rwt.title} — ${rwt.gist})\n` +
-    'Bring it in the way a host does: name the thing — the title, who, where, ' +
-    'when — say what happened in a sentence or two and what you make of it, ' +
-    'then carry on. One item, in your own voice. Not a newsreader\'s rundown, ' +
-    'not a "here is the news" frame, not a list.'
-  )
-}
-
 // Render recent turns as a transcript. The host's own prior lines are "You";
 // the listener's lines are "Listener".
 export function renderTranscript(ctx: ContextPack, dropTrailingUser?: string): string {
@@ -246,23 +221,51 @@ function carryOn(ctx: ContextPack, transcript: string): string {
 // Prompt for a single self-initiated talk segment (the fallback path when the
 // batched tool call degrades — spec 04 §3.2).
 export function buildNextTalkPrompt(ctx: ContextPack): string {
+  if (ctx.program !== undefined) {
+    return buildProgramBeatsPrompt(ctx, ctx.program, `Say only the next beat of this point.\n${OUTPUT_RULES}`)
+  }
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next beat.`
     : `${openingBlock(ctx)} Open naturally with your first beat.`
-  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
+  return `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n${groundingRules(ctx)}\n${OUTPUT_RULES}`
 }
+
+// One program point (spec 15 §2.5): the same stable blocks and program facts
+// as a free beat, but the head is the program — its outline and this point's
+// notes — instead of "carry on".
+function buildProgramBeatsPrompt(ctx: ContextPack, program: ProgramCue, tail: string): string {
+  const transcript = renderTranscript(ctx)
+  const head = !transcript
+    ? openingBlock(ctx)
+    : ctx.opening === true
+      ? `${openingBlock(ctx)}\n\n(Already on the air, just now)\n${transcript}`
+      : `(The program so far)\n${transcript}`
+  const activity = ACTIVITY_GUIDANCE[ctx.activity ?? '']
+  return (
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}\n\n` +
+    `${programBlock(program, program.anchor === undefined ? undefined : CUE_GUIDANCE[program.anchor])}` +
+    `${sceneLine(ctx)}${musicLine(ctx)}${activity === undefined ? '' : `\n${activity}`}\n` +
+    `${groundingRules(ctx)}\n${tail}`
+  )
+}
+
+const PROGRAM_BEATS_TAIL =
+  'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
+  'no markup, labels, or stage directions). Return them in order by calling ' +
+  'the emit_talk_beats tool.'
 
 // Prompt for the next `count` self-initiated beats in one call. The beats come
 // back via the emit_talk_beats tool (structured output — see talk-tools.ts),
 // so the shape lives in that tool's schema, not here.
 export function buildNextTalksPrompt(ctx: ContextPack, count: number): string {
+  if (ctx.program !== undefined) return buildProgramBeatsPrompt(ctx, ctx.program, PROGRAM_BEATS_TAIL)
   const transcript = renderTranscript(ctx)
   const head = transcript
     ? `${carryOn(ctx, transcript)} — say your next ${count} beats.`
     : `${openingBlock(ctx)} Open naturally with your first ${count} beats.`
   return (
-    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${coveredLine(ctx)}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}${rwtLine(ctx)}\n` +
+    `${profileBlock(ctx)}${tasteBlock(ctx)}${head}${sceneLine(ctx)}${musicLine(ctx)}${pacingLines(ctx)}\n` +
     `${groundingRules(ctx)}\n` +
     'Each beat is one small stretch of radio (a few sentences, spoken aloud — ' +
     'no markup, labels, or stage directions). Return ' +

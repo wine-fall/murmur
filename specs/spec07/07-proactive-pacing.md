@@ -219,6 +219,11 @@ memory:
 
 ### 2.5 Cadence + pacing integration (no new scheduling machinery)
 
+> **Amended 2026-10-15 (spec 15 §2.10).** While a program is on the air the
+> program owns the talk/music ratio — a song after each outline point — and
+> the configured cadence is consulted only when no program is on (the
+> fallback). Gating still composes as below.
+
 `CadenceState` (`src/director/cadence.ts`) already documents "later specs extend it
 (pacing in 07)". This spec adds the field and one decorator:
 
@@ -316,6 +321,12 @@ Gating is one rule applied at the two places talk work is started:
   sanctioned Brain call in the away state.
 
 ### 3.4 Time anchors on the stream
+
+> **Amended 2026-10-15 (spec 15 §2.7).** With programs wired, an anchor no
+> longer takes a boundary of its own: when one is due as a program opens, its
+> greeting folds into the opening point (the cue's `anchor`), and it is marked
+> fired when that opening beat airs. An anchor whose window passes inside a
+> program is not aired. The standalone anchor beat below is the stub path.
 
 1. At each boundary, before cadence: `scheduler.due(now)`.
 2. If an anchor is due, the segment is an **anchor talk segment**: one

@@ -17,6 +17,10 @@ import {
   stampDates,
 } from '../src/memory/memory.ts'
 
+// A program ledger row (spec 15 §2.6), keyed by its label for these tests.
+const program = (label: string) => ({ id: 'origin', label, keys: [label] })
+const labels = (rows: readonly { label: string }[]) => rows.map((r) => r.label)
+
 const dir = () => mkdtempSync(join(tmpdir(), 'murmur-fold-'))
 
 // Seed a profile that already satisfies the output contract (spec 05-01 §3.3):
@@ -387,12 +391,12 @@ describe('forget scrubs topic keys from the ledger (spec 05-01 §3.5)', () => {
     const c = clock(at('2026-09-01'))
     const path = dir()
     const store = new PersistentMemoryStore({ dir: path, now: c.now })
-    store.recordEvent('topic', 'evening hunger deciding dinner')
+    store.recordProgram(program('evening hunger deciding dinner'))
     store.recordEvent('song', 'Dinner Music — Someone')
     store.recordEvent('rwt', 'A dinner summit ends without a deal')
     store.recordEvent('anchor', 'dinner-bell')
     store.recordEvent('setup', 'dinner')
-    store.recordEvent('topic', 'night walks')
+    store.recordProgram(program('night walks'))
     store.record({ role: 'user', text: 'what I had for dinner is nobody\'s business' })
     return { store, path }
   }
@@ -402,7 +406,7 @@ describe('forget scrubs topic keys from the ledger (spec 05-01 §3.5)', () => {
     const before = readFileSync(join(path, 'ledger.jsonl'), 'utf-8').split('\n')
     const removed = store.forget('dinner')
     expect(removed.lines).toBe(1)
-    expect(store.recentTopics(10)).toEqual(['night walks'])
+    expect(labels(store.recentPrograms(10))).toEqual(['night walks'])
     const after = readFileSync(join(path, 'ledger.jsonl'), 'utf-8').split('\n')
     // Every other kind survives byte-for-byte; only the topic row and the
     // trailing forget event differ.
@@ -413,7 +417,7 @@ describe('forget scrubs topic keys from the ledger (spec 05-01 §3.5)', () => {
     expect(after.some((l) => l.includes('dinner summit'))).toBe(true)
     // And the scrub survives a reload — the file is the source of truth.
     const reopened = new PersistentMemoryStore({ dir: path })
-    expect(reopened.recentTopics(10)).toEqual(['night walks'])
+    expect(labels(reopened.recentPrograms(10))).toEqual(['night walks'])
     expect(reopened.recentSongs(10)).toEqual(['Dinner Music — Someone'])
   })
 
@@ -421,16 +425,16 @@ describe('forget scrubs topic keys from the ledger (spec 05-01 §3.5)', () => {
     const { store } = seeded()
     // "the" and "thing" are stop words, "hunger" is the one real token.
     expect(store.forget('the hunger thing').lines).toBe(1)
-    expect(store.recentTopics(10)).toEqual(['night walks'])
+    expect(labels(store.recentPrograms(10))).toEqual(['night walks'])
   })
 
   it('the in-process store scrubs its topics the same way', () => {
     const store = new InProcessMemoryStore()
-    store.recordEvent('topic', 'evening hunger deciding dinner')
-    store.recordEvent('topic', 'night walks')
+    store.recordProgram(program('evening hunger deciding dinner'))
+    store.recordProgram(program('night walks'))
     store.recordEvent('song', 'Dinner Music — Someone')
     expect(store.forget('dinner').lines).toBe(1)
-    expect(store.recentTopics(10)).toEqual(['night walks'])
+    expect(labels(store.recentPrograms(10))).toEqual(['night walks'])
     expect(store.recentSongs(10)).toEqual(['Dinner Music — Someone'])
   })
 })

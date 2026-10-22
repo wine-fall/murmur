@@ -577,14 +577,14 @@ describe('emit_talk_beats tool', () => {
     const result = await t.handler(
       {
         beats: [
-          { text: '  first  ', topic: ' mood ' },
+          { text: '  first  ' },
           { text: 'second' },
           { text: 'third (over cap)' },
         ],
       },
       {},
     )
-    expect(captured).toEqual([{ text: 'first', topic: 'mood' }, { text: 'second' }])
+    expect(captured).toEqual([{ text: 'first' }, { text: 'second' }])
     expect(result.content[0]).toMatchObject({ type: 'text' })
   })
 
@@ -597,11 +597,8 @@ describe('emit_talk_beats tool', () => {
 })
 
 describe('cleanBeats', () => {
-  it('drops empties, trims, and omits blank topics', () => {
-    const beats = cleanBeats(
-      [{ text: '', topic: 'x' }, { text: 'keep', topic: '  ' }, { text: 'and me' }],
-      5,
-    )
+  it('drops empties and trims', () => {
+    const beats = cleanBeats([{ text: '' }, { text: ' keep ' }, { text: 'and me' }], 5)
     expect(beats).toEqual([{ text: 'keep' }, { text: 'and me' }])
   })
 

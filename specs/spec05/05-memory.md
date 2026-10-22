@@ -381,6 +381,15 @@ the radio from booting. `meta.json` unreadable → treat as "never compacted".
 
 ### 3.9 Topic keys — where they come from
 
+> **Superseded 2026-10-15 (spec 15 §2.6).** The per-beat `topic` tag, the
+> `topic` ledger kind, `recentTopics` and `ContextPack.coveredTopics` are
+> deleted: the 12-tag window scrolled out before a repeat came round, never
+> matched a paraphrase, and pushed the host off its own thread. The ledger
+> keeps a `program` row per program that opened (id, label, normalized
+> cooldown keys, leads, requested), and `lastOnAir.topics` reads the previous
+> sitting's program labels. `forget` scrubs program rows by label as it did
+> topic keys.
+
 Talk beats are free text; the ledger needs a compact topic key per beat.
 Decided mechanism: the spec-04
 `emit_talk_beats` tool schema gains an **optional** per-beat `topic` field

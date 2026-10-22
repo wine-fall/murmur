@@ -839,7 +839,8 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
   // In the sky composition the strip is one centred line over a full-width
   // rule (concept 04), and now-playing lives under the scene; in the band
   // composition the strip stays two-sided and carries now-playing itself.
-  const stripRight = [identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')
+  // The program on the air (spec 15 §2.9) leads the right side when there is one.
+  const stripRight = [state?.program ?? identity.persona, state?.scene, state?.activity].filter(Boolean).join(' · ')
   const bandStrip = [stripLead({ floor: floor?.strip, bubble: stripBubble, greeting, microcopy }) ?? 'warming up...', state?.nowPlaying]
     .filter((part) => part !== undefined && part !== '')
     .join('  ♪ ')
@@ -852,6 +853,7 @@ export function App({ subscribe, wire }: { subscribe: Subscribe; wire: Wire }): 
         : fit(bandStrip, cols - 4 - cells(stripRight))
       : [
           stripLead({ floor: floor?.strip, bubble: stripBubble, greeting, microcopy }) ?? 'murmur is on the air',
+          floor === null ? state?.program : undefined,
           floor?.sub ?? state?.scene,
           floor === null ? (state?.activity ?? 'here') : undefined,
         ]

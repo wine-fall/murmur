@@ -12,6 +12,7 @@ import type { CanUseTool, PermissionMode, SdkMcpToolDefinition } from '@anthropi
 
 import type { Activity } from './director/activity.ts'
 import type { Settings, SettingsPatch } from './host/ipc.ts'
+import type { ProgramId } from './programs/catalogue.ts'
 
 export type AudioClip = {
   // Local file path (L0); may become a stream URL once music lands (spec 03-01).
@@ -42,11 +43,10 @@ export type Turn = {
   readonly cite?: number
 }
 
-// One self-initiated talk beat from the batched call (spec 04 §3.2). `topic`
-// is the optional ledger key for cross-day anti-repeat (spec 05, Phase 4).
+// One self-initiated talk beat from the batched call (spec 04 §3.2).
+// Anti-repeat lives at the program level, never per beat (spec 15 §2.6).
 export type TalkBeat = {
   readonly text: string
-  readonly topic?: string
 }
 
 // The program's real music status at context-build time (spec 04 bugfix): the
@@ -70,9 +70,8 @@ export type MusicState =
 // The compact context handed to the Brain per call (master §6). Beyond the
 // spec-01 fields: `scene` is the time-of-day bucket (spec 04 §3.4, ratified by
 // spec 05 §2.2) and `time` the real local clock rendered for the prompt;
-// `music` is the program's live music status (spec 04 bugfix); `profile` and
-// `coveredTopics` are the tier-①/③ memory reads (spec 05 §3.5 —
-// coveredTopics is cross-day, the issue-#44 anti-repeat).
+// `music` is the program's live music status (spec 04 bugfix); `profile` is
+// the tier-① memory read (spec 05 §3.5).
 // `activity` is the spec-07 §2.2 presence signal (the field spec 05 reserved),
 // and `cue` the per-call intent the Director asks the prompt to carry (an
 // anchor — spec 07 §3.4).
@@ -84,13 +83,8 @@ export type ContextPack = {
   readonly time?: string
   readonly music?: MusicState
   readonly profile?: string
-  readonly coveredTopics?: readonly string[]
   readonly activity?: Activity
   readonly cue?: string
-  // One real-world item offered to this batch (spec 13 §2.5): material, not
-  // an assignment. Absent on most batches — the roll decides — and always
-  // absent on an anchor or coda beat.
-  readonly rwt?: { readonly title: string; readonly gist: string }
   // The taste digest (spec 14 §2.3): what the listener keeps on the platforms
   // they mounted, as background the host knows. '' or absent renders nothing.
   readonly taste?: string
@@ -102,6 +96,26 @@ export type ContextPack = {
   // yet (spec 04 §3.6). The transcript is no longer empty, so the opening fact
   // would otherwise be dropped — and the host would open the program twice.
   readonly opening?: boolean
+  // The program point this beat call says (spec 15 §2.5). Absent = no program
+  // on the air (a stub run): the free-talk prompt.
+  readonly program?: ProgramCue
+}
+
+// One outline point to say, with where it sits in its program (spec 15 §2.5).
+export type ProgramCue = {
+  readonly name: string
+  readonly subject: string
+  readonly angle: string
+  readonly outline: readonly string[] // every point's title
+  readonly index: number // the point being said, 0-based
+  readonly point: { readonly title: string; readonly content: string }
+  readonly beats: readonly [number, number] // how many beats this call returns
+  readonly opening?: true // the program opens with this point
+  readonly closing?: true // and ends with this one
+  readonly resumed?: true // the first point after a relaunch picked the program up
+  readonly returning?: true // the listener just spoke; back to the point
+  readonly afterSong?: true // the first beat goes out as a song ends
+  readonly anchor?: string // a time anchor folded into the opening
 }
 
 // --- real-world topics (spec 13) ------------------------------------------ //
@@ -189,7 +203,20 @@ export type BedPosition = { track: string; offsetS: number }
 // the same gaps quiet instead of re-opening the conversation.
 // 'forget' keys one honoured forget request (spec 05-01 §3.5) — the time only,
 // never the text: an event that kept what was forgotten would defeat the point.
-export type LedgerKind = 'topic' | 'song' | 'anchor' | 'setup' | 'forget' | 'rwt'
+// 'program' keys one program that opened (spec 15 §2.6): what the cooldowns and
+// the two-program gap read, across sessions.
+export type LedgerKind = 'program' | 'song' | 'anchor' | 'setup' | 'forget' | 'rwt'
+
+// A program's ledger row (spec 15 §2.6): its id, the label it aired under,
+// the normalized cooldown keys, and whether the listener asked for it.
+export type ProgramRecord = {
+  readonly id: string
+  readonly label: string
+  readonly keys: readonly string[]
+  // The thinkers who led a puzzle, as said — what the planner is told to avoid.
+  readonly leads?: readonly string[]
+  readonly requested?: boolean
+}
 
 // Where a recalled line came from (spec 05-01 §2.1): a history row's speaker,
 // or 'faded' for a profile fact that has aged out of the prompts but is still
@@ -204,7 +231,7 @@ export type RecallHit = {
 }
 
 // The three-tier store (spec 05 §2.1): the spec-01 turn log (tier ②) plus the
-// profile read (tier ①) and the anti-repeat ledger (tier ③). recentTopics /
+// profile read (tier ①) and the anti-repeat ledger (tier ③). recentPrograms /
 // recentSongs / recentAnchors span sessions and days on the persistent store
 // (issue #44; spec 07 §2.4). spec 05-01 adds retrieval over the whole log and
 // removal on request.
@@ -213,10 +240,12 @@ export interface MemoryStore {
   recent(n: number): Turn[]
   profile(): string
   recordEvent(kind: LedgerKind, key: string): void
-  recentTopics(n: number): string[]
+  recordProgram(record: ProgramRecord): void
+  // The last n programs that opened, oldest first, each with its time.
+  recentPrograms(n: number): (ProgramRecord & { readonly ts: number })[]
   recentSongs(n: number): string[]
-  // When the program was last on the air BEFORE this boot, with the handful of
-  // topics it touched (spec 05 §3.4). undefined on a first run and inside the
+  // When the program was last on the air BEFORE this boot, with the labels of
+  // the programs it aired (spec 05 §3.4, spec 15 §2.6). undefined on a first run and inside the
   // same sitting, where the recent window already carries the continuity.
   lastOnAir(): { ts: number; topics: readonly string[] } | undefined
   // The avoid-list read (spec 05 §3.5): the songs aired at or after `sinceTs`
@@ -334,10 +363,11 @@ export type TaskTool = Omit<SdkMcpToolDefinition, 'inputSchema' | 'handler'> & {
 }
 
 // What a Claude call is for, so its usage line in the dev log can be summed by
-// purpose (DESIGN §7 row 3): the host's own beats, a reply, the pick, the
-// cadence judgment, the real-world fetch, the profile fold, onboarding, stock
-// lines, the setup guide, a bug report.
+// purpose (DESIGN §7 row 3): a program's planning call, the host's own
+// beats, a reply, the pick, the cadence judgment, the real-world fetch, the
+// profile fold, onboarding, stock lines, the setup guide, a bug report.
 export type UsageCategory =
+  | 'plan'
   | 'beat'
   | 'reply'
   | 'music'
@@ -428,11 +458,21 @@ export type MemoryOps = {
   markSteered(): void
 }
 
+// A listener's program request (spec 15 §2.8): the run on the air ends and
+// the asked-for program is planned at once. Absent = no programs wired.
+export type SteerProgramActions = {
+  // False = the program cannot air right now (a today without its items).
+  request(id: ProgramId, subject?: string): boolean
+  // The program on the air, as the status line names it; undefined = none.
+  current(): string | undefined
+}
+
 export type SteerActions = {
   readonly music?: SteerMusicActions
   readonly shutdown: SteerShutdownActions
   readonly settings?: SteerSettingsActions
   readonly memory?: SteerMemoryActions
+  readonly programs?: SteerProgramActions
 }
 
 // The agentic reply capability (spec 11 §2.2): resolves to the reply text the

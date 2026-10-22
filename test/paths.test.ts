@@ -90,3 +90,10 @@ describe('listening-taste paths (spec 14)', () => {
     expect(tasteDir({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/data/taste')
   })
 })
+
+describe('programsPath (spec 15 §2.3)', () => {
+  it('lives under the data root', async () => {
+    const { programsPath } = await import('../src/paths.ts')
+    expect(programsPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/data/programs.json')
+  })
+})

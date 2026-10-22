@@ -9,7 +9,7 @@ import { join } from 'node:path'
 
 import { z } from 'zod'
 
-import type { LedgerKind, MemoryStore, RecallHit, Turn } from '../contracts.ts'
+import type { LedgerKind, MemoryStore, ProgramRecord, RecallHit, Turn } from '../contracts.ts'
 import {
   ABOUT_HEADER,
   PROFILE_CHAR_CAP,
@@ -28,6 +28,44 @@ function keys(entries: readonly LedgerEntry[], n: number): string[] {
   return n > 0 ? entries.slice(-n).map((e) => e.key) : []
 }
 
+// A program row's key is its record as JSON (spec 15 §2.6). The key is written
+// by us but read back from disk, so it is parsed, never cast; a row that does
+// not parse is skipped like any other malformed row.
+const ProgramRecordSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  keys: z.array(z.string()),
+  leads: z.array(z.string()).optional(),
+  requested: z.boolean().optional(),
+})
+
+function parseProgram(key: string): ProgramRecord | null {
+  try {
+    const parsed = ProgramRecordSchema.safeParse(JSON.parse(key))
+    if (!parsed.success) return null
+    const { leads, requested, ...rest } = parsed.data
+    return { ...rest, ...(leads !== undefined && { leads }), ...(requested !== undefined && { requested }) }
+  } catch {
+    return null
+  }
+}
+
+// The last n program rows, oldest first, parsed.
+function programRows(entries: readonly LedgerEntry[], n: number): (ProgramRecord & { ts: number })[] {
+  if (n <= 0) return []
+  return entries.slice(-n).flatMap((e) => {
+    const record = parseProgram(e.key)
+    return record === null ? [] : [{ ...record, ts: e.ts }]
+  })
+}
+
+// What forget matches a program row on: the words it aired under.
+const programLabel = (key: string): string => parseProgram(key)?.label ?? ''
+
+// The programs tail is kept by AGE, not count: every row inside the longest
+// cooldown (spec 15 §2.1, 180 days) stays, however busy the station is.
+const PROGRAM_RETENTION_S = 200 * 86_400
+
 // The songs aired at or after `sinceTs`, newest-last, capped.
 function songsSince(songs: readonly LedgerEntry[], sinceTs: number, cap: number): string[] {
   if (cap <= 0) return []
@@ -40,7 +78,7 @@ function songsSince(songs: readonly LedgerEntry[], sinceTs: number, cap: number)
 export class InProcessMemoryStore implements MemoryStore {
   private turns: { ts: number; turn: Turn }[] = []
   private profileText = ''
-  private topics: LedgerEntry[] = []
+  private programs: LedgerEntry[] = []
   private songs: LedgerEntry[] = []
   private anchors: LedgerEntry[] = []
   private setup: LedgerEntry[] = []
@@ -87,9 +125,9 @@ export class InProcessMemoryStore implements MemoryStore {
     const kept = this.profileText.split('\n').filter((l) => !l.toLowerCase().includes(needle))
     let lines = this.profileText.split('\n').length - kept.length
     this.profileText = kept.join('\n')
-    const topics = this.topics.filter((e) => !e.key.toLowerCase().includes(needle))
-    lines += this.topics.length - topics.length
-    this.topics = topics
+    const programs = this.programs.filter((e) => !programLabel(e.key).toLowerCase().includes(needle))
+    lines += this.programs.length - programs.length
+    this.programs = programs
     return { rows: before - this.turns.length, lines }
   }
 
@@ -102,8 +140,12 @@ export class InProcessMemoryStore implements MemoryStore {
     return undefined
   }
 
-  recentTopics(n: number): string[] {
-    return keys(this.topics, n)
+  recordProgram(record: ProgramRecord): void {
+    this.recordEvent('program', JSON.stringify(record))
+  }
+
+  recentPrograms(n: number): (ProgramRecord & { ts: number })[] {
+    return programRows(this.programs, n)
   }
 
   recentSongs(n: number): string[] {
@@ -128,8 +170,8 @@ export class InProcessMemoryStore implements MemoryStore {
 
   private ledger(kind: LedgerKind): LedgerEntry[] {
     switch (kind) {
-      case 'topic':
-        return this.topics
+      case 'program':
+        return this.programs
       case 'song':
         return this.songs
       case 'anchor':
@@ -152,7 +194,7 @@ export class InProcessMemoryStore implements MemoryStore {
 // (spec 05 §6), aligned with the pet's away greeting (spec 10 §3.7.3).
 const SITTING_GAP_H = 1
 
-// How many of the previous sitting's topics the lastOnAir fact carries.
+// How many of the previous sitting's program labels the lastOnAir fact carries.
 const LAST_ON_AIR_TOPICS = 3
 
 // Compaction cadence (spec 05-01 §2.3): admitted LISTENER turns past the
@@ -545,7 +587,7 @@ export class PersistentMemoryStore implements MemoryStore {
 
   private maxlen: number
   private turns: { ts: number; turn: Turn }[] = []
-  private topics: LedgerEntry[] = []
+  private programs: LedgerEntry[] = []
   private songs: LedgerEntry[] = []
   private anchors: LedgerEntry[] = []
   private setup: LedgerEntry[] = []
@@ -627,12 +669,13 @@ export class PersistentMemoryStore implements MemoryStore {
   }
 
   // Physical removal, no backup (spec 05-01 §3.5): history rows, profile lines,
-  // faded lines and topic ledger keys go, the index is rebuilt, and the
+  // faded lines and program ledger rows go, the index is rebuilt, and the
   // in-memory window is filtered so the very next pack no longer carries what
-  // went. A topic key is model-written text that can name a private detail,
-  // and every talk prompt renders the recent ones — so it counts as a line the
-  // host held. The other ledger kinds stay: they record what AIRED, and taking
-  // one would make the same song or news item come round again as new.
+  // went. A program label is model-written text that can name a private
+  // detail, and the opening fact renders the last ones — so it counts as a
+  // line the host held. The other ledger kinds stay: they record what AIRED,
+  // and taking one would make the same song or news item come round again as
+  // new.
   forget(what: string, askedIn = 0): { rows: number; lines: number } {
     const tokens = forgetTokens(what)
     if (tokens.length === 0) return { rows: 0, lines: 0 }
@@ -677,12 +720,12 @@ export class PersistentMemoryStore implements MemoryStore {
     const lines =
       this.forgetLines(this.profilePath, gone) +
       this.forgetLines(this.fadedPath, gone) +
-      this.forgetTopics(hit)
+      this.forgetPrograms(hit)
     if (dropped === 0 && lines === 0) return { rows: 0, lines: 0 }
 
     this.profileText = this.readText(this.profilePath)
-    this.topics = this.topics.filter((e) => !hit(e.key))
-    // The opening fact is a copy of those keys, taken at boot: a forget that
+    this.programs = this.programs.filter((e) => !hit(programLabel(e.key)))
+    // The opening fact is a copy of those labels, taken at boot: a forget that
     // left it standing would hand the deleted words straight back to the model.
     if (this.last !== undefined) {
       this.last = { ...this.last, topics: this.last.topics.filter((k) => !hit(k)) }
@@ -710,8 +753,12 @@ export class PersistentMemoryStore implements MemoryStore {
     this.rememberEvent(kind, key, ts)
   }
 
-  recentTopics(n: number): string[] {
-    return keys(this.topics, n)
+  recordProgram(record: ProgramRecord): void {
+    this.recordEvent('program', JSON.stringify(record))
+  }
+
+  recentPrograms(n: number): (ProgramRecord & { ts: number })[] {
+    return programRows(this.programs, n)
   }
 
   recentSongs(n: number): string[] {
@@ -735,8 +782,8 @@ export class PersistentMemoryStore implements MemoryStore {
   // and the Director has no business in that tier.
   recentEvents(kind: LedgerKind, n: number): string[] {
     switch (kind) {
-      case 'topic':
-        return keys(this.topics, n)
+      case 'program':
+        return keys(this.programs, n)
       case 'song':
         return keys(this.songs, n)
       case 'anchor':
@@ -794,8 +841,8 @@ export class PersistentMemoryStore implements MemoryStore {
     return this.away
   }
 
-  // When the program was last on the air before this boot, and the handful of
-  // topics it touched (spec 05 §3.4). undefined on a first run and on a boot
+  // When the program was last on the air before this boot, and the labels of
+  // the last programs it aired (spec 05 §3.4, spec 15 §2.6). undefined on a first run and on a boot
   // inside the same sitting — there the primed turns already carry it.
   lastOnAir(): { ts: number; topics: readonly string[] } | undefined {
     return this.last
@@ -921,10 +968,10 @@ export class PersistentMemoryStore implements MemoryStore {
     return lines.length - kept.length
   }
 
-  // Drop matching `topic` rows from the ledger atomically; returns how many
-  // went. Every other row is kept byte-for-byte — an unparseable line included,
-  // as in rewriteHistory.
-  private forgetTopics(hit: (text: string) => boolean): number {
+  // Drop `program` rows whose label matches from the ledger atomically;
+  // returns how many went. Every other row is kept byte-for-byte — an
+  // unparseable line included, as in rewriteHistory.
+  private forgetPrograms(hit: (text: string) => boolean): number {
     const text = this.readText(this.ledgerPath)
     if (text === '') return 0
     const lines = text.split('\n')
@@ -936,7 +983,11 @@ export class PersistentMemoryStore implements MemoryStore {
         return true
       }
       const row = ledgerRowSchema.safeParse(parsed)
-      return !(row.success && row.data.kind === 'topic' && hit(row.data.key))
+      if (!row.success) return true
+      // A `topic` row is what an older murmur ledgered per beat: no longer
+      // read, but still words the listener may ask to erase.
+      if (row.data.kind === 'topic') return !hit(row.data.key)
+      return !(row.data.kind === 'program' && hit(programLabel(row.data.key)))
     })
     if (kept.length === lines.length) return 0
     atomicWrite(this.ledgerPath, kept.join('\n'))
@@ -1073,8 +1124,8 @@ export class PersistentMemoryStore implements MemoryStore {
   // An unknown kind (a newer murmur's ledger) is skipped, not crashed on.
   private rememberEvent(kind: string, key: string, ts: number): void {
     const target =
-      kind === 'topic'
-        ? this.topics
+      kind === 'program'
+        ? this.programs
         : kind === 'song'
           ? this.songs
           : kind === 'anchor'
@@ -1088,6 +1139,11 @@ export class PersistentMemoryStore implements MemoryStore {
                   : null
     if (target === null) return
     target.push({ key, ts })
+    if (target === this.programs) {
+      const drop = target.findIndex((e) => e.ts >= ts - PROGRAM_RETENTION_S)
+      if (drop > 0) target.splice(0, drop)
+      return
+    }
     if (target.length > LEDGER_TAIL) target.splice(0, target.length - LEDGER_TAIL)
   }
 
@@ -1183,18 +1239,18 @@ export class PersistentMemoryStore implements MemoryStore {
       this.rememberEvent(row.kind, row.key, row.ts ?? 0)
     }
 
-    // After the ledger, so the topics are the previous sitting's own: bounded by
-    // where that sitting began, because a topic from a month ago reported as
+    // After the ledger, so the labels are the previous sitting's own: bounded by
+    // where that sitting began, because a program from a month ago reported as
     // "what we talked about yesterday" is a false fact, not a coarse one.
     // Frozen here, so what this session goes on to say never rewrites the fact
     // it opened with.
     if (!sameSitting && this.lastTs > 0) {
       // Bounded by the last row BEFORE that sitting, not its first: a beat
-      // ledgers its topic and records its turn in the same breath, and the two
+      // ledgers its program and records its turn in the same breath, and the two
       // stamps differ by a millisecond in whichever order.
       const since = from > 0 ? rows[from - 1]!.ts : 0
-      const topics = this.topics.filter((e) => e.ts > since)
-      this.last = { ts: this.lastTs, topics: keys(topics, LAST_ON_AIR_TOPICS) }
+      const aired = this.programs.filter((e) => e.ts > since)
+      this.last = { ts: this.lastTs, topics: programRows(aired, LAST_ON_AIR_TOPICS).map((r) => r.label) }
     }
   }
 }

@@ -19,6 +19,7 @@ import {
   dataRoot,
   homeRoot,
   musicPolicyPath,
+  programsPath,
   rwtPoolPath,
   sourcesConfigPath,
   tasteDir,
@@ -112,13 +113,12 @@ export const ConfigSchema = z.object({
   // numbers are env-only by-ear knobs.
   rwtEnabled: z.boolean().default(true),
   rwtPoolPath: z.string().default(() => rwtPoolPath()),
+  // The program schedule (spec 15 §2.3): weights, frozen names, the run on air.
+  programsPath: z.string().default(() => programsPath()),
 
   // --- listening taste (spec 14 §2.1/§2.2) -------------------------------- //
   sourcesPath: z.string().default(() => sourcesConfigPath()),
   tasteDir: z.string().default(() => tasteDir()),
-  rwtP: z.coerce.number().min(0).max(1).default(0.35),
-  rwtMinGap: z.coerce.number().int().nonnegative().default(1),
-  rwtMaxGap: z.coerce.number().int().nonnegative().default(4),
   rwtStaleHours: z.coerce.number().positive().default(6),
   rwtTtlHours: z.coerce.number().positive().default(48),
 
@@ -266,18 +266,12 @@ function playOrderFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
   return { playOrder: [...new Set([...parsed.data, ...PLAY_ORDER])] }
 }
 
-// The MURMUR_RWT_* numbers (spec 13 §2.6): the same warn-and-default posture,
-// omitted when unset so the schema default stands.
+// The MURMUR_RWT_* freshness numbers (spec 13 §2.6): the same warn-and-default
+// posture, omitted when unset so the schema default stands.
 function rwtFromEnv(env: NodeJS.ProcessEnv): Partial<Config> {
-  const p = envNumber(env, 'MURMUR_RWT_P', z.coerce.number().min(0).max(1))
-  const minGap = envNumber(env, 'MURMUR_RWT_MIN_GAP', z.coerce.number().int().nonnegative())
-  const maxGap = envNumber(env, 'MURMUR_RWT_MAX_GAP', z.coerce.number().int().nonnegative())
   const staleHours = envNumber(env, 'MURMUR_RWT_STALE_HOURS', z.coerce.number().positive())
   const ttlHours = envNumber(env, 'MURMUR_RWT_TTL_HOURS', z.coerce.number().positive())
   return {
-    ...(p !== undefined && { rwtP: p }),
-    ...(minGap !== undefined && { rwtMinGap: minGap }),
-    ...(maxGap !== undefined && { rwtMaxGap: maxGap }),
     ...(staleHours !== undefined && { rwtStaleHours: staleHours }),
     ...(ttlHours !== undefined && { rwtTtlHours: ttlHours }),
   }
@@ -358,6 +352,7 @@ export function parseCli(argv: string[], env: NodeJS.ProcessEnv = process.env): 
     memoryDir: join(dataRoot(env), 'memory'),
     musicPolicyPath: musicPolicyPath(env),
     rwtPoolPath: rwtPoolPath(env),
+    programsPath: programsPath(env),
     sourcesPath: sourcesConfigPath(env),
     tasteDir: tasteDir(env),
     ...rwtFromEnv(env),

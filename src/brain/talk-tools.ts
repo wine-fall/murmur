@@ -15,7 +15,6 @@ import type { StockRequest, StockSet } from '../support/stock.ts'
 
 const beatSchema = z.object({
   text: z.string().describe('the spoken beat, a few sentences'),
-  topic: z.string().optional().describe('optional 2-5 word key for anti-repeat'),
 })
 
 const beatsShape = {
@@ -29,8 +28,7 @@ export function cleanBeats(raw: z.infer<typeof beatSchema>[], count: number): Ta
   for (const b of raw) {
     const text = b.text.trim()
     if (!text) continue
-    const topic = b.topic?.trim()
-    beats.push({ text, ...(topic && { topic }) })
+    beats.push({ text })
     if (beats.length >= count) break
   }
   return beats
@@ -41,9 +39,8 @@ export function emitTalkBeatsTool(count: number, capture: (beats: TalkBeat[]) =>
     'emit_talk_beats',
     'Return your next spoken radio beats as an array, in order — each beat is ' +
       'an object with `text` (a few sentences of clean spoken text: no markup, ' +
-      'speaker labels, quotation marks, or stage directions) and an optional ' +
-      '`topic` (a 2-5 word key naming what the beat is about, for anti-repeat). ' +
-      'Calling this ends the task.',
+      'speaker labels, quotation marks, or stage directions). Calling this ends ' +
+      'the task.',
     beatsShape,
     async (args) => {
       const beats = cleanBeats(args.beats, count)

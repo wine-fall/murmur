@@ -100,6 +100,13 @@ export function rwtPoolPath(env: NodeJS.ProcessEnv = process.env): string {
   return join(cacheRoot(env), 'rwt.json')
 }
 
+// The program schedule (spec 15 §2.3): the weights, the frozen program names
+// and the run on the air. Under data/ — the names and the deal are the
+// station's character, not a cache.
+export function programsPath(env: NodeJS.ProcessEnv = process.env): string {
+  return join(dataRoot(env), 'programs.json')
+}
+
 // The mounted taste sources (spec 14 §2.1): beside voice.json because it is the
 // same kind of thing — re-obtainable configuration the listener can mount
 // again, and secret-bearing like it (a Spotify token, a Soda session).

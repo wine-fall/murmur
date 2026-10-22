@@ -1,4 +1,5 @@
-// The real-world topic pool (spec 13 §2.1), the roll (§2.3) and the off-loop
+// The real-world topic pool (spec 13 §2.1), what the programs read of it (spec
+// 15 §2.1) and the off-loop
 // refresh (§3.1): file-backed, expiring, single-flight, and never on the talk
 // path.
 
@@ -10,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { FetchedTopic, FetchTopicsRequest } from '../src/contracts.ts'
 import { RWT_FETCH_SYSTEM_PROMPT } from '../src/prompts/rwt.ts'
-import { fetchTopicsTask, RealWorldTopics, RwtPool, RwtRoll } from '../src/brain/rwt.ts'
+import { fetchTopicsTask, RealWorldTopics, RwtPool } from '../src/brain/rwt.ts'
 import { callTool, FakeHarness, until } from './fakes.ts'
 
 const HOUR = 3600
@@ -107,29 +108,8 @@ describe('RwtPool (spec 13 §2.1)', () => {
   })
 })
 
-describe('RwtRoll (spec 13 §2.3)', () => {
-  it('holds off until minGap and forces an offer at maxGap', () => {
-    const roll = new RwtRoll({ p: 1, minGap: 2, maxGap: 4, random: () => 0 })
-    expect(roll.roll()).toBe(false) // 1 batch since the last offer
-    expect(roll.roll()).toBe(true) // 2 — p wins
-    const never = new RwtRoll({ p: 0, minGap: 1, maxGap: 3, random: () => 0.99 })
-    expect(never.roll()).toBe(false)
-    expect(never.roll()).toBe(false)
-    expect(never.roll()).toBe(true) // 3 — guardrail
-    expect(never.roll()).toBe(false) // the counter reset
-  })
-
-  it('uses the injected RNG against p in between', () => {
-    const rolls = [0.1, 0.9]
-    const roll = new RwtRoll({ p: 0.35, minGap: 1, maxGap: 9, random: () => rolls.shift()! })
-    expect(roll.roll()).toBe(true)
-    expect(roll.roll()).toBe(false)
-  })
-})
-
 function feed(over: {
   fetch?: (req: FetchTopicsRequest) => Promise<FetchedTopic[]>
-  roll?: RwtRoll
   clock?: { now: number }
   covered?: () => readonly string[]
 } = {}) {
@@ -139,7 +119,6 @@ function feed(over: {
   const lines: string[] = []
   const rwt = new RealWorldTopics({
     pool,
-    roll: over.roll ?? new RwtRoll({ p: 1, minGap: 0, maxGap: 1, random: () => 0 }),
     brain: {
       fetchTopics: async (req) => {
         requests.push(req)
@@ -168,16 +147,20 @@ describe('RealWorldTopics (spec 13 §2.4 / §3.1)', () => {
     expect(lines.some((l) => l === 'rwt.pool fresh=2 used=0')).toBe(true)
   })
 
-  it('offers only when the roll lands and the pool has an unused entry', async () => {
-    const rolls = [0.99, 0.0]
-    const { rwt, lines } = feed({ roll: new RwtRoll({ p: 0.5, minGap: 0, maxGap: 9, random: () => rolls.shift()! }) })
-    expect(rwt.offer()).toBeNull() // pool empty: the roll is not even consumed
+  // spec 15 §2.1: the programs read the pool — a puzzle looks, a today takes.
+  it('fresh() lists the unused items without spending them; take(n) spends up to n', async () => {
+    const { rwt, pool, lines } = feed()
+    expect(rwt.fresh()).toEqual([])
+    expect(rwt.take(3)).toEqual([])
     rwt.maybeRefresh()
     await rwt.drain()
-    expect(rwt.offer()).toBeNull() // 0.99 > p
-    const offered = rwt.offer()
-    expect(offered?.title).toBe('A')
-    expect(lines).toContain(`rwt.offer ${offered?.id}`)
+    expect(rwt.fresh().map((t) => t.title)).toEqual(['A', 'B'])
+    expect(pool.counts()).toEqual({ fresh: 2, used: 0 })
+    const taken = rwt.take(3)
+    expect(taken.map((t) => t.title)).toEqual(['A', 'B'])
+    expect(pool.counts()).toEqual({ fresh: 0, used: 2 })
+    expect(rwt.fresh()).toEqual([])
+    expect(lines).toContain(`rwt.take ${taken[0]!.id}`)
   })
 
   it('a failed fetch costs one log line and leaves the pool as it was', async () => {

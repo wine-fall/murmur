@@ -78,6 +78,13 @@ that call has no hands. Consequences observed:
 
 ### 2.1 The steer tools (`src/brain/steer-tools.ts`)
 
+> **Amended 2026-10-15 (spec 15 §2.8).** A fifth action tool,
+> `request_program({ program, subject? })`, is offered when programs are
+> wired: free text maps to one of the five programs (and a subject only when
+> the listener named one); the run on the air ends with the reply, which is
+> its wrap, and the requested program is planned at once. A request that fits
+> no program is just answered. The steer prompt carries a matching bullet.
+
 Handed to `runTask` by the steer task builder. All are murmur-owned,
 in-process, and validated by zod schemas (03-01 isolation invariants apply
 unchanged). Availability is capability-gated: `switch_music` is only in the
