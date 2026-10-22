@@ -175,12 +175,24 @@ interface Brain {
 
 ### 2.3 The roll — `RwtRoll`
 
+> **Superseded 2026-10-15 (spec 15 §2.1).** The per-batch roll is deleted
+> with `RwtRoll`, `rwtP` / `rwtMinGap` / `rwtMaxGap` and their env knobs.
+> Items reach the air only through programs: *This Thing Today* takes 2–3 at
+> plan time (marked used and ledgered at the take, §3.7 unchanged) and needs
+> ≥ 2 fresh items to be drawn; *Things I Can't Figure Out* reads up to five
+> fresh items as its reality tie-in without spending them. The pool, the fetch
+> task, the refresh cadence and the knob stand.
+
 `RandomCadence`'s shape (spec 03-02 §2.3), one rung down: `{ p, minGap,
 maxGap, random }` over a counter of **talk batches since the last offer**.
 Never before `minGap` batches; always by `maxGap`; `p` in between. Defaults
 `p 0.35, minGap 1, maxGap 4`. Injected `random` for determinism.
 
 ### 2.4 The Director seam
+
+> **Superseded 2026-10-15 (spec 15 §2.1).** The Director only pokes
+> `maybeRefresh()`; `offer()` is gone. The pool's readers are `fresh()` and
+> `take(n)` on the program desk.
 
 ```ts
 // DirectorDeps
@@ -199,6 +211,10 @@ rwt?: {
 - Absent (stub runs, tests): no roll, no refresh, no field.
 
 ### 2.5 The prompt seam
+
+> **Superseded 2026-10-15 (spec 15 §2.1).** `ContextPack.rwt` and `rwtLine()`
+> are deleted. The host-not-newsreader register they carried lives in the
+> *This Thing Today* planning brief (`src/prompts/program.ts`).
 
 - `ContextPack.rwt?: { readonly title: string; readonly gist: string }`.
 - `rwtLine(ctx)` renders the item **on the desk for this stretch**, then the

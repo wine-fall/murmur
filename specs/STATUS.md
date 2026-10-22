@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-10-08 (spec 14 §5.10, controlled-clock coverage for the session invitation)_
+_Last updated: 2026-10-15 (spec 15 programs built on `box/programs`, stacked on the usage-logging branch)_
 
 ## Where we are
 
@@ -22,7 +22,13 @@ bed + spec 05 memory (v1.5 — `05-01` recall & forgetting), with 04, 06, 07, 10
 smokes passed per phase. **Each spec's own status header records what its build
 realized and the PR that landed it.** Everything open is under **Open**.
 
-**In flight: spec 03-03 §7.2, the default female voice.** It was a clone of a
+**In flight: spec 15, programs.** Every self-initiated minute now belongs to
+one of five programs (planning call + one beat call per outline point),
+stacked on the per-call usage log and the one-model change (DESIGN §7 row 3).
+Built and unit-green on `box/programs`; the by-ear criteria (§5.9–5.10) are
+the user's.
+
+**Also in flight: spec 03-03 §7.2, the default female voice.** It was a clone of a
 clone of a 5 s render; it is now a first-generation clone of a real recording,
 and `female-v2.mp3` is the matching >=20 s preset clip. #295 carries the ear,
 #294 the same debt on the male side. Stock lines (#292) and discovery
