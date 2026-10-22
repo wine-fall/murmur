@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { Brain, ContextPack, ProgramCue, SteerActions, SteerBrain, TalkBeat, Turn } from '../src/contracts.ts'
 import { EveryNCadence } from '../src/director/cadence.ts'
-import { Director, type DirectorDeps } from '../src/director/director.ts'
+import { CODA_LEAD_MIN_S, Director, type DirectorDeps } from '../src/director/director.ts'
 import type { AnchorId, Scheduler } from '../src/director/scheduler.ts'
 import { InProcessMemoryStore } from '../src/memory/memory.ts'
 import type { Plan, ProgramId } from '../src/programs/catalogue.ts'
@@ -177,6 +177,29 @@ describe('programs with music (spec 15 §2.10)', () => {
     expect(brain.contexts[1]!.music).toMatchObject({ kind: 'playing' })
     player.handles[1]!.end()
     await run
+  })
+
+  // spec 15 §2.10: the coda's heir. The next point's first beat, written as
+  // the song started, rides the outro when it is ready; it is a program beat,
+  // so it counts toward its point.
+  it("the next point's first beat rides the outro", async () => {
+    const { host, player, source, director } = build({ withMusic: true, random: () => 0 })
+    source.picks = [
+      pickOf('https://stream/fill', { title: 'Fill' }),
+      pickOf('https://stream/s1', { title: 'After', durationS: CODA_LEAD_MIN_S + 0.1 }),
+      ...source.picks,
+    ]
+    const run = director.run(5)
+    await until(() => player.handles.length === 1, 'fill song')
+    player.handles[0]!.end()
+    await until(() => player.handles.length === 2, 'song after point 0')
+    await until(() => host.radio.includes('s1:P1.1'), 'point 1 rode the outro')
+    expect(player.handles[1]!.endedNaturally).toBe(false) // still playing under it
+    expect(host.debugs).toContain('coda rides the outro')
+    player.handles[1]!.end()
+    await run
+    expect(host.radio.filter((t) => t === 's1:P1.1')).toHaveLength(1)
+    expect(host.radio.at(-1)).toBe('s1:P1.2')
   })
 
   it('the pick is told the program on the air', async () => {
