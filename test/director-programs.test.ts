@@ -105,7 +105,7 @@ function build(over: Partial<DirectorDeps> & { withMusic?: boolean; subjects?: s
     ...(withMusic && { music: { source, cadence: new EveryNCadence(9), engine: player } }),
     ...rest,
   }
-  return { brain, memory, host, player, source, harness, programs, director: new Director(deps) }
+  return { brain, memory, host, player, source, harness, programs, knobs, director: new Director(deps) }
 }
 
 describe('programs on a talk-only air', () => {
@@ -252,6 +252,32 @@ describe('replies and requests inside a program', () => {
     expect(after[0]).toBe('a requested poem:P0.1')
     expect(after.some((t) => t.startsWith('s1:'))).toBe(false)
     expect(memory.recentPrograms(9).at(-1)).toMatchObject({ label: 'a requested poem', requested: true })
+  })
+})
+
+describe('the song slot after a point (box music smoke)', () => {
+  // Seen live: the song after a point was not had (music off, or no pick),
+  // the next point opened, and the still-owed song cut in after that point's
+  // first beat — mid-point. The slot belongs to the boundary right after the
+  // point's last beat; once another beat airs, it has passed.
+  it('a song missed after a point is not played in the middle of the next one', async () => {
+    const { host, player, knobs, director } = build({ withMusic: true })
+    knobs.musicEnabled = false
+    player.auto = false
+    const run = director.run(5)
+    // Step the manual player one clip at a time until point 1's first beat is on.
+    for (let i = 0; i < 400 && host.radio.length < 3; i++) {
+      if (player.playing) player.finish()
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    expect(host.radio.at(-1)).toBe('s1:P1.1')
+    knobs.musicEnabled = true
+    const pump = setInterval(() => player.finish(), 5)
+    await until(() => player.handles.length === 1, 'a song')
+    clearInterval(pump)
+    expect(host.radio.at(-1)).toBe('s1:P1.2')
+    player.handles[0]!.end()
+    await pumped(player, run)
   })
 })
 

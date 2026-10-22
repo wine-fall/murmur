@@ -955,6 +955,10 @@ export class Director {
     }
     const aired = this.pointProgress?.index === point.index ? this.pointProgress.aired + 1 : 1
     this.pointProgress = { index: point.index, aired }
+    // The song slot is the boundary right after a point's last beat: one that
+    // was missed (music off, no pick) has passed once another beat airs, and
+    // must not cut into the middle of the next point.
+    this.songOwed = false
     if (point.last) {
       desk.pointAired(point.index)
       this.pointProgress = null
