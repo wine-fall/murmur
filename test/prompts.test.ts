@@ -1366,3 +1366,12 @@ describe('the single-beat fallback keeps the program', () => {
     expect(p).not.toContain('emit_talk_beats')
   })
 })
+
+describe('the steer prompt offers program requests only when wired (spec 15 §2.8)', () => {
+  const opts = { musicWired: false, shutdownArmed: false, settingsWired: false, memoryWired: false }
+  it('names request_program when programs are wired', () => {
+    const p = buildSteerPrompt('read me a poem', { persona: 'p', recent: [] }, { ...opts, programsWired: true })
+    expect(p).toContain('request_program')
+    expect(buildSteerPrompt('read me a poem', { persona: 'p', recent: [] }, opts)).not.toContain('request_program')
+  })
+})

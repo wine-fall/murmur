@@ -50,6 +50,15 @@ const STEER_SETTINGS_RULE =
   '"mute"). For the language, pass the language name; pass an empty string to ' +
   'return to its own default.\n'
 
+// A program request (spec 15 §2.8): the reply that answers it is the current
+// program's wrap, so the model is told the program on the air ends there.
+const STEER_PROGRAM_RULE =
+  '- A request for one of the programs, or for what one of them does (a ' +
+  'philosophy question, the news, an artist or album, a poem, where something ' +
+  'comes from) -> call request_program, with `subject` only if they named ' +
+  'one. The program on the air ends with your reply: wrap it in a line or two ' +
+  'and say what comes next.\n'
+
 const STEER_REPLY_RULE =
   '- Anything the tools above do not cover is just conversation — no action tools.\n\n' +
   'Always finish by calling submit_reply with your spoken reply, in character, ' +
@@ -110,6 +119,7 @@ export function buildSteerPrompt(
     shutdownArmed: boolean
     settingsWired: boolean
     memoryWired: boolean
+    programsWired?: boolean
   },
 ): string {
   const transcript = renderTranscript(ctx, userText)
@@ -120,6 +130,7 @@ export function buildSteerPrompt(
     `${opts.musicWired ? STEER_SWITCH_RULE : ''}` +
     `${opts.settingsWired ? STEER_SETTINGS_RULE : ''}` +
     `${opts.memoryWired ? STEER_MEMORY_RULE : ''}` +
+    `${opts.programsWired === true ? STEER_PROGRAM_RULE : ''}` +
     `${STEER_END_RULE}${STEER_REPLY_RULE}${opts.memoryWired ? MEMORY_GROUNDING : ''}`
   const armed = opts.shutdownArmed ? `\n\n${STEER_ARMED_NOTE}` : ''
   return (

@@ -35,6 +35,7 @@ export class SteerResponder implements SteerBrain {
         musicWired: actions.music !== undefined,
         settingsWired: actions.settings !== undefined,
         memoryWired: actions.memory !== undefined,
+        programsWired: actions.programs !== undefined,
         shutdownArmed: actions.shutdown.armed(),
       }),
       model: this.deps.model,
