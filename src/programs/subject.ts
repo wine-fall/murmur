@@ -17,7 +17,7 @@ export function normalizeSubject(subject: string): string {
 // What a plan is remembered by: the lead thinkers for `puzzle` (the question
 // itself is never deduped), the subject for the others, nothing for `today`
 // (the real-world ledger dedupes its items).
-export function cooldownKeys(id: ProgramId, plan: { subject: string; leads?: readonly string[] }): string[] {
+export function cooldownKeys(id: ProgramId, plan: { subject: string; leads?: readonly string[] | undefined }): string[] {
   if (id === 'today') return []
   const raw = id === 'puzzle' ? (plan.leads ?? []) : [plan.subject]
   return raw.map(normalizeSubject).filter((key) => key !== '')

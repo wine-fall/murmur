@@ -99,6 +99,26 @@ export type ContextPack = {
   // yet (spec 04 §3.6). The transcript is no longer empty, so the opening fact
   // would otherwise be dropped — and the host would open the program twice.
   readonly opening?: boolean
+  // The program point this beat call says (spec 15 §2.5). Absent = no program
+  // on the air (a stub run): the free-talk prompt.
+  readonly program?: ProgramCue
+}
+
+// One outline point to say, with where it sits in its program (spec 15 §2.5).
+export type ProgramCue = {
+  readonly name: string
+  readonly subject: string
+  readonly angle: string
+  readonly outline: readonly string[] // every point's title
+  readonly index: number // the point being said, 0-based
+  readonly point: { readonly title: string; readonly content: string }
+  readonly beats: readonly [number, number] // how many beats this call returns
+  readonly opening?: true // the program opens with this point
+  readonly closing?: true // and ends with this one
+  readonly resumed?: true // the first point after a relaunch picked the program up
+  readonly returning?: true // the listener just spoke; back to the point
+  readonly afterSong?: true // the first beat goes out as a song ends
+  readonly anchor?: string // a time anchor folded into the opening
 }
 
 // --- real-world topics (spec 13) ------------------------------------------ //
@@ -196,6 +216,8 @@ export type ProgramRecord = {
   readonly id: string
   readonly label: string
   readonly keys: readonly string[]
+  // The thinkers who led a puzzle, as said — what the planner is told to avoid.
+  readonly leads?: readonly string[]
   readonly requested?: boolean
 }
 

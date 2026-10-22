@@ -35,6 +35,7 @@ const ProgramRecordSchema = z.object({
   id: z.string(),
   label: z.string(),
   keys: z.array(z.string()),
+  leads: z.array(z.string()).optional(),
   requested: z.boolean().optional(),
 })
 
@@ -42,8 +43,8 @@ function parseProgram(key: string): ProgramRecord | null {
   try {
     const parsed = ProgramRecordSchema.safeParse(JSON.parse(key))
     if (!parsed.success) return null
-    const { requested, ...rest } = parsed.data
-    return requested === undefined ? rest : { ...rest, requested }
+    const { leads, requested, ...rest } = parsed.data
+    return { ...rest, ...(leads !== undefined && { leads }), ...(requested !== undefined && { requested }) }
   } catch {
     return null
   }
