@@ -34,7 +34,9 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const { cookies, released } = jars()
     const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), cookies })
     const found = await provider.search('city pop', 5, 'bilibili')
-    expect(calls[0]).toEqual(['--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'])
+    // The Referer is what yt-dlp's own bilisearch request lacks, and without
+    // it Bilibili's risk control answers 412 about half the time (measured).
+    expect(calls[0]).toEqual(['--add-headers', 'Referer:https://www.bilibili.com/', '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'])
     expect(found[0]).toMatchObject({ catalogue: 'bilibili', ref: 'https://www.bilibili.com/video/BV1' })
     await provider.search('city pop', 5)
     expect(calls[1]).toEqual(['--dump-json', '--flat-playlist', 'ytsearch5:city pop'])
@@ -89,8 +91,8 @@ describe('YtDlpMusicProvider with mounted sources', () => {
     const blocked = 'ERROR: city pop: Unable to download JSON metadata: HTTP Error 412: Precondition Failed'
     expect((await failing(blocked).search('city pop', 5, 'bilibili'))[0]).toMatchObject({ catalogue: 'bilibili' })
     expect(calls).toEqual([
-      ['--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
-      ['--cookies', '/jar/bilibili', '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
+      ['--add-headers', 'Referer:https://www.bilibili.com/', '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
+      ['--cookies', '/jar/bilibili', '--add-headers', 'Referer:https://www.bilibili.com/', '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:city pop'],
     ])
     expect(released).toEqual(['bilibili'])
     // Any other failure, and any YouTube search, stays one anonymous call.
@@ -566,5 +568,70 @@ describe('the digest in the prompts (spec 14 §2.3/§3.3)', () => {
     expect(tasteBlock({ persona: 'p', recent: [] })).toBe('')
     expect(tasteBlock({ persona: 'p', recent: [], taste: '' })).toBe('')
     expect(buildNextTalksPrompt({ persona: 'p', recent: [] }, 2)).not.toContain('What the listener keeps')
+  })
+})
+
+// Bilibili through its own web API first (spec 14 §2.4/§2.5): the search page
+// and the anonymous play url both skip yt-dlp's page extraction, which
+// Bilibili's risk control answers 412; yt-dlp stays as the fallback for both.
+describe('YtDlpMusicProvider with the Bilibili web client', () => {
+  const candidate: TrackCandidate = { ref: 'https://www.bilibili.com/video/BV1', title: 't', uploader: 'up', durationS: 281, extra: { tags: ['ai rap'] }, catalogue: 'bilibili' }
+  const clip = { source: 'https://cdn/a192', durationS: 281, headers: { Referer: 'https://www.bilibili.com/' } }
+  const BILI_REF = 'https://www.bilibili.com/video/BV1'
+  const REFERER = ['--add-headers', 'Referer:https://www.bilibili.com/']
+
+  it('searches Bilibili through the client and never spawns yt-dlp for it', async () => {
+    const calls: string[][] = []
+    const searches: [string, number][] = []
+    const bilibili = { search: async (q: string, n: number) => (searches.push([q, n]), [candidate]), playUrl: async () => clip }
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), bilibili })
+    expect(await provider.search('rain song', 3, 'bilibili')).toEqual([candidate])
+    expect(searches).toEqual([['rain song', 3]])
+    expect(calls).toEqual([])
+  })
+
+  it('falls back to a yt-dlp bilisearch, with the Referer, when the client search fails', async () => {
+    const calls: string[][] = []
+    const bilibili = { search: async (): Promise<TrackCandidate[]> => { throw new Error('bilibili /x/web-interface/search/type: HTTP 412') }, playUrl: async () => clip }
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), hit), bilibili })
+    expect((await provider.search('rain song', 5, 'bilibili'))[0]).toMatchObject({ catalogue: 'bilibili', ref: BILI_REF })
+    expect(calls).toEqual([[...REFERER, '--dump-json', '--no-playlist', '--ignore-errors', 'bilisearch5:rain song']])
+  })
+
+  it('plays a Bilibili ref through the anonymous play url first, the jar untouched', async () => {
+    const calls: string[][] = []
+    const { cookies, released } = jars()
+    const played: string[] = []
+    const bilibili = { search: async () => [candidate], playUrl: async (ref: string) => (played.push(ref), clip) }
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n'), cookies, bilibili })
+    expect(await provider.resolve(BILI_REF)).toEqual({ source: 'https://cdn/a192', kind: 'music', durationS: 281, headers: { Referer: 'https://www.bilibili.com/' } })
+    expect(played).toEqual([BILI_REF])
+    expect(calls).toEqual([])
+    expect(released).toEqual([])
+    // A segment ref still plays the chapter it names.
+    const segment = await provider.resolve(`${BILI_REF}#t=30,90`)
+    expect(segment).toMatchObject({ durationS: 60, segment: { startS: 30, endS: 90 } })
+    expect(played[1]).toBe(BILI_REF)
+  })
+
+  it('falls back to the yt-dlp resolve with the jar when the play url fails', async () => {
+    const calls: string[][] = []
+    const { cookies, released } = jars()
+    const bilibili = { search: async () => [candidate], playUrl: async (): Promise<typeof clip> => { throw new Error('bilibili /x/player/playurl: HTTP 412') } }
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), '183\nhttps://s\n'), cookies, bilibili })
+    expect((await provider.resolve(BILI_REF)).source).toBe('https://s')
+    expect(calls[0]).toEqual(['-f', 'bestaudio/best', '--print', '%(duration)s', '--print', 'urls', '--print', '%(http_headers)j', '--cookies', '/jar/bilibili', BILI_REF])
+    expect(released).toEqual(['bilibili'])
+  })
+
+  it('never asks the Bilibili client about another host', async () => {
+    const calls: string[][] = []
+    let asked = 0
+    const bilibili = { search: async () => (asked++, [candidate]), playUrl: async () => (asked++, clip) }
+    const provider = new YtDlpMusicProvider({ run: async (args) => (calls.push(args), args[0] === '-f' ? '183\nhttps://s\n' : hit), bilibili })
+    await provider.search('q', 5, 'youtube')
+    await provider.resolve('https://youtube.com/watch?v=a')
+    expect(asked).toBe(0)
+    expect(calls).toHaveLength(2)
   })
 })

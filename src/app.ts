@@ -65,7 +65,7 @@ import { anonymousNetease, buildSource, CookieJars, cookieLeaser, dailyFeeds, de
 import { runSources } from './music/sources/flow.ts'
 import { TasteRefresher } from './music/sources/refresh.ts'
 import { SourcesStore } from './music/sources/store.ts'
-import { BilibiliSpace } from './music/sources/wbi.ts'
+import { BilibiliWeb } from './music/sources/wbi.ts'
 import { SOURCE_NAMES, TasteReader } from './music/sources/taste.ts'
 import { detectLanguage } from './locale.ts'
 import { loadPersona, personaLanguage, personaLine } from './brain/persona.ts'
@@ -368,8 +368,13 @@ function buildMusic(
   // With taste wired the provider leases the mounted host's jar per call
   // (spec 14 §2.5) and can search NetEase; without it, it is exactly the
   // cookie-less provider it always was.
+  // Bilibili's own web API, anonymous (spec 14 §2.4/§2.5): the search page and
+  // the play url the provider tries before yt-dlp, and the space listing the
+  // curated channels read. One instance, so one handshake serves all three.
+  const bilibili = new BilibiliWeb()
   const provider = new YtDlpMusicProvider({
     binary: config.ytdlpCmd,
+    bilibili,
     neighbours: { search: (query, limit) => neighbours.search(query, limit) },
     // The mood pool reads anonymously (spec 14 3.10), so it is wired for a
     // listener who has mounted nothing.
@@ -384,7 +389,7 @@ function buildMusic(
   // from the channels themselves, both off the live loop and both cached.
   const ytdlp = ytdlpRunner(config.ytdlpCmd)
   const channelPool = new ChannelPool({
-    uploads: channelUploads({ run: ytdlp, space: new BilibiliSpace() }),
+    uploads: channelUploads({ run: ytdlp, space: bilibili }),
     ...(host.debug !== undefined && { debug: host.debug.bind(host) }),
   })
   const source = new MusicProgrammer({
