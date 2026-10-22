@@ -783,6 +783,52 @@ describe('usage metering', () => {
     expect(seen).toEqual([{ input: 3, output: 280, cacheRead: 500, cacheWrite: 40 }])
   })
 
+  // codex review: waiting for the usage tail must never cost the result the
+  // task already finished with — a stream that throws or stalls after the
+  // finishing tool call still hands the result back, with what was metered.
+  it('runHarnessTask keeps a finished result when the stream throws before message_stop', async () => {
+    const event = (e: object) => ({ type: 'stream_event', parent_tool_use_id: null, event: e }) as unknown as SDKMessage
+    const seen: Usage[] = []
+    let finish: ((value: string) => void) | undefined
+    const fakeQuery = () =>
+      (async function* () {
+        yield event({ type: 'message_start', message: { id: 'a', usage: u(3, 1, 500, 40) } })
+        finish?.('done')
+        yield call('a', u(3, 1, 500, 40))
+        throw new Error('stream died')
+      })()
+    const task = { category: 'beat' as const, systemPrompt: 's', prompt: 'p', model: 'm', maxTurns: 2, tools: (f: (v: string) => void) => ((finish = f), []) }
+    expect(await runHarnessTask(fakeQuery as never, task, (usage) => seen.push(usage))).toBe('done')
+    expect(seen).toEqual([{ input: 3, output: 1, cacheRead: 500, cacheWrite: 40 }])
+  })
+
+  it('runHarnessTask bounds the wait for the usage tail after the result is in', async () => {
+    const event = (e: object) => ({ type: 'stream_event', parent_tool_use_id: null, event: e }) as unknown as SDKMessage
+    let finish: ((value: string) => void) | undefined
+    const fakeQuery = () =>
+      (async function* () {
+        yield event({ type: 'message_start', message: { id: 'a', usage: u(3, 1) } })
+        finish?.('done')
+        yield call('a', u(3, 1))
+        await new Promise(() => {}) // stalls forever
+      })()
+    const task = { category: 'beat' as const, systemPrompt: 's', prompt: 'p', model: 'm', maxTurns: 2, tools: (f: (v: string) => void) => ((finish = f), []) }
+    const started = Date.now()
+    expect(await runHarnessTask(fakeQuery as never, task, undefined, 50)).toBe('done')
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('generateText reports the usage it saw even when the stream throws', async () => {
+    const seen: Usage[] = []
+    const fakeQuery = () =>
+      (async function* () {
+        yield call('a', u(5, 9), 'partial')
+        throw new Error('stream died')
+      })()
+    await expect(generateText(fakeQuery as never, 's', 'p', 'm', undefined, (usage) => seen.push(usage))).rejects.toThrow('stream died')
+    expect(seen).toEqual([{ input: 5, output: 9, cacheRead: 0, cacheWrite: 0 }])
+  })
+
   it('runGuideSession reports once per turn', async () => {
     const seen: Usage[] = []
     const fakeQuery = () =>

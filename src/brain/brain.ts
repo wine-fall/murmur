@@ -10,6 +10,7 @@
 // schema-validated args, never scraped free text.
 
 import { readFileSync } from 'node:fs'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import {
   createSdkMcpServer,
@@ -316,6 +317,11 @@ export function formatUsage(r: UsageRecord): string {
 
 type OnUsage = (usage: Usage) => void
 
+// How long a finished task waits for its call's final usage before it hands
+// the result over anyway (measured: the delta trails the tool call by well
+// under a second).
+const USAGE_TAIL_MS = 2_000
+
 type QueryFn = (params: {
   prompt: string | AsyncIterable<SDKUserMessage>
   options?: Options
@@ -452,7 +458,12 @@ function toolResultText(content: string | { type: string; text?: string }[] | un
 // its tool_use block closes, ahead of the message_delta carrying the call's
 // final usage, so the break waits for that call to close. Factored over an
 // injectable query like the guide loop.
-export async function runHarnessTask<T>(queryFn: QueryFn, task: Task<T>, onUsage?: OnUsage): Promise<T | null> {
+export async function runHarnessTask<T>(
+  queryFn: QueryFn,
+  task: Task<T>,
+  onUsage?: OnUsage,
+  tailMs = USAGE_TAIL_MS,
+): Promise<T | null> {
   let captured: T | null = null
   const tools = task.tools((value) => (captured = value))
   const server = createSdkMcpServer({ name: 'murmur', tools })
@@ -462,12 +473,22 @@ export async function runHarnessTask<T>(queryFn: QueryFn, task: Task<T>, onUsage
     prompt: task.prompt,
     options: agenticOptions(task.systemPrompt, task.model, server, allowed, task.maxTurns, task.builtins, task.thinking),
   })
+  const iterator = q[Symbol.asyncIterator]()
+  // Once the result is in, the usage tail is best-effort: bounded by a
+  // deadline, and a stream that dies in it never costs the result.
+  let deadline: Promise<'late'> | null = null
   try {
-    for await (const message of q) {
-      meter.observe(message)
+    while (true) {
+      if (captured !== null && deadline === null) deadline = sleep(tailMs, 'late' as const, { ref: false })
+      const step = deadline === null ? await iterator.next() : await Promise.race([iterator.next(), deadline])
+      if (step === 'late' || step.done === true) break
+      meter.observe(step.value)
       if (captured !== null && meter.settled()) break
     }
+  } catch (err) {
+    if (captured === null) throw err
   } finally {
+    void iterator.return?.().catch(() => {})
     const usage = meter.drain()
     if (usage !== null) onUsage?.(usage)
   }
@@ -563,15 +584,19 @@ export async function generateText(
   signal?.addEventListener('abort', () => abortController.abort(signal.reason), { once: true })
   const parts: string[] = []
   const meter = new UsageMeter()
-  for await (const message of queryFn({ prompt, options: { ...isolatedOptions(persona, model), abortController } })) {
-    meter.observe(message)
-    if (message.type !== 'assistant') continue
-    for (const block of message.message.content) {
-      if (block.type === 'text' && block.text) parts.push(block.text)
+  try {
+    for await (const message of queryFn({ prompt, options: { ...isolatedOptions(persona, model), abortController } })) {
+      meter.observe(message)
+      if (message.type !== 'assistant') continue
+      for (const block of message.message.content) {
+        if (block.type === 'text' && block.text) parts.push(block.text)
+      }
     }
+  } finally {
+    // A call that failed or was cut still spent what it spent.
+    const usage = meter.drain()
+    if (usage !== null) onUsage?.(usage)
   }
-  const usage = meter.drain()
-  if (usage !== null) onUsage?.(usage)
   if (signal?.aborted) throw aborted()
   const text = parts.join('').trim()
   if (!text) throw new Error('ClaudeBrain produced no text (check Claude Code login / network)')
