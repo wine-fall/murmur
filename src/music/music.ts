@@ -8,18 +8,22 @@
 // measured ~10-17s per search; flat is ~2s) whose entries still carry the
 // judging signal (title, uploader, duration, view_count), so the brain can
 // reject junk (hour-long loops, low-quality re-uploads) and prefer official
-// audio. Bilibili searches through `bilisearch{limit}:` with full extraction,
-// because its flat entries carry none of that signal; NetEase
-// has no yt-dlp search, so a mounted NetEase client answers that catalogue
-// (spec 14 §2.8). Searching is anonymous for both — Bilibili's risk control
-// can answer a signed-in search 412, and a 412 on the anonymous one is retried
-// once with the jar — and so is YouTube PLAYBACK: under a
-// signed-in web client yt-dlp skips the formats it can hand ffmpeg and the
-// URL it prints answers 403. The jar stays where it earns its keep: the
-// taste reads, and Bilibili/NetEase playback (spec 14 §2.5). resolve runs `-f bestaudio/best` with `--print` and returns a
-// STREAM URL plus the track's length, never a download (master decision A);
-// Phase 3's engine decodes it, and spec 10 §3.3's rail counts against the
-// length.
+// audio. Bilibili is answered by the site's own search page first
+// (`BilibiliWeb`, spec 14 §2.4) — titled in one request, where yt-dlp's
+// `bilisearch{limit}:` needs full extraction (its flat entries carry no
+// title) and Bilibili's risk control answers 412 to the pages that opens.
+// yt-dlp is the fallback for it, with the Referer its own request lacks and,
+// on a 412, one retry with the jar. NetEase has no yt-dlp search, so a
+// mounted NetEase client answers that catalogue (spec 14 §2.8). Searching is
+// anonymous throughout — and so is YouTube PLAYBACK: under a signed-in web
+// client yt-dlp skips the formats it can hand ffmpeg and the URL it prints
+// answers 403. Bilibili playback is anonymous first too, through the site's
+// pagelist + playurl (spec 14 §2.5), with yt-dlp and the jar as the fallback.
+// The jar stays where it earns its keep: the taste reads, NetEase/QQ Music
+// playback, and the Bilibili fallback. resolve runs `-f bestaudio/best` with
+// `--print` and returns a STREAM URL plus the track's length, never a download
+// (master decision A); Phase 3's engine decodes it, and spec 10 §3.3's rail
+// counts against the length.
 //
 // yt-dlp's JSON is an untrusted boundary, so every hit is zod-parsed and a hit
 // that does not fit is skipped rather than coerced. Its stderr is read once,
@@ -35,6 +39,12 @@ import type { AudioClip, Catalogue, MusicProvider, TrackCandidate } from '../con
 import { classifyAuthFailure, rightsMiss, SourceAuthError, TrackRightsError } from './sources/auth.ts'
 import { BrowserCookieError, type CookieLease } from './sources/cookies.ts'
 import { sourceOfRef, type CookieSource } from './sources/store.ts'
+import { BILIBILI_REFERER, type PlayUrl } from './sources/wbi.ts'
+
+// What yt-dlp's own bilisearch request lacks: without the Referer, Bilibili's
+// risk control answers the search API 412 about half the time (measured
+// 2026-10-22, 4/8 bare vs 8/8 with it).
+export const BILIBILI_REFERER_ARGS = ['--add-headers', `Referer:${BILIBILI_REFERER}`]
 
 const debug = debuglog('murmur')
 const run = promisify(execFile)
@@ -162,6 +172,10 @@ export function ytdlpFailureText(err: unknown): string {
 // mounted.
 export type ClientCatalogue = { search(query: string, limit: number): Promise<TrackCandidate[]> }
 
+// Bilibili's own web API (spec 14 §2.4/§2.5): the search page and the
+// anonymous play url, each tried before yt-dlp. Absent = yt-dlp alone.
+export type BilibiliCatalogue = ClientCatalogue & { playUrl(ref: string): Promise<PlayUrl> }
+
 // The cookie seam (spec 14 §2.5): a leased jar for a mounted cookie source
 // (its `args` ride the call, `release` runs after), null when that source
 // is not mounted. Absent = no cookie ever: today's arguments byte for byte.
@@ -171,6 +185,7 @@ export type YtDlpMusicProviderOptions = {
   binary?: string
   run?: YtDlpRunner
   cookies?: CookieLeaser
+  bilibili?: BilibiliCatalogue
   netease?: ClientCatalogue
   qqmusic?: ClientCatalogue
   // The mood pool (spec 14 3.10): playlists other people keep, read
@@ -261,6 +276,16 @@ export class YtDlpMusicProvider implements MusicProvider {
       const stdout = await this.run(['--dump-json', '--flat-playlist', `ytsearch${limit}:${query}`])
       return parseSearchOutput(stdout, limit).map((c) => ({ ...c, catalogue }))
     }
+    // Bilibili's own search page answers first: titled in one request, where
+    // yt-dlp's path below opens every hit's page. A refused read is logged
+    // and yt-dlp takes over — the page is the fallback, not the verdict.
+    if (this.opts.bilibili !== undefined) {
+      try {
+        return await this.opts.bilibili.search(query, limit)
+      } catch (err) {
+        debug('music.bilibili search api failed, yt-dlp next: %s', String(err))
+      }
+    }
     // A flat bilisearch entry carries no title, duration or uploader, so
     // Bilibili pays for full extraction (~12 s for five hits, measured) where
     // YouTube's flat page already holds the judging signal. Full extraction
@@ -268,7 +293,7 @@ export class YtDlpMusicProvider implements MusicProvider {
     // to one entry instead of every part crowding out the other hits, and
     // --ignore-errors lets one dead video fail alone — the exit status is
     // still non-zero, so the hits it did print are read off the failure.
-    const args = ['--dump-json', '--no-playlist', '--ignore-errors', `bilisearch${limit}:${query}`]
+    const args = [...BILIBILI_REFERER_ARGS, '--dump-json', '--no-playlist', '--ignore-errors', `bilisearch${limit}:${query}`]
     const search = (cookie: string[]): Promise<string> =>
       this.run([...cookie, ...args]).catch((err: unknown) => {
         const printed = typeof err === 'object' && err !== null && 'stdout' in err && typeof err.stdout === 'string' ? err.stdout : ''
@@ -310,17 +335,30 @@ export class YtDlpMusicProvider implements MusicProvider {
     // reaches a resolve — except as the second chance for a video that says,
     // in words classifyAuthFailure knows, that it wants a login.
     const source = sourceOfRef(ref)
-    const printed = await (source === 'youtube'
-      ? this.withCookie(null, dump).catch(async (err: unknown) => {
-          if (classifyAuthFailure(ytdlpFailureText(err)) === null) throw err
-          // Only a jar in hand is worth a second extraction: repeating the
-          // same anonymous arguments cannot answer a login wall.
-          const lease = await this.leaseFor(source)
-          if (lease === null) throw err
-          return this.withLease(source, lease, dump)
-        })
-      : this.withCookie(source, dump))
-    const { source: streamUrl, durationS, headers } = parseResolveOutput(printed)
+    // Bilibili plays anonymously through its own play url first: no page
+    // opened, no jar leased. The yt-dlp road below is its fallback — and the
+    // only road to the tiers a login unlocks.
+    const direct =
+      source === 'bilibili' && this.opts.bilibili !== undefined
+        ? await this.opts.bilibili.playUrl(ref).catch((err: unknown) => {
+            debug('music.bilibili playurl failed, yt-dlp next: %s', String(err))
+            return null
+          })
+        : null
+    const { source: streamUrl, durationS, headers } =
+      direct ??
+      parseResolveOutput(
+        await (source === 'youtube'
+          ? this.withCookie(null, dump).catch(async (err: unknown) => {
+              if (classifyAuthFailure(ytdlpFailureText(err)) === null) throw err
+              // Only a jar in hand is worth a second extraction: repeating the
+              // same anonymous arguments cannot answer a login wall.
+              const lease = await this.leaseFor(source)
+              if (lease === null) throw err
+              return this.withLease(source, lease, dump)
+            })
+          : this.withCookie(source, dump)),
+      )
     // On a segment clip the length that matters is the chapter's, never the
     // two-hour upload's: everything downstream (the coda timing, the announce,
     // the talk-ahead) reads durationS and knows nothing about segments.

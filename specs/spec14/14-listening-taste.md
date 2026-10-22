@@ -389,8 +389,20 @@ catalogue: z.enum(['youtube', 'bilibili', 'netease', 'qqmusic', 'channels']).opt
 - `MusicProvider.search(query, limit, catalogue?)` — the third argument is
   additive; existing callers unchanged.
 - **YouTube**: `ytsearch{N}:` as today.
-- **Bilibili**: `bilisearch{N}:` through yt-dlp (`BiliBiliSearch`), flat, and
-  anonymous — a signed-in search trips Bilibili's risk control (§2.5).
+- **Bilibili**: the site's own search page first
+  (`BilibiliWeb.search`, `src/music/sources/wbi.ts`): one anonymous request
+  to `x/web-interface/search/type` with the web player's User-Agent, Referer
+  and a site-issued `buvid3`, answering titled candidates whose `extra` also
+  carries `tags` (string list) and `zone` (the typename) — the only fields in
+  which a video says what it is, an AI-made song included. yt-dlp's
+  `bilisearch{N}:` is the **fallback** when that read throws (risk control,
+  a shape drift): full extraction, anonymous, with
+  `--add-headers Referer:https://www.bilibili.com/` — the header yt-dlp's own
+  search request lacks, without which the search API answers 412 about half
+  the time (measured 2026-10-22: 4/8 bare, 8/8 with it) — and one retry with
+  the jar on a 412 (§2.5). The page path opens every hit's own page, which a
+  plain machine is refused anonymously (yt-dlp "Unable to extract initial
+  state"), so the fallback mostly earns its keep with a mounted jar.
 - **NetEase**: the NetEase client's `search(query, limit)` (§2.7) → candidates
   whose `ref` is `https://music.163.com/#/song?id=<id>`; `resolve` then goes
   through yt-dlp with the cookie (§2.5). The client requires a mount.
@@ -470,10 +482,20 @@ the cookie makes them fail:
   private video), the resolve is retried once with the jar.
 - **Bilibili search.** A signed-in `bilisearch` can answer "HTTP Error 412:
   Precondition Failed" (Bilibili's risk control on the search API) where the
-  same query with no cookie returns hits. Bilibili *playback* keeps the jar —
-  it resolves and probes fine with it, and needs it for the better tiers.
+  same query with no cookie returns hits — and the site's own search page
+  (§2.4), which answers first, never sees a cookie at all.
+- **Bilibili playback, first attempt.** A Bilibili ref plays anonymously
+  through the site's own `x/player/pagelist` (the first part's `cid` and its
+  length) and `x/player/playurl?fnval=16` (the dash audio tiers; the highest
+  bandwidth is taken, ~192 kbps AAC — `BilibiliWeb.playUrl`). No page is
+  opened, no jar is leased, and the clip carries the `Referer` + `User-Agent`
+  the CDN wants. Only when that read throws does the ref take the yt-dlp
+  road below **with** the jar — which resolves and probes fine, and is the
+  one road to the tiers a login unlocks. A ref the bvid cannot be read from
+  (an `av` number, a `b23.tv` short link) goes straight to yt-dlp.
 
-So the jar is for the taste reads, and for Bilibili, NetEase and QQ Music playback.
+So the jar is for the taste reads, NetEase and QQ Music playback, and the
+Bilibili fallbacks.
 
 *As built (review round)*: the cookie reaches yt-dlp as a **leased jar**
 (`--cookies <tmp>`, owner-only, deleted when the call returns) rather than
@@ -1981,8 +2003,15 @@ task's situation contains the heading; `.dev/dev.log` of a real pick shows
 `music.pick start situation=<n>ch` grown by the digest's length.
 
 ### 5.4 Named search (unit + smoke)
-`search_music({catalogue:'bilibili'})` runs `bilisearch5:` with the cookie
-flag; `catalogue:'netease'` returns candidates whose `ref` is a `music.163.com`
+`search_music({catalogue:'bilibili'})` answers off Bilibili's own search page
+with `tags` and `zone` in each candidate's `extra`, never spawning yt-dlp for
+it; when that read throws, it runs `bilisearch5:` anonymously with the
+Referer header, and the 412 retry with the jar still applies. A Bilibili
+`submit_pick` resolves through `pagelist` + `playurl` with no jar leased, and
+falls back to the yt-dlp resolve with the jar when that throws (unit, both
+paths and both fallbacks; smoke verified 2026-10-22: five titled hits in
+1.4–1.9 s cold / 0.5–0.6 s warm, resolve 0.5–0.7 s, ffprobe decodes the
+stream's full length at 118–212 kbps AAC). `catalogue:'netease'` returns candidates whose `ref` is a `music.163.com`
 song URL, and `submit_pick` on one plays it end to end (smoke; a VIP account
 yields a `lossless` or better format in the yt-dlp JSON).
 `catalogue:'qqmusic'` returns candidates whose `ref` is a
@@ -2190,6 +2219,17 @@ streak bounded by the deck. Every line logged is a **count** (`hits=`,
 
 ## 6. Resolved decisions
 
+- **Bilibili is read through its own web API first, yt-dlp second**
+  (2026-10-22, user). Two days of logs showed 64 Bilibili searches and not
+  one hit: yt-dlp's `bilisearch` request lacks the Referer and its page
+  extraction is refused anonymously, so the catalogue was empty in practice
+  and the AI-made music that lives mostly there never reached a pick. The
+  site's search page and play url answer both needs in one request each,
+  anonymously; yt-dlp stays as the fallback for both (search with the
+  Referer added; playback with the jar, which is also the only road to the
+  login-gated tiers). The cost is owning the API shape ourselves — a drift
+  there falls through to yt-dlp rather than breaking the catalogue. No zone
+  filter on the search: the brain judges, with the zone name riding along.
 - **The play order is a card, not an env var** (2026-09-20, user). Where a
   song plays from is the listener's preference, not a deployment setting, so
   it is a settings-layer knob set from `( play order )` in /sources and read

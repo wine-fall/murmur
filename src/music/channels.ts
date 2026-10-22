@@ -31,7 +31,7 @@ import type { TrackCandidate } from '../contracts.ts'
 import { cacheRoot } from '../paths.ts'
 import type { YtDlpRunner } from './music.ts'
 import { RETRY_MS, STALE_MS } from './sources/refresh.ts'
-import { BilibiliSpace, type ChannelTrack } from './sources/wbi.ts'
+import { BilibiliWeb, type ChannelTrack } from './sources/wbi.ts'
 
 export type { ChannelTrack }
 
@@ -277,7 +277,7 @@ export function chapterTracks(upload: ChannelTrack, chapters: readonly Chapter[]
 
 const BILIBILI_SPACE = /^https?:\/\/space\.bilibili\.com\/(\d+)\b/
 
-export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliSpace, 'recent'>; dir?: string }
+export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliWeb, 'recent'>; dir?: string }
 
 // One channel's recent uploads, by the shape of its url. YouTube goes through
 // yt-dlp, whose flat listing carries the titles; Bilibili goes through the
