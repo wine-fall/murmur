@@ -10,7 +10,7 @@ _This file is a **card, not a ledger**: an entry that is done and no longer
 guides the work gets **deleted**, not archived. History lives in git and PR
 bodies; measured facts live in the spec they verify._
 
-_Last updated: 2026-10-15 (spec 15 programs built on `box/programs`, stacked on the usage-logging branch)_
+_Last updated: 2026-10-22 (spec 15 programs landed after the one-model usage log, #315)_
 
 ## Where we are
 
@@ -18,15 +18,9 @@ _Last updated: 2026-10-15 (spec 15 programs built on `box/programs`, stacked on 
 built.** L0 = `01-core-loop` + `02-voice-provider` (hosted voice); L1 adds
 `03-01-brain-harness` + `03-02-ducking` + `03-03` guided install + the `03-04`
 bed + spec 05 memory (v1.5 — `05-01` recall & forgetting), with 04, 06, 07, 10,
-11, 12 and 13 (real-world topics) on top. Unit gate green (vitest); real-SDK
+11, 12, 13 (real-world topics) and 15 (programs) on top. Unit gate green (vitest); real-SDK
 smokes passed per phase. **Each spec's own status header records what its build
 realized and the PR that landed it.** Everything open is under **Open**.
-
-**In flight: spec 15, programs.** Every self-initiated minute now belongs to
-one of five programs (planning call + one beat call per outline point),
-stacked on the per-call usage log and the one-model change (DESIGN §7 row 3).
-Built and unit-green on `box/programs`; the by-ear criteria (§5.9–5.10) are
-the user's.
 
 **Also in flight: spec 03-03 §7.2, the default female voice.** It was a clone of a
 clone of a 5 s render; it is now a first-generation clone of a real recording,

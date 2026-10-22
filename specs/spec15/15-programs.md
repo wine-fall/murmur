@@ -1,9 +1,10 @@
 # spec/15 · programs — every minute on the air belongs to a program
 
-> **Status**: **Built 2026-10-15** on branch `box/programs` (stacked on the
-> usage-logging change). Unit suite green; a real headless brain smoke
-> measured tokens per 1000 spoken characters before and after (numbers in the
-> PR body). **§5's by-ear criteria are open** — user-run.
+> **Status**: **Landed 2026-10-22**, after the one-model usage log (#315).
+> Unit suite green; real-brain runs with music measured usage before and after
+> (numbers in the PR body). The user waived the pre-merge listening pass. One
+> seam no run has shown: `record` outline tracks actually playing (the build
+> box could not stream YouTube).
 > **Part**: replaces free talk. Supersedes the per-beat `topic` tag and the
 > `recentTopics(12)` "don't repeat" cue (spec 05 §3.5 / §3.9), the per-batch
 > real-world roll (spec 13 §2.3 / §2.4), the separate time-anchor beat (spec 07
@@ -15,8 +16,8 @@
 > settings layer (12), real-world topics (13), taste (14).
 > **Conventions**: English; written for a coding agent. Prompt text in
 > `src/prompts/`; no CJK in source (master §0) — which is why program names
-> live in code as English canonical titles and reach the air in the
-> listener's language (§2.2).
+> live in code as English canonical titles, with the Chinese names shipped as
+> data (§2.2).
 
 ---
 
