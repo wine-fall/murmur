@@ -2,6 +2,8 @@
 // only — the planner's brief for each lives with the prompts
 // (src/prompts/program.ts), and the schedule draws over these ids.
 
+import { z } from 'zod'
+
 export const PROGRAM_IDS = ['puzzle', 'today', 'record', 'poem', 'origin'] as const
 
 export type ProgramId = (typeof PROGRAM_IDS)[number]
@@ -35,3 +37,35 @@ export const PROGRAMS: Readonly<Record<ProgramId, ProgramShape>> = {
 // `today` airs commentary on real-world items and needs at least this many
 // fresh, unused ones in the pool to be drawn at all.
 export const TODAY_MIN_ITEMS = 2
+
+// What a planning call hands back (spec 15 §2.4), as data: the outline the
+// beats are said from. Also the persisted shape of a run, so it is a schema.
+export const PointSchema = z.object({
+  title: z.string(),
+  content: z.string(),
+  track: z.object({ artist: z.string(), title: z.string() }).optional(),
+})
+
+export const PlanSchema = z.object({
+  name: z.string(),
+  subject: z.string(),
+  leads: z.array(z.string()).optional(),
+  angle: z.string(),
+  points: z.array(PointSchema).min(1),
+})
+
+export type Point = z.infer<typeof PointSchema>
+export type Plan = z.infer<typeof PlanSchema>
+
+// The program on the air (spec 15 §2.7): `next` is the point to say, and
+// `opened` turns true once its first beat aired (when the ledger hears of it).
+export const RunStateSchema = z.object({
+  id: z.enum(PROGRAM_IDS),
+  plan: PlanSchema,
+  next: z.number().int().nonnegative(),
+  opened: z.boolean(),
+  requested: z.boolean(),
+  updatedAt: z.number(), // epoch ms
+})
+
+export type RunState = z.infer<typeof RunStateSchema>
