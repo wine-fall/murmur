@@ -260,3 +260,37 @@ describe('switch_music tells the truth about when the cut lands (spec 11 §2.1)'
     expect(res.status).not.toMatch(/mid-song/i)
   })
 })
+
+// spec 15 §2.8: a typed request maps to a category, and a subject when one
+// was named; the run on the air ends and the request is planned at once.
+describe('request_program', () => {
+  const shutdown = { armed: () => false, arm: () => {}, confirm: () => {} }
+
+  it('is offered only when programs are wired', () => {
+    expect(steerTools({ shutdown }, () => {}).some((t) => t.name === 'request_program')).toBe(false)
+    const programs = { request: () => {}, current: () => undefined }
+    expect(steerTools({ shutdown, programs }, () => {}).some((t) => t.name === 'request_program')).toBe(true)
+  })
+
+  it('passes the category and the subject through, and says the program ends now', async () => {
+    const asked: [string, string | undefined][] = []
+    const programs = { request: (id: string, subject?: string) => void asked.push([id, subject]), current: () => 'NAME · s · 2/5' }
+    const tools = steerTools({ shutdown, programs }, () => {})
+    const withSubject = await callTool(tools, 'request_program', { program: 'poem', subject: 'Li Bai' })
+    expect(withSubject.ok).toBe(true)
+    expect(String(withSubject.status)).toContain('NAME · s · 2/5')
+    await callTool(tools, 'request_program', { program: 'origin' })
+    expect(asked).toEqual([
+      ['poem', 'Li Bai'],
+      ['origin', undefined],
+    ])
+  })
+
+  it('names every program in its description so free text can be mapped', () => {
+    const programs = { request: () => {}, current: () => undefined }
+    const tool = steerTools({ shutdown, programs }, () => {}).find((t) => t.name === 'request_program')!
+    for (const title of ["Things I Can't Figure Out", 'This Thing Today', 'One Record', 'Read One', 'Where It Comes From']) {
+      expect(tool.description).toContain(title)
+    }
+  })
+})

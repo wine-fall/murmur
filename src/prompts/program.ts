@@ -45,6 +45,16 @@ export const PROGRAM_BRIEFS: Readonly<Record<ProgramId, string>> = {
     'noun — the thing itself.',
 }
 
+// One line per program for the request tool (spec 15 §2.8), so the reply turn
+// can map a listener's free text to a program.
+export const PROGRAM_PITCH: Readonly<Record<ProgramId, string>> = {
+  puzzle: 'philosophy, one question through several thinkers and their lives',
+  today: 'commentary on two or three things that happened in the world',
+  record: 'one artist or album, played and talked through track by track',
+  poem: 'a poem or passage read in the original, then read closely',
+  origin: 'where a thing, a word or a custom comes from',
+}
+
 export type PlanPromptInput = {
   readonly id: ProgramId
   readonly today: string

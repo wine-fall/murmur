@@ -11,6 +11,8 @@ import { tool } from '@anthropic-ai/claude-agent-sdk'
 import { z } from 'zod'
 
 import type { SteerActions, TaskTool } from '../contracts.ts'
+import { PROGRAM_IDS, PROGRAMS } from '../programs/catalogue.ts'
+import { PROGRAM_PITCH } from '../prompts/program.ts'
 import { LANGUAGE_MAX, MIX_EVERY_N, MIX_NAMES, type SettingsPatch } from '../host/ipc.ts'
 import { memoryBlock } from '../prompts/reply.ts'
 
@@ -199,6 +201,35 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
                 ? 'nothing on record matched — say so plainly rather than ' +
                   'claiming to have forgotten something'
                 : 'gone for good; tell them it is forgotten',
+          })
+        },
+      ),
+    )
+  }
+
+  const programs = actions.programs
+  if (programs !== undefined) {
+    tools.push(
+      tool(
+        'request_program',
+        'The listener asked for one of the station\'s programs (or for something ' +
+          'only one of them does). The programs: ' +
+          PROGRAM_IDS.map((id) => `\`${id}\` — ${PROGRAMS[id].title}: ${PROGRAM_PITCH[id]}`).join('; ') +
+          '. Pass `subject` ONLY when they named one (a thinker, a poem, an artist, ' +
+          'a thing); without it you pick within the program. A request that fits ' +
+          'none of them is not a program request: just answer it and do not call this.',
+        {
+          program: z.enum(PROGRAM_IDS).describe('the program they asked for'),
+          subject: z.string().optional().describe('the subject they named, in their own words; omit when they named none'),
+        },
+        async (args) => {
+          const before = programs.current()
+          programs.request(args.program, args.subject?.trim() || undefined)
+          return reply({
+            ok: true,
+            status:
+              (before === undefined ? '' : `the program on the air (${before}) ends with this reply; `) +
+              'the requested program is being prepared and opens after it — wrap up in a line or two',
           })
         },
       ),
