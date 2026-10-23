@@ -767,6 +767,9 @@ that does not work.
 
 > *Added 2026-09-16.* A committed list of music channels becomes an extra
 > **search source**. It is not a taste source and must never be read as one.
+> *Amended 2026-10-22:* the list also names **tags** — a tag's newest uploads
+> join the same pool, which is how AI-made music reaches the pick (§2.9.1) —
+> and a listener can append their own lines.
 
 **The one distinction.** The listener's own accounts (§2.2/§2.3) decide **what
 kind** of song to look for. The curated channels are one of the **places to
@@ -776,15 +779,38 @@ about the listener, and a channel someone else curated says nothing about them.
 Code-wise this is structural: `src/music/channels.ts` never imports the digest
 and is never handed to the pack.
 
-**The manifest** — `assets/music_channels.txt`, exactly the shape of
-`assets/bed_sources.txt` (spec 03-04): one URL per line, blank lines and `#`
-comments ignored, anything that is not an `http(s)` URL skipped. Adding a
-channel is adding a line. Two shapes are understood:
+**The manifest** — `assets/music_channels.txt`, the shape of
+`assets/bed_sources.txt` (spec 03-04) plus tag lines: one channel URL or one
+tag line per line, blank lines and `#` comments ignored, anything else
+skipped. Adding a channel or a tag is adding a line. Four shapes are
+understood:
 
 | Shape | Read by |
 |---|---|
 | `https://www.youtube.com/@<handle>/videos` | yt-dlp `--dump-json --flat-playlist` |
 | `https://space.bilibili.com/<mid>/video` | Bilibili's own space API, wbi-signed |
+| `tag:bilibili:<keyword>` | `BilibiliWeb.newest`: the search page, `order=pubdate&tids=3` (newest first, music zone only) |
+| `tag:youtube:<term>` | yt-dlp `--dump-json --flat-playlist` over `https://www.youtube.com/results?search_query=<term>&sp=EgIIAw%3D%3D` (this week's uploads) |
+
+*Tag lines (added 2026-10-22).* A tag names a stream of uploads instead of an
+uploader — the only way AI-made music, which no curated channel carries,
+reaches the pool. Which feed a tag reads, and which terms are listed, is the
+measured outcome of §2.9.1; a term goes into the committed list only after it
+clears that section's bar. The parse (`parseManifestLine`) is total: the
+`tag` prefix and the platform are read in any case, the term is trimmed,
+whitespace-collapsed and lowercased (both sites search case-blind, so `AI
+Cover` and `ai cover` are one key), and a line with an unknown platform or an
+empty term is dropped like any other junk line. A murmur that predates tag
+lines skips them as non-URLs, so the shared file stays readable by every
+release.
+
+**The listener's own list** — `$MURMUR_HOME/music_channels.txt`
+(`musicChannelsPath`, beside `music-policy.md`: configuration the listener
+owns, never written by murmur), the same four shapes. It is read from disk on
+**every** load and appended after the shared list; a key both lists name is
+kept once, where it first appeared (`mergeManifests`). A missing or unreadable
+file is an empty list. Its lines are the listener's own words, so they never
+reach the dev log (below).
 
 **Runtime refresh.** The list is re-read from
 `https://raw.githubusercontent.com/wine-fall/murmur/main/assets/music_channels.txt`
@@ -796,10 +822,21 @@ fallback chain is total and never throws — cache inside TTL → fresh fetch �
 stale cache → **the copy that shipped**. A body with no URLs in it (a 404 page,
 a half-written file) is treated as a failure, not as "the list is now empty".
 
-**The pool.** Each listed channel's newest **20** uploads (title, ref,
-uploader) are pulled into `$MURMUR_HOME/cache/channels/pool.json`. A channel
-that fails costs that channel; a refresh where **nothing** answers keeps the
-pool it already had, so the catalogue never silently unmounts. A refresh that
+**The pool.** Each listed channel's or tag's newest **20** uploads (title,
+ref, uploader, and the `extra` its feed gives — §2.9.1) are pulled into
+`$MURMUR_HOME/cache/channels/pool.json`. A line that fails costs that line; a
+refresh where **nothing** answers keeps the pool it already had, so the
+catalogue never silently unmounts. A tag's rows keep only what is
+**song-length** — `MIN_CHAPTER_S` (45 s) to `MIX_DURATION_S` (12 min), the
+bounds a chapter already has to meet; a length of 0 is unknown and kept — and
+are never sent to the chapter pass: a long upload under a tag is a
+compilation far more often than a chaptered album. The whole pool is capped at
+`MAX_POOL_TRACKS` = **1000**; once full, the remaining lines are not read at
+all, which also bounds a refresh's network when a listener's own file grows
+long. Each refresh writes **one** dev-log line of counts —
+`channels.refresh n=<tracks> channels=<lines> tags=<lines> failed=<lines>` —
+and never a URL, a term or a failure's text (a yt-dlp failure quotes the
+search URL, which carries the term). A refresh that
 was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
 outcome — the taste refresh's own cooldown, and the reason an offline listener
 does not respawn yt-dlp over the whole list once a song. Refreshed on the
@@ -838,7 +875,10 @@ a longer spacing or a resume across refreshes — not a retry loop.
 substring match over the pool on **title and uploader** — every word of the
 query has to land — with **no network at search time**. It returns the same
 `TrackCandidate` shape as every other catalogue, so `submit_pick` resolves the
-ref through the unchanged yt-dlp path (§2.5). Like the other catalogues it is
+ref through the unchanged yt-dlp path (§2.5). A row's `extra` rides through to
+the candidate: a Bilibili tag row carries `tags` and `zone` exactly as §2.4's
+search does, a YouTube row the `viewCount` its flat listing gives (a flat
+listing has no tags). Like the other catalogues it is
 offered **only while it holds something**: an empty pool is not mounted, and
 asking for it returns the same `{ ok: false, reason: 'not-mounted' }`.
 
@@ -906,6 +946,187 @@ sentence rendered only while the pool is non-empty: the catalogue searches
 recent uploads from a curated list of music channels — good for something new,
 a cover, or a recent release a plain search would bury. That sentence is about
 **where to look**. It must not describe the listener.
+
+The `search_music` tool's `catalogue` description carries the one sentence
+that names what the pool holds: *"channels is recent uploads from curated
+channels and tags."* The tags add **no rule** to the music policy or the
+pick instruction — the pool holds AI-made songs now, and the model meets
+them, and judges them, the way it judges any candidate.
+
+### 2.9.1 Tag feeds — where AI-made music is found (measured 2026-10-22)
+
+> *Added 2026-10-22.* The research behind the tag lines of §2.9. Every number
+> below was measured from one Linux machine on 2026-10-22 through murmur's own
+> transports (`BilibiliWeb` for Bilibili, `ytdlpRunner` + yt-dlp 2026.08.19 for
+> YouTube); the probe scripts live in the gitignored `scratch/tags/`.
+
+**The question.** AI-generated music is uploaded in volume to Bilibili and
+YouTube, but no curated channel carries it, so the pick never sees it. Which
+feeds can be asked, **by a tag**, for uploads that are recent, titled, and
+actually a song — rather than a tutorial, a review, a story video, or a
+compilation?
+
+**Method.**
+
+- Each feed's first **20** rows were judged **by hand**: on Bilibili from the
+  title, the description and the tag list; on YouTube from the title, the
+  channel and the length (a flat YouTube listing carries no tags). **Y** = one
+  piece of music (song, cover, original, MV, instrumental); **N** = tutorial,
+  comparison, review, talk, story video, advert, gameplay, karaoke backing
+  track, or a compilation.
+- **raw** = Y / 20. **filtered** = Y among the rows that survive the length
+  rule the pool already applies to chapters (45 s to 12 min, §2.9) — what the
+  pool would actually hold.
+- Every request was sent **4 times** in a row (2.5 s apart on Bilibili, 1.5 s
+  on YouTube). **runs** = answered / sent; **overlap** = the smallest share of
+  run 1's rows found again in a later run. The chosen feeds were measured
+  again at a **second time point** (3 runs each) and only the rows not seen
+  the first time were judged.
+- **AI-marked** = rows whose title, tags or description name AI or an AI tool
+  — a check that a feed is about AI-made music at all, not only music.
+- **Age** = days since upload: Bilibili's `pubdate`; YouTube's `upload_date`
+  from one full-metadata read per row.
+- The bar: **raw >= 70 %**, every run answered with 20 titled rows, and
+  recent. A feed below the bar is not offered.
+
+Bilibili tags are written as `\u` escapes here because committed files carry
+no CJK (DESIGN §0); the manifest itself holds the plain characters.
+
+**Bilibili — the endpoints.**
+
+| Endpoint | Outcome |
+|---|---|
+| `x/web-interface/search/type`, `search_type=video&order=pubdate&tids=3` (newest first, music zone only) | **Chosen.** 15 / 15 keywords answered 4 / 4 runs with 20 titled rows each, ~0.3-0.4 s median; `tag` and `typename` on every row (the `extra` of §2.4). Median age 0-1 day for every chosen keyword. |
+| the same without `tids=3` | Same stability; a lower hit rate on 12 of 15 keywords (equal on one, higher on two) — story videos, tutorials and AI short dramas leak in from the other zones. |
+| `x/web-interface/wbi/search/type` (signed) | The same rows as the unsigned call. Signing buys nothing here. |
+| `x/tag/info?tag_name=` -> `x/tag/detail?tag_id=&pn=1&ps=20` (`news.archives`, the tag's own archive) | Titled, zone on every row, **no tag list**. **Not reliable for "recent"**: the first request for a tag answers an unordered, stale slice (`udio`: all twenty rows from 2024) and only later requests the newest-first list — run 1 shared 0-15 % of its rows with runs 2-4 on 5 of 15 tags. |
+| `x/web-interface/tag/top?tid=<tag_id>` | Answers, but it is the tag's popular list (rows weeks to months old), not its newest. |
+| `x/web-interface/web/channel/multiple/list`, `.../channel/detail`, `.../channel/featured/list` | HTTP **404** — the channel API is gone. |
+| `x/tag/ranking/archives` | `code -352` (risk control). |
+| `x/web-interface/newlist?rid=130` | `code 0` with an empty list. |
+
+**Bilibili — failure shapes.** Without the site-issued `buvid3` (a bare
+`curl`), the search answers **HTTP 412 with an HTML body**, 3 / 3 —
+`BilibiliWeb.get` throws `HTTP 412`. Through `BilibiliWeb`'s session: **0
+failures** in 180 sweep requests plus 27 at the second time point, and **0** in
+a 27-request burst with **no spacing at all**. Risk control is real (#317
+measured it for yt-dlp's search, and the space API of §2.9 still answers it
+to bursts) but this endpoint, read the way `BilibiliWeb` reads it, did not
+trip it once. Other shapes seen: `code -352` (a JSON answer, not an HTTP
+error) on the ranking endpoint.
+
+**Bilibili — every keyword** (`order=pubdate`; first column with `tids=3`):
+
+| keyword | gloss | raw (music zone) | filtered | AI-marked | raw (all zones) | raw (tag archive) |
+|---|---|---|---|---|---|---|
+| `AI\u97f3\u4e50` | AI music | 19 / 20 | 19 / 20 | 20 / 20 | 18 / 20 | 19 / 20 |
+| `AI\u7ffb\u5531` | AI cover | 19 / 20 | 16 / 17 | 20 / 20 | 18 / 20 | 18 / 20 |
+| `AI\u6b4c\u66f2` | AI song | 20 / 20 | 19 / 19 | 20 / 20 | 19 / 20 | 16 / 20 |
+| `AI\u4f5c\u66f2` | AI-composed | 19 / 20 | 19 / 20 | 20 / 20 | 20 / 20 | 10 / 20 |
+| `suno` | | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 13 / 20 |
+| `AI\u751f\u6210\u97f3\u4e50` | AI-generated music | 19 / 20 | 19 / 20 | 20 / 20 | 1 / 20 | 15 / 20 |
+| `AIGC\u97f3\u4e50` | AIGC music | 16 / 20 | 15 / 17 | 20 / 20 | 9 / 20 | 18 / 20 |
+| `AI\u6b4c\u624b` | AI singer | 17 / 20 | 17 / 20 | 20 / 20 | 13 / 20 | 12 / 20 |
+| `AIMV` | AI music video | 20 / 20 | 20 / 20 | 19 / 20 | 17 / 20 | 16 / 20 |
+| `AI\u539f\u521b` | AI original | 20 / 20 | 19 / 19 | 20 / 20 | 5 / 20 | 3 / 20 |
+| `AI\u539f\u521b\u6b4c\u66f2` | AI original song | 20 / 20 | 20 / 20 | 20 / 20 | 20 / 20 | 20 / 20 |
+| `Suno AI` | | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 15 / 20 |
+| `suno\u97f3\u4e50` | suno music | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 11 / 20 |
+| `udio` | | 19 / 20 | 19 / 20 | **0 / 20** | 3 / 20 | 18 / 20 |
+| `\u53e4\u4eba\u5f00\u9ea6` | "the ancients take the mic" | **3 / 20** | 3 / 19 | 3 / 20 | 10 / 20 | 16 / 20 |
+
+What the table does not show on its own:
+
+- **A keyword is not a tag.** The search matches the word anywhere in the
+  title, tags or description. `udio` matches Portuguese *audio*: in the music
+  zone it returns twenty real songs (Brazilian "audio oficial" uploads) of
+  which none is AI-made. Dropped.
+- **The music zone can be the wrong place.** `\u53e4\u4eba\u5f00\u9ea6` (a
+  meme series of AI rap videos) puts sixteen **karaoke backing tracks** of the
+  series into the music zone; the songs themselves sit in other zones.
+  Dropped.
+- **Redundant keywords.** `AI\u6b4c\u66f2` / `AI\u539f\u521b` /
+  `AI\u539f\u521b\u6b4c\u66f2` share 15-18 of their 20 rows (one uploader's
+  numbered series dominates all three), and `suno` / `Suno AI` /
+  `suno\u97f3\u4e50` share 16-19. One of each is kept — a duplicate costs a
+  request and adds nothing the de-duplicated pool does not already hold.
+
+**Chosen on Bilibili (9):** `AI\u97f3\u4e50`, `AI\u7ffb\u5531`,
+`AI\u6b4c\u66f2`, `AI\u4f5c\u66f2`, `suno`, `AI\u751f\u6210\u97f3\u4e50`,
+`AIGC\u97f3\u4e50`, `AI\u6b4c\u624b`, `AIMV` — raw 80-100 %, together 162
+distinct videos in one sample. *Second time point (35 min later, 27 / 27
+requests answered):* 27 rows were new, **26** were songs, and the one miss
+was a 33-minute compilation the length rule drops. Many `AI\u7ffb\u5531` rows
+are 30-60 s clips (an "AI idol" covers trend); the length rule drops the ones
+under 45 s.
+
+**YouTube — the feeds.**
+
+| Feed | Outcome |
+|---|---|
+| `ytsearchdate<N>:<query>` | **Gone**: yt-dlp 2026.08.19 answers `Unsupported url scheme: "ytsearchdate20"`. |
+| `results?search_query=<q>&sp=CAI%3D` (the old "sort by upload date") | Answers, but does **not** sort by date any more: months-to-years-old rows, mostly tutorials. |
+| `https://www.youtube.com/hashtag/<tag>` | Titled, 4 / 4 runs, often song-rich — but **not recent**: median age 95-645 days and 0-9 of 20 rows inside 90 days. The page is a popularity view and **reshuffles on every request** (overlap 0.30-0.85). Fails the "recent" bar. |
+| `results?search_query=<q>&sp=EgIIAw%3D%3D` (the "this week" upload filter) | **Chosen.** Median age 2-6 days, 20 / 20 rows inside the week, 4 / 4 runs with 20 titled rows, ~1-2.4 s. Whether the rows are songs depends entirely on the query term (below). A term that starts with `#` here answers 1-20 rows in ~6 s — unstable; terms go in bare. |
+
+The flat listing gives title, channel, length and view count; there is no tag
+field, so the YouTube candidates carry what flat gives (`extra.viewCount`).
+
+**YouTube — every term** (4 runs each, all answered 20 titled rows unless
+noted):
+
+| hashtag page | raw | filtered | overlap | median age (d) | inside 90 d |
+|---|---|---|---|---|---|
+| `#aisong` | 18 / 20 | 18 / 18 | 0.30 | 95 | 9 / 19 |
+| `#aicover` | 18 / 20 | 18 / 18 | 0.40 | 188 | 8 / 20 |
+| `#aimusic` | 17 / 20 | 16 / 16 | 0.55 | 166 | 1 / 20 |
+| `#sunoai` | 15 / 20 | 15 / 17 | 0.85 | 312 | 0 / 20 |
+| `#udiomusic` | 18 / 19 | 18 / 18 | 0.53 | 645 | 0 / 19 (rows 19, 20, 20, 14) |
+| `#aigeneratedmusic` | 13 / 20 | 13 / 14 | 0.55 | 362 | 2 / 20 |
+| `#aisongs` | 12 / 20 | 12 / 12 | 0.60 | 208 | 4 / 20 |
+| `#sunomusic` | 3 / 20 | 3 / 13 | 1.00 | 263 | 2 / 20 |
+| `#suno` | 2 / 20 | 2 / 16 | 1.00 | 72 | 13 / 20 |
+| `#udio` | 1 / 20 | 1 / 17 | 0.75 | 356 | 2 / 20 |
+
+| "this week" term | raw | filtered | overlap | median age (d) |
+|---|---|---|---|---|
+| `ai cover` | **19 / 20** | 18 / 18 | 0.85 | 5 |
+| `ai version` | **18 / 20** | 18 / 19 | 0.75 | 2 |
+| `ai cover song` | 17 / 20 | 17 / 17 | 0.65 | 4 |
+| `ai original song` | **15 / 20** | 15 / 17 | 0.75 | 5 |
+| `ai generated song` | 13 / 20 | 13 / 17 | 0.95 | 6 |
+| `ai song` | 10 / 20 | 10 / 14 | 0.40 | 5 |
+| `ai remix` | 8 / 20 | 8 / 8 | 0.85 | 5 |
+| `ai generated music` | 8 / 20 | 8 / 15 | 0.95 | 5 |
+| `suno cover` | 8 / 20 | 8 / 12 | 0.35 | 4 |
+| `ai music video` | 6 / 20 | 6 / 17 | 0.85 | 4 |
+| `suno song` | 5 / 20 | 5 / 17 | 0.85 | 4 |
+| `udio` | 1 / 20 | 1 / 5 | 0.60 | 2 |
+| `suno ai music` | 0 / 20 | 0 / 16 | 0.90 | 3 |
+
+What the table does not show on its own:
+
+- **Free text collides.** *ai* is Vietnamese for "who" (`ai remix`: twelve of
+  twenty rows are 30-80 minute Vietnamese remix sets) and a Hindi word in song
+  titles; *suno* is Hindi for "listen" (`suno song`); `udio` matches *audio*
+  and *studio*. A term names AI music only when its other words pin it.
+- **The tool's name brings its tutorials.** Every term built on "suno" or
+  "ai music" is dominated by how-to and news videos; "cover" and "version"
+  are what songs are called, so those terms find songs.
+- `ai cover song` shares 10 of 20 rows with `ai cover` and is dropped as
+  redundant.
+
+**Chosen on YouTube (3):** `ai cover`, `ai version`, `ai original song` — raw
+75-95 %, no two sharing more than one row, together 58 distinct uploads.
+`ai original song` is the marginal one (75 %). *Second time point (~10 min
+later, 9 / 9 runs answered):* 13 rows were new and **8** were songs; three of
+the five misses are 26-58 minute compilations the length rule drops.
+
+**Rejected for good** (do not re-try without new evidence): the Bilibili
+channel API (404), the tag archive as a "recent" feed (stale first answer),
+the YouTube hashtag page as a "recent" feed (a reshuffled popularity view),
+`ytsearchdate` (removed from yt-dlp) and the upload-date sort (no longer
+sorts).
 
 ### 2.11 The ledger — what accumulates, next to the snapshot that does not
 
@@ -2102,6 +2323,46 @@ three Bilibili channels answered `412` in that run (the measured ceiling in
 §2.9) and were skipped without costing the pool. YouTube refs from the pool
 resolve through the unchanged path; a Bilibili resolve was 412 from the same
 rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
+
+*Tag lines — added 2026-10-22.* Unit: a manifest line parses as a channel, a
+tag (platform in any case, term tidied and lowercased, a colon inside the term
+kept) or nothing (a comment, an empty term, an unknown platform, a malformed
+prefix); a list keeps channels and tags in order and reads a repeated line
+once; two lists merge with the second appended and de-duplicated; the
+listener's file is appended on every load — inside the shared list's TTL, on
+top of the bundled copy when offline — costs nothing when absent, and
+defaults to `$MURMUR_HOME/music_channels.txt`; the bundled list carries tag
+lines for both platforms. `BilibiliWeb.newest` asks `order=pubdate&tids=3`,
+sends a non-Latin keyword as typed, strips every `<em>` highlight, reads an
+empty tag list and a missing play count as nothing, caps at the limit, skips a
+row with no bvid or title, throws on a 412 and on a non-zero code, and reads
+an empty page as no rows. A YouTube flat search row carries its view count
+and nothing it does not have. A tag routes to its platform's feed (the
+YouTube one with the this-week filter in the URL), keeps only song-length
+rows, spends no chapter lookup, reads an unparseable line as nothing, and lets
+a failed read throw. The pool hands a row's `extra` to the candidate and keeps
+it across a restart; stops filling, and reading, at `MAX_POOL_TRACKS`; keeps
+the pool (and its file) when a later refresh gets nothing back; and writes
+exactly one dev-log line of counts, with no term, URL or failure text, on
+success and on total failure. The `search_music` catalogue description names
+channels and tags, and the pick instruction does not mention tags.
+
+Smoke (real services, `scratch/tags/smoke.ts`): every committed tag returns
+song-length, titled rows through the real transports, Bilibili rows carry
+their tags, and one full refresh over the committed list plus a listener file
+builds a pool whose rows search with their `extra`.
+
+*As built, 2026-10-22*: all 12 committed tags answered. Kept after the length
+rule, of 20: Bilibili 12, 14, 16, 20, 20, 20, 17, 20, 20 (every row with its
+tags; 0.36-1.1 s each); YouTube `ai cover` 16, `ai version` 18,
+`ai original song` 18 (1.0-2.4 s each). One refresh over the committed list
+plus a listener file (one new tag, one duplicate of a committed tag, one junk
+line — read as 23 keys, 13 of them tags) built **339** tracks in 68 s and
+logged `channels.refresh n=339 channels=10 tags=13 failed=5`; the five
+failures were all channel lines that predate this change (three Bilibili
+spaces answering 412, the §2.9 ceiling; `@MahoganySessions`, which yt-dlp now
+reports has no videos tab) and no tag line failed. A fresh pool over the same
+home read the 339 back from `pool.json`.
 ---
 
 ### 5.14 The digest spends its budget on music (unit) — *added 2026-09-18*

@@ -1,6 +1,7 @@
 // Bilibili's own web API, read anonymously, for the three things yt-dlp
 // cannot be relied on for: a channel's recent uploads (spec 14 §2.9), the
-// search page (§2.4) and the play url behind a watch ref (§2.5).
+// search page (§2.4, and a tag's newest uploads, §2.9.1) and the play url
+// behind a watch ref (§2.5).
 //
 // Why this exists at all: yt-dlp's flat read of a Bilibili space
 // (`--flat-playlist https://space.bilibili.com/<mid>/video`) returns the refs
@@ -58,8 +59,15 @@ const FINGERPRINT: Record<string, string> = {
 
 export type WbiFetch = (url: string, init?: RequestInit) => Promise<Response>
 
-// One recent upload of a curated channel: what the pool is searched by.
-export type ChannelTrack = { ref: string; title: string; uploader: string; durationS: number }
+// What a feed says about an upload beyond its title: the play count, and on
+// Bilibili the zone and the uploader's own tags — the only places a video says
+// what it is (an AI-made song, say).
+// `| undefined` because the pool's cache is read back through zod, whose
+// optional fields come out that way.
+export type TrackExtra = { viewCount?: number | undefined; zone?: string | undefined; tags?: string[] | undefined }
+
+// One recent upload of a curated channel or tag: what the pool is searched by.
+export type ChannelTrack = { ref: string; title: string; uploader: string; durationS: number; extra?: TrackExtra | undefined }
 
 const NavSchema = z.object({ data: z.object({ wbi_img: z.object({ img_url: z.string(), sub_url: z.string() }) }) })
 const SpiSchema = z.object({ data: z.object({ b_3: z.string() }) })
@@ -158,14 +166,27 @@ export class BilibiliWeb {
   }
 
   // One search page, titled (spec 14 §2.4): the fields the pick judges on,
-  // plus the tags and the zone — the only places a video says what it is (an
-  // AI-made song, say). Throws on a refused read so the caller can fall back.
+  // plus the tags and the zone. Throws on a refused read so the caller can
+  // fall back.
   async search(query: string, limit: number): Promise<TrackCandidate[]> {
+    const rows = await this.searchPage({ keyword: query }, limit)
+    return rows.map((row) => ({ ...row, extra: row.extra ?? {}, catalogue: 'bilibili' as const }))
+  }
+
+  // A tag's newest uploads in the music zone (spec 14 §2.9.1) — the same page,
+  // newest first and zone 3 only, which is what kept story videos and
+  // tutorials out of the measured feeds. Throws on a refused read: the caller
+  // keeps the pool it already had.
+  async newest(keyword: string, limit: number): Promise<ChannelTrack[]> {
+    return await this.searchPage({ keyword, order: 'pubdate', tids: '3' }, limit)
+  }
+
+  private async searchPage(params: Record<string, string>, limit: number): Promise<ChannelTrack[]> {
     const { cookie } = await this.open()
-    const params = new URLSearchParams({ search_type: 'video', keyword: query, page: '1' })
-    const page = SearchSchema.parse(await this.get(`${API}/x/web-interface/search/type?${params}`, cookie, BILIBILI_REFERER))
+    const query = new URLSearchParams({ search_type: 'video', page: '1', ...params })
+    const page = SearchSchema.parse(await this.get(`${API}/x/web-interface/search/type?${query}`, cookie, BILIBILI_REFERER))
     if (page.code !== 0) throw new Error(`bilibili search: code ${page.code}`)
-    const found: TrackCandidate[] = []
+    const found: ChannelTrack[] = []
     for (const raw of page.data?.result ?? []) {
       const row = SearchRowSchema.safeParse(raw)
       if (!row.success || row.data.bvid === '') continue
@@ -182,7 +203,6 @@ export class BilibiliWeb {
           zone: row.data.typename ?? '',
           tags: (row.data.tag ?? '').split(',').map((t) => t.trim()).filter((t) => t !== ''),
         },
-        catalogue: 'bilibili',
       })
       if (found.length >= limit) break
     }

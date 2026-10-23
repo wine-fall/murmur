@@ -5,6 +5,7 @@ import {
   claudeCodeRoot,
   dataRoot,
   homeRoot,
+  musicChannelsPath,
   musicPolicyPath,
   settingsPath,
   sourcesConfigPath,
@@ -95,5 +96,14 @@ describe('programsPath (spec 15 §2.3)', () => {
   it('lives under the data root', async () => {
     const { programsPath } = await import('../src/paths.ts')
     expect(programsPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/data/programs.json')
+  })
+})
+
+// spec 14 §2.9: the listener's own channel and tag lines, appended to the
+// curated list. Configuration they own, beside the music policy.
+describe('the local channel list', () => {
+  it('lives at the home root and moves with MURMUR_HOME', () => {
+    expect(musicChannelsPath({ MURMUR_HOME: '/tmp/mh' })).toBe('/tmp/mh/music_channels.txt')
+    expect(musicChannelsPath({}).endsWith('/.murmur/music_channels.txt')).toBe(true)
   })
 })

@@ -255,3 +255,50 @@ describe('BilibiliWeb.playUrl', () => {
     await expect(fakeWeb((url) => (url.includes('pagelist') ? { code: -400, data: null } : answers(url))).web.playUrl('https://www.bilibili.com/video/BV1x')).rejects.toThrow(/-400/)
   })
 })
+
+// The tag feed (spec 14 §2.9.1): the same search page, asked for the newest
+// uploads in the music zone. Measured 2026-10-22, this is the one Bilibili
+// read that answers "recent, titled, a song" for a tag; the tag's own archive
+// answered a stale slice first.
+describe('BilibiliWeb.newest', () => {
+  it('asks for the newest uploads in the music zone and keeps the tags and zone', async () => {
+    const { web, calls } = fakeWeb(() => ({ code: 0, data: { result: [ROW] } }))
+    expect(await web.newest('ai music', 20)).toEqual([
+      { ref: 'https://www.bilibili.com/video/BV1x', title: 'rain song', uploader: 'up', durationS: 281, extra: { viewCount: 487_831, zone: 'MV', tags: ['rap', 'ai rap', 'choir'] } },
+    ])
+    const url = new URL(calls.find((c) => c.url.includes('/x/web-interface/search/type'))?.url ?? 'https://x/')
+    expect(url.searchParams.get('keyword')).toBe('ai music')
+    expect(url.searchParams.get('order')).toBe('pubdate')
+    expect(url.searchParams.get('tids')).toBe('3')
+    expect(url.searchParams.get('search_type')).toBe('video')
+  })
+
+  it('sends a keyword in any script as the site spells it', async () => {
+    // A Chinese keyword, built from code points: committed sources carry no CJK.
+    const keyword = `AI${String.fromCharCode(0x97f3, 0x4e50)}`
+    const { web, calls } = fakeWeb(() => ({ code: 0, data: { result: [] } }))
+    await web.newest(keyword, 20)
+    const url = new URL(calls.find((c) => c.url.includes('/x/web-interface/search/type'))?.url ?? 'https://x/')
+    expect(url.searchParams.get('keyword')).toBe(keyword)
+  })
+
+  it('strips every highlight, and reads an empty tag list or a missing play count as nothing', async () => {
+    const row = { ...ROW, title: '<em class="keyword">ai</em> <em class="keyword">cover</em> of a ballad', tag: '', play: null }
+    const { web } = fakeWeb(() => ({ code: 0, data: { result: [row] } }))
+    expect(await web.newest('ai cover', 20)).toEqual([
+      { ref: 'https://www.bilibili.com/video/BV1x', title: 'ai cover of a ballad', uploader: 'up', durationS: 281, extra: { zone: 'MV', tags: [] } },
+    ])
+  })
+
+  it('caps at the limit and skips a row with no bvid or title', async () => {
+    const { web } = fakeWeb(() => ({ code: 0, data: { result: [{ ...ROW, bvid: '' }, { ...ROW, title: '<em class="keyword"></em>' }, ROW, { ...ROW, bvid: 'BV2x' }, { ...ROW, bvid: 'BV3x' }] } }))
+    expect((await web.newest('q', 2)).map((t) => t.ref)).toEqual(['https://www.bilibili.com/video/BV1x', 'https://www.bilibili.com/video/BV2x'])
+  })
+
+  it('throws on risk control and on a non-zero code, so the pool keeps what it had', async () => {
+    await expect(fakeWeb(() => '<!DOCTYPE html>').web.newest('q', 20)).rejects.toThrow(/412/)
+    await expect(fakeWeb(() => ({ code: -352, message: '-352' })).web.newest('q', 20)).rejects.toThrow(/-352/)
+    // An empty page is an answer — a quiet tag, not a failure.
+    expect(await fakeWeb(() => ({ code: 0, data: { result: null } })).web.newest('q', 20)).toEqual([])
+  })
+})
