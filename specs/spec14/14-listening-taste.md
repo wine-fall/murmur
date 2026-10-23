@@ -907,6 +907,181 @@ recent uploads from a curated list of music channels — good for something new,
 a cover, or a recent release a plain search would bury. That sentence is about
 **where to look**. It must not describe the listener.
 
+### 2.9.1 Tag feeds — where AI-made music is found (measured 2026-10-22)
+
+> *Added 2026-10-22.* The research behind the tag lines of §2.9. Every number
+> below was measured from one Linux machine on 2026-10-22 through murmur's own
+> transports (`BilibiliWeb` for Bilibili, `ytdlpRunner` + yt-dlp 2026.08.19 for
+> YouTube); the probe scripts live in the gitignored `scratch/tags/`.
+
+**The question.** AI-generated music is uploaded in volume to Bilibili and
+YouTube, but no curated channel carries it, so the pick never sees it. Which
+feeds can be asked, **by a tag**, for uploads that are recent, titled, and
+actually a song — rather than a tutorial, a review, a story video, or a
+compilation?
+
+**Method.**
+
+- Each feed's first **20** rows were judged **by hand**: on Bilibili from the
+  title, the description and the tag list; on YouTube from the title, the
+  channel and the length (a flat YouTube listing carries no tags). **Y** = one
+  piece of music (song, cover, original, MV, instrumental); **N** = tutorial,
+  comparison, review, talk, story video, advert, gameplay, karaoke backing
+  track, or a compilation.
+- **raw** = Y / 20. **filtered** = Y among the rows that survive the length
+  rule the pool already applies to chapters (45 s to 12 min, §2.9) — what the
+  pool would actually hold.
+- Every request was sent **4 times** in a row (2.5 s apart on Bilibili, 1.5 s
+  on YouTube). **runs** = answered / sent; **overlap** = the smallest share of
+  run 1's rows found again in a later run. The chosen feeds were measured
+  again at a **second time point** (3 runs each) and only the rows not seen
+  the first time were judged.
+- **AI-marked** = rows whose title, tags or description name AI or an AI tool
+  — a check that a feed is about AI-made music at all, not only music.
+- **Age** = days since upload: Bilibili's `pubdate`; YouTube's `upload_date`
+  from one full-metadata read per row.
+- The bar: **raw >= 70 %**, every run answered with 20 titled rows, and
+  recent. A feed below the bar is not offered.
+
+Bilibili tags are written as `\u` escapes here because committed files carry
+no CJK (DESIGN §0); the manifest itself holds the plain characters.
+
+**Bilibili — the endpoints.**
+
+| Endpoint | Outcome |
+|---|---|
+| `x/web-interface/search/type`, `search_type=video&order=pubdate&tids=3` (newest first, music zone only) | **Chosen.** 15 / 15 keywords answered 4 / 4 runs with 20 titled rows each, ~0.3-0.4 s median; `tag` and `typename` on every row (the `extra` of §2.4). Median age 0-1 day for every chosen keyword. |
+| the same without `tids=3` | Same stability; a lower hit rate on 12 of 15 keywords (equal on one, higher on two) — story videos, tutorials and AI short dramas leak in from the other zones. |
+| `x/web-interface/wbi/search/type` (signed) | The same rows as the unsigned call. Signing buys nothing here. |
+| `x/tag/info?tag_name=` -> `x/tag/detail?tag_id=&pn=1&ps=20` (`news.archives`, the tag's own archive) | Titled, zone on every row, **no tag list**. **Not reliable for "recent"**: the first request for a tag answers an unordered, stale slice (`udio`: all twenty rows from 2024) and only later requests the newest-first list — run 1 shared 0-15 % of its rows with runs 2-4 on 5 of 15 tags. |
+| `x/web-interface/tag/top?tid=<tag_id>` | Answers, but it is the tag's popular list (rows weeks to months old), not its newest. |
+| `x/web-interface/web/channel/multiple/list`, `.../channel/detail`, `.../channel/featured/list` | HTTP **404** — the channel API is gone. |
+| `x/tag/ranking/archives` | `code -352` (risk control). |
+| `x/web-interface/newlist?rid=130` | `code 0` with an empty list. |
+
+**Bilibili — failure shapes.** Without the site-issued `buvid3` (a bare
+`curl`), the search answers **HTTP 412 with an HTML body**, 3 / 3 —
+`BilibiliWeb.get` throws `HTTP 412`. Through `BilibiliWeb`'s session: **0
+failures** in 180 sweep requests plus 27 at the second time point, and **0** in
+a 27-request burst with **no spacing at all**. Risk control is real (#317
+measured it for yt-dlp's search, and the space API of §2.9 still answers it
+to bursts) but this endpoint, read the way `BilibiliWeb` reads it, did not
+trip it once. Other shapes seen: `code -352` (a JSON answer, not an HTTP
+error) on the ranking endpoint.
+
+**Bilibili — every keyword** (`order=pubdate`; first column with `tids=3`):
+
+| keyword | gloss | raw (music zone) | filtered | AI-marked | raw (all zones) | raw (tag archive) |
+|---|---|---|---|---|---|---|
+| `AI\u97f3\u4e50` | AI music | 19 / 20 | 19 / 20 | 20 / 20 | 18 / 20 | 19 / 20 |
+| `AI\u7ffb\u5531` | AI cover | 19 / 20 | 16 / 17 | 20 / 20 | 18 / 20 | 18 / 20 |
+| `AI\u6b4c\u66f2` | AI song | 20 / 20 | 19 / 19 | 20 / 20 | 19 / 20 | 16 / 20 |
+| `AI\u4f5c\u66f2` | AI-composed | 19 / 20 | 19 / 20 | 20 / 20 | 20 / 20 | 10 / 20 |
+| `suno` | | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 13 / 20 |
+| `AI\u751f\u6210\u97f3\u4e50` | AI-generated music | 19 / 20 | 19 / 20 | 20 / 20 | 1 / 20 | 15 / 20 |
+| `AIGC\u97f3\u4e50` | AIGC music | 16 / 20 | 15 / 17 | 20 / 20 | 9 / 20 | 18 / 20 |
+| `AI\u6b4c\u624b` | AI singer | 17 / 20 | 17 / 20 | 20 / 20 | 13 / 20 | 12 / 20 |
+| `AIMV` | AI music video | 20 / 20 | 20 / 20 | 19 / 20 | 17 / 20 | 16 / 20 |
+| `AI\u539f\u521b` | AI original | 20 / 20 | 19 / 19 | 20 / 20 | 5 / 20 | 3 / 20 |
+| `AI\u539f\u521b\u6b4c\u66f2` | AI original song | 20 / 20 | 20 / 20 | 20 / 20 | 20 / 20 | 20 / 20 |
+| `Suno AI` | | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 15 / 20 |
+| `suno\u97f3\u4e50` | suno music | 20 / 20 | 20 / 20 | 20 / 20 | 17 / 20 | 11 / 20 |
+| `udio` | | 19 / 20 | 19 / 20 | **0 / 20** | 3 / 20 | 18 / 20 |
+| `\u53e4\u4eba\u5f00\u9ea6` | "the ancients take the mic" | **3 / 20** | 3 / 19 | 3 / 20 | 10 / 20 | 16 / 20 |
+
+What the table does not show on its own:
+
+- **A keyword is not a tag.** The search matches the word anywhere in the
+  title, tags or description. `udio` matches Portuguese *audio*: in the music
+  zone it returns twenty real songs (Brazilian "audio oficial" uploads) of
+  which none is AI-made. Dropped.
+- **The music zone can be the wrong place.** `\u53e4\u4eba\u5f00\u9ea6` (a
+  meme series of AI rap videos) puts sixteen **karaoke backing tracks** of the
+  series into the music zone; the songs themselves sit in other zones.
+  Dropped.
+- **Redundant keywords.** `AI\u6b4c\u66f2` / `AI\u539f\u521b` /
+  `AI\u539f\u521b\u6b4c\u66f2` share 15-18 of their 20 rows (one uploader's
+  numbered series dominates all three), and `suno` / `Suno AI` /
+  `suno\u97f3\u4e50` share 16-19. One of each is kept — a duplicate costs a
+  request and adds nothing the de-duplicated pool does not already hold.
+
+**Chosen on Bilibili (9):** `AI\u97f3\u4e50`, `AI\u7ffb\u5531`,
+`AI\u6b4c\u66f2`, `AI\u4f5c\u66f2`, `suno`, `AI\u751f\u6210\u97f3\u4e50`,
+`AIGC\u97f3\u4e50`, `AI\u6b4c\u624b`, `AIMV` — raw 80-100 %, together 162
+distinct videos in one sample. *Second time point (35 min later, 27 / 27
+requests answered):* 27 rows were new, **26** were songs, and the one miss
+was a 33-minute compilation the length rule drops. Many `AI\u7ffb\u5531` rows
+are 30-60 s clips (an "AI idol" covers trend); the length rule drops the ones
+under 45 s.
+
+**YouTube — the feeds.**
+
+| Feed | Outcome |
+|---|---|
+| `ytsearchdate<N>:<query>` | **Gone**: yt-dlp 2026.08.19 answers `Unsupported url scheme: "ytsearchdate20"`. |
+| `results?search_query=<q>&sp=CAI%3D` (the old "sort by upload date") | Answers, but does **not** sort by date any more: months-to-years-old rows, mostly tutorials. |
+| `https://www.youtube.com/hashtag/<tag>` | Titled, 4 / 4 runs, often song-rich — but **not recent**: median age 95-645 days and 0-9 of 20 rows inside 90 days. The page is a popularity view and **reshuffles on every request** (overlap 0.30-0.85). Fails the "recent" bar. |
+| `results?search_query=<q>&sp=EgIIAw%3D%3D` (the "this week" upload filter) | **Chosen.** Median age 2-6 days, 20 / 20 rows inside the week, 4 / 4 runs with 20 titled rows, ~1-2.4 s. Whether the rows are songs depends entirely on the query term (below). A term that starts with `#` here answers 1-20 rows in ~6 s — unstable; terms go in bare. |
+
+The flat listing gives title, channel, length and view count; there is no tag
+field, so the YouTube candidates carry what flat gives (`extra.viewCount`).
+
+**YouTube — every term** (4 runs each, all answered 20 titled rows unless
+noted):
+
+| hashtag page | raw | filtered | overlap | median age (d) | inside 90 d |
+|---|---|---|---|---|---|
+| `#aisong` | 18 / 20 | 18 / 18 | 0.30 | 95 | 9 / 19 |
+| `#aicover` | 18 / 20 | 18 / 18 | 0.40 | 188 | 8 / 20 |
+| `#aimusic` | 17 / 20 | 16 / 16 | 0.55 | 166 | 1 / 20 |
+| `#sunoai` | 15 / 20 | 15 / 17 | 0.85 | 312 | 0 / 20 |
+| `#udiomusic` | 18 / 19 | 18 / 18 | 0.53 | 645 | 0 / 19 (rows 19, 20, 20, 14) |
+| `#aigeneratedmusic` | 13 / 20 | 13 / 14 | 0.55 | 362 | 2 / 20 |
+| `#aisongs` | 12 / 20 | 12 / 12 | 0.60 | 208 | 4 / 20 |
+| `#sunomusic` | 3 / 20 | 3 / 13 | 1.00 | 263 | 2 / 20 |
+| `#suno` | 2 / 20 | 2 / 16 | 1.00 | 72 | 13 / 20 |
+| `#udio` | 1 / 20 | 1 / 17 | 0.75 | 356 | 2 / 20 |
+
+| "this week" term | raw | filtered | overlap | median age (d) |
+|---|---|---|---|---|
+| `ai cover` | **19 / 20** | 18 / 18 | 0.85 | 5 |
+| `ai version` | **18 / 20** | 18 / 19 | 0.75 | 2 |
+| `ai cover song` | 17 / 20 | 17 / 17 | 0.65 | 4 |
+| `ai original song` | **15 / 20** | 15 / 17 | 0.75 | 5 |
+| `ai generated song` | 13 / 20 | 13 / 17 | 0.95 | 6 |
+| `ai song` | 10 / 20 | 10 / 14 | 0.40 | 5 |
+| `ai remix` | 8 / 20 | 8 / 8 | 0.85 | 5 |
+| `ai generated music` | 8 / 20 | 8 / 15 | 0.95 | 5 |
+| `suno cover` | 8 / 20 | 8 / 12 | 0.35 | 4 |
+| `ai music video` | 6 / 20 | 6 / 17 | 0.85 | 4 |
+| `suno song` | 5 / 20 | 5 / 17 | 0.85 | 4 |
+| `udio` | 1 / 20 | 1 / 5 | 0.60 | 2 |
+| `suno ai music` | 0 / 20 | 0 / 16 | 0.90 | 3 |
+
+What the table does not show on its own:
+
+- **Free text collides.** *ai* is Vietnamese for "who" (`ai remix`: twelve of
+  twenty rows are 30-80 minute Vietnamese remix sets) and a Hindi word in song
+  titles; *suno* is Hindi for "listen" (`suno song`); `udio` matches *audio*
+  and *studio*. A term names AI music only when its other words pin it.
+- **The tool's name brings its tutorials.** Every term built on "suno" or
+  "ai music" is dominated by how-to and news videos; "cover" and "version"
+  are what songs are called, so those terms find songs.
+- `ai cover song` shares 10 of 20 rows with `ai cover` and is dropped as
+  redundant.
+
+**Chosen on YouTube (3):** `ai cover`, `ai version`, `ai original song` — raw
+75-95 %, no two sharing more than one row, together 58 distinct uploads.
+`ai original song` is the marginal one (75 %). *Second time point (~10 min
+later, 9 / 9 runs answered):* 13 rows were new and **8** were songs; three of
+the five misses are 26-58 minute compilations the length rule drops.
+
+**Rejected for good** (do not re-try without new evidence): the Bilibili
+channel API (404), the tag archive as a "recent" feed (stale first answer),
+the YouTube hashtag page as a "recent" feed (a reshuffled popularity view),
+`ytsearchdate` (removed from yt-dlp) and the upload-date sort (no longer
+sorts).
+
 ### 2.11 The ledger — what accumulates, next to the snapshot that does not
 
 *Added 2026-09-18.* A snapshot is the **latest read**: `refreshOne` overwrites
