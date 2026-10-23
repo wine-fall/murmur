@@ -767,6 +767,9 @@ that does not work.
 
 > *Added 2026-09-16.* A committed list of music channels becomes an extra
 > **search source**. It is not a taste source and must never be read as one.
+> *Amended 2026-10-22:* the list also names **tags** — a tag's newest uploads
+> join the same pool, which is how AI-made music reaches the pick (§2.9.1) —
+> and a listener can append their own lines.
 
 **The one distinction.** The listener's own accounts (§2.2/§2.3) decide **what
 kind** of song to look for. The curated channels are one of the **places to
@@ -776,15 +779,38 @@ about the listener, and a channel someone else curated says nothing about them.
 Code-wise this is structural: `src/music/channels.ts` never imports the digest
 and is never handed to the pack.
 
-**The manifest** — `assets/music_channels.txt`, exactly the shape of
-`assets/bed_sources.txt` (spec 03-04): one URL per line, blank lines and `#`
-comments ignored, anything that is not an `http(s)` URL skipped. Adding a
-channel is adding a line. Two shapes are understood:
+**The manifest** — `assets/music_channels.txt`, the shape of
+`assets/bed_sources.txt` (spec 03-04) plus tag lines: one channel URL or one
+tag line per line, blank lines and `#` comments ignored, anything else
+skipped. Adding a channel or a tag is adding a line. Four shapes are
+understood:
 
 | Shape | Read by |
 |---|---|
 | `https://www.youtube.com/@<handle>/videos` | yt-dlp `--dump-json --flat-playlist` |
 | `https://space.bilibili.com/<mid>/video` | Bilibili's own space API, wbi-signed |
+| `tag:bilibili:<keyword>` | `BilibiliWeb.newest`: the search page, `order=pubdate&tids=3` (newest first, music zone only) |
+| `tag:youtube:<term>` | yt-dlp `--dump-json --flat-playlist` over `https://www.youtube.com/results?search_query=<term>&sp=EgIIAw%3D%3D` (this week's uploads) |
+
+*Tag lines (added 2026-10-22).* A tag names a stream of uploads instead of an
+uploader — the only way AI-made music, which no curated channel carries,
+reaches the pool. Which feed a tag reads, and which terms are listed, is the
+measured outcome of §2.9.1; a term goes into the committed list only after it
+clears that section's bar. The parse (`parseManifestLine`) is total: the
+`tag` prefix and the platform are read in any case, the term is trimmed,
+whitespace-collapsed and lowercased (both sites search case-blind, so `AI
+Cover` and `ai cover` are one key), and a line with an unknown platform or an
+empty term is dropped like any other junk line. A murmur that predates tag
+lines skips them as non-URLs, so the shared file stays readable by every
+release.
+
+**The listener's own list** — `$MURMUR_HOME/music_channels.txt`
+(`musicChannelsPath`, beside `music-policy.md`: configuration the listener
+owns, never written by murmur), the same four shapes. It is read from disk on
+**every** load and appended after the shared list; a key both lists name is
+kept once, where it first appeared (`mergeManifests`). A missing or unreadable
+file is an empty list. Its lines are the listener's own words, so they never
+reach the dev log (below).
 
 **Runtime refresh.** The list is re-read from
 `https://raw.githubusercontent.com/wine-fall/murmur/main/assets/music_channels.txt`
@@ -796,10 +822,21 @@ fallback chain is total and never throws — cache inside TTL → fresh fetch �
 stale cache → **the copy that shipped**. A body with no URLs in it (a 404 page,
 a half-written file) is treated as a failure, not as "the list is now empty".
 
-**The pool.** Each listed channel's newest **20** uploads (title, ref,
-uploader) are pulled into `$MURMUR_HOME/cache/channels/pool.json`. A channel
-that fails costs that channel; a refresh where **nothing** answers keeps the
-pool it already had, so the catalogue never silently unmounts. A refresh that
+**The pool.** Each listed channel's or tag's newest **20** uploads (title,
+ref, uploader, and the `extra` its feed gives — §2.9.1) are pulled into
+`$MURMUR_HOME/cache/channels/pool.json`. A line that fails costs that line; a
+refresh where **nothing** answers keeps the pool it already had, so the
+catalogue never silently unmounts. A tag's rows keep only what is
+**song-length** — `MIN_CHAPTER_S` (45 s) to `MIX_DURATION_S` (12 min), the
+bounds a chapter already has to meet; a length of 0 is unknown and kept — and
+are never sent to the chapter pass: a long upload under a tag is a
+compilation far more often than a chaptered album. The whole pool is capped at
+`MAX_POOL_TRACKS` = **1000**; once full, the remaining lines are not read at
+all, which also bounds a refresh's network when a listener's own file grows
+long. Each refresh writes **one** dev-log line of counts —
+`channels.refresh n=<tracks> channels=<lines> tags=<lines> failed=<lines>` —
+and never a URL, a term or a failure's text (a yt-dlp failure quotes the
+search URL, which carries the term). A refresh that
 was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
 outcome — the taste refresh's own cooldown, and the reason an offline listener
 does not respawn yt-dlp over the whole list once a song. Refreshed on the
@@ -838,7 +875,10 @@ a longer spacing or a resume across refreshes — not a retry loop.
 substring match over the pool on **title and uploader** — every word of the
 query has to land — with **no network at search time**. It returns the same
 `TrackCandidate` shape as every other catalogue, so `submit_pick` resolves the
-ref through the unchanged yt-dlp path (§2.5). Like the other catalogues it is
+ref through the unchanged yt-dlp path (§2.5). A row's `extra` rides through to
+the candidate: a Bilibili tag row carries `tags` and `zone` exactly as §2.4's
+search does, a YouTube row the `viewCount` its flat listing gives (a flat
+listing has no tags). Like the other catalogues it is
 offered **only while it holds something**: an empty pool is not mounted, and
 asking for it returns the same `{ ok: false, reason: 'not-mounted' }`.
 
@@ -906,6 +946,12 @@ sentence rendered only while the pool is non-empty: the catalogue searches
 recent uploads from a curated list of music channels — good for something new,
 a cover, or a recent release a plain search would bury. That sentence is about
 **where to look**. It must not describe the listener.
+
+The `search_music` tool's `catalogue` description carries the one sentence
+that names what the pool holds: *"channels is recent uploads from curated
+channels and tags."* The tags add **no rule** to the music policy or the
+pick instruction — the pool holds AI-made songs now, and the model meets
+them, and judges them, the way it judges any candidate.
 
 ### 2.9.1 Tag feeds — where AI-made music is found (measured 2026-10-22)
 
@@ -2277,6 +2323,46 @@ three Bilibili channels answered `412` in that run (the measured ceiling in
 §2.9) and were skipped without costing the pool. YouTube refs from the pool
 resolve through the unchanged path; a Bilibili resolve was 412 from the same
 rate-limited IP, which is the pre-existing §2.5 behaviour and not this change.
+
+*Tag lines — added 2026-10-22.* Unit: a manifest line parses as a channel, a
+tag (platform in any case, term tidied and lowercased, a colon inside the term
+kept) or nothing (a comment, an empty term, an unknown platform, a malformed
+prefix); a list keeps channels and tags in order and reads a repeated line
+once; two lists merge with the second appended and de-duplicated; the
+listener's file is appended on every load — inside the shared list's TTL, on
+top of the bundled copy when offline — costs nothing when absent, and
+defaults to `$MURMUR_HOME/music_channels.txt`; the bundled list carries tag
+lines for both platforms. `BilibiliWeb.newest` asks `order=pubdate&tids=3`,
+sends a non-Latin keyword as typed, strips every `<em>` highlight, reads an
+empty tag list and a missing play count as nothing, caps at the limit, skips a
+row with no bvid or title, throws on a 412 and on a non-zero code, and reads
+an empty page as no rows. A YouTube flat search row carries its view count
+and nothing it does not have. A tag routes to its platform's feed (the
+YouTube one with the this-week filter in the URL), keeps only song-length
+rows, spends no chapter lookup, reads an unparseable line as nothing, and lets
+a failed read throw. The pool hands a row's `extra` to the candidate and keeps
+it across a restart; stops filling, and reading, at `MAX_POOL_TRACKS`; keeps
+the pool (and its file) when a later refresh gets nothing back; and writes
+exactly one dev-log line of counts, with no term, URL or failure text, on
+success and on total failure. The `search_music` catalogue description names
+channels and tags, and the pick instruction does not mention tags.
+
+Smoke (real services, `scratch/tags/smoke.ts`): every committed tag returns
+song-length, titled rows through the real transports, Bilibili rows carry
+their tags, and one full refresh over the committed list plus a listener file
+builds a pool whose rows search with their `extra`.
+
+*As built, 2026-10-22*: all 12 committed tags answered. Kept after the length
+rule, of 20: Bilibili 12, 14, 16, 20, 20, 20, 17, 20, 20 (every row with its
+tags; 0.36-1.1 s each); YouTube `ai cover` 16, `ai version` 18,
+`ai original song` 18 (1.0-2.4 s each). One refresh over the committed list
+plus a listener file (one new tag, one duplicate of a committed tag, one junk
+line — read as 23 keys, 13 of them tags) built **339** tracks in 68 s and
+logged `channels.refresh n=339 channels=10 tags=13 failed=5`; the five
+failures were all channel lines that predate this change (three Bilibili
+spaces answering 412, the §2.9 ceiling; `@MahoganySessions`, which yt-dlp now
+reports has no videos tab) and no tag line failed. A fresh pool over the same
+home read the 339 back from `pool.json`.
 ---
 
 ### 5.14 The digest spends its budget on music (unit) — *added 2026-09-18*
