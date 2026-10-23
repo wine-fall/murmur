@@ -1,6 +1,7 @@
 // The curated-channel search source (spec 14 §2.9): a committed list of music
-// channels, refreshed from GitHub at runtime, whose recent uploads make a
-// local pool the pick task can search as the `channels` catalogue.
+// channels and tags, refreshed from GitHub at runtime and extended by the
+// listener's own file, whose recent uploads make a local pool the pick task
+// can search as the `channels` catalogue.
 //
 // THE DISTINCTION THIS MODULE EXISTS UNDER: this list is a place to LOOK for a
 // song, never taste. The listener's own accounts (spec 14 §2.3) decide WHAT
@@ -9,11 +10,12 @@
 // here describes the listener.
 //
 // Three things live here, in the order they run:
-//   1. the manifest — one channel url per line, fetched from GitHub with the
-//      committed copy as the floor, so a channel added upstream reaches a
-//      listener without waiting for a release;
-//   2. the pool — each channel's recent uploads (title, ref, uploader), read
-//      once a day on the taste refresh's own clock and cached;
+//   1. the manifest — one channel url or tag line per line, fetched from
+//      GitHub with the committed copy as the floor, so a line added upstream
+//      reaches a listener without waiting for a release, then merged with the
+//      listener's own `$MURMUR_HOME/music_channels.txt`;
+//   2. the pool — each channel's or tag's recent uploads (title, ref,
+//      uploader), read once a day on the taste refresh's own clock and cached;
 //   3. the search — a local substring match over that pool. No network at
 //      search time: the pick task is already paying for a real search.
 //
@@ -28,12 +30,21 @@ import { fileURLToPath } from 'node:url'
 import { z } from 'zod'
 
 import type { TrackCandidate } from '../contracts.ts'
-import { cacheRoot } from '../paths.ts'
+import { cacheRoot, musicChannelsPath } from '../paths.ts'
 import type { YtDlpRunner } from './music.ts'
 import { RETRY_MS, STALE_MS } from './sources/refresh.ts'
 import { BilibiliWeb, type ChannelTrack } from './sources/wbi.ts'
 
 export type { ChannelTrack }
+
+// A tag's feed per platform, as measured (spec 14 §2.9.1): Bilibili's search
+// page newest-first in the music zone; YouTube's search results filtered to
+// this week's uploads. A hashtag page is neither recent nor stable, so it is
+// not what a tag line reads.
+export type TagPlatform = 'bilibili' | 'youtube'
+const TAG_PLATFORMS: readonly TagPlatform[] = ['bilibili', 'youtube']
+
+export type ManifestEntry = { kind: 'channel'; url: string } | { kind: 'tag'; platform: TagPlatform; term: string }
 
 // fileURLToPath, not URL.pathname: pathname keeps %-escapes (a checkout path
 // with a space would silently read as an empty list).
@@ -47,9 +58,9 @@ export const CHANNEL_MANIFEST_URL = 'https://raw.githubusercontent.com/wine-fall
 // manifest is never the reason a channel is missing for long.
 export const MANIFEST_TTL_MS = 12 * 60 * 60_000
 
-// How many recent uploads each channel contributes. Enough that a pool of a
-// handful of channels has something to say about most queries, small enough
-// that a refresh is a few seconds of network once a day.
+// How many recent uploads each channel or tag contributes. Enough that a pool
+// of a handful of channels has something to say about most queries, small
+// enough that a refresh is a few seconds of network once a day.
 export const UPLOADS_PER_CHANNEL = 20
 
 // Bilibili answers a burst of space reads with its risk-control page; the
@@ -85,6 +96,12 @@ export const MAX_CHAPTERS_PER_UPLOAD = 12
 // chapters cannot swamp the `channels` catalogue and crowd out everyone else.
 export const TRACKS_PER_CHANNEL = 40
 
+// The ceiling on the whole pool, and so on one refresh's network: a listener's
+// own file can name any number of lines, and once the pool is full the rest
+// are not read. The committed list fills about 400; this leaves room for the
+// listener's lines behind it.
+export const MAX_POOL_TRACKS = 1_000
+
 // Full metadata costs one yt-dlp extraction per upload (~2 s), and only a long
 // upload is ever asked. Four per channel per refresh bounds a daily refresh at
 // a few seconds of extra network per channel; the rest of that channel's long
@@ -96,7 +113,8 @@ export const CHAPTER_LOOKUPS_PER_CHANNEL = 4
 const CHAPTER_CACHE_ENTRIES = 500
 
 const ManifestCacheSchema = z.object({ at: z.number(), text: z.string() })
-const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1), uploader: z.string(), durationS: z.number() })
+const ExtraSchema = z.object({ viewCount: z.number().optional(), zone: z.string().optional(), tags: z.array(z.string()).optional() })
+const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1), uploader: z.string(), durationS: z.number(), extra: ExtraSchema.optional() })
 // The chapter rules (spec 14 §2.9) changed what belongs in a pool, so a file
 // written before them is stale by construction: a version that does not match
 // reads as no cache at all, and the pool rebuilds on the next poke.
@@ -104,14 +122,40 @@ const POOL_CACHE_VERSION = 2
 const PoolCacheSchema = z.object({ v: z.literal(POOL_CACHE_VERSION), at: z.number(), tracks: z.array(TrackSchema) })
 const ChapterCacheSchema = z.record(z.string(), z.array(TrackSchema))
 
-// One url per line; `#` comments, blanks and anything that is not an http(s)
-// url are skipped. A listener edits this by adding a line, so a line they got
+// One line: a channel's http(s) url, or `tag:<platform>:<term>`. The platform
+// is read in any case and the term with its spacing tidied and lowercased —
+// both sites search case-blind, so `AI Cover` and `ai cover` are one feed.
+// Anything else (a `#` comment, a blank, an unknown platform, an empty term)
+// is not a line at all: a listener edits this file by hand, so a line they got
 // wrong must cost that line and nothing else.
+export function parseManifestLine(line: string): ManifestEntry | null {
+  const text = line.trim()
+  if (/^https?:\/\//.test(text)) return { kind: 'channel', url: text }
+  const tag = /^tag:([a-z]+):(.*)$/i.exec(text)
+  if (tag === null) return null
+  const platform = TAG_PLATFORMS.find((p) => p === tag[1]?.toLowerCase())
+  const term = (tag[2] ?? '').trim().replace(/\s+/g, ' ').toLowerCase()
+  return platform === undefined || term === '' ? null : { kind: 'tag', platform, term }
+}
+
+// The one string a line is known by: the pool's key, the dedupe's unit.
+function manifestKey(entry: ManifestEntry): string {
+  return entry.kind === 'channel' ? entry.url : `tag:${entry.platform}:${entry.term}`
+}
+
 export function parseChannelManifest(text: string): string[] {
-  return text
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line !== '' && !line.startsWith('#') && /^https?:\/\//.test(line))
+  const keys: string[] = []
+  for (const line of text.split('\n')) {
+    const entry = parseManifestLine(line)
+    if (entry !== null) keys.push(manifestKey(entry))
+  }
+  return mergeManifests(keys)
+}
+
+// Later lists append to earlier ones; a key already present stays where it
+// first appeared.
+export function mergeManifests(...lists: readonly string[][]): string[] {
+  return [...new Set(lists.flat())]
 }
 
 export function channelsCacheDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -140,7 +184,9 @@ function writeJson(path: string, value: unknown): void {
   }
 }
 
-function bundled(path: string): string[] {
+// The copy that shipped, or the listener's own file. Missing or unreadable
+// is an empty list: neither is required to exist.
+function readManifestFile(path: string): string[] {
   try {
     return parseChannelManifest(readFileSync(path, 'utf8'))
   } catch {
@@ -151,15 +197,23 @@ function bundled(path: string): string[] {
 export type ManifestDeps = {
   dir?: string
   bundledPath?: string
+  localPath?: string
   fetch?: (url: string, init?: RequestInit) => Promise<Response>
   ttlMs?: number
   now?: () => number
 }
 
-// The channel list, in order of preference: a cache inside its TTL, a fresh
+// The list: the shared one, then the listener's own lines appended. The
+// listener's file is read on every load — it is on disk, and an edit should
+// land on the next refresh, not after the shared list's TTL.
+export async function loadChannelManifest(deps: ManifestDeps = {}): Promise<string[]> {
+  return mergeManifests(await sharedManifest(deps), readManifestFile(deps.localPath ?? musicChannelsPath()))
+}
+
+// The shared list, in order of preference: a cache inside its TTL, a fresh
 // fetch, a stale cache, the copy that shipped. Total — the fallback chain is
 // the feature's guarantee that a network hiccup never costs it.
-export async function loadChannelManifest(deps: ManifestDeps = {}): Promise<string[]> {
+async function sharedManifest(deps: ManifestDeps): Promise<string[]> {
   const path = join(deps.dir ?? channelsCacheDir(), 'manifest.json')
   const now = (deps.now ?? Date.now)()
   const cached = readJson(path, ManifestCacheSchema)
@@ -176,7 +230,7 @@ export async function loadChannelManifest(deps: ManifestDeps = {}): Promise<stri
       return fresh
     }
   }
-  return fromCache.length > 0 ? fromCache : bundled(deps.bundledPath ?? BUNDLED_CHANNELS)
+  return fromCache.length > 0 ? fromCache : readManifestFile(deps.bundledPath ?? BUNDLED_CHANNELS)
 }
 
 async function fetchManifest(deps: ManifestDeps): Promise<string | null> {
@@ -194,6 +248,7 @@ const FlatSchema = z.object({
   url: z.string().nullish(),
   webpage_url: z.string().nullish(),
   duration: z.number().nullish(),
+  view_count: z.number().nullish(),
   uploader: z.string().nullish(),
   channel: z.string().nullish(),
   // A channel listing names the channel here and leaves `uploader` null.
@@ -224,6 +279,8 @@ export function parseFlatUploads(stdout: string, limit: number): ChannelTrack[] 
       title: row.data.title,
       uploader: row.data.playlist_uploader ?? row.data.uploader ?? row.data.channel ?? '',
       durationS: Math.trunc(row.data.duration ?? 0),
+      // All a flat row says about itself beyond the title: no tags, no zone.
+      ...(row.data.view_count == null ? {} : { extra: { viewCount: row.data.view_count } }),
     })
   }
   return tracks
@@ -277,20 +334,44 @@ export function chapterTracks(upload: ChannelTrack, chapters: readonly Chapter[]
 
 const BILIBILI_SPACE = /^https?:\/\/space\.bilibili\.com\/(\d+)\b/
 
-export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliWeb, 'recent'>; dir?: string }
+// The "this week" upload filter on YouTube's results page. The "upload date"
+// SORT (`sp=CAI%3D`) no longer sorts and yt-dlp dropped `ytsearchdate`; the
+// filter is what returned recent rows when measured (spec 14 §2.9.1).
+const YOUTUBE_THIS_WEEK = 'sp=EgIIAw%3D%3D'
 
-// One channel's recent uploads, by the shape of its url. YouTube goes through
-// yt-dlp, whose flat listing carries the titles; Bilibili goes through the
-// signed space API, because yt-dlp's flat listing of a space returns the refs
-// with every title empty (spec 14 §2.9). An unrecognised url is skipped.
-export function channelUploads(deps: UploadsDeps): (url: string, limit: number) => Promise<ChannelTrack[]> {
-  return async (url, limit) => {
-    const space = BILIBILI_SPACE.exec(url)
+export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliWeb, 'recent' | 'newest'>; dir?: string }
+
+// One line's recent uploads, by its shape. A YouTube channel goes through
+// yt-dlp, whose flat listing carries the titles; a Bilibili space goes through
+// the signed space API, because yt-dlp's flat listing of a space returns the
+// refs with every title empty (spec 14 §2.9); a tag goes to its platform's
+// feed (spec 14 §2.9.1). An unrecognised line is skipped.
+export function channelUploads(deps: UploadsDeps): (key: string, limit: number) => Promise<ChannelTrack[]> {
+  return async (key, limit) => {
+    const entry = parseManifestLine(key)
+    if (entry?.kind === 'tag') return (await tagUploads(deps, entry.platform, entry.term, limit)).filter((t) => songLength(t.durationS))
+    const space = BILIBILI_SPACE.exec(key)
     if (space !== null) return await deps.space.recent(space[1] ?? '', limit)
-    if (!/^https?:\/\/(www\.)?youtube\.com\//.test(url)) return []
-    const stdout = await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', url])
+    if (!/^https?:\/\/(www\.)?youtube\.com\//.test(key)) return []
+    const stdout = await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', key])
     return await withChapters(deps, parseFlatUploads(stdout, limit))
   }
+}
+
+// A tag's newest uploads. No chapter pass: a tag names anyone's upload, and a
+// long one there is a compilation far more often than a chaptered album, so
+// the length rule below drops it rather than paying a lookup to ask.
+async function tagUploads(deps: UploadsDeps, platform: TagPlatform, term: string, limit: number): Promise<ChannelTrack[]> {
+  if (platform === 'bilibili') return await deps.space.newest(term, limit)
+  const results = `https://www.youtube.com/results?search_query=${encodeURIComponent(term)}&${YOUTUBE_THIS_WEEK}`
+  return parseFlatUploads(await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', results]), limit)
+}
+
+// The bounds a chapter has to fall inside to count as a song, applied to a tag
+// row: a clip under MIN_CHAPTER_S is a sting, an upload past MIX_DURATION_S is
+// a set. 0 is "unknown", not short.
+function songLength(durationS: number): boolean {
+  return durationS === 0 || (durationS >= MIN_CHAPTER_S && durationS <= MIX_DURATION_S)
 }
 
 // The chapter pass over one channel's flat listing. A short upload is a song
@@ -342,7 +423,7 @@ async function readChapters(deps: UploadsDeps, upload: ChannelTrack): Promise<Ch
 export type ChannelPoolDeps = {
   dir?: string
   manifest?: () => Promise<string[]>
-  uploads?: (url: string, limit: number) => Promise<ChannelTrack[]>
+  uploads?: (key: string, limit: number) => Promise<ChannelTrack[]>
   staleMs?: number
   retryMs?: number
   pauseMs?: number
@@ -396,42 +477,47 @@ export class ChannelPool {
     await this.running?.catch(() => {})
   }
 
-  // Read every listed channel, keep what answered, cache it. Returns how many
-  // tracks the pool now holds. Never throws: a refresh that falls over leaves
-  // the pool exactly as it was.
+  // Read every listed channel and tag until the pool is full, keep what
+  // answered, cache it. Returns how many tracks the pool now holds. Never
+  // throws: a refresh that falls over leaves the pool exactly as it was.
   async refresh(): Promise<number> {
     this.tried = this.now()
     const read = this.deps.uploads ?? (() => Promise.resolve([]))
-    let urls: string[]
+    let keys: string[]
     try {
-      urls = await (this.deps.manifest ?? (() => loadChannelManifest({ dir: this.dir })))()
+      keys = await (this.deps.manifest ?? (() => loadChannelManifest({ dir: this.dir })))()
     } catch (err) {
       this.deps.debug?.(`channels.refresh manifest failed: ${String(err)}`)
       return this.tracks.length
     }
     const found: ChannelTrack[] = []
     const seen = new Set<string>()
-    for (const [index, url] of urls.entries()) {
+    let failed = 0
+    for (const [index, key] of keys.entries()) {
+      if (found.length >= MAX_POOL_TRACKS) break
       if (index > 0) await pause(this.deps.pauseMs ?? BETWEEN_CHANNELS_MS)
       try {
-        for (const track of await read(url, UPLOADS_PER_CHANNEL)) {
-          if (seen.has(track.ref)) continue
+        for (const track of await read(key, UPLOADS_PER_CHANNEL)) {
+          if (seen.has(track.ref) || found.length >= MAX_POOL_TRACKS) continue
           seen.add(track.ref)
           found.push(track)
         }
-      } catch (err) {
-        // One channel behind risk control or renamed out from under the list
-        // costs that channel, not the pool.
-        this.deps.debug?.(`channels.refresh ${url} failed: ${String(err)}`)
+      } catch {
+        // One line behind risk control or renamed out from under the list
+        // costs that line, not the pool. Counted, never named: a tag line can
+        // be the listener's own words, and the failure text carries them.
+        failed++
       }
     }
+    // One line of counts per refresh (spec 14 §3.6: counts, never content).
+    const tags = keys.filter((key) => key.startsWith('tag:')).length
+    this.deps.debug?.(`channels.refresh n=${found.length} channels=${keys.length - tags} tags=${tags} failed=${failed}`)
     // Nothing came back at all: keep what the pool already had rather than
     // emptying it, which would silently unmount the catalogue.
     if (found.length === 0) return this.tracks.length
     this.tracks = found
     this.at = this.now()
     writeJson(join(this.dir, 'pool.json'), { v: POOL_CACHE_VERSION, at: this.at, tracks: this.tracks })
-    this.deps.debug?.(`channels.refresh n=${found.length} channels=${urls.length}`)
     return found.length
   }
 
@@ -448,7 +534,7 @@ export class ChannelPool {
       title: t.title,
       uploader: t.uploader,
       durationS: t.durationS,
-      extra: {},
+      extra: t.extra ?? {},
       catalogue: 'channels' as const,
     }))
   }

@@ -61,10 +61,12 @@ export type WbiFetch = (url: string, init?: RequestInit) => Promise<Response>
 // What a feed says about an upload beyond its title: the play count, and on
 // Bilibili the zone and the uploader's own tags — the only places a video says
 // what it is (an AI-made song, say).
-export type TrackExtra = { viewCount?: number; zone?: string; tags?: string[] }
+// `| undefined` because the pool's cache is read back through zod, whose
+// optional fields come out that way.
+export type TrackExtra = { viewCount?: number | undefined; zone?: string | undefined; tags?: string[] | undefined }
 
 // One recent upload of a curated channel or tag: what the pool is searched by.
-export type ChannelTrack = { ref: string; title: string; uploader: string; durationS: number; extra?: TrackExtra }
+export type ChannelTrack = { ref: string; title: string; uploader: string; durationS: number; extra?: TrackExtra | undefined }
 
 const NavSchema = z.object({ data: z.object({ wbi_img: z.object({ img_url: z.string(), sub_url: z.string() }) }) })
 const SpiSchema = z.object({ data: z.object({ b_3: z.string() }) })

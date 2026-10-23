@@ -339,6 +339,7 @@ export function musicTools(
         .optional()
         .describe(
           'where to search; default youtube. bilibili, netease, qqmusic and channels are available only when mounted — the tool result says which are. ' +
+            'channels is recent uploads from curated channels and tags. ' +
             'neighbours is what the platforms put next to the song that is on the air right now, read while it played — it ignores the query, and early in a program it may be empty. ' +
             'playlists is the mood pool: give it the situation in a few words (a scene, a weather, an hour, a feeling, or one of the platform\'s own category words) ' +
             'and it answers with tracks off playlists other people keep for that — somewhere to look that is nobody\'s memory of the obvious song. ' +
