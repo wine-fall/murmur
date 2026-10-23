@@ -890,6 +890,15 @@ describe('the pool with tags in it', () => {
   })
 })
 
+describe('a tag row in front of the pick', () => {
+  it('reaches the model with its tags and zone, the only places it says it is AI-made', async () => {
+    const row = { ref: 'https://www.bilibili.com/video/BVai', title: 'Paper Lanterns', uploader: 'Lantern Studio', durationS: 200, extra: { zone: 'cover', tags: ['ai cover'] }, catalogue: 'channels' as const }
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [row] })
+    const result = await callTool(tools, 'search_music', { query: 'lanterns', catalogue: 'channels' })
+    expect((result.candidates as TrackCandidate[])[0]?.extra).toEqual({ zone: 'cover', tags: ['ai cover'] })
+  })
+})
+
 describe('what search_music says the channels catalogue is', () => {
   it('names curated channels and tags, in the tool and nowhere in the prompt', () => {
     const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [] })
