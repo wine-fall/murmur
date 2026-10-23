@@ -384,9 +384,10 @@ function buildMusic(
   // The listener's policy file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).
   if (seedMusicPolicy(config.musicPolicyPath)) host.debug?.(`music.policy seeded ${config.musicPolicyPath}`)
-  // The curated channels (spec 14 §2.9): an extra place to LOOK for a song,
-  // never taste. The list refreshes from GitHub and the pool of recent uploads
-  // from the channels themselves, both off the live loop and both cached.
+  // The curated channels and tags (spec 14 §2.9): an extra place to LOOK for a
+  // song, never taste. The list refreshes from GitHub and the pool of recent
+  // uploads from the channels and tags themselves, both off the live loop and
+  // both cached.
   const ytdlp = ytdlpRunner(config.ytdlpCmd)
   const channelPool = new ChannelPool({
     uploads: channelUploads({ run: ytdlp, space: bilibili }),

@@ -1,6 +1,7 @@
 // Bilibili's own web API, read anonymously, for the three things yt-dlp
 // cannot be relied on for: a channel's recent uploads (spec 14 §2.9), the
-// search page (§2.4) and the play url behind a watch ref (§2.5).
+// search page (§2.4, and a tag's newest uploads, §2.9.1) and the play url
+// behind a watch ref (§2.5).
 //
 // Why this exists at all: yt-dlp's flat read of a Bilibili space
 // (`--flat-playlist https://space.bilibili.com/<mid>/video`) returns the refs

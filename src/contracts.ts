@@ -280,8 +280,8 @@ export type TrackCandidate = {
 // Where a search can go (spec 14 §2.4): the catalogues that can also PLAY.
 // Spotify and Soda are taste sources only and are never a search target.
 // `channels` (spec 14 §2.9) is the odd one: not an account and not a network
-// search, but a local pool of recent uploads from the curated channel list —
-// a place to LOOK, never a statement about the listener's taste.
+// search, but a local pool of recent uploads from the curated channel and tag
+// list — a place to LOOK, never a statement about the listener's taste.
 export type Catalogue = 'youtube' | 'bilibili' | 'netease' | 'qqmusic' | 'channels' | 'playlists' | 'neighbours'
 
 // Where a found song is PLAYED from, best first (spec 14 §2.13). `channels` is
