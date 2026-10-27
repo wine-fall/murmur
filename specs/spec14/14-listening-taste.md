@@ -2584,6 +2584,15 @@ never refused for it. *The knob.* `aiShare` defaults to 0.1, is read from
 feeds, and matching on titles, uploaders and tags, and still says nothing
 about the listener.
 
+*As built, 2026-10-27* (real services, `scratch/ai-slot-smoke.ts` and
+`scratch/ai-slot-pick.ts`): one refresh over the committed tag lines kept
+**53 of 157** Bilibili rows and none of the YouTube rows, every kept row marked
+a tag row; an empty query, a genre word, `AI` and a query nothing matches each
+answered five. Two real AI-slot picks (an invented scene) each landed on a tag
+row with no refusal — `music.slot ai picked=ai refused=0 fail-open=0`, 9.1 s
+and 14.9 s, the Bilibili audio resolving — and each announce said the song was
+AI-made.
+
 ## 6. Resolved decisions
 
 - **Bilibili is read through its own web API first, yt-dlp second**
