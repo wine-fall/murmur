@@ -151,18 +151,27 @@ function sameArtist(hit: TrackCandidate, artist: string | undefined): boolean {
 export type ChannelCatalogue = {
   count: () => number
   search: (query: string, limit?: number) => TrackCandidate[]
+  // Whether a ref is one of the pool's tag rows -- an AI-made song, which is
+  // what an AI slot plays (spec 14 §3.10 step four).
+  isTagRow: (ref: string) => boolean
 }
 
-// The discovery wiring (spec 14 3.10), one object because the three parts
-// arrive together: the neighbour pool this task FILLS from the ref it
-// commits to, what the listener already knows of a candidate, and whether
-// this slot may play something they know.
+// The discovery wiring (spec 14 3.10), one object because the parts arrive
+// together: the neighbour pool this task FILLS from the ref it commits to,
+// what the listener already knows of a candidate, whether this slot may play
+// something they know, and whether it is an AI slot.
 export type DiscoveryOptions = {
   prime?: (ref: string) => void
   label?: (title: string, artist: string) => Promise<Familiarity>
   newOnly?: boolean
+  aiSlot?: boolean
   log?: (message: string) => void
 }
+
+// An AI slot's refusals before it plays what it was handed (spec 14 §3.10
+// step four): measured, the model lands on a tag row without one, and a
+// longer loop would spend the task's turns and cost the slot its song.
+const AI_SLOT_REFUSALS = 3
 
 export function musicTools(
   provider: MusicProvider,
@@ -390,6 +399,7 @@ export function musicTools(
   // air and a refusal loop spends the task's turns on nothing.
   let refused = 0
   let failOpen = 0
+  let aiRefused = 0
 
   const submitPick = tool(
     'submit_pick',
@@ -420,6 +430,18 @@ export function musicTools(
       const label = trackLabel({ title, artist })
       if (avoided.has(folded(label))) {
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
+      }
+
+      // The AI slot (spec 14 §3.10 step four): only a tag row of the channels
+      // pool, until it has said so AI_SLOT_REFUSALS times -- then whatever
+      // the model found plays, because dead air costs more.
+      const aiRow = channels?.isTagRow(ref) === true
+      if (discovery?.aiSlot === true && !aiRow && aiRefused < AI_SLOT_REFUSALS) {
+        aiRefused++
+        return reply({
+          ok: false,
+          error: 'this slot plays one of the AI-generated songs from the channels catalogue: search it and submit one of those.',
+        })
       }
 
       const mark = discovery?.label === undefined ? undefined : await discovery.label(title, artist)
@@ -455,6 +477,9 @@ export function musicTools(
         discovery.log?.(
           `music.slot ${discovery.newOnly === true ? 'new-only' : 'familiar-ok'} picked=${mark?.familiar === true ? 'familiar' : 'new'} refused=${refused} fail-open=${failOpen}`,
         )
+      }
+      if (discovery?.aiSlot === true) {
+        discovery.log?.(`music.slot ai picked=${aiRow ? 'ai' : 'other'} refused=${aiRefused} fail-open=${aiRow ? 0 : 1}`)
       }
       // Background, after the pick is committed (spec 14 3.10): the song's
       // own airtime is what pays for the next pick's neighbour pool.

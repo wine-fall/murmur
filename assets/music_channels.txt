@@ -21,8 +21,10 @@
 #   tag:youtube:<term>       this week's YouTube uploads that match the term
 #
 # A tag line is read in any case; the platform must be one of the two above
-# and the term must not be empty, or the line is skipped. A tag's uploads
-# keep only what is song-length: 45 seconds to 12 minutes.
+# and the term must not be empty, or the line is skipped. A tag's uploads keep
+# only what reads as an AI-made song: its own tags say AI, its title is not a
+# cover, tutorial or chart, and it runs 2-7 minutes. A YouTube upload carries
+# no tag list, so a YouTube tag line keeps nothing; none is listed.
 #
 # An upload longer than 12 minutes on a listed CHANNEL has to justify itself
 # with chapters: a chapter becomes one candidate, and murmur plays just that
@@ -68,5 +70,3 @@ tag:bilibili:AI生成音乐
 tag:bilibili:AIGC音乐
 tag:bilibili:AI歌手
 tag:bilibili:AIMV
-tag:youtube:ai cover
-tag:youtube:ai version

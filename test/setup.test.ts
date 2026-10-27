@@ -1351,6 +1351,7 @@ describe('set_language (spec 03-03 \u00a77 + spec 12 \u00a73.9)', () => {
     tuiPet: true,
     rwtEnabled: true,
     playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
+    aiShare: 0.1,
   }
   const store = (home: string) =>
     new SettingsStore({ path: join(home, SETTINGS_FILE), initial: BASE, touched: {} })

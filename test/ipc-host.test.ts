@@ -762,6 +762,7 @@ describe('IpcHost (spec 10 §2.1/§2.3)', () => {
       tuiPet: true,
       rwtEnabled: true,
       playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
+      aiShare: 0.1,
     }
 
     function wire(applyOk = true): SettingsPatch[] {

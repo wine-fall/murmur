@@ -88,6 +88,9 @@ export const PlayOrderSchema = z
   .array(z.enum(PLAY_ORDER_IDS))
   .transform((order) => [...new Set([...order, ...PLAY_ORDER_IDS])])
 
+export const AiShareSchema = z.number().min(0).max(1)
+export const AI_SHARE_DEFAULT = 0.1
+
 export const SettingsValuesSchema = z.object({
   anchorsEnabled: z.boolean(),
   musicEnabled: z.boolean(),
@@ -106,6 +109,9 @@ export const SettingsValuesSchema = z.object({
   // the /sources play-order card; the ids are spelled out here for the same
   // reason SourceLine's are — this module ships with the front-end.
   playOrder: PlayOrderSchema,
+  // The chance an autoplay pick is one of the channels pool's AI-made songs
+  // (spec 14 §3.10 step four); 0 = never. No pane item (spec 12 §1).
+  aiShare: AiShareSchema,
   // The one OPTIONAL knob (spec 12 §3.9). Absent means the listener never said,
   // and the persona decides; set is an override applied as a directive on top
   // of the persona, never an edit to persona.md. Free text — a language name as
@@ -127,6 +133,7 @@ export const SettingsPatchSchema = z.object({
   tuiPet: z.boolean().optional(),
   rwtEnabled: z.boolean().optional(),
   playOrder: PlayOrderSchema.optional(),
+  aiShare: AiShareSchema.optional(),
   // Empty string is legal HERE and only here: it is how the listener clears the
   // override and hands the language back to the persona (spec 12 §3.9).
   language: z.union([LanguageSchema, z.literal('')]).optional(),

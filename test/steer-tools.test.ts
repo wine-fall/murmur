@@ -25,6 +25,7 @@ const BASE: Settings = {
   tuiPet: true,
   rwtEnabled: true,
   playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
+  aiShare: 0.1,
 }
 
 function harness(initial: Partial<Settings> = {}, wired: { music?: boolean } = {}) {
@@ -74,6 +75,14 @@ describe('change_settings (spec 12 §2.6)', () => {
     // "stop with the news" (spec 13 §2.6)
     expect((await call({ rwt: false })).ok).toBe(true)
     expect(store.current().rwtEnabled).toBe(false)
+  })
+
+  it('sets the AI share, 0 meaning never, and refuses one past 1 (spec 14 §3.10 step four)', async () => {
+    const { store, call } = harness()
+    expect((await call({ aiSongs: 0 })).ok).toBe(true)
+    expect(store.current().aiShare).toBe(0)
+    expect((await call({ aiSongs: 1.5 })).ok).toBe(false)
+    expect(store.current().aiShare).toBe(0)
   })
 
   it('translates the mix gear the way the pane does, never raw field names', async () => {

@@ -160,6 +160,10 @@ const PLAYED_CAP = 2048
 // submit_pick; this is the half the model can act on before it searches.
 const SLOT_LINE =
   'this slot: something they have not heard. Their own shelves are not the place to look for it — the playlists catalogue, the neighbours of what is on air, and what the platforms picked for them today are.'
+// What an AI slot says instead (spec 14 §3.10 step four). Measured verbatim
+// over real picks (8 / 8 landed on a tag row): reword it only with a re-run.
+const AI_SLOT_LINE =
+  'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.'
 // How many of those the moment excludes by artist (spec 14 §2.12): the last
 // three on or near the air, newest last.
 const MOMENT_AVOID = 3
@@ -272,6 +276,9 @@ export type MusicWiring = {
   // awaited -- its own 24 h gate makes that a no-op on all but one a day.
   // Absent = no lane at all.
   daily?: { maybeRefresh: () => void; block: () => string }
+  // How many AI-made songs (tag rows) the channels pool holds (spec 14 §3.10
+  // step four). An AI slot is drawn only while there are some. Absent = none.
+  aiRows?: () => number
 }
 
 // Proactive-and-pacing wiring (spec 07), optional as a block: without it the
@@ -295,6 +302,9 @@ export type DirectorSettings = {
   // Whether an ordinary talk batch may be offered real-world material (spec
   // 13 §2.6); read live at each batch, so "stop with the news" lands at once.
   rwtEnabled: boolean
+  // The chance an autoplay pick is an AI slot (spec 14 §3.10 step four), read
+  // live at each pick; 0 = never.
+  aiShare: number
   // Absent = the persona decides (spec 12 §3.9). Read live like every other
   // knob here, so a change lands on the next beat with no restart.
   language?: string | undefined
@@ -1414,16 +1424,22 @@ export class Director {
     // month ago is still one the listener has heard from this radio.
     const played = [...this.deps.memory.recentSongsSince(0, PLAYED_CAP), ...this.queuedLabels()]
     const newOnly = !request && !this.deck.draw()
+    // The AI slot is drawn ahead of the deck's line and takes its place (spec
+    // 14 §3.10 step four), while the deck's verdict still rides along: the
+    // familiarity refusal stays armed on a new-only AI slot.
+    const share = this.deps.settings().aiShare
+    const aiSlot = !request && share > 0 && (this.deps.music?.aiRows?.() ?? 0) > 0 && (this.deps.random ?? Math.random)() < share
     return {
       persona: this.persona(),
       played,
       newOnly,
+      aiSlot,
       situation: buildMusicSituation(
         this.deps.memory.recent(Math.min(MUSIC_RECENT_TURNS, this.deps.settings().recentWindow)),
         avoid,
         this.tasteDigest(this.moment(avoid)),
         this.dailyLane(),
-        newOnly ? SLOT_LINE : '',
+        aiSlot ? AI_SLOT_LINE : newOnly ? SLOT_LINE : '',
       ),
       // The same list as data, so submit_pick can refuse a repeat instead of
       // only asking for none: the prompt rule alone let one through.

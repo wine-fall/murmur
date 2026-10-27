@@ -35,7 +35,7 @@ import type { Plan } from '../src/programs/catalogue.ts'
 // The Director's live-settings thunk (spec 12 §3.2), test defaults. Mutate the
 // returned object to exercise hot application.
 export function directorSettings(over: Partial<DirectorSettings> = {}): DirectorSettings {
-  return { gapSeconds: 0, recentWindow: 12, anchorsEnabled: true, musicEnabled: true, rwtEnabled: true, ...over }
+  return { gapSeconds: 0, recentWindow: 12, anchorsEnabled: true, musicEnabled: true, rwtEnabled: true, aiShare: 0, ...over }
 }
 
 // Stands in for the model driving an agentic task: `play` is handed the task's
