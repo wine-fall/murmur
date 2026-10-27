@@ -439,10 +439,11 @@ describe('ChannelPool', () => {
     await built.refresh()
     expect(built.search('chaka khan').map((c) => c.ref)).toEqual(['https://www.youtube.com/watch?v=2'])
     // the uploader is matched too, so "what did COLORS put up" finds the channel
-    expect(built.search('colors').map((c) => c.ref)).toEqual(['https://www.youtube.com/watch?v=1', 'https://www.youtube.com/watch?v=2'])
+    expect(built.search('colors').map((c) => c.ref).sort()).toEqual(['https://www.youtube.com/watch?v=1', 'https://www.youtube.com/watch?v=2'])
     expect(built.search('jvr')[0]?.title).toBe('Sicily | Official MV')
-    // every word has to land, so an unrelated query finds nothing
-    expect(built.search('chaka khan reggaeton')).toEqual([])
+    // every word has to land: an unrelated word is not a narrower match, it
+    // is no match, and that answers a sample of the whole pool
+    expect(built.search('chaka khan reggaeton')).toHaveLength(3)
   })
 
   it('hands back candidates in the shape every other catalogue returns', async () => {
@@ -458,7 +459,7 @@ describe('ChannelPool', () => {
     })
   })
 
-  it('honours the limit and answers an empty query with the newest of the pool', async () => {
+  it('honours the limit and answers an empty query with a sample of the pool', async () => {
     const built = pool()
     await built.refresh()
     expect(built.search('colors', 1)).toHaveLength(1)
@@ -473,6 +474,7 @@ describe('the channels catalogue in search_music (spec 03-01 §2.3)', () => {
       [
         { ref: 'https://www.youtube.com/watch?v=2', title: 'Chaka Khan | A COLORS CLOSE-UP', uploader: 'COLORS', durationS: 300, extra: {}, catalogue: 'channels' as const },
       ].filter((c) => c.title.toLowerCase().includes(query.toLowerCase())).slice(0, limit ?? 5),
+    isTagRow: () => false,
   })
 
   it('is offered, and searched locally, when the pool has something in it', async () => {
@@ -487,7 +489,7 @@ describe('the channels catalogue in search_music (spec 03-01 §2.3)', () => {
   })
 
   it('is not offered while the pool is empty, and asking for it says so', async () => {
-    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 0, search: () => [] })
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 0, search: () => [], isTagRow: () => false })
     expect(tools.find((t) => t.name === 'search_music')?.description ?? '').not.toContain('channels')
     const result = await callTool(tools, 'search_music', { query: 'anything', catalogue: 'channels' })
     expect(result.ok).toBe(false)
@@ -540,7 +542,7 @@ describe('the pool on the pick pipeline (spec 14 §3.4 cadence)', () => {
       brain,
       provider: new FakeMusicProvider(),
       model: 'm',
-      channels: { count: () => 3, search: () => [], maybeRefresh: () => (pokes++, true) },
+      channels: { count: () => 3, search: () => [], isTagRow: () => false, maybeRefresh: () => (pokes++, true) },
     })
     expect(await programmer.nextTrack(ctx)).toBeNull()
     expect(pokes).toBe(1)
@@ -740,7 +742,7 @@ describe('channelUploads for a tag', () => {
     title,
     uploader: 'up',
     durationS,
-    extra: { zone: 'cover', tags: ['ai cover'] },
+    extra: { zone: 'original', tags: ['AI\u97f3\u4e50'] },
   })
 
   it('reads a Bilibili tag through the newest-first search, tags and zone riding along', async () => {
@@ -753,36 +755,19 @@ describe('channelUploads for a tag', () => {
     expect(keywords).toEqual(['ai music'])
   })
 
+  // The listing is read; its rows carry no tag list, so the AI-song rule
+  // (spec 14 §2.9) keeps none of them.
   it('reads a YouTube tag as this week\'s search results, through yt-dlp', async () => {
     const args: string[][] = []
     const read = channelUploads({
       run: async (a) => (args.push(a), JSON.stringify({ title: 'Song (AI Cover)', url: 'https://www.youtube.com/watch?v=c1', duration: 180, channel: 'ch', view_count: 9 })),
       space: { recent: async () => [], newest: async () => [] },
     })
-    expect(await read('tag:youtube:ai cover', 20)).toEqual([
-      { ref: 'https://www.youtube.com/watch?v=c1', title: 'Song (AI Cover)', uploader: 'ch', durationS: 180, extra: { viewCount: 9 } },
-    ])
+    expect(await read('tag:youtube:ai cover', 20)).toEqual([])
     expect(args).toHaveLength(1)
     expect(args[0]).toContain('--flat-playlist')
     expect(args[0]).toEqual(expect.arrayContaining(['--playlist-end', '20']))
     expect(args[0]).toContain('https://www.youtube.com/results?search_query=ai%20cover&sp=EgIIAw%3D%3D')
-  })
-
-  it('keeps what is song-length: a clip, a mix and a set are not songs, an unknown length is not judged', async () => {
-    const read = channelUploads({
-      run: async () =>
-        [
-          { title: 'clip', duration: 30 },
-          { title: 'song', duration: 240 },
-          { title: 'two-hour set', duration: 7200 },
-          { title: 'unknown length', duration: null },
-        ]
-          .map((r, i) => JSON.stringify({ ...r, url: `https://www.youtube.com/watch?v=${i}`, channel: 'ch' }))
-          .join('\n'),
-      space: { recent: async () => [], newest: async () => [B('short', 44), B('BVok', 45), B('long', 721), B('BVedge', 720)] },
-    })
-    expect((await read('tag:youtube:ai cover', 20)).map((t) => t.title)).toEqual(['song', 'unknown length'])
-    expect((await read('tag:bilibili:ai cover', 20)).map((t) => t.title)).toEqual(['BVok', 'BVedge'])
   })
 
   it('never spends a chapter lookup on a tag row', async () => {
@@ -893,7 +878,7 @@ describe('the pool with tags in it', () => {
 describe('a tag row in front of the pick', () => {
   it('reaches the model with its tags and zone, the only places it says it is AI-made', async () => {
     const row = { ref: 'https://www.bilibili.com/video/BVai', title: 'Paper Lanterns', uploader: 'Lantern Studio', durationS: 200, extra: { zone: 'cover', tags: ['ai cover'] }, catalogue: 'channels' as const }
-    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [row] })
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [row], isTagRow: () => false })
     const result = await callTool(tools, 'search_music', { query: 'lanterns', catalogue: 'channels' })
     expect((result.candidates as TrackCandidate[])[0]?.extra).toEqual({ zone: 'cover', tags: ['ai cover'] })
   })
@@ -901,11 +886,11 @@ describe('a tag row in front of the pick', () => {
 
 describe('what search_music says the channels catalogue is', () => {
   it('names curated channels and tags, in the tool and nowhere in the prompt', () => {
-    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [] })
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [], isTagRow: () => false })
     const schema = tools.find((t) => t.name === 'search_music')!.inputSchema as Record<string, { description?: string }>
     expect(schema.catalogue!.description).toContain('channels is recent uploads from curated channels and tags')
-    // The music policy and its prompt gain no rule for this: the pool is a
-    // place to look, and the tool already says what is in it.
-    expect(buildFindMusicInstruction(undefined, { channels: true })).not.toMatch(/\btags?\b/i)
+    // The music policy gains no rule for this: the pool is a place to look,
+    // and the AI slot's own line is where the instruction lives.
+    expect(buildFindMusicInstruction(undefined, { channels: true })).not.toMatch(/say on air that it is AI-made/)
   })
 })

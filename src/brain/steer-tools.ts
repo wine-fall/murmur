@@ -33,6 +33,7 @@ type SettingsIntent = {
   memorySpan?: number | undefined
   language?: string | undefined
   rwt?: boolean | undefined
+  aiSongs?: number | undefined
 }
 
 function settingsPatch(intent: SettingsIntent): SettingsPatch | null {
@@ -49,6 +50,7 @@ function settingsPatch(intent: SettingsIntent): SettingsPatch | null {
     ...(intent.memorySpan !== undefined && { recentWindow: intent.memorySpan }),
     ...(intent.language !== undefined && { language: intent.language }),
     ...(intent.rwt !== undefined && { rwtEnabled: intent.rwt }),
+    ...(intent.aiSongs !== undefined && { aiShare: intent.aiSongs }),
   }
   return Object.keys(patch).length === 0 ? null : patch
 }
@@ -134,6 +136,12 @@ export function steerTools(actions: SteerActions, finish: (replyText: string) =>
             .boolean()
             .optional()
             .describe('whether the host brings up real-world news and happenings at all'),
+          aiSongs: z
+            .number()
+            .min(0)
+            .max(1)
+            .optional()
+            .describe('how often a song the radio picks on its own is an AI-generated one, 0 to 1; 0 = never'),
         },
         async (args) => {
           // The pane greys the music items when this run has no pipeline; the

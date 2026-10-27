@@ -337,6 +337,10 @@ export type MusicContext = {
   // handed something they already know. Said in the situation AND carried
   // here, because a prompt rule is advice and this one is enforced.
   readonly newOnly?: boolean
+  // An AI slot (spec 14 §3.10 step four): this pick plays one of the
+  // channels pool's AI-made songs. Said in the situation and enforced in
+  // submit_pick, like newOnly.
+  readonly aiSlot?: boolean
   // Every song murmur itself has aired, as track labels -- the ledger's whole
   // window plus what the queue is holding. One of the things that make a
   // candidate familiar (spec 14 3.10).

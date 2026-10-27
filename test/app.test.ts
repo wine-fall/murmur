@@ -593,6 +593,15 @@ describe('settings store wiring (spec 12)', () => {
     expect(buildSettingsStore(config([], { MURMUR_HOME: home })).current().rwtEnabled).toBe(false)
   })
 
+  it('seeds the AI share at 0.1 and reads the listener\'s own from the file (spec 14 §3.10 step four)', () => {
+    const home = emptyHome()
+    expect(buildSettingsStore(config([], { MURMUR_HOME: home })).current().aiShare).toBe(0.1)
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ aiShare: 0.25 }))
+    expect(buildSettingsStore(config([], { MURMUR_HOME: home })).current().aiShare).toBe(0.25)
+    writeFileSync(join(home, 'settings.json'), JSON.stringify({ aiShare: 1.5 }))
+    expect(buildSettingsStore(config([], { MURMUR_HOME: home })).current().aiShare).toBe(0.1)
+  })
+
   it('a persisted mute seeds the store without touching the voice provider', () => {
     const home = emptyHome()
     writeFileSync(join(home, 'settings.json'), JSON.stringify({ muted: true }))

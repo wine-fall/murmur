@@ -16,8 +16,8 @@
 //      listener's own `$MURMUR_HOME/music_channels.txt`;
 //   2. the pool — each channel's or tag's recent uploads (title, ref,
 //      uploader), read once a day on the taste refresh's own clock and cached;
-//   3. the search — a local substring match over that pool. No network at
-//      search time: the pick task is already paying for a real search.
+//   3. the search — a local word match over that pool. No network at search
+//      time: the pick task is already paying for a real search.
 //
 // Every entry point is total. A dead network, a 404, a hand-mangled cache or a
 // channel behind risk control costs at most the channels that failed — never
@@ -115,11 +115,16 @@ const CHAPTER_CACHE_ENTRIES = 500
 const ManifestCacheSchema = z.object({ at: z.number(), text: z.string() })
 const ExtraSchema = z.object({ viewCount: z.number().optional(), zone: z.string().optional(), tags: z.array(z.string()).optional() })
 const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1), uploader: z.string(), durationS: z.number(), extra: ExtraSchema.optional() })
-// The chapter rules (spec 14 §2.9) changed what belongs in a pool, so a file
-// written before them is stale by construction: a version that does not match
-// reads as no cache at all, and the pool rebuilds on the next poke.
-const POOL_CACHE_VERSION = 2
-const PoolCacheSchema = z.object({ v: z.literal(POOL_CACHE_VERSION), at: z.number(), tracks: z.array(TrackSchema) })
+// Which line a pooled row came from: a tag row is what the AI slot plays
+// (spec 14 §3.10 step four).
+const PoolTrackSchema = TrackSchema.extend({ origin: z.enum(['channel', 'tag']) })
+type PoolTrack = z.infer<typeof PoolTrackSchema>
+// The chapter rules and then the AI-song rule and the origin mark (spec 14
+// §2.9) changed what belongs in a pool, so a file written before them is
+// stale by construction: a version that does not match reads as no cache at
+// all, and the pool rebuilds on the next poke.
+const POOL_CACHE_VERSION = 3
+const PoolCacheSchema = z.object({ v: z.literal(POOL_CACHE_VERSION), at: z.number(), tracks: z.array(PoolTrackSchema) })
 const ChapterCacheSchema = z.record(z.string(), z.array(TrackSchema))
 
 // One line: a channel's http(s) url, or `tag:<platform>:<term>`. The platform
@@ -349,7 +354,7 @@ export type UploadsDeps = { run: YtDlpRunner; space: Pick<BilibiliWeb, 'recent' 
 export function channelUploads(deps: UploadsDeps): (key: string, limit: number) => Promise<ChannelTrack[]> {
   return async (key, limit) => {
     const entry = parseManifestLine(key)
-    if (entry?.kind === 'tag') return (await tagUploads(deps, entry.platform, entry.term, limit)).filter((t) => songLength(t.durationS))
+    if (entry?.kind === 'tag') return (await tagUploads(deps, entry.platform, entry.term, limit)).filter(aiSong)
     const space = BILIBILI_SPACE.exec(key)
     if (space !== null) return await deps.space.recent(space[1] ?? '', limit)
     if (!/^https?:\/\/(www\.)?youtube\.com\//.test(key)) return []
@@ -367,11 +372,28 @@ async function tagUploads(deps: UploadsDeps, platform: TagPlatform, term: string
   return parseFlatUploads(await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', results]), limit)
 }
 
-// The bounds a chapter has to fall inside to count as a song, applied to a tag
-// row: a clip under MIN_CHAPTER_S is a sting, an upload past MIX_DURATION_S is
-// a set. 0 is "unknown", not short.
-function songLength(durationS: number): boolean {
-  return durationS === 0 || (durationS >= MIN_CHAPTER_S && durationS <= MIX_DURATION_S)
+// What a tag row has to be to stay (spec 14 §2.9): an AI-made song. A tag
+// feed matches its word anywhere, so what comes back is also covers,
+// tutorials, contests and charts; measured, these three rules kept 44 of 152
+// rows. The tags are the row's own word that it is AI-made -- a YouTube row
+// carries none, so none passes. ASCII title words count only as whole words.
+const AI_TAGS = ['suno', 'ai\u97f3\u4e50', 'aigc', 'ai\u751f\u6210', 'ai\u4f5c\u66f2', 'ai\u539f\u521b', 'ai\u6b4c\u66f2']
+// \u7ffb\u5531 cover, \u6539\u7f16 adaptation, \u7248 edition, \u7eaf\u97f3\u4e50 instrumental, \u4f34\u594f backing
+// track, \u6559\u7a0b tutorial, \u6d4b\u8bc4 review, \u8bd5\u542c preview, \u58f0\u5e93 voice bank,
+// \u5927\u8d5b contest, \u6392\u884c chart.
+const NOT_A_SONG =
+  /\u7ffb\u5531|\u6539\u7f16|\u7248|\u7eaf\u97f3\u4e50|\u4f34\u594f|\u6559\u7a0b|\u6d4b\u8bc4|\u8bd5\u542c|\u58f0\u5e93|\u5927\u8d5b|\u6392\u884c|(?<![a-z0-9])(cover|vlog|reaction|mv)(?![a-z0-9])/i
+export const AI_SONG_MIN_S = 120
+export const AI_SONG_MAX_S = 420
+
+export function aiSong(track: ChannelTrack): boolean {
+  const tags = (track.extra?.tags ?? []).map((t) => t.toLowerCase())
+  return (
+    track.durationS >= AI_SONG_MIN_S &&
+    track.durationS <= AI_SONG_MAX_S &&
+    tags.some((tag) => AI_TAGS.some((ai) => tag.includes(ai))) &&
+    !NOT_A_SONG.test(track.title)
+  )
 }
 
 // The chapter pass over one channel's flat listing. A short upload is a song
@@ -428,6 +450,7 @@ export type ChannelPoolDeps = {
   retryMs?: number
   pauseMs?: number
   now?: () => number
+  random?: () => number
   debug?: (message: string) => void
 }
 
@@ -438,7 +461,7 @@ export type ChannelPoolDeps = {
 export class ChannelPool {
   private deps: ChannelPoolDeps
   private dir: string
-  private tracks: ChannelTrack[]
+  private tracks: PoolTrack[]
   private at: number
   private running: Promise<unknown> | null = null
   // When a refresh was last attempted, success or failure — in memory, so a
@@ -456,6 +479,15 @@ export class ChannelPool {
 
   count(): number {
     return this.tracks.length
+  }
+
+  // How many rows a tag line brought: what an AI slot can be drawn on.
+  aiRows(): number {
+    return this.tracks.filter((t) => t.origin === 'tag').length
+  }
+
+  isTagRow(ref: string): boolean {
+    return this.tracks.some((t) => t.origin === 'tag' && t.ref === ref)
   }
 
   // The background poke. True when a refresh started; false when one is
@@ -490,17 +522,18 @@ export class ChannelPool {
       this.deps.debug?.(`channels.refresh manifest failed: ${String(err)}`)
       return this.tracks.length
     }
-    const found: ChannelTrack[] = []
+    const found: PoolTrack[] = []
     const seen = new Set<string>()
     let failed = 0
     for (const [index, key] of keys.entries()) {
       if (found.length >= MAX_POOL_TRACKS) break
       if (index > 0) await pause(this.deps.pauseMs ?? BETWEEN_CHANNELS_MS)
+      const origin: PoolTrack['origin'] = key.startsWith('tag:') ? 'tag' : 'channel'
       try {
         for (const track of await read(key, UPLOADS_PER_CHANNEL)) {
           if (seen.has(track.ref) || found.length >= MAX_POOL_TRACKS) continue
           seen.add(track.ref)
-          found.push(track)
+          found.push({ ...track, origin })
         }
       } catch {
         // One line behind risk control or renamed out from under the list
@@ -521,15 +554,19 @@ export class ChannelPool {
     return found.length
   }
 
-  // The `channels` catalogue's search: every word of the query has to appear
-  // in the title or the uploader. Local, so it costs nothing and cannot fail.
+  // The `channels` catalogue's search (spec 14 §2.9): every word of the query
+  // has to land in the title, the uploader or the tags -- an ASCII word as a
+  // whole word, so "ai" is not inside "Isaiah". The answer is a random sample,
+  // and a query nothing matches (or none at all) samples the whole pool: the
+  // model asks by genre, and a catalogue that answers nothing is one it never
+  // asks again. Local, so it costs nothing and cannot fail.
   search(query: string, limit = 5): TrackCandidate[] {
-    const words = query.toLowerCase().split(/\s+/).filter((w) => w !== '')
+    const words = query.toLowerCase().split(/\s+/).filter((w) => w !== '').map(wordPattern)
     const hits = this.tracks.filter((t) => {
-      const haystack = `${t.title} ${t.uploader}`.toLowerCase()
-      return words.every((w) => haystack.includes(w))
+      const haystack = [t.title, t.uploader, ...(t.extra?.tags ?? [])].join(' ').toLowerCase()
+      return words.every((w) => w.test(haystack))
     })
-    return hits.slice(0, limit).map((t) => ({
+    return this.sample(hits.length > 0 ? hits : this.tracks, limit).map((t) => ({
       ref: t.ref,
       title: t.title,
       uploader: t.uploader,
@@ -539,9 +576,28 @@ export class ChannelPool {
     }))
   }
 
+  // A partial Fisher-Yates: `limit` rows drawn without replacement.
+  private sample(rows: readonly PoolTrack[], limit: number): PoolTrack[] {
+    const random = this.deps.random ?? Math.random
+    const deck = [...rows]
+    const n = Math.min(limit, deck.length)
+    for (let i = 0; i < n; i++) {
+      const j = i + Math.floor(random() * (deck.length - i))
+      ;[deck[i], deck[j]] = [deck[j]!, deck[i]!]
+    }
+    return deck.slice(0, n)
+  }
+
   private now(): number {
     return (this.deps.now ?? Date.now)()
   }
+}
+
+// One query word as a matcher: an ASCII word lands only on a word boundary,
+// anything else (a CJK word has no spaces to bound it) anywhere.
+function wordPattern(word: string): RegExp {
+  const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return /^[!-~]+$/.test(word) ? new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`) : new RegExp(escaped)
 }
 
 const pause = (ms: number) => (ms <= 0 ? Promise.resolve() : new Promise<void>((r) => setTimeout(r, ms)))

@@ -19,6 +19,7 @@ const VALUES: Settings = {
   tuiPet: true,
   rwtEnabled: true,
   playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
+  aiShare: 0.1,
 }
 
 const snap = (

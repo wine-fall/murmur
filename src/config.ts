@@ -29,6 +29,7 @@ import {
 } from './paths.ts'
 import { DEFAULT_PERSONA_PATH } from './prompts/persona.ts'
 import { readSettingsFile } from './host/settings.ts'
+import { AI_SHARE_DEFAULT, AiShareSchema } from './host/ipc.ts'
 import { MAX_SPEED, MIN_SPEED, readVoiceConfig, type VoiceConfig } from './voice/voice-config.ts'
 
 // The inter-sentence silence pad the hosted voice splices in (spec 02 §3.6). A
@@ -98,6 +99,9 @@ export const ConfigSchema = z.object({
   // Where a found song is PLAYED from (spec 14 §2.13), best first. Finding and
   // playing are two decisions: the model picks the song, this picks the CDN.
   playOrder: z.array(z.enum(PLAY_ORDER)).default([...PLAY_ORDER]),
+  // The AI slot's chance per autoplay pick (spec 14 §3.10 step four): a
+  // settings-file knob only, no env or flag.
+  aiShare: AiShareSchema.default(AI_SHARE_DEFAULT),
   // The listener-owned taste half of the pick instruction (spec 03-01 §2.3),
   // under the one murmur home. Absent = the built-in policy.
   musicPolicyPath: z.string().default(() => musicPolicyPath()),

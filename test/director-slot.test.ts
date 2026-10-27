@@ -93,3 +93,79 @@ describe('the rotation deck reaches the pick', () => {
     await run
   })
 })
+
+// The AI slot (spec 14 §3.10 step four): an independent draw at
+// `aiShare`, only while the channels pool holds tag rows and never on a
+// listener request; it takes the situation's slot line, and the deck's
+// verdict still rides along so the familiarity refusal stays armed.
+describe('the AI slot reaches the pick', () => {
+  const AI_LINE =
+    'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.'
+
+  async function firstPick(aiShare: number, aiRows: number) {
+    const player = new FakeMixingPlayer()
+    const source = new FakeTrackSource()
+    source.picks = [pickOf('https://stream/1')]
+    const { director } = setup({
+      player,
+      music: { ...music(source, player), aiRows: () => aiRows },
+      random: KEEP_ORDER,
+      settings: () => directorSettings({ gapSeconds: 0, aiShare }),
+    })
+    const run = director.run(2)
+    await until(() => source.contexts.length >= 1, 'a pick was asked for')
+    await until(() => player.handles.length === 1, 'song on air')
+    player.handles[0]!.end()
+    await run
+    return source.contexts[0]!
+  }
+
+  it('is drawn at the share, ends the situation with its line, and leaves the deck verdict armed', async () => {
+    const ctx = await firstPick(1, 5)
+    expect(ctx.aiSlot).toBe(true)
+    // In the slot line's place, the one the 5c line takes: one slot, one line.
+    expect(ctx.situation).toContain(`\n${AI_LINE}\n`)
+    expect(ctx.situation.match(/this slot:/g)).toHaveLength(1)
+    expect(ctx.situation).not.toContain('this slot: something they have not heard')
+    expect(ctx.newOnly).toBe(true)
+  })
+
+  it('is never drawn at 0, nor while the pool holds no tag rows', async () => {
+    for (const [share, rows] of [[0, 5], [1, 0]] as const) {
+      const ctx = await firstPick(share, rows)
+      expect(ctx.aiSlot).toBe(false)
+      expect(ctx.situation).not.toContain(AI_LINE)
+      expect(ctx.situation).toContain('this slot: something they have not heard')
+    }
+  })
+
+  it('steps aside for a listener request', async () => {
+    const player = new FakeMixingPlayer()
+    const source = new FakeTrackSource()
+    source.picks = [pickOf('https://stream/1'), pickOf('https://stream/2'), pickOf('https://stream/3'), pickOf('https://stream/4')]
+    const steer: SteerBrain = {
+      respond: async (_text, _ctx, actions) => {
+        actions.music!.switchTrack('that band again')
+        return 'on it.'
+      },
+    }
+    const { director, host } = setup({
+      player,
+      music: { ...music(source, player), aiRows: () => 5 },
+      random: KEEP_ORDER,
+      steer,
+      settings: () => directorSettings({ gapSeconds: 0, aiShare: 1 }),
+    })
+    const run = director.run(2)
+    await until(() => player.handles.length === 1, 'first song on air')
+    host.type('play that band again')
+    await until(() => source.contexts.some((c) => c.situation.includes('listener request:')), 'the request reached a pick')
+    const asked = source.contexts.find((c) => c.situation.includes('listener request:'))!
+    expect(asked.aiSlot).toBe(false)
+    expect(asked.situation).not.toContain('this slot:')
+    expect(source.contexts[0]!.aiSlot).toBe(true)
+    player.handles[0]!.end()
+    host.type('/quit')
+    await run
+  })
+})

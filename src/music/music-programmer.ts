@@ -147,6 +147,7 @@ export class MusicProgrammer implements TrackSource {
               label: (title: string, artist: string): Promise<Familiarity> => wired.label!(title, artist, ctx.played ?? []),
             }),
             ...(ctx.newOnly !== undefined && { newOnly: ctx.newOnly }),
+            ...(ctx.aiSlot !== undefined && { aiSlot: ctx.aiSlot }),
             ...(debug !== undefined && { log: debug }),
           }
     const t = performance.now()

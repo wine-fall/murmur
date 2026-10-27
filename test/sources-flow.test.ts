@@ -35,6 +35,7 @@ const BASE_SETTINGS = {
   tuiPet: true,
   rwtEnabled: true,
   playOrder: [...PLAY_ORDER],
+  aiShare: 0.1,
 }
 
 const NOW = new Date('2026-09-06T12:00:00Z')

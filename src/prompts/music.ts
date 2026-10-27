@@ -104,13 +104,15 @@ Where a pick PLAYS from is decided after submit_pick, so choose the best song,
 not the best source. In the announce, say where a pick came from only when it is theirs
 ("one you've kept"), never otherwise.`
 
-// What the `channels` catalogue IS (spec 14 §2.9), rendered only while the
-// pool holds something. This sentence is about WHERE TO LOOK and nothing else:
-// the curated list is a search source, never a statement about the listener —
-// what they like comes from their own accounts, and from nowhere else.
-export const CHANNELS_GUIDANCE = `The channels catalogue searches recent uploads from a curated list of music
-channels — good for something new, a cover, or a recent release that a plain
-search would bury.`
+// What the `channels` catalogue IS and how it matches (spec 14 §2.9),
+// rendered only while the pool holds something. WHERE TO LOOK and how to ask,
+// nothing else: no rule about when to choose from it (the AI slot's own line
+// carries that), and never a statement about the listener — the curated list
+// is a search source, and what they like comes from their own accounts.
+export const CHANNELS_GUIDANCE = `The channels catalogue holds recent uploads from a curated list of music
+channels and this season's AI-generated songs from Bilibili and YouTube tag
+feeds. Words are matched against titles, uploaders and tags, so a style word, a
+language, "\u539f\u521b", "AI" or an empty query opens it.`
 
 export function buildFindMusicInstruction(
   policy: string = DEFAULT_MUSIC_POLICY,

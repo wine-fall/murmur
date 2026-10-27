@@ -944,6 +944,7 @@ describe('Director — a language change invalidates the talk look-ahead (spec 1
         tuiPet: true,
         rwtEnabled: true,
         playOrder: ['youtube', 'bilibili', 'qqmusic', 'netease'],
+        aiShare: 0.1,
       },
       touched: {},
     })

@@ -183,7 +183,7 @@ describe('play-source preference (spec 14 §2.13)', () => {
       (pick) => picks.push(pick),
       async () => true,
       { catalogues: () => [], debug: () => {} },
-      { count: () => 1, search: () => [candidate(bili, { durationS: 240 })] },
+      { count: () => 1, search: () => [candidate(bili, { durationS: 240 })], isTagRow: () => false },
     )
     await callTool(tools, 'search_music', { query: 'kong kong', catalogue: 'channels' })
     await callTool(tools, 'submit_pick', { ref: bili, why: 'w', title: 'Kong Kong', artist: 'Chen Li' })

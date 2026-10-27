@@ -262,6 +262,7 @@ export function buildSettingsStore(
       tuiPet: resolved.tuiPet,
       rwtEnabled: resolved.rwtEnabled,
       playOrder: resolved.playOrder,
+      aiShare: resolved.aiShare,
     },
     touched: stored,
     log,
@@ -417,6 +418,7 @@ function buildMusic(
     channels: {
       count: () => channelPool.count(),
       search: (query, limit) => channelPool.search(query, limit),
+      isTagRow: (ref) => channelPool.isTagRow(ref),
       maybeRefresh: () => channelPool.maybeRefresh(),
     },
     ...(taste !== undefined && {
@@ -449,7 +451,12 @@ function buildMusic(
           feeds: () => dailyFeeds(taste.build),
           ...(host.debug !== undefined && { log: host.debug.bind(host) }),
         })
-  return { source, cadence, engine, ...(daily !== undefined && { daily: { maybeRefresh: () => void daily.maybeRefresh(), block: () => daily.block() } }) }
+  return {
+    source,
+    cadence,
+    engine,
+    aiRows: () => channelPool.aiRows(),
+    ...(daily !== undefined && { daily: { maybeRefresh: () => void daily.maybeRefresh(), block: () => daily.block() } }) }
 }
 
 // The language the gists are written in (spec 13 §3.5), read where the host
