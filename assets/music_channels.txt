@@ -70,4 +70,3 @@ tag:bilibili:AI歌手
 tag:bilibili:AIMV
 tag:youtube:ai cover
 tag:youtube:ai version
-tag:youtube:ai original song

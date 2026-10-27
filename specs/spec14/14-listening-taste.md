@@ -1116,11 +1116,15 @@ What the table does not show on its own:
 - `ai cover song` shares 10 of 20 rows with `ai cover` and is dropped as
   redundant.
 
-**Chosen on YouTube (3):** `ai cover`, `ai version`, `ai original song` — raw
-75-95 %, no two sharing more than one row, together 58 distinct uploads.
-`ai original song` is the marginal one (75 %). *Second time point (~10 min
-later, 9 / 9 runs answered):* 13 rows were new and **8** were songs; three of
-the five misses are 26-58 minute compilations the length rule drops.
+**Chosen on YouTube (2):** `ai cover`, `ai version` — raw 80-95 %, no two
+sharing more than one row. `ai original song` measured 75 % here and was
+shipped at first, then **dropped** (2026-10-27, user): a re-measure five days
+later held 11 / 19 songs, the rest "how to make an AI song" tutorials and
+"I turned a song into a music video" clips — and a YouTube row carries no
+tag list the pick could read past the title. *Second time point for the
+marginal term (~10 min later, 9 / 9 runs answered):* 13 rows were new and
+**8** were songs; three of the five misses are 26-58 minute compilations the
+length rule drops.
 
 **Rejected for good** (do not re-try without new evidence): the Bilibili
 channel API (404), the tag archive as a "recent" feed (stale first answer),
