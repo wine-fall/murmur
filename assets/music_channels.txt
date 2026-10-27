@@ -1,29 +1,39 @@
-# murmur curated music channels (spec 14 §2.9)
+# murmur curated music channels and tags (spec 14 §2.9)
 #
-# One channel URL per line; blank lines and lines starting with "#" are
-# ignored. Adding a channel is adding a line — that is the whole editing story.
+# One line per channel or tag; blank lines and lines starting with "#" are
+# ignored. Adding one is adding a line — that is the whole editing story.
 #
-# What this list IS: an extra place to LOOK for a song. murmur pulls each
-# channel's recent uploads into a local pool and offers it to the pick task as
-# the `channels` catalogue, which is good for something new, a cover, or a
-# recent release that a plain search would not surface.
+# What this list IS: an extra place to LOOK for a song. murmur pulls the
+# recent uploads of each channel and each tag into a local pool and offers it
+# to the pick task as the `channels` catalogue, which is good for something
+# new, a cover, or a recent release that a plain search would not surface.
 #
 # What this list is NOT: taste. Nothing here ever describes what the listener
 # likes — that comes from their own accounts (`/sources`) and from nowhere
 # else. The listener's taste decides WHAT KIND of song to look for; these
-# channels are one of the places to look for it.
+# channels and tags are one of the places to look for it.
 #
 # Supported shapes:
 #   https://www.youtube.com/@<handle>/videos
 #   https://space.bilibili.com/<mid>/video
+#   tag:bilibili:<keyword>   the newest uploads in Bilibili's music zone that
+#                            match the keyword
+#   tag:youtube:<term>       this week's YouTube uploads that match the term
 #
-# An upload longer than 12 minutes has to justify itself with chapters: a
-# chapter becomes one candidate, and murmur plays just that chapter. A long
-# upload with no chapters is a mix, not a song, and is left out of the pool.
+# A tag line is read in any case; the platform must be one of the two above
+# and the term must not be empty, or the line is skipped. A tag's uploads
+# keep only what is song-length: 45 seconds to 12 minutes.
 #
-# murmur re-reads this list from GitHub at runtime, so a channel added here
-# reaches a listener without waiting for a release; a listener who edits their
-# own copy has it read from disk. A failed fetch keeps the copy that shipped.
+# An upload longer than 12 minutes on a listed CHANNEL has to justify itself
+# with chapters: a chapter becomes one candidate, and murmur plays just that
+# chapter. A long upload with no chapters is a mix, not a song, and is left
+# out of the pool.
+#
+# murmur re-reads this list from GitHub at runtime, so a line added here
+# reaches a listener without waiting for a release. A failed fetch keeps the
+# copy that shipped. A listener adds their own lines in
+# $MURMUR_HOME/music_channels.txt (same shapes), read after this list; a line
+# both name is read once.
 
 # -- YouTube: live sessions and first performances (new songs, new artists)
 https://www.youtube.com/@ColorsxStudios/videos
@@ -45,3 +55,18 @@ https://space.bilibili.com/669334488/video
 
 # -- Bilibili: studio playbacks of single songs, one track per upload (JLRS-LeoFM)
 https://space.bilibili.com/3493093607213343/video
+
+# -- Tags: AI-made music, which no curated channel carries. Each term was
+#    measured before it was listed (spec 14 §2.9.1): at least 70% of its
+#    newest twenty uploads were a song, not a tutorial or a compilation.
+tag:bilibili:AI音乐
+tag:bilibili:AI翻唱
+tag:bilibili:AI歌曲
+tag:bilibili:AI作曲
+tag:bilibili:suno
+tag:bilibili:AI生成音乐
+tag:bilibili:AIGC音乐
+tag:bilibili:AI歌手
+tag:bilibili:AIMV
+tag:youtube:ai cover
+tag:youtube:ai version

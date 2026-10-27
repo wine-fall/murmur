@@ -26,7 +26,10 @@ import {
   channelUploads,
   channelsCacheDir,
   loadChannelManifest,
+  MAX_POOL_TRACKS,
+  mergeManifests,
   parseChannelManifest,
+  parseManifestLine,
   CHAPTER_LOOKUPS_PER_CHANNEL,
   chapterTracks,
   MAX_CHAPTERS_PER_UPLOAD,
@@ -36,12 +39,20 @@ import {
 } from '../src/music/channels.ts'
 
 let dir: string
+const home = process.env.MURMUR_HOME
 
+// Every default path (the cache, the listener's own list) resolves inside the
+// test's own directory, never the developer's real ~/.murmur.
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), 'murmur-channels-test-'))
+  process.env.MURMUR_HOME = dir
 })
 
-afterEach(() => rm(dir, { recursive: true, force: true }))
+afterEach(async () => {
+  if (home === undefined) delete process.env.MURMUR_HOME
+  else process.env.MURMUR_HOME = home
+  await rm(dir, { recursive: true, force: true })
+})
 
 // The manifest constant is anchored relative to the module file; a tree move
 // that breaks the anchor must fail here, not at a listener's first run.
@@ -180,7 +191,7 @@ describe('channelUploads', () => {
     const mids: string[] = []
     const read = channelUploads({
       run: async (a) => (args.push(a), JSON.stringify({ title: 't', url: 'https://u/1', duration: 2, playlist_uploader: 'ch' })),
-      space: { recent: async (mid, limit) => (mids.push(mid), [{ ref: 'https://www.bilibili.com/video/BV1', title: 'b', uploader: 'up', durationS: 3 }].slice(0, limit)) },
+      space: { recent: async (mid, limit) => (mids.push(mid), [{ ref: 'https://www.bilibili.com/video/BV1', title: 'b', uploader: 'up', durationS: 3 }].slice(0, limit)), newest: async () => [] },
     })
     expect(await read('https://www.youtube.com/@Ch/videos', 4)).toEqual([{ ref: 'https://u/1', title: 't', uploader: 'ch', durationS: 2 }])
     expect(args[0]).toContain('https://www.youtube.com/@Ch/videos')
@@ -192,7 +203,7 @@ describe('channelUploads', () => {
   })
 
   it('ignores a url that is neither', async () => {
-    const read = channelUploads({ run: async () => 'never', space: { recent: async () => [] } })
+    const read = channelUploads({ run: async () => 'never', space: { recent: async () => [], newest: async () => [] } })
     expect(await read('https://example.com/whatever', 4)).toEqual([])
   })
 })
@@ -274,7 +285,7 @@ describe('the chaptered pool', () => {
         const id = (args.at(-1) ?? '').split('=').at(-1) ?? ''
         return meta(chapters[id] ?? null)
       },
-      space: { recent: async () => [] },
+      space: { recent: async () => [], newest: async () => [] },
       dir,
     })
     return { read, calls }
@@ -329,7 +340,7 @@ describe('the chaptered pool', () => {
           if (args.includes('--flat-playlist')) return listing([{ id: 'broken', duration: 5987 }, { id: 'song', duration: 240 }])
           throw new Error('video unavailable')
         },
-        space: { recent: async () => [] },
+        space: { recent: async () => [], newest: async () => [] },
         dir,
       })
     expect((await make()('https://www.youtube.com/@90sNeonSoul/videos', 20)).map((t) => t.title)).toEqual(['upload song'])
@@ -569,5 +580,332 @@ describe('a refresh that fails is not tried again at every boundary', () => {
     expect(built.maybeRefresh()).toBe(true)
     await built.idle()
     expect(reads).toBe(4)
+  })
+})
+
+// --- tags (spec 14 §2.9, §2.9.1) ------------------------------------------- //
+//
+// A manifest line can name a tag instead of a channel: the pool then holds
+// that tag's newest uploads. The lines a listener writes are untrusted — a
+// bad one costs that line and nothing else.
+
+describe('parseManifestLine', () => {
+  it('tells a channel url from a tag line', () => {
+    expect(parseManifestLine('https://www.youtube.com/@One/videos')).toEqual({ kind: 'channel', url: 'https://www.youtube.com/@One/videos' })
+    expect(parseManifestLine('tag:bilibili:ai music')).toEqual({ kind: 'tag', platform: 'bilibili', term: 'ai music' })
+    expect(parseManifestLine('  tag:youtube:ai cover  ')).toEqual({ kind: 'tag', platform: 'youtube', term: 'ai cover' })
+  })
+
+  it('reads the platform in any case and the term with its spacing tidied', () => {
+    expect(parseManifestLine('TAG:YouTube:  AI   Version ')).toEqual({ kind: 'tag', platform: 'youtube', term: 'ai version' })
+  })
+
+  it('keeps a colon inside the term', () => {
+    expect(parseManifestLine('tag:youtube:remix: night')).toEqual({ kind: 'tag', platform: 'youtube', term: 'remix: night' })
+  })
+
+  it('drops a line it cannot read rather than guessing', () => {
+    for (const line of [
+      '',
+      '# tag:bilibili:commented out',
+      'tag:bilibili:',
+      'tag:bilibili:    ',
+      'tag:bilibili',
+      'tag::ai music',
+      'tag:spotify:ai music',
+      'tags:youtube:ai cover',
+      'youtube:ai cover',
+      'ftp://elsewhere/nope',
+      'not a url at all',
+    ]) {
+      expect(parseManifestLine(line), line).toBeNull()
+    }
+  })
+})
+
+describe('parseChannelManifest with tag lines', () => {
+  it('keeps channels and tags in order, as one key each, and drops the rest', () => {
+    const text = [
+      '# channels',
+      'https://www.youtube.com/@One/videos',
+      '',
+      '# tags',
+      'tag:bilibili:ai music',
+      'tag:youtube:ai cover',
+      'tag:spotify:ai music',
+      'tag:youtube:',
+      '  # tag:youtube:off',
+      'https://space.bilibili.com/42/video',
+    ].join('\n')
+    expect(parseChannelManifest(text)).toEqual([
+      'https://www.youtube.com/@One/videos',
+      'tag:bilibili:ai music',
+      'tag:youtube:ai cover',
+      'https://space.bilibili.com/42/video',
+    ])
+  })
+
+  it('reads a line twice as one key', () => {
+    expect(parseChannelManifest('tag:youtube:ai cover\nTAG:youtube:AI  Cover\nhttps://u/1\nhttps://u/1\n')).toEqual(['tag:youtube:ai cover', 'https://u/1'])
+  })
+})
+
+describe('mergeManifests', () => {
+  it('appends the second list to the first and drops what the first already has', () => {
+    expect(mergeManifests(['https://u/1', 'tag:youtube:ai cover'], ['tag:youtube:ai cover', 'tag:bilibili:suno', 'https://u/1'])).toEqual([
+      'https://u/1',
+      'tag:youtube:ai cover',
+      'tag:bilibili:suno',
+    ])
+  })
+
+  it('is the other list when one side is empty', () => {
+    expect(mergeManifests([], ['https://u/1'])).toEqual(['https://u/1'])
+    expect(mergeManifests(['https://u/1'], [])).toEqual(['https://u/1'])
+  })
+})
+
+describe("the listener's own list", () => {
+  const local = () => join(dir, 'music_channels.txt')
+
+  it('is appended to the shared list, de-duplicated', async () => {
+    writeFileSync(local(), '# mine\ntag:youtube:ai version\nhttps://www.youtube.com/@Remote/videos\ntag:nowhere:x\n')
+    const got = await loadChannelManifest({ dir, localPath: local(), fetch: ok(REMOTE), now: () => 1_000 })
+    expect(got).toEqual(['https://www.youtube.com/@Remote/videos', 'tag:youtube:ai version'])
+  })
+
+  it('is read from disk on every load, even while the shared list is cached', async () => {
+    await loadChannelManifest({ dir, localPath: local(), fetch: ok(REMOTE), now: () => 1_000 })
+    writeFileSync(local(), 'tag:bilibili:suno\n')
+    const got = await loadChannelManifest({ dir, localPath: local(), fetch: async () => new Response('', { status: 500 }), now: () => 2_000 })
+    expect(got).toEqual(['https://www.youtube.com/@Remote/videos', 'tag:bilibili:suno'])
+  })
+
+  it('rides on the bundled copy when the network is down', async () => {
+    writeFileSync(local(), 'tag:bilibili:lantern songs\n')
+    const got = await loadChannelManifest({
+      dir,
+      localPath: local(),
+      fetch: async () => {
+        throw new Error('offline')
+      },
+      now: () => 1_000,
+    })
+    expect(got).toEqual([...parseChannelManifest(readFileSync(BUNDLED_CHANNELS, 'utf8')), 'tag:bilibili:lantern songs'])
+  })
+
+  it('costs nothing when it does not exist', async () => {
+    expect(await loadChannelManifest({ dir, localPath: local(), fetch: ok(REMOTE), now: () => 1_000 })).toEqual([
+      'https://www.youtube.com/@Remote/videos',
+    ])
+  })
+
+  it('defaults to the file beside the music policy in the murmur home', async () => {
+    writeFileSync(join(dir, 'music_channels.txt'), 'tag:youtube:ai version\n')
+    expect(await loadChannelManifest({ fetch: ok(REMOTE), now: () => 1_000 })).toContain('tag:youtube:ai version')
+  })
+})
+
+it('the bundled manifest carries tag lines for both platforms', () => {
+  const keys = parseChannelManifest(readFileSync(BUNDLED_CHANNELS, 'utf8'))
+  expect(keys.some((k) => k.startsWith('tag:bilibili:'))).toBe(true)
+  expect(keys.some((k) => k.startsWith('tag:youtube:'))).toBe(true)
+})
+
+describe('parseFlatUploads on a YouTube search listing', () => {
+  // The shape of `yt-dlp --dump-json --flat-playlist` over a results page:
+  // `channel` and `uploader` both set, a view count, no tags at all.
+  const row = (fields: Record<string, unknown>) =>
+    JSON.stringify({ _type: 'url', ie_key: 'Youtube', id: 'x', description: null, timestamp: null, ...fields })
+
+  it('carries the view count the listing gives, and nothing it does not', () => {
+    const stdout = [
+      row({ title: 'Paper Lanterns (AI Version)', url: 'https://www.youtube.com/watch?v=a1', duration: 201, channel: 'Night Owl Covers', uploader: 'Night Owl Covers', view_count: 5321 }),
+      row({ title: 'Live now', url: 'https://www.youtube.com/watch?v=a2', duration: null, channel: 'Somewhere', view_count: null }),
+    ].join('\n')
+    expect(parseFlatUploads(stdout, 20)).toEqual([
+      { ref: 'https://www.youtube.com/watch?v=a1', title: 'Paper Lanterns (AI Version)', uploader: 'Night Owl Covers', durationS: 201, extra: { viewCount: 5321 } },
+      { ref: 'https://www.youtube.com/watch?v=a2', title: 'Live now', uploader: 'Somewhere', durationS: 0 },
+    ])
+  })
+
+  it('skips a row with no title, which a results page can carry for a shelf', () => {
+    expect(parseFlatUploads(row({ title: '', url: 'https://www.youtube.com/watch?v=a3' }), 20)).toEqual([])
+  })
+})
+
+describe('channelUploads for a tag', () => {
+  const B = (title: string, durationS: number) => ({
+    ref: `https://www.bilibili.com/video/${title}`,
+    title,
+    uploader: 'up',
+    durationS,
+    extra: { zone: 'cover', tags: ['ai cover'] },
+  })
+
+  it('reads a Bilibili tag through the newest-first search, tags and zone riding along', async () => {
+    const keywords: string[] = []
+    const read = channelUploads({
+      run: async () => 'never',
+      space: { recent: async () => [], newest: async (keyword, limit) => (keywords.push(keyword), [B('BVsong', 200)].slice(0, limit)) },
+    })
+    expect(await read('tag:bilibili:ai music', 20)).toEqual([B('BVsong', 200)])
+    expect(keywords).toEqual(['ai music'])
+  })
+
+  it('reads a YouTube tag as this week\'s search results, through yt-dlp', async () => {
+    const args: string[][] = []
+    const read = channelUploads({
+      run: async (a) => (args.push(a), JSON.stringify({ title: 'Song (AI Cover)', url: 'https://www.youtube.com/watch?v=c1', duration: 180, channel: 'ch', view_count: 9 })),
+      space: { recent: async () => [], newest: async () => [] },
+    })
+    expect(await read('tag:youtube:ai cover', 20)).toEqual([
+      { ref: 'https://www.youtube.com/watch?v=c1', title: 'Song (AI Cover)', uploader: 'ch', durationS: 180, extra: { viewCount: 9 } },
+    ])
+    expect(args).toHaveLength(1)
+    expect(args[0]).toContain('--flat-playlist')
+    expect(args[0]).toEqual(expect.arrayContaining(['--playlist-end', '20']))
+    expect(args[0]).toContain('https://www.youtube.com/results?search_query=ai%20cover&sp=EgIIAw%3D%3D')
+  })
+
+  it('keeps what is song-length: a clip, a mix and a set are not songs, an unknown length is not judged', async () => {
+    const read = channelUploads({
+      run: async () =>
+        [
+          { title: 'clip', duration: 30 },
+          { title: 'song', duration: 240 },
+          { title: 'two-hour set', duration: 7200 },
+          { title: 'unknown length', duration: null },
+        ]
+          .map((r, i) => JSON.stringify({ ...r, url: `https://www.youtube.com/watch?v=${i}`, channel: 'ch' }))
+          .join('\n'),
+      space: { recent: async () => [], newest: async () => [B('short', 44), B('BVok', 45), B('long', 721), B('BVedge', 720)] },
+    })
+    expect((await read('tag:youtube:ai cover', 20)).map((t) => t.title)).toEqual(['song', 'unknown length'])
+    expect((await read('tag:bilibili:ai cover', 20)).map((t) => t.title)).toEqual(['BVok', 'BVedge'])
+  })
+
+  it('never spends a chapter lookup on a tag row', async () => {
+    const args: string[][] = []
+    const read = channelUploads({
+      run: async (a) => (args.push(a), JSON.stringify({ title: 'long', url: 'https://www.youtube.com/watch?v=l', duration: 5000, channel: 'ch' })),
+      space: { recent: async () => [], newest: async () => [] },
+      dir,
+    })
+    expect(await read('tag:youtube:ai cover', 20)).toEqual([])
+    expect(args).toHaveLength(1)
+  })
+
+  it('reads a line it cannot parse as nothing, and lets a failed read throw', async () => {
+    const read = channelUploads({
+      run: async () => {
+        throw new Error('yt-dlp exploded')
+      },
+      space: {
+        recent: async () => [],
+        newest: async () => {
+          throw new Error('bilibili search: code -352')
+        },
+      },
+    })
+    expect(await read('tag:spotify:ai music', 20)).toEqual([])
+    await expect(read('tag:bilibili:ai music', 20)).rejects.toThrow(/-352/)
+    await expect(read('tag:youtube:ai cover', 20)).rejects.toThrow(/exploded/)
+  })
+})
+
+describe('the pool with tags in it', () => {
+  const TAGGED = {
+    ref: 'https://www.bilibili.com/video/BVai',
+    title: 'Paper Lanterns, an AI cover',
+    uploader: 'Lantern Studio',
+    durationS: 200,
+    extra: { viewCount: 12, zone: 'cover', tags: ['ai cover', 'ballad'] },
+  }
+
+  it('hands the tags and the zone to the pick, and keeps them across a restart', async () => {
+    const built = pool({ manifest: async () => ['tag:bilibili:ai cover'], uploads: async () => [TAGGED] })
+    await built.refresh()
+    const expected = { ...TAGGED, catalogue: 'channels' }
+    expect(built.search('lanterns')[0]).toEqual(expected)
+    expect(pool({ manifest: async () => [] }).search('lanterns')[0]).toEqual(expected)
+  })
+
+  it('stops filling at the cap and stops reading once it is full', async () => {
+    const keys = Array.from({ length: 80 }, (_, i) => `tag:youtube:term ${i}`)
+    const read: string[] = []
+    const built = pool({
+      manifest: async () => keys,
+      uploads: async (key, limit) => (
+        read.push(key), Array.from({ length: limit }, (_, i) => ({ ref: `${key}/${i}`, title: `${key} song ${i}`, uploader: 'u', durationS: 200 }))
+      ),
+    })
+    expect(await built.refresh()).toBe(MAX_POOL_TRACKS)
+    expect(built.count()).toBe(MAX_POOL_TRACKS)
+    expect(read.length).toBeLessThan(keys.length)
+  })
+
+  it('keeps the pool it had when a later refresh gets nothing back', async () => {
+    let failing = false
+    const built = pool({
+      manifest: async () => ['tag:bilibili:ai cover', 'tag:youtube:ai cover'],
+      uploads: async () => {
+        if (failing) throw new Error('HTTP 412')
+        return [TAGGED]
+      },
+    })
+    await built.refresh()
+    const before = readFileSync(join(dir, 'pool.json'), 'utf8')
+    failing = true
+    expect(await built.refresh()).toBe(1)
+    expect(built.search('lanterns')).toHaveLength(1)
+    expect(readFileSync(join(dir, 'pool.json'), 'utf8')).toBe(before)
+  })
+
+  it('writes one line of counts to the dev log and never a term, a url or an error', async () => {
+    const lines: string[] = []
+    const built = pool({
+      manifest: async () => ['https://www.youtube.com/@Colors/videos', 'tag:bilibili:secret words', 'tag:youtube:private term'],
+      uploads: async (key) => {
+        if (key.startsWith('tag:youtube')) throw new Error('Command failed: yt-dlp https://www.youtube.com/results?search_query=private%20term')
+        return key.startsWith('tag:') ? [TAGGED] : (LISTINGS[key] ?? [])
+      },
+      debug: (line) => lines.push(line),
+    })
+    await built.refresh()
+    expect(lines).toEqual(['channels.refresh n=3 channels=1 tags=2 failed=1'])
+  })
+
+  it('writes the same line when nothing answered', async () => {
+    const lines: string[] = []
+    const built = pool({
+      manifest: async () => ['tag:bilibili:secret words'],
+      uploads: async () => {
+        throw new Error('bilibili /x/web-interface/search/type: HTTP 412')
+      },
+      debug: (line) => lines.push(line),
+    })
+    await built.refresh()
+    expect(lines).toEqual(['channels.refresh n=0 channels=0 tags=1 failed=1'])
+  })
+})
+
+describe('a tag row in front of the pick', () => {
+  it('reaches the model with its tags and zone, the only places it says it is AI-made', async () => {
+    const row = { ref: 'https://www.bilibili.com/video/BVai', title: 'Paper Lanterns', uploader: 'Lantern Studio', durationS: 200, extra: { zone: 'cover', tags: ['ai cover'] }, catalogue: 'channels' as const }
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [row] })
+    const result = await callTool(tools, 'search_music', { query: 'lanterns', catalogue: 'channels' })
+    expect((result.candidates as TrackCandidate[])[0]?.extra).toEqual({ zone: 'cover', tags: ['ai cover'] })
+  })
+})
+
+describe('what search_music says the channels catalogue is', () => {
+  it('names curated channels and tags, in the tool and nowhere in the prompt', () => {
+    const tools = musicTools(new FakeMusicProvider(), () => {}, undefined, undefined, { count: () => 1, search: () => [] })
+    const schema = tools.find((t) => t.name === 'search_music')!.inputSchema as Record<string, { description?: string }>
+    expect(schema.catalogue!.description).toContain('channels is recent uploads from curated channels and tags')
+    // The music policy and its prompt gain no rule for this: the pool is a
+    // place to look, and the tool already says what is in it.
+    expect(buildFindMusicInstruction(undefined, { channels: true })).not.toMatch(/\btags?\b/i)
   })
 })
