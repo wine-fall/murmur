@@ -826,11 +826,32 @@ a half-written file) is treated as a failure, not as "the list is now empty".
 ref, uploader, and the `extra` its feed gives — §2.9.1) are pulled into
 `$MURMUR_HOME/cache/channels/pool.json`. A line that fails costs that line; a
 refresh where **nothing** answers keeps the pool it already had, so the
-catalogue never silently unmounts. A tag's rows keep only what is
-**song-length** — `MIN_CHAPTER_S` (45 s) to `MIX_DURATION_S` (12 min), the
-bounds a chapter already has to meet; a length of 0 is unknown and kept — and
-are never sent to the chapter pass: a long upload under a tag is a
-compilation far more often than a chaptered album. The whole pool is capped at
+catalogue never silently unmounts. A tag's rows are never sent to the
+chapter pass — a long upload under a tag is a compilation far more often than
+a chaptered album — and keep only what reads as **an AI-made song**
+(`aiSong`, *amended 2026-10-27*; channel rows keep the rules above and
+below unchanged). All three must hold:
+
+- **its own tags say AI** — one tag, case-blind, contains `suno`,
+  `AI\u97f3\u4e50` (AI music), `AIGC`, `AI\u751f\u6210` (AI-generated),
+  `AI\u4f5c\u66f2` (AI-composed), `AI\u539f\u521b` (AI original) or
+  `AI\u6b4c\u66f2` (AI song). A YouTube row carries no tag list (§2.9.1), so
+  no YouTube tag row passes: the YouTube lines read and contribute nothing
+  until a rule for them is measured;
+- **its title is not something else** — none of `\u7ffb\u5531` (cover),
+  `cover`, `\u6539\u7f16` (adaptation), `\u7248` (edition/version),
+  `\u7eaf\u97f3\u4e50` (instrumental), `\u4f34\u594f` (backing track),
+  `\u6559\u7a0b` (tutorial), `\u6d4b\u8bc4` (review), `\u8bd5\u542c`
+  (preview), `\u58f0\u5e93` (voice bank), `vlog`, `\u5927\u8d5b` (contest),
+  `\u6392\u884c` (chart), `reaction`, `MV`; the ASCII words match as whole
+  words, case-blind;
+- **it runs 2-7 minutes** (`AI_SONG_MIN_S` = 120, `AI_SONG_MAX_S` = 420); an
+  unknown length (0) is dropped.
+
+*Measured 2026-10-27* on this season's tag feeds: 152 raw rows, 44 song-like
+under these rules, of which ~30 were judged genuinely AI-made songs with a
+voice. The pool marks each kept tag row as one (`isTagRow(ref)`), which is
+what the AI slot (§3.10 step four) enforces against. The whole pool is capped at
 `MAX_POOL_TRACKS` = **1000**; once full, the remaining lines are not read at
 all, which also bounds a refresh's network when a listener's own file grows
 long. Each refresh writes **one** dev-log line of counts —
@@ -872,8 +893,16 @@ day. If a listener's list ever grows to many Bilibili channels, the upgrade is
 a longer spacing or a resume across refreshes — not a retry loop.
 
 **The catalogue.** `search_music(catalogue: 'channels')` is a **local**
-substring match over the pool on **title and uploader** — every word of the
-query has to land — with **no network at search time**. It returns the same
+match over the pool with **no network at search time** (*amended
+2026-10-27*). Every word of the query has to land somewhere in a row's
+**title, uploader or tags**; an ASCII word lands only as a whole word
+(case-blind, so `AI` finds `AI cover` and never `Isaiah` or `Maiden`), any
+other word as a substring. The hits come back as a **random sample** of the
+matches, not the first N — the same query twice in an evening should not
+offer the same five. An **empty query, or one nothing matches, answers with
+a random sample of the whole pool** instead of nothing: the model asks a
+catalogue by genre (a style word, a language) and a pool that answers 0 the
+first time teaches it never to come back. It returns the same
 `TrackCandidate` shape as every other catalogue, so `submit_pick` resolves the
 ref through the unchanged yt-dlp path (§2.5). A row's `extra` rides through to
 the candidate: a Bilibili tag row carries `tags` and `zone` exactly as §2.4's
@@ -923,7 +952,8 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
   cannot swamp the catalogue and crowd out every other channel.
 - **The old pool is discarded once.** `pool.json` carries a version; the
   chapter rules changed what belongs in a pool, so a file written before them
-  reads as no cache at all. Without that, a listener whose channels are all
+  reads as no cache at all — and so did the AI-song rule and the tag-row mark
+  (version 3). Without that, a listener whose channels are all
   long-mix uploads would hit the "nothing answered, keep what we had" rule and
   keep serving the very mixes these rules exist to drop.
 - **A segment that cannot play is refused at resolve.** If the resolved source
@@ -941,17 +971,23 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
   resolves the bare one (verified), and `resolve` strips it anyway. What the
   fragment becomes on the clip is spec 03-01 §2.2's business.
 
-**What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`), one
-sentence rendered only while the pool is non-empty: the catalogue searches
-recent uploads from a curated list of music channels — good for something new,
-a cover, or a recent release a plain search would bury. That sentence is about
-**where to look**. It must not describe the listener.
+**What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`),
+rendered only while the pool is non-empty (*amended 2026-10-27*): what the
+catalogue holds — recent uploads from a curated list of music channels, and
+this season's AI-generated songs from Bilibili and YouTube tag feeds — and
+how it matches: words against titles, uploaders and tags, so a style word, a
+language, `\u539f\u521b` (original), `AI` or an empty query opens it. That is
+**where to look and how to ask**, never a rule about when to choose it (the AI
+slot's line in §3.10 carries that, on the slots that have one). It must not
+describe the listener.
 
 The `search_music` tool's `catalogue` description carries the one sentence
 that names what the pool holds: *"channels is recent uploads from curated
-channels and tags."* The tags add **no rule** to the music policy or the
-pick instruction — the pool holds AI-made songs now, and the model meets
-them, and judges them, the way it judges any candidate.
+channels and tags."* The tags add **no rule** to the music policy — on an
+ordinary slot the model meets the AI-made songs, and judges them, the way it
+judges any candidate. *Measured 2026-10-27:* over 120 real autoplay picks it
+never chose one on its own, which is why the AI slot (§3.10 step four) is
+drawn in code.
 
 ### 2.9.1 Tag feeds — where AI-made music is found (measured 2026-10-22)
 
@@ -2096,7 +2132,7 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    left, ignores the query, and is empty early in a program. A failed read
    keeps the pool it had.
 
-**Step three (labels and rotation), the last of this section.**
+**Step three (labels and rotation).**
 
 5a. **Every `search_music` hit carries its familiarity label** — `kept`,
    `watched`, `played by murmur`, `artist's #N hit`, or `new` — so the model
@@ -2152,6 +2188,46 @@ tool (§5 acceptance #7 locks the pick task at exactly two).
    rotation that refused what they just asked for would be a radio arguing
    with its listener. The 3-in-10 is a constant with a `ponytail:` comment,
    not a setting.
+
+**Step four (the AI slot).** *Added 2026-10-27.*
+
+*The measurement.* AI-made songs reach the `channels` catalogue through the
+tag lines (§2.9), and over **120** real autoplay picks the brain never chose
+one: it searches `<artist> <title>` on the big catalogues, and a pool of
+unknown uploaders matched by word is invisible to that habit. What worked,
+**8 / 8 with 0 refusals** (10-17 s per pick, every Bilibili audio
+resolving), is the shape of 5c: the code draws the slot, the situation says
+so, and `submit_pick` enforces it.
+
+6a. **The draw.** `aiShare` (spec 12, a settings key; default **0.1**, `0` =
+   never, at most `1`) is the chance that an autoplay pick is an AI slot. It
+   is drawn **in code at pick start**, read live from the settings store, and
+   carried on `MusicContext.aiSlot`. Never drawn for a **listener request**
+   (the same rule as 5c), and never while the pool holds **no tag rows**
+   (`aiRows() === 0`) — a slot pointing at an empty shelf would spend its
+   three refusals for nothing. An independent coin, not a deck: at 0.1 a run
+   of AI slots is rare enough not to matter, and a deck would need the share
+   to be a whole number of tenths.
+6b. **Precedence over 5c.** The AI draw comes **first** and 5c's deck is
+   still drawn, so its 3-in-10 holds over the slots it governs. When the AI
+   slot wins, the situation carries the AI line **instead of** the new-only
+   line (one slot, one instruction), but `newOnly` stays as drawn — the
+   familiarity refusal stays armed, so an AI song murmur already aired is
+   still turned back once on a new-only slot.
+6c. **The line** (validated live — keep it verbatim), in the situation's slot
+   line, the place 5c's line takes:
+   `this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.`
+6d. **The enforcement.** On an AI slot, `submit_pick` refuses a ref that is
+   not a tag row of the pool (`ChannelCatalogue.isTagRow`) with *"this slot
+   plays one of the AI-generated songs from the channels catalogue: search it
+   and submit one of those."* — **at most three times**, then it fails open:
+   dead air costs more than a song that is not AI-made. The check runs after
+   the title/artist and recently-played guards and before the familiarity
+   rule; those stay in force — the listener's rule is never the same song
+   again, so an AI slot whose whole pool was recently played fails open onto
+   whatever the model finds instead. One dev-log line per accepted AI-slot
+   pick, counts only: `music.slot ai picked=ai|other refused=N
+   fail-open=0|1`.
 
 **Dropped on purpose** (do not add them back): a 30-day cooldown on kept
 songs; a `source`/`outcome` field on the memory ledger (familiarity is a pure
@@ -2481,6 +2557,32 @@ the fail-open; a listener request arrives as `newOnly: false` with no slot
 line; and over any ten slots exactly three allow the familiar, with the
 streak bounded by the deck. Every line logged is a **count** (`hits=`,
 `familiar=`, `artist-known=`, `refused=`, `fail-open=`), never a title.
+
+### 5.22 The AI slot (unit) — *added 2026-10-27*
+
+*The pool.* A tag row is kept only when one of its tags says AI (case-blind),
+its title carries none of the excluded words (an ASCII one only as a whole
+word, so a title that merely contains the letters is kept) and it runs 2-7
+min; a YouTube tag row, which has no tags, is dropped; a channel row is
+judged exactly as before. The pool knows which refs are tag rows, counts
+them, and keeps the mark across a restart; a pool file written before the
+mark reads as no cache. *The search.* Words land on title, uploader or tags;
+`AI` lands on a whole word and never inside `Isaiah`; the hits are a random
+sample of the matches; an empty query and a query nothing matches both answer
+a random sample of the whole pool, capped at the limit. *The draw.* With the
+pool holding tag rows and `aiShare` at 1 every autoplay pick is an AI slot,
+with its line in the situation's slot line and no new-only line, while `newOnly`
+still carries the deck's verdict; at 0, or with no tag rows, or on a listener
+request, none is. *The enforcement.* On an AI slot a ref that is not a tag
+row is refused with the slot's error three times and accepted the fourth,
+logged `music.slot ai picked=other refused=3 fail-open=1`; a tag row is
+accepted at once (`picked=ai refused=0 fail-open=0`); a recently played tag
+row is still refused as recently played; off an AI slot a non-tag ref is
+never refused for it. *The knob.* `aiShare` defaults to 0.1, is read from
+`settings.json`, rejects a value outside 0-1, and `change_settings` sets it.
+*The guidance.* `CHANNELS_GUIDANCE` names the curated channels, the AI tag
+feeds, and matching on titles, uploaders and tags, and still says nothing
+about the listener.
 
 ## 6. Resolved decisions
 

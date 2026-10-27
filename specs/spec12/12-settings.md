@@ -52,6 +52,15 @@ everything else — this is not an invitation to a ninth.
 | 7 | Memory span (advanced group) | `recentWindow` |
 | 8 | The language it speaks | `language` (§3.9) |
 
+**Keys outside the pane.** A later spec may add a settings key without a
+pane item; it is then reached by `settings.json` and by telling murmur
+(`change_settings`), and the pane stays at eight. `rwtEnabled` (spec 13) and
+`playOrder` (spec 14 §2.13, set from the `/sources` card) are two; the third
+is **`aiShare`** (*added 2026-10-27*, spec 14 §3.10 step four): the chance,
+`0`-`1`, that a pick the radio makes on its own is one of the AI-generated
+songs in the channels catalogue. Default **0.1**; `0` = never. No env or flag
+surface: it is the listener's knob, not a developer's.
+
 Read-only display: the resolved storage home (`config.home`) and the voice
 endpoint status (configured / not configured — **never** the key or URL
 contents beyond what `hello` already shows).
@@ -96,6 +105,7 @@ and the raw knob identifiers appear nowhere in the UI.
     muted?: boolean        // the listener's output mute (§3.4)
     tuiPet?: boolean
     language?: string      // the spoken-language override (§3.9)
+    aiShare?: number       // 0..1, the AI slot's chance (spec 14 §3.10)
   }
   ```
 
