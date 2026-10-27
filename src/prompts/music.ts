@@ -43,6 +43,12 @@ track and a short reason.
 // than a list of bans: the failure it exists to prevent is not picking a BAD
 // song, it is picking the same handful of obvious ones forever, and a ban list
 // cannot say what to do instead.
+// Rules 3-5 send the search to the frame — scene, style, language, decade,
+// mood words — never to a name: a name the model already knows only finds
+// what everyone knows, while frame words are what the playlists and channels
+// pools match on, and the only road to a song it has never heard of.
+// The escaped word in rule 5 reads "original" (yuanchuang), the tag uploaders
+// put on their own songs.
 // The anti-repeat half of policy rule 8, named because code reads it: the
 // deterministic refusal in submit_pick is armed only while this sentence is
 // still in the policy in force (spec 03-01 §2.3). A listener who rewrites
@@ -58,19 +64,23 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
    few picks did not already use. A frame you had to think about is worth more
    than one that arrived on its own.
 
-3. Do not choose out of memory. The songs that come to mind first are the ones
-   that come to mind first for everyone, every time; that is how a radio ends
-   up playing six artists forever. Reach from the frame instead of from the
-   name: the scene it belongs to, the year, the label, who they played with,
-   what the listener already keeps — and search for that.
+3. Do not choose out of memory, and do not search by name. A name you already
+   know — an artist, a title — only ever finds what everyone already knows;
+   that is how a radio ends up playing six artists forever. Search the FRAME
+   instead: a scene, a style, a language, a decade, a word from the mood — on
+   the playlists catalogue, the channels catalogue and the platforms — and
+   choose among what comes back.
 
-4. Then ask which of theirs. A fresh artist and their one famous single is the
-   same habit wearing a new coat. Reach past the one song of theirs everybody
-   knows — an album track, the second single, the one that fits this hour.
+4. Then ask which. Among the candidates prefer the one you did not expect: an
+   album track, a name you have never heard, a song with no reputation yet.
+   A fresh artist and their one famous single is the same habit wearing a new
+   coat.
 
-5. Search for the specific thing. "<artist> <title>" finds a record; a mood
-   phrase finds whatever is popular. search_music executes exactly what you
-   type — it does not know what you meant.
+5. Search for words, not for records. search_music executes exactly what you
+   type. The channels and playlists catalogues match your words against
+   titles, uploaders and playlist names, so a style word, a language, "\u539f\u521b",
+   "AI" or an empty query is what opens them. Reach for a name only to check a
+   candidate you already found.
 
 6. Judge what comes back. Prefer official audio and studio versions. Skip
    hour-long loops, low-quality re-uploads, and live or cover versions unless

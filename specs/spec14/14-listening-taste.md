@@ -2606,6 +2606,22 @@ picked=familiar refused=1`, or a `music.pick done ... picked=no` on an AI slot.
 
 ## 6. Resolved decisions
 
+- **The default policy searches the frame, never a name** (2026-10-27,
+  measured). Spec 03-01 §2.3's rules 3-5 told the pick to search
+  `"<artist> <title>"`; over 120 real autoplay picks the search always ended
+  at a name the model already knew, on YouTube, QQ Music or NetEase, so the
+  `playlists` and `channels` pools (§3.10 step two, §2.9) — which match
+  scene, style and language words, not names — were barely used and nothing
+  the model had never heard of could surface. The rules now say: do not
+  search by name; search the frame (a scene, a style, a language, a decade,
+  a mood word) across those catalogues and the platforms; prefer the
+  candidate you did not expect; reach for a name only to check a candidate
+  already found. Over 24 real runs every query was a frame phrase (0 name
+  searches) and the picks were names the radio had never played. The cost is
+  that a well-known song now arrives only through a pool, never by recall;
+  whether the new picks are good is a by-ear pass, owed. Installs whose `music-policy.md` was
+  already seeded keep their old text (§3.10 step one, 3), so the change
+  reaches new installs and anyone who deletes the file.
 - **Bilibili is read through its own web API first, yt-dlp second**
   (2026-10-22, user). Two days of logs showed 64 Bilibili searches and not
   one hit: yt-dlp's `bilisearch` request lacks the Referer and its page
