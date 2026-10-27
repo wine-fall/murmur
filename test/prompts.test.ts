@@ -143,6 +143,19 @@ describe('music prompts', () => {
     expect(DEFAULT_MUSIC_POLICY).toContain('Do not choose out of memory')
   })
 
+  // Measured (spec 03-01 §2.3): told to search "<artist> <title>", every pick
+  // ended at a name it already knew and the pools that answer scene words sat
+  // idle. The policy sends the search to the frame and keeps names for checks.
+  it('searches the frame, never a name', () => {
+    expect(DEFAULT_MUSIC_POLICY).toContain('do not search by name')
+    expect(DEFAULT_MUSIC_POLICY).toContain('Search the FRAME')
+    expect(DEFAULT_MUSIC_POLICY).toContain('Search for words, not for records')
+    expect(DEFAULT_MUSIC_POLICY).not.toContain('<artist> <title>')
+    for (const pool of ['playlists catalogue', 'channels catalogue']) {
+      expect(DEFAULT_MUSIC_POLICY).toContain(pool)
+    }
+  })
+
   // The playbook directs the tools the task actually has. A step that tells
   // the model to call something it is not offered spends a turn teaching it
   // that the tool does not exist.
