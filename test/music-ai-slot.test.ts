@@ -257,8 +257,8 @@ describe('what the pick task is told the channels catalogue holds', () => {
   it('names the curated channels, the AI tag feeds, and how a word matches', () => {
     expect(CHANNELS_GUIDANCE).toMatch(/curated/)
     expect(CHANNELS_GUIDANCE).toMatch(/AI-generated/)
-    expect(CHANNELS_GUIDANCE).toMatch(/Bilibili/)
-    expect(CHANNELS_GUIDANCE).toMatch(/YouTube/)
+    expect(CHANNELS_GUIDANCE).toMatch(/Bilibili's tag feeds/)
+    expect(CHANNELS_GUIDANCE).not.toMatch(/YouTube/)
     expect(CHANNELS_GUIDANCE).toMatch(/titles, uploaders and tags/)
     expect(CHANNELS_GUIDANCE).toContain('"\u539f\u521b"')
     expect(CHANNELS_GUIDANCE).toMatch(/empty query/)

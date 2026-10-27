@@ -836,8 +836,8 @@ below unchanged). All three must hold:
   `AI\u97f3\u4e50` (AI music), `AIGC`, `AI\u751f\u6210` (AI-generated),
   `AI\u4f5c\u66f2` (AI-composed), `AI\u539f\u521b` (AI original) or
   `AI\u6b4c\u66f2` (AI song). A YouTube row carries no tag list (§2.9.1), so
-  no YouTube tag row passes: the YouTube lines read and contribute nothing
-  until a rule for them is measured;
+  no YouTube tag row passes — which is why the committed list carries no
+  YouTube tag line (below); the parser still reads one;
 - **its title is not something else** — none of `\u7ffb\u5531` (cover),
   `cover`, `\u6539\u7f16` (adaptation), `\u7248` (edition/version),
   `\u7eaf\u97f3\u4e50` (instrumental), `\u4f34\u594f` (backing track),
@@ -974,7 +974,7 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
 **What the model is told** (`CHANNELS_GUIDANCE`, `src/prompts/music.ts`),
 rendered only while the pool is non-empty (*amended 2026-10-27*): what the
 catalogue holds — recent uploads from a curated list of music channels, and
-this season's AI-generated songs from Bilibili and YouTube tag feeds — and
+this season's AI-generated songs from Bilibili's tag feeds — and
 how it matches: words against titles, uploaders and tags, so a style word, a
 language, `\u539f\u521b` (original), `AI` or an empty query opens it. That is
 **where to look and how to ask**, never a rule about when to choose it (the AI
@@ -1160,7 +1160,10 @@ later held 11 / 19 songs, the rest "how to make an AI song" tutorials and
 tag list the pick could read past the title. *Second time point for the
 marginal term (~10 min later, 9 / 9 runs answered):* 13 rows were new and
 **8** were songs; three of the five misses are 26-58 minute compilations the
-length rule drops.
+length rule drops. *Both dropped from the committed list 2026-10-27 (user):*
+`ai cover` and `ai version` rows are covers, which the AI-song rule of §2.9
+excludes, and a YouTube row has no tag list to pass it with. The committed
+tag lines are Bilibili's alone; `tag:youtube:` stays a readable shape.
 
 **Rejected for good** (do not re-try without new evidence): the Bilibili
 channel API (404), the tag archive as a "recent" feed (stale first answer),
@@ -2411,8 +2414,8 @@ prefix); a list keeps channels and tags in order and reads a repeated line
 once; two lists merge with the second appended and de-duplicated; the
 listener's file is appended on every load — inside the shared list's TTL, on
 top of the bundled copy when offline — costs nothing when absent, and
-defaults to `$MURMUR_HOME/music_channels.txt`; the bundled list carries tag
-lines for both platforms. `BilibiliWeb.newest` asks `order=pubdate&tids=3`,
+defaults to `$MURMUR_HOME/music_channels.txt`; the bundled list carries Bilibili
+tag lines and, since 2026-10-27, no YouTube one. `BilibiliWeb.newest` asks `order=pubdate&tids=3`,
 sends a non-Latin keyword as typed, strips every `<em>` highlight, reads an
 empty tag list and a missing play count as nothing, caps at the limit, skips a
 row with no bvid or title, throws on a 412 and on a non-zero code, and reads
@@ -2592,6 +2595,14 @@ answered five. Two real AI-slot picks (an invented scene) each landed on a tag
 row with no refusal — `music.slot ai picked=ai refused=0 fail-open=0`, 9.1 s
 and 14.9 s, the Bilibili audio resolving — and each announce said the song was
 AI-made.
+
+*Watched in the logs, not changed:* a new-only AI slot whose AI song murmur
+aired more than a week ago (familiar as `played by murmur`, past the avoid
+window) is refused once by the familiarity rule, whose message points at the
+playlists and neighbours; a submission from there is then refused by the AI
+slot, and the run can spend the task's 8 turns and return `picked=no`. Read it
+as a `music.slot ai ... fail-open=1` next to `music.slot new-only
+picked=familiar refused=1`, or a `music.pick done ... picked=no` on an AI slot.
 
 ## 6. Resolved decisions
 

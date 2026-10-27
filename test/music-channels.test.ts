@@ -708,10 +708,12 @@ describe("the listener's own list", () => {
   })
 })
 
-it('the bundled manifest carries tag lines for both platforms', () => {
+// A YouTube row carries no tag list, so the AI-song rule keeps none of a
+// YouTube tag's rows: the committed list asks Bilibili alone.
+it('the bundled manifest carries Bilibili tag lines and no YouTube one', () => {
   const keys = parseChannelManifest(readFileSync(BUNDLED_CHANNELS, 'utf8'))
   expect(keys.some((k) => k.startsWith('tag:bilibili:'))).toBe(true)
-  expect(keys.some((k) => k.startsWith('tag:youtube:'))).toBe(true)
+  expect(keys.some((k) => k.startsWith('tag:youtube:'))).toBe(false)
 })
 
 describe('parseFlatUploads on a YouTube search listing', () => {

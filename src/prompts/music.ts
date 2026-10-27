@@ -110,9 +110,9 @@ not the best source. In the announce, say where a pick came from only when it is
 // carries that), and never a statement about the listener — the curated list
 // is a search source, and what they like comes from their own accounts.
 export const CHANNELS_GUIDANCE = `The channels catalogue holds recent uploads from a curated list of music
-channels and this season's AI-generated songs from Bilibili and YouTube tag
-feeds. Words are matched against titles, uploaders and tags, so a style word, a
-language, "\u539f\u521b", "AI" or an empty query opens it.`
+channels and this season's AI-generated songs from Bilibili's tag feeds. Words
+are matched against titles, uploaders and tags, so a style word, a language,
+"\u539f\u521b", "AI" or an empty query opens it.`
 
 export function buildFindMusicInstruction(
   policy: string = DEFAULT_MUSIC_POLICY,
