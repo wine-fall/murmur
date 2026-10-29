@@ -72,7 +72,8 @@ export const UPLOADS_PER_CHANNEL = 20
 export const UPLOADS_PER_TAG = 3 * UPLOADS_PER_CHANNEL
 
 // The tag rows the pool has seen stay across refreshes, rolled by when each
-// was last seen. Three pages of the committed lines brought 126 AI songs in
+// was last seen, while the tag rows number fewer than this. It bounds what is
+// remembered: a refresh's own rows are never cut for it. Three pages of the committed lines brought 126 AI songs in
 // one refresh (measured 2026-10-29), so 300 holds at least two refreshes'
 // worth: a song stays drawable for days after it falls off the newest pages,
 // and the set stays well inside MAX_POOL_TRACKS beside the channel rows.

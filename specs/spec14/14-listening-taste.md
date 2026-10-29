@@ -881,9 +881,11 @@ what the AI slot (§3.10 step four) enforces against.
 *The AI rows roll (added 2026-10-29).* A refresh replaces the channel rows
 whole, but the tag rows the pool already held and this refresh did not bring
 back **stay**, behind the fresh rows, in the order they were last seen
-(`remember`), up to `MAX_AI_ROWS` = **300** tag rows in all; the
-longest-unseen go first, and a row seen again takes what its feed says of it
-now. Why: a tag feed is newest-first and turns over in about a day, so a pool
+(`remember`), while the tag rows number fewer than `MAX_AI_ROWS` = **300**;
+the longest-unseen go first, and a row seen again takes what its feed says of
+it now. The bound is on what is **remembered**: a refresh's own rows are never
+cut for it (a listener whose lines bring more than 300 fresh tag rows keeps
+them all, bounded by `MAX_POOL_TRACKS` like any row) and then remembers none. Why: a tag feed is newest-first and turns over in about a day, so a pool
 replaced whole lost yesterday's AI songs by today, and the few still on the
 newest pages came up in the AI slot again and again. Three pages of the
 committed lines brought **126** AI rows in one refresh (measured 2026-10-29,

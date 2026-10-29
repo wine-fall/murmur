@@ -241,6 +241,17 @@ describe('the pool remembers the AI rows it has seen', () => {
     expect(built.isTagRow(ai(99).ref)).toBe(false)
   })
 
+  // The bound is on what is remembered: rows a refresh just read are never
+  // thrown away for it, and they leave no room for older ones.
+  it('keeps every tag row a refresh brings, past the bound, and then remembers none', async () => {
+    const many = Array.from({ length: MAX_AI_ROWS + 10 }, (_, k) => ai(2000 + k))
+    const { built, next } = rolling([[ai(1)], many])
+    await next()
+    await next()
+    expect(built.aiRows()).toBe(MAX_AI_ROWS + 10)
+    expect(built.isTagRow(ai(1).ref)).toBe(false)
+  })
+
   it('takes a row seen again with what the feed says of it now', async () => {
     const seenAgain = { ...ai(1), extra: { zone: 'original', tags: [AI, 'ballad'], viewCount: 99 } }
     const { built, next } = rolling([[ai(1), ai(2)], [seenAgain]])
