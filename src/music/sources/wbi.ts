@@ -35,6 +35,8 @@ const MIXIN_TABLE = [
 
 const API = 'https://api.bilibili.com'
 const DEFAULT_TIMEOUT_MS = 15_000
+// What one search page answers.
+const SEARCH_PAGE_ROWS = 20
 // A browser's own User-Agent and Referer: every one of these APIs answers a
 // request that does not look like the web player with its risk-control page.
 // The Referer is also what yt-dlp's own `bilisearch` request lacks, and the
@@ -175,10 +177,24 @@ export class BilibiliWeb {
 
   // A tag's newest uploads in the music zone (spec 14 §2.9.1) — the same page,
   // newest first and zone 3 only, which is what kept story videos and
-  // tutorials out of the measured feeds. Throws on a refused read: the caller
-  // keeps the pool it already had.
+  // tutorials out of the measured feeds — read page after page until `limit`,
+  // an empty page, or as many pages as `limit` could fill. Throws when the
+  // first page is refused, so the caller keeps the pool it already had; a
+  // later page refused ends the read with what the earlier ones gave.
   async newest(keyword: string, limit: number): Promise<ChannelTrack[]> {
-    return await this.searchPage({ keyword, order: 'pubdate', tids: '3' }, limit)
+    const found: ChannelTrack[] = []
+    for (let page = 1; page <= Math.ceil(limit / SEARCH_PAGE_ROWS) && found.length < limit; page++) {
+      let rows: ChannelTrack[]
+      try {
+        rows = await this.searchPage({ keyword, order: 'pubdate', tids: '3', page: String(page) }, limit - found.length)
+      } catch (err) {
+        if (page === 1) throw err
+        break
+      }
+      if (rows.length === 0) break
+      found.push(...rows)
+    }
+    return found
   }
 
   private async searchPage(params: Record<string, string>, limit: number): Promise<ChannelTrack[]> {

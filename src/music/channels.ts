@@ -63,6 +63,22 @@ export const MANIFEST_TTL_MS = 12 * 60 * 60_000
 // enough that a refresh is a few seconds of network once a day.
 export const UPLOADS_PER_CHANNEL = 20
 
+// A tag line reads deeper: its three newest pages. A tag feed is newest-first
+// and turns over in about a day, so one page held ~50 AI songs and the AI slot
+// kept meeting the same few. Measured 2026-10-29 on the committed lines: pages
+// 2-5 added ~50 AI songs a page with no failure; three pages roughly triple
+// the slot's choice for 18 more requests a refresh, while pages four and five
+// would add older rows for twice that again.
+export const UPLOADS_PER_TAG = 3 * UPLOADS_PER_CHANNEL
+
+// The tag rows the pool has seen stay across refreshes, rolled by when each
+// was last seen, while the tag rows number fewer than this. It bounds what is
+// remembered: a refresh's own rows are never cut for it. Three pages of the committed lines brought 126 AI songs in
+// one refresh (measured 2026-10-29), so 300 holds at least two refreshes'
+// worth: a song stays drawable for days after it falls off the newest pages,
+// and the set stays well inside MAX_POOL_TRACKS beside the channel rows.
+export const MAX_AI_ROWS = 300
+
 // Bilibili answers a burst of space reads with its risk-control page; the
 // refresh is a background job with a whole day to finish, so it waits.
 const BETWEEN_CHANNELS_MS = 1_500
@@ -119,11 +135,11 @@ const TrackSchema = z.object({ ref: z.string().min(1), title: z.string().min(1),
 // (spec 14 §3.10 step four).
 const PoolTrackSchema = TrackSchema.extend({ origin: z.enum(['channel', 'tag']) })
 type PoolTrack = z.infer<typeof PoolTrackSchema>
-// The chapter rules and then the AI-song rule and the origin mark (spec 14
-// §2.9) changed what belongs in a pool, so a file written before them is
-// stale by construction: a version that does not match reads as no cache at
-// all, and the pool rebuilds on the next poke.
-const POOL_CACHE_VERSION = 3
+// The chapter rules, the AI-song rule and the origin mark, and then the
+// not-original tags (spec 14 §2.9) each changed what belongs in a pool, so a
+// file written before them is stale by construction: a version that does not
+// match reads as no cache at all, and the pool rebuilds on the next poke.
+const POOL_CACHE_VERSION = 4
 const PoolCacheSchema = z.object({ v: z.literal(POOL_CACHE_VERSION), at: z.number(), tracks: z.array(PoolTrackSchema) })
 const ChapterCacheSchema = z.record(z.string(), z.array(TrackSchema))
 
@@ -372,17 +388,37 @@ async function tagUploads(deps: UploadsDeps, platform: TagPlatform, term: string
   return parseFlatUploads(await deps.run(['--dump-json', '--flat-playlist', '--playlist-end', String(limit), '--no-warnings', results]), limit)
 }
 
-// What a tag row has to be to stay (spec 14 §2.9): an AI-made song. A tag
-// feed matches its word anywhere, so what comes back is also covers,
-// tutorials, contests and charts; measured, these three rules kept 44 of 152
-// rows. The tags are the row's own word that it is AI-made -- a YouTube row
-// carries none, so none passes. ASCII title words count only as whole words.
+// What a tag row has to be to stay (spec 14 §2.9): an AI-made original song.
+// A tag feed matches its word anywhere, so what comes back is also covers,
+// voice-clone covers, tutorials, contests and charts. The tags are the row's
+// own word that it is AI-made -- a YouTube row carries none, so none passes --
+// and its own word that it is someone else's song. ASCII words count only as
+// whole words.
 const AI_TAGS = ['suno', 'ai\u97f3\u4e50', 'aigc', 'ai\u751f\u6210', 'ai\u4f5c\u66f2', 'ai\u539f\u521b', 'ai\u6b4c\u66f2']
-// \u7ffb\u5531 cover, \u6539\u7f16 adaptation, \u7248 edition, \u7eaf\u97f3\u4e50 instrumental, \u4f34\u594f backing
-// track, \u6559\u7a0b tutorial, \u6d4b\u8bc4 review, \u8bd5\u542c preview, \u58f0\u5e93 voice bank,
-// \u5927\u8d5b contest, \u6392\u884c chart.
+// \u7ffb\u5531 cover, \u6539\u7f16 adaptation, \u4e8c\u521b derivative work, \u91cd\u7f6e remake, RVC voice
+// conversion: someone else's song. A tag says it as plainly as a title does.
+const NOT_ORIGINAL = /\u7ffb\u5531|\u6539\u7f16|\u4e8c\u521b|\u91cd\u7f6e|(?<![a-z0-9])(cover|rvc)(?![a-z0-9])/i
+// \u7248 edition, \u7eaf\u97f3\u4e50 instrumental, \u4f34\u594f backing track, \u6559\u7a0b tutorial,
+// \u6d4b\u8bc4 review, \u8bd5\u542c preview, \u58f0\u5e93 voice bank, \u5927\u8d5b contest, \u6392\u884c chart.
+// Read in a title only: as a tag, `MV` or a word with \u7248 in it is a zone, not a verdict.
 const NOT_A_SONG =
-  /\u7ffb\u5531|\u6539\u7f16|\u7248|\u7eaf\u97f3\u4e50|\u4f34\u594f|\u6559\u7a0b|\u6d4b\u8bc4|\u8bd5\u542c|\u58f0\u5e93|\u5927\u8d5b|\u6392\u884c|(?<![a-z0-9])(cover|vlog|reaction|mv)(?![a-z0-9])/i
+  /\u7248|\u7eaf\u97f3\u4e50|\u4f34\u594f|\u6559\u7a0b|\u6d4b\u8bc4|\u8bd5\u542c|\u58f0\u5e93|\u5927\u8d5b|\u6392\u884c|(?<![a-z0-9])(vlog|reaction|mv)(?![a-z0-9])/i
+// A voice-clone cover names the cloned singer or character right after "AI",
+// at the head of the title or of a bracket, and the name ends at a delimiter
+// (a bracket, a bar, a space, an ampersand, a book-title mark, or
+// \u539f\u521b/\u539f\u5275 "original"). After "AI" a generic word is the tool, not a
+// voice: music, composing (\u4f5c), original, song (\u6b4c), generated, idol,
+// track, contest, every-maker, expansion, assisted, continuation, arranging,
+// lyrics, short film, Chinese style, female/male, new, animation, video,
+// virtual, writing, creating, making, singing, voice change, cover, smart,
+// drawing, electronic, band, adaptation, remake, derivative, synthesis, voice,
+// tune, edition.
+const VOICE_GENERIC =
+  '\u97f3\u4e50|\u97f3\u6a02|\u4f5c|\u539f\u521b|\u539f\u5275|\u6b4c|\u751f\u6210|\u5076\u50cf|\u8d5b\u9053|\u5168\u6c11|\u6269\u5199|\u8f85\u52a9|\u7eed\u5199|\u7f16\u66f2|\u586b\u8bcd|\u5fae\u7535\u5f71|\u4e2d\u56fd\u98ce|\u56fd\u98ce|\u5973|\u7537|\u65b0|\u52a8\u753b|\u89c6\u9891|\u865a\u62df|\u5199|\u521b\u4f5c|\u5236\u4f5c|\u6f14|\u5531|\u6362\u58f0|\u7ffb\u5531|\u667a\u80fd|\u7ed8|\u7535\u5b50|\u4e50\u961f|\u6539\u7f16|\u91cd\u7f6e|\u4e8c\u521b|\u5408\u6210|\u58f0|\u66f2|\u7248'
+const VOICE_CLONE = new RegExp(
+  `(?:^|[\\u3010\\[\\u300c\\u300e\\uff08(])ai\\s?(?!${VOICE_GENERIC})[\\u4e00-\\u9fff\\u3040-\\u30ff]{1,6}?(?=$|[\\u3011\\]\\u300d\\u300f\\uff08(\\uff5c|&\\s\\u300a]|\\u539f\\u521b|\\u539f\\u5275)`,
+  'i',
+)
 export const AI_SONG_MIN_S = 120
 export const AI_SONG_MAX_S = 420
 
@@ -392,7 +428,10 @@ export function aiSong(track: ChannelTrack): boolean {
     track.durationS >= AI_SONG_MIN_S &&
     track.durationS <= AI_SONG_MAX_S &&
     tags.some((tag) => AI_TAGS.some((ai) => tag.includes(ai))) &&
-    !NOT_A_SONG.test(track.title)
+    !tags.some((tag) => NOT_ORIGINAL.test(tag)) &&
+    !NOT_ORIGINAL.test(track.title) &&
+    !NOT_A_SONG.test(track.title) &&
+    !VOICE_CLONE.test(track.title)
   )
 }
 
@@ -530,7 +569,7 @@ export class ChannelPool {
       if (index > 0) await pause(this.deps.pauseMs ?? BETWEEN_CHANNELS_MS)
       const origin: PoolTrack['origin'] = key.startsWith('tag:') ? 'tag' : 'channel'
       try {
-        for (const track of await read(key, UPLOADS_PER_CHANNEL)) {
+        for (const track of await read(key, origin === 'tag' ? UPLOADS_PER_TAG : UPLOADS_PER_CHANNEL)) {
           if (seen.has(track.ref) || found.length >= MAX_POOL_TRACKS) continue
           seen.add(track.ref)
           found.push({ ...track, origin })
@@ -548,10 +587,10 @@ export class ChannelPool {
     // Nothing came back at all: keep what the pool already had rather than
     // emptying it, which would silently unmount the catalogue.
     if (found.length === 0) return this.tracks.length
-    this.tracks = found
+    this.tracks = tags === 0 ? found : remember(found, this.tracks)
     this.at = this.now()
     writeJson(join(this.dir, 'pool.json'), { v: POOL_CACHE_VERSION, at: this.at, tracks: this.tracks })
-    return found.length
+    return this.tracks.length
   }
 
   // The `channels` catalogue's search (spec 14 §2.9): every word of the query
@@ -591,6 +630,24 @@ export class ChannelPool {
   private now(): number {
     return (this.deps.now ?? Date.now)()
   }
+}
+
+// A refresh's rows, then the tag rows the pool already held that this one did
+// not bring back, in the order they were last seen: the AI slot draws on more
+// than the feeds' newest pages (spec 14 §2.9). Fresh rows come first, so the
+// bound lets the longest-unseen go, and a row seen again takes what its feed
+// says of it now.
+function remember(found: PoolTrack[], held: readonly PoolTrack[]): PoolTrack[] {
+  const fresh = new Set(found.map((t) => t.ref))
+  let room = MAX_AI_ROWS - found.filter((t) => t.origin === 'tag').length
+  const kept = [...found]
+  for (const track of held) {
+    if (kept.length >= MAX_POOL_TRACKS || room <= 0) break
+    if (track.origin !== 'tag' || fresh.has(track.ref)) continue
+    kept.push(track)
+    room--
+  }
+  return kept
 }
 
 // One query word as a matcher: an ASCII word lands only on a word boundary,

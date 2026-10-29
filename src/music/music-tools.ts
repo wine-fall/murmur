@@ -168,9 +168,10 @@ export type DiscoveryOptions = {
   log?: (message: string) => void
 }
 
-// An AI slot's refusals before it plays what it was handed (spec 14 §3.10
-// step four): measured, the model lands on a tag row without one, and a
-// longer loop would spend the task's turns and cost the slot its song.
+// An AI slot's refusals, while the model has not yet looked in the channels
+// catalogue, before it plays what it was handed (spec 14 §3.10 step four):
+// dead air costs more than a song that is not AI-made, and a longer loop
+// would spend the task's turns and cost the slot its song.
 const AI_SLOT_REFUSALS = 3
 
 export function musicTools(
@@ -189,6 +190,9 @@ export function musicTools(
   // prompt rule is advice — a repeat that reaches here is turned back, at the
   // cost of one tool turn.
   const avoided = new Set((avoid ?? []).map(folded))
+  // Whether this pick has looked in the channels catalogue: an AI slot takes
+  // a real song only after it has (spec 14 §3.10 step four).
+  let searchedChannels = false
   // What this task may search: youtube always, the rest while mounted and
   // not yet closed by an auth failure in this very task. An empty channel
   // pool is not mounted — there is nothing in it to find.
@@ -364,6 +368,7 @@ export function musicTools(
       // The curated channels are already on disk: matched here, so a search of
       // them costs nothing and cannot fail (spec 14 §2.9).
       if (catalogue === 'channels') {
+        searchedChannels = true
         const found = channels?.search(args.query, args.limit) ?? []
         for (const c of found) stated.set(c.ref, c.durationS)
         return reply({ candidates: await labelled(found) })
@@ -432,15 +437,17 @@ export function musicTools(
         return reply({ ok: false, error: `${label} was played recently; pick a different song` })
       }
 
-      // The AI slot (spec 14 §3.10 step four): only a tag row of the channels
-      // pool, until it has said so AI_SLOT_REFUSALS times -- then whatever
-      // the model found plays, because dead air costs more.
+      // The AI slot (spec 14 §3.10 step four): a tag row of the channels pool,
+      // or -- once the model has looked there and nothing fit the hour -- the
+      // real song it found instead. A model that never looks is turned back
+      // AI_SLOT_REFUSALS times, then whatever it found plays, because dead air
+      // costs more.
       const aiRow = channels?.isTagRow(ref) === true
-      if (discovery?.aiSlot === true && !aiRow && aiRefused < AI_SLOT_REFUSALS) {
+      if (discovery?.aiSlot === true && !aiRow && !searchedChannels && aiRefused < AI_SLOT_REFUSALS) {
         aiRefused++
         return reply({
           ok: false,
-          error: 'this slot plays one of the AI-generated songs from the channels catalogue: search it and submit one of those.',
+          error: 'this slot plays one of the AI-generated songs from the channels catalogue: search it first, and submit one of those that fits this hour.',
         })
       }
 
@@ -479,7 +486,7 @@ export function musicTools(
         )
       }
       if (discovery?.aiSlot === true) {
-        discovery.log?.(`music.slot ai picked=${aiRow ? 'ai' : 'other'} refused=${aiRefused} fail-open=${aiRow ? 0 : 1}`)
+        discovery.log?.(`music.slot ai picked=${aiRow ? 'ai' : 'other'} searched=${searchedChannels ? 1 : 0}`)
       }
       // Background, after the pick is committed (spec 14 3.10): the song's
       // own airtime is what pays for the next pick's neighbour pool.

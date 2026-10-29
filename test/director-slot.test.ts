@@ -100,7 +100,7 @@ describe('the rotation deck reaches the pick', () => {
 // verdict still rides along so the familiarity refusal stays armed.
 describe('the AI slot reaches the pick', () => {
   const AI_LINE =
-    'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.'
+    'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made. If none of them fits this hour, a real artist\'s song that does is this slot\'s pick instead.'
 
   async function firstPick(aiShare: number, aiRows: number) {
     const player = new FakeMixingPlayer()

@@ -295,6 +295,37 @@ describe('BilibiliWeb.newest', () => {
     expect((await web.newest('q', 2)).map((t) => t.ref)).toEqual(['https://www.bilibili.com/video/BV1x', 'https://www.bilibili.com/video/BV2x'])
   })
 
+  // A page is 20 rows; a tag line asks for 60, which is pages 1-3 (spec 14 §2.9).
+  const paged = (pages: Record<string, unknown>) => (url: string) => pages[new URL(url).searchParams.get('page') ?? ''] ?? { code: 0, data: { result: [] } }
+  const page = (p: number) => ({ code: 0, data: { result: Array.from({ length: 20 }, (_, i) => ({ ...ROW, bvid: `BVp${p}r${i}` })) } })
+  const searched = (calls: { url: string }[]) => calls.filter((c) => c.url.includes('/x/web-interface/search/type')).map((c) => new URL(c.url).searchParams.get('page'))
+
+  it('reads page after page, newest first, until the limit, and never a page past it', async () => {
+    const { web, calls } = fakeWeb(paged({ 1: page(1), 2: page(2), 3: page(3), 4: page(4) }))
+    const found = await web.newest('q', 60)
+    expect(found).toHaveLength(60)
+    expect(found.at(-1)?.ref).toBe('https://www.bilibili.com/video/BVp3r19')
+    expect(searched(calls)).toEqual(['1', '2', '3'])
+  })
+
+  it('stops at an empty page: the keyword has no older uploads', async () => {
+    const { web, calls } = fakeWeb(paged({ 1: page(1) }))
+    expect(await web.newest('q', 60)).toHaveLength(20)
+    expect(searched(calls)).toEqual(['1', '2'])
+  })
+
+  it('a later page that fails ends the read with what the earlier pages gave', async () => {
+    const { web } = fakeWeb(paged({ 1: page(1), 2: '<!DOCTYPE html>' }))
+    expect(await web.newest('q', 60)).toHaveLength(20)
+  })
+
+  it('reads no more pages than the limit could fill, however thin each page is', async () => {
+    const thin = { code: 0, data: { result: [{ ...ROW, bvid: '' }, ROW] } }
+    const { web, calls } = fakeWeb(() => thin)
+    await web.newest('q', 60)
+    expect(searched(calls)).toEqual(['1', '2', '3'])
+  })
+
   it('throws on risk control and on a non-zero code, so the pool keeps what it had', async () => {
     await expect(fakeWeb(() => '<!DOCTYPE html>').web.newest('q', 20)).rejects.toThrow(/412/)
     await expect(fakeWeb(() => ({ code: -352, message: '-352' })).web.newest('q', 20)).rejects.toThrow(/-352/)

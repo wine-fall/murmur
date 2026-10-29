@@ -789,7 +789,7 @@ understood:
 |---|---|
 | `https://www.youtube.com/@<handle>/videos` | yt-dlp `--dump-json --flat-playlist` |
 | `https://space.bilibili.com/<mid>/video` | Bilibili's own space API, wbi-signed |
-| `tag:bilibili:<keyword>` | `BilibiliWeb.newest`: the search page, `order=pubdate&tids=3` (newest first, music zone only) |
+| `tag:bilibili:<keyword>` | `BilibiliWeb.newest`: the search page, `order=pubdate&tids=3` (newest first, music zone only), pages 1-3 (*amended 2026-10-29*) |
 | `tag:youtube:<term>` | yt-dlp `--dump-json --flat-playlist` over `https://www.youtube.com/results?search_query=<term>&sp=EgIIAw%3D%3D` (this week's uploads) |
 
 *Tag lines (added 2026-10-22).* A tag names a stream of uploads instead of an
@@ -822,15 +822,21 @@ fallback chain is total and never throws — cache inside TTL → fresh fetch �
 stale cache → **the copy that shipped**. A body with no URLs in it (a 404 page,
 a half-written file) is treated as a failure, not as "the list is now empty".
 
-**The pool.** Each listed channel's or tag's newest **20** uploads (title,
-ref, uploader, and the `extra` its feed gives — §2.9.1) are pulled into
+**The pool.** Each listed channel's newest **20** uploads
+(`UPLOADS_PER_CHANNEL`) and each tag's newest **60** (`UPLOADS_PER_TAG`,
+*amended 2026-10-29*: on Bilibili, search pages 1-3, read until the limit, an
+empty page, or as many pages as the limit could fill; a later page refused
+ends the read with what the earlier ones gave, the first refused fails the
+line) — title, ref, uploader, and the `extra` its feed gives (§2.9.1) — are
+pulled into
 `$MURMUR_HOME/cache/channels/pool.json`. A line that fails costs that line; a
 refresh where **nothing** answers keeps the pool it already had, so the
 catalogue never silently unmounts. A tag's rows are never sent to the
 chapter pass — a long upload under a tag is a compilation far more often than
-a chaptered album — and keep only what reads as **an AI-made song**
-(`aiSong`, *amended 2026-10-27*; channel rows keep the rules above and
-below unchanged). All three must hold:
+a chaptered album — and keep only what reads as **an AI-made original
+song** (`aiSong`, *amended 2026-10-27, and 2026-10-29 for the not-original
+tags and the voice-clone title*; channel rows keep the rules above and below
+unchanged). All of these must hold:
 
 - **its own tags say AI** — one tag, case-blind, contains `suno`,
   `AI\u97f3\u4e50` (AI music), `AIGC`, `AI\u751f\u6210` (AI-generated),
@@ -838,8 +844,27 @@ below unchanged). All three must hold:
   `AI\u6b4c\u66f2` (AI song). A YouTube row carries no tag list (§2.9.1), so
   no YouTube tag row passes — which is why the committed list carries no
   YouTube tag line (below); the parser still reads one;
-- **its title is not something else** — none of `\u7ffb\u5531` (cover),
-  `cover`, `\u6539\u7f16` (adaptation), `\u7248` (edition/version),
+- **it is nobody else's song** — no tag and no title contains
+  `\u7ffb\u5531` (cover), `\u6539\u7f16` (adaptation), `\u4e8c\u521b`
+  (derivative work), `\u91cd\u7f6e` (remake), `cover` or `RVC` (voice
+  conversion), the ASCII words whole, case-blind. Only these words are read in
+  a tag: as a tag, `MV` or a word with `\u7248` in it is a zone, not a
+  verdict;
+- **it is not a voice-clone cover** — the title does not name a cloned voice
+  right after `AI` (`VOICE_CLONE`): at the head of the title or of a bracket
+  (`\u3010 [ \u300c \u300e \uff08 (`), `AI` (any case, one optional space),
+  a 1-6 character Han or kana name, then a delimiter (a closing bracket, an
+  opening parenthesis, a bar, `&`, a space, `\u300a`, the end, or
+  `\u539f\u521b` "original"). A name that opens with a generic word — music,
+  composing, original, song, generated, idol, singer, short film, and the rest
+  of `VOICE_GENERIC` — is the tool, not a voice, and passes. *Measured
+  2026-10-29* on 518 rows that passed the 2026-10-27 rule (the committed
+  keywords' pages 1-5 plus probe keywords, `scratch/suno-source/`): the tags
+  dropped 74, the title words and this rule 25 (19 of them voice-clone titles
+  — a VTuber, anime characters, a celebrity singer — most of which the tags
+  also flag), 82 in all, leaving 436; free text after `AI` mid-title
+  (`Suno AI \u4f5c\u66f2`) is never read;
+- **its title is not something else** — none of `\u7248` (edition/version),
   `\u7eaf\u97f3\u4e50` (instrumental), `\u4f34\u594f` (backing track),
   `\u6559\u7a0b` (tutorial), `\u6d4b\u8bc4` (review), `\u8bd5\u542c`
   (preview), `\u58f0\u5e93` (voice bank), `vlog`, `\u5927\u8d5b` (contest),
@@ -851,11 +876,31 @@ below unchanged). All three must hold:
 *Measured 2026-10-27* on this season's tag feeds: 152 raw rows, 44 song-like
 under these rules, of which ~30 were judged genuinely AI-made songs with a
 voice. The pool marks each kept tag row as one (`isTagRow(ref)`), which is
-what the AI slot (§3.10 step four) enforces against. The whole pool is capped at
+what the AI slot (§3.10 step four) enforces against.
+
+*The AI rows roll (added 2026-10-29).* A refresh replaces the channel rows
+whole, but the tag rows the pool already held and this refresh did not bring
+back **stay**, behind the fresh rows, in the order they were last seen
+(`remember`), while the tag rows number fewer than `MAX_AI_ROWS` = **300**;
+the longest-unseen go first, and a row seen again takes what its feed says of
+it now. The bound is on what is **remembered**: a refresh's own rows are never
+cut for it (a listener whose lines bring more than 300 fresh tag rows keeps
+them all, bounded by `MAX_POOL_TRACKS` like any row) and then remembers none. Why: a tag feed is newest-first and turns over in about a day, so a pool
+replaced whole lost yesterday's AI songs by today, and the few still on the
+newest pages came up in the AI slot again and again. Three pages of the
+committed lines brought **126** AI rows in one refresh (measured 2026-10-29,
+against ~30 song-like rows from page 1 on 2026-10-27), so 300 holds at least
+two refreshes' worth — a song stays drawable for days after it falls off the
+newest pages — and stays well inside `MAX_POOL_TRACKS` beside the channel
+rows. A
+manifest with no tag line at all keeps none. A refresh where nothing answered
+keeps the pool as it was, as before.
+
+The whole pool is capped at
 `MAX_POOL_TRACKS` = **1000**; once full, the remaining lines are not read at
 all, which also bounds a refresh's network when a listener's own file grows
 long. Each refresh writes **one** dev-log line of counts —
-`channels.refresh n=<tracks> channels=<lines> tags=<lines> failed=<lines>` —
+`channels.refresh n=<rows this refresh read> channels=<lines> tags=<lines> failed=<lines>` —
 and never a URL, a term or a failure's text (a yt-dlp failure quotes the
 search URL, which carries the term). A refresh that
 was **attempted** is not attempted again for `RETRY_MS` (1 h) whatever its
@@ -953,7 +998,8 @@ song at all; played per chapter it is twenty. So the pool reads chapters and a
 - **The old pool is discarded once.** `pool.json` carries a version; the
   chapter rules changed what belongs in a pool, so a file written before them
   reads as no cache at all — and so did the AI-song rule and the tag-row mark
-  (version 3). Without that, a listener whose channels are all
+  (version 3), and the not-original tags and the voice-clone title
+  (version 4). Without that, a listener whose channels are all
   long-mix uploads would hit the "nothing answered, keep what we had" rule and
   keep serving the very mixes these rules exist to drop.
 - **A segment that cannot play is refused at resolve.** If the resolved source
@@ -1170,6 +1216,17 @@ channel API (404), the tag archive as a "recent" feed (stale first answer),
 the YouTube hashtag page as a "recent" feed (a reshuffled popularity view),
 `ytsearchdate` (removed from yt-dlp) and the upload-date sort (no longer
 sorts).
+
+**Deeper pages (measured 2026-10-29,** `scratch/suno-source/`, through
+`BilibiliWeb` and the 2026-10-27 `aiSong`**).** The nine committed keywords,
+newest-first in the music zone: page 1 held **54** distinct AI-song rows;
+pages 2-5 added **197** more (36 requests, 0 failures; a hand-judged sample
+of 20: 13 originals, 7 covers, 0 non-songs). The same keywords ordered by
+plays (`order=click`, pages 1-3) added 89 at a worse mix (9 originals, 7
+covers, 4 talk or reaction videos), and genre keywords (`suno` + folk,
+guofeng, rock, rap, jazz, ...) by plays 178, mostly AI covers of famous
+songs — neither is a committed line. 30 / 30 sampled rows played through
+`playUrl` + ffmpeg. Tag lines read pages 1-3 (§2.9).
 
 ### 2.11 The ledger — what accumulates, next to the snapshot that does not
 
@@ -2217,20 +2274,28 @@ so, and `submit_pick` enforces it.
    line (one slot, one instruction), but `newOnly` stays as drawn — the
    familiarity refusal stays armed, so an AI song murmur already aired is
    still turned back once on a new-only slot.
-6c. **The line** (validated live — keep it verbatim), in the situation's slot
+6c. **The line** (validated live — keep it verbatim; *amended 2026-10-29*
+   with its last sentence, the fallback of 6d), in the situation's slot
    line, the place 5c's line takes:
-   `this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.`
-6d. **The enforcement.** On an AI slot, `submit_pick` refuses a ref that is
-   not a tag row of the pool (`ChannelCatalogue.isTagRow`) with *"this slot
-   plays one of the AI-generated songs from the channels catalogue: search it
-   and submit one of those."* — **at most three times**, then it fails open:
-   dead air costs more than a song that is not AI-made. The check runs after
+   `this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made. If none of them fits this hour, a real artist's song that does is this slot's pick instead.`
+6d. **The enforcement.** *Amended 2026-10-29 (user): when no AI song fits
+   the moment, the slot falls back to a real artist's song.* On an AI slot,
+   `submit_pick` refuses a ref that is not a tag row of the pool
+   (`ChannelCatalogue.isTagRow`) with *"this slot plays one of the
+   AI-generated songs from the channels catalogue: search it first, and
+   submit one of those that fits this hour."* — **only until the task has
+   searched the `channels` catalogue once** (it looked, and nothing fit the
+   hour): after that a real song is accepted. Why: a quiet folk hour met a
+   pool holding two folk AI songs, and the same one aired as every moment's
+   first AI slot; forcing an AI song there plays the wrong song, while a slot
+   that never asks to look is a no-op. A task that never searches is refused
+   **at most three times**, then it fails open: dead air costs more than a
+   song that is not AI-made. The check runs after
    the title/artist and recently-played guards and before the familiarity
    rule; those stay in force — the listener's rule is never the same song
    again, so an AI slot whose whole pool was recently played fails open onto
    whatever the model finds instead. One dev-log line per accepted AI-slot
-   pick, counts only: `music.slot ai picked=ai|other refused=N
-   fail-open=0|1`.
+   pick, counts only: `music.slot ai picked=ai|other searched=0|1`.
 
 **Dropped on purpose** (do not add them back): a 30-day cooldown on kept
 songs; a `source`/`outcome` field on the memory ledger (familiarity is a pure
@@ -2577,9 +2642,11 @@ pool holding tag rows and `aiShare` at 1 every autoplay pick is an AI slot,
 with its line in the situation's slot line and no new-only line, while `newOnly`
 still carries the deck's verdict; at 0, or with no tag rows, or on a listener
 request, none is. *The enforcement.* On an AI slot a ref that is not a tag
-row is refused with the slot's error three times and accepted the fourth,
-logged `music.slot ai picked=other refused=3 fail-open=1`; a tag row is
-accepted at once (`picked=ai refused=0 fail-open=0`); a recently played tag
+row is refused with the slot's error until the task has searched the
+`channels` catalogue, then accepted (`music.slot ai picked=other
+searched=1`); never searched, it is refused three times and accepted the
+fourth (`picked=other searched=0`); a tag row is accepted at once
+(`picked=ai`); a recently played tag
 row is still refused as recently played; off an AI slot a non-tag ref is
 never refused for it. *The knob.* `aiShare` defaults to 0.1, is read from
 `settings.json`, rejects a value outside 0-1, and `change_settings` sets it.
