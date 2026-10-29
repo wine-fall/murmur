@@ -94,7 +94,9 @@
   never reached an installed copy — the sibling `music-policy.md`, same
   shape, measured byte-identical to its template after nine days and 28
   sessions. `music-policy.md` itself is left alone: it has shipped, and a
-  music taste is likelier to be edited than a topic taste.
+  music taste is likelier to be edited than a topic taste. (It has since
+  become notes added to a code-owned default, spec 03-01 §2.3, which ends
+  the freeze.)
 - **Reaction tracking** (did the listener type after a real-world beat) and
   a negative-constraint steer ("no sports") — the signal is too dirty and the
   machinery too heavy for what #202 has shown so far.

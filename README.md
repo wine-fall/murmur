@@ -49,7 +49,7 @@ The first run is a short conversation. It asks a few questions to shape your hos
 ## Using it
 
 - **Commands.** In the full-screen UI, `/` lists what it takes: settings, the setup guide, a bug report, a wish, `/update` (installs a newer murmur from npm) and `/quit`. The plain front-end takes the same commands typed in full; `Ctrl-C` says goodbye too.
-- **What it plays is yours to rewrite.** The song-picking rules live in `~/.murmur/music-policy.md`, re-read before every pick — ask for more Cantonese, no covers, nothing you've heard this month. Delete the file to go back to the defaults.
+- **What it plays is yours to steer.** Write your own notes in `~/.murmur/music-policy.md` — more Cantonese, no covers, a decade to live in — and they are added to murmur's built-in song-picking rules before every pick, winning wherever the two disagree. Empty the file to go back to the built-in rules alone.
 - **When something goes wrong**, `/bug` turns what just happened into a filled-in GitHub report with the log attached. A run that dies without saying goodnight is noticed on the next start and offered up the same way. Logs live in `~/.murmur/log/`, one file per day, two weeks kept.
 - **Flags worth knowing:** `--plain` (skip the full-screen UI), `--no-music`, `--persona PATH`, `--version`. Pacing, cadence and the rest are the option table at the top of [`src/config.ts`](src/config.ts).
 

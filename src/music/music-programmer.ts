@@ -17,7 +17,7 @@ import type {
   TrackSource,
 } from '../contracts.ts'
 import { musicTools, type ChannelCatalogue, type StreamProbe, type TasteToolOptions } from './music-tools.ts'
-import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER, NO_REPEATS_RULE } from '../prompts/music.ts'
+import { FIND_MUSIC_INSTRUCTION, MUSIC_CONTEXT_HEADER } from '../prompts/music.ts'
 
 // Enough turns for several searches -> judge -> submit, and a couple of
 // pick-agains if a ref will not resolve: a real pick can spend 5 searches
@@ -124,10 +124,6 @@ export class MusicProgrammer implements TrackSource {
     this.deps.channels?.maybeRefresh()
     const [systemPrompt, situationBlock] = renderMusicContext(ctx)
     const instruction = this.deps.instruction?.() ?? FIND_MUSIC_INSTRUCTION
-    // The avoid-list is enforced in code only while the policy in force still
-    // asks for it: the rule is the listener's to replace (spec 03-01 §2.3),
-    // and a policy that welcomes repeats must not be overruled by a tool.
-    const avoid = instruction.includes(NO_REPEATS_RULE) ? ctx.avoid : undefined
     const { debug, probe } = this.deps
     const provider = debug === undefined ? this.deps.provider : timedProvider(this.deps.provider, debug)
     const wiredProbe = probe !== undefined && debug !== undefined ? timedProbe(probe, debug) : probe
@@ -164,7 +160,10 @@ export class MusicProgrammer implements TrackSource {
       // states, and nothing reads its reasoning back. The SDK's default extended
       // thinking spent ~45 s of a ~100 s pick writing it (issue #164).
       thinking: 'disabled',
-      tools: (finish) => musicTools(provider, finish, wiredProbe, taste, this.deps.channels, avoid, discovery),
+      // The avoid-list is refused in code whatever the instruction says: no
+      // repeats is the listener's standing rule, and a note in their policy
+      // file steers taste, never this guard (spec 03-01 §2.3).
+      tools: (finish) => musicTools(provider, finish, wiredProbe, taste, this.deps.channels, ctx.avoid, discovery),
     })
     debug?.(`music.pick done ${elapsed(t)} picked=${pick === null ? 'no' : 'yes'}`)
     return pick

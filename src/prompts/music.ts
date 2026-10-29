@@ -1,5 +1,6 @@
-// The music pick task (spec 03-01 §2.3/§2.5): the code-owned contract half,
-// the listener-replaceable taste half, and the volatile situation block.
+// The music pick task (spec 03-01 §2.3/§2.5): the code-owned contract and
+// policy, the listener's own notes added after them, and the volatile
+// situation block.
 
 import type { Turn } from '../contracts.ts'
 
@@ -38,8 +39,9 @@ track and a short reason.
   or two — never a title/artist/year rundown, and never an "up next" formula.`
 
 
-// The TASTE half — everything a listener may replace wholesale by writing
-// $MURMUR_HOME/music-policy.md (spec 03-01 §2.3). Written as a playbook rather
+// The TASTE half, code-owned and always in force, so an improvement to it
+// reaches every install; the listener's $MURMUR_HOME/music-policy.md is added
+// after it as notes (spec 03-01 §2.3). Written as a playbook rather
 // than a list of bans: the failure it exists to prevent is not picking a BAD
 // song, it is picking the same handful of obvious ones forever, and a ban list
 // cannot say what to do instead.
@@ -49,12 +51,6 @@ track and a short reason.
 // pools match on, and the only road to a song it has never heard of.
 // The escaped word in rule 5 reads "original" (yuanchuang), the tag uploaders
 // put on their own songs.
-// The anti-repeat half of policy rule 8, named because code reads it: the
-// deterministic refusal in submit_pick is armed only while this sentence is
-// still in the policy in force (spec 03-01 §2.3). A listener who rewrites
-// the policy without it welcomes repeats, and the code must not overrule them.
-export const NO_REPEATS_RULE = 'never play something the context lists as recently played'
-
 export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The persona and the turns above say more
    than any genre label does: the hour, what the listener keeps circling back
    to, whether they want company or cover.
@@ -92,9 +88,15 @@ export const DEFAULT_MUSIC_POLICY = `1. Read the room before the record. The per
    in it is the whole point of a radio.
 
 8. Stay inside the listener's language and taste as the persona describes
-   them, and ${NO_REPEATS_RULE}.`
+   them, and never play something the context lists as recently played.`
 
 export const MUSIC_POLICY_HEADER = 'Policy:'
+
+// Heads the listener's music-policy.md notes. They come after the policy and
+// win where the two disagree: the file is the listener speaking, and a radio
+// that overrules its listener on taste is not theirs.
+export const LISTENER_NOTES_HEADER =
+  "The listener's own notes — where they disagree with the policy above, follow them:"
 
 // Search with taste in hand (spec 14 §3.3), rendered only when a digest rides
 // the situation. The block is the listener's shape, not a shelf to pull from:
@@ -125,12 +127,13 @@ are matched against titles, uploaders and tags, so a style word, a language,
 "\u539f\u521b", "AI" or an empty query opens it.`
 
 export function buildFindMusicInstruction(
-  policy: string = DEFAULT_MUSIC_POLICY,
+  notes?: string,
   opts: { taste?: boolean; channels?: boolean } = {},
 ): string {
+  const listener = notes === undefined ? '' : `\n\n${LISTENER_NOTES_HEADER}\n${notes.trim()}`
   const taste = opts.taste === true ? `\n\n${TASTE_GUIDANCE}` : ''
   const channels = opts.channels === true ? `\n\n${CHANNELS_GUIDANCE}` : ''
-  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${policy.trim()}${taste}${channels}`
+  return `${FIND_MUSIC_CONTRACT}\n\n${MUSIC_POLICY_HEADER}\n${DEFAULT_MUSIC_POLICY}${listener}${taste}${channels}`
 }
 
 export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
@@ -138,9 +141,8 @@ export const FIND_MUSIC_INSTRUCTION = buildFindMusicInstruction()
 // The volatile situation block (spec 03-02 §1 #9): the session's recent turns
 // plus the Director's intent. Recently-played songs arrive with the spec-05
 // ledger; an empty list renders nothing. This block states FACTS only — what
-// to do about a recently-played song is a taste rule, so it lives in the
-// replaceable policy (spec 03-01 §2.3), never here where a listener who
-// welcomes repeats could not overrule it.
+// to do about a recently-played song is policy step 8, backed by the refusal
+// in submit_pick (spec 03-01 §2.3).
 // `taste` is the rendered digest (spec 14 §2.3): appended under its own
 // heading with the one instruction the spec adds; '' renders nothing.
 // `daily` is the daily lane's own block (spec 14 3.10): the platforms' picks

@@ -2072,8 +2072,8 @@ the miss rate is logged rather than guessed at.
    and the experiment is reversible on the measurement below.
 3. **The taste paragraph (§3.3) is rewritten**, code-owned. It must live in
    `src/prompts/music.ts` and **never** in the listener-editable
-   `music-policy.md`: that file is seeded once and existing installs never
-   receive a new sentence, so nothing may arm off a sentence in it.
+   `music-policy.md`: that file holds only the listener's own notes (spec
+   03-01 §2.3), so nothing may arm off a sentence in it.
 
 **Step two (candidate pools).** Where the pick goes instead of its own
 memory. Both pools are **catalogue values on `search_music`**, never a third
@@ -2619,9 +2619,19 @@ picked=familiar refused=1`, or a `music.pick done ... picked=no` on an AI slot.
   already found. Over 24 real runs every query was a frame phrase (0 name
   searches) and the picks were names the radio had never played. The cost is
   that a well-known song now arrives only through a pool, never by recall;
-  whether the new picks are good is a by-ear pass, owed. Installs whose `music-policy.md` was
-  already seeded keep their old text (§3.10 step one, 3), so the change
-  reaches new installs and anyone who deletes the file.
+  whether the new picks are good is a by-ear pass, owed. It reaches existing
+  installs too, through the next decision.
+- **The listener's `music-policy.md` is added to the default, never in place
+  of it** (2026-10-27, user: the file supplements the policy, it does not
+  decide it). Spec 03-01 §2.3 has the contract. Seeded once with a full copy
+  of the default of its day and never rewritten, the file had frozen every
+  existing listener on the August or September rules, so the frame-search
+  rewrite above reached only new installs. Now the default is code-owned and
+  always in force; the file's text rides after it as notes that win where
+  they disagree; a copy of a shipped default inside the file is dropped when
+  it is read (the file on disk is never touched), so those listeners get the
+  current default at once. The repeat refusal is armed always: no repeats is
+  the listener's standing rule, and a note cannot disarm a code guard.
 - **Bilibili is read through its own web API first, yt-dlp second**
   (2026-10-22, user). Two days of logs showed 64 Bilibili searches and not
   one hit: yt-dlp's `bilisearch` request lacks the Referer and its page

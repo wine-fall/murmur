@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { MusicContext, TaskTool } from '../src/contracts.ts'
 import { MusicProgrammer, renderMusicContext } from '../src/music/music-programmer.ts'
-import { buildFindMusicInstruction, MUSIC_CONTEXT_HEADER, NO_REPEATS_RULE } from '../src/prompts/music.ts'
+import { buildFindMusicInstruction, MUSIC_CONTEXT_HEADER } from '../src/prompts/music.ts'
 
 import { callTool, FakeHarness, FakeMusicProvider } from './fakes.ts'
 
@@ -258,11 +258,11 @@ describe('discovery instrumentation', () => {
   })
 })
 
-// spec 03-01 §2.3: what to do about a recently-played song is a taste rule
-// living in the listener's own policy, not a code-fixed one. So the
-// deterministic refusal inside submit_pick is armed by that policy: a listener
-// who drops the no-repeats rule turns the guard off with it (codex review).
-describe('the submit_pick avoid-guard follows the listener policy', () => {
+// spec 03-01 §2.3: the listener's standing rule is that the same song never
+// plays twice in a row, so the deterministic refusal inside submit_pick is a
+// code rule, armed whatever the instruction says. A listener note can steer
+// taste; it cannot disarm the guard.
+describe('the submit_pick avoid-guard is always armed', () => {
   const AVOIDED: MusicContext = { ...ctx, avoid: ['Song A — Label'] }
 
   async function submit(instruction: string | undefined) {
@@ -285,14 +285,13 @@ describe('the submit_pick avoid-guard follows the listener policy', () => {
     expect(pick).toBeNull()
   })
 
-  it('stands down when the listener wrote a policy that does not forbid repeats', async () => {
-    const { submitted, pick } = await submit(buildFindMusicInstruction('1. Play whatever you like, repeats welcome.'))
-    expect(submitted.ok).toBe(true)
-    expect(pick).not.toBeNull()
+  it('still refuses when a listener note says repeats are fine', async () => {
+    const { submitted, pick } = await submit(buildFindMusicInstruction('- Repeats are fine, play a favourite again.'))
+    expect(submitted.ok).toBe(false)
+    expect(pick).toBeNull()
   })
 
-  it('still refuses when the listener kept the no-repeats rule in their own policy', async () => {
-    const own = buildFindMusicInstruction(`1. More cantopop.\n2. And ${NO_REPEATS_RULE}.`)
-    expect((await submit(own)).submitted.ok).toBe(false)
+  it('still refuses under an instruction that never mentions repeats', async () => {
+    expect((await submit('Choose one song.')).submitted.ok).toBe(false)
   })
 })
