@@ -2274,20 +2274,28 @@ so, and `submit_pick` enforces it.
    line (one slot, one instruction), but `newOnly` stays as drawn — the
    familiarity refusal stays armed, so an AI song murmur already aired is
    still turned back once on a new-only slot.
-6c. **The line** (validated live — keep it verbatim), in the situation's slot
+6c. **The line** (validated live — keep it verbatim; *amended 2026-10-29*
+   with its last sentence, the fallback of 6d), in the situation's slot
    line, the place 5c's line takes:
-   `this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.`
-6d. **The enforcement.** On an AI slot, `submit_pick` refuses a ref that is
-   not a tag row of the pool (`ChannelCatalogue.isTagRow`) with *"this slot
-   plays one of the AI-generated songs from the channels catalogue: search it
-   and submit one of those."* — **at most three times**, then it fails open:
-   dead air costs more than a song that is not AI-made. The check runs after
+   `this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made. If none of them fits this hour, a real artist's song that does is this slot's pick instead.`
+6d. **The enforcement.** *Amended 2026-10-29 (user): when no AI song fits
+   the moment, the slot falls back to a real artist's song.* On an AI slot,
+   `submit_pick` refuses a ref that is not a tag row of the pool
+   (`ChannelCatalogue.isTagRow`) with *"this slot plays one of the
+   AI-generated songs from the channels catalogue: search it first, and
+   submit one of those that fits this hour."* — **only until the task has
+   searched the `channels` catalogue once** (it looked, and nothing fit the
+   hour): after that a real song is accepted. Why: a quiet folk hour met a
+   pool holding two folk AI songs, and the same one aired as every moment's
+   first AI slot; forcing an AI song there plays the wrong song, while a slot
+   that never asks to look is a no-op. A task that never searches is refused
+   **at most three times**, then it fails open: dead air costs more than a
+   song that is not AI-made. The check runs after
    the title/artist and recently-played guards and before the familiarity
    rule; those stay in force — the listener's rule is never the same song
    again, so an AI slot whose whole pool was recently played fails open onto
    whatever the model finds instead. One dev-log line per accepted AI-slot
-   pick, counts only: `music.slot ai picked=ai|other refused=N
-   fail-open=0|1`.
+   pick, counts only: `music.slot ai picked=ai|other searched=0|1`.
 
 **Dropped on purpose** (do not add them back): a 30-day cooldown on kept
 songs; a `source`/`outcome` field on the memory ledger (familiarity is a pure
@@ -2634,9 +2642,11 @@ pool holding tag rows and `aiShare` at 1 every autoplay pick is an AI slot,
 with its line in the situation's slot line and no new-only line, while `newOnly`
 still carries the deck's verdict; at 0, or with no tag rows, or on a listener
 request, none is. *The enforcement.* On an AI slot a ref that is not a tag
-row is refused with the slot's error three times and accepted the fourth,
-logged `music.slot ai picked=other refused=3 fail-open=1`; a tag row is
-accepted at once (`picked=ai refused=0 fail-open=0`); a recently played tag
+row is refused with the slot's error until the task has searched the
+`channels` catalogue, then accepted (`music.slot ai picked=other
+searched=1`); never searched, it is refused three times and accepted the
+fourth (`picked=other searched=0`); a tag row is accepted at once
+(`picked=ai`); a recently played tag
 row is still refused as recently played; off an AI slot a non-tag ref is
 never refused for it. *The knob.* `aiShare` defaults to 0.1, is read from
 `settings.json`, rejects a value outside 0-1, and `change_settings` sets it.

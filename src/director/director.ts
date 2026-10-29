@@ -161,9 +161,9 @@ const PLAYED_CAP = 2048
 const SLOT_LINE =
   'this slot: something they have not heard. Their own shelves are not the place to look for it — the playlists catalogue, the neighbours of what is on air, and what the platforms picked for them today are.'
 // What an AI slot says instead (spec 14 §3.10 step four). Measured verbatim
-// over real picks (8 / 8 landed on a tag row): reword it only with a re-run.
+// over real picks: reword it only with a re-run.
 const AI_SLOT_LINE =
-  'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made.'
+  'this slot: one of the AI-generated songs in the channels catalogue. Search it (a style word, a language, "\u539f\u521b", or an empty query to browse) and choose the one that fits this hour; say on air that it is AI-made. If none of them fits this hour, a real artist\'s song that does is this slot\'s pick instead.'
 // How many of those the moment excludes by artist (spec 14 §2.12): the last
 // three on or near the air, newest last.
 const MOMENT_AVOID = 3

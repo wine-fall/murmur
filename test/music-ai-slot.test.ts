@@ -331,7 +331,8 @@ describe("the channels catalogue's search", () => {
 describe('an AI slot at submit_pick', () => {
   const TAG: TrackCandidate = { ref: 'https://www.bilibili.com/video/BVtag', title: 'Paper Lanterns', uploader: 'Lantern Studio', durationS: 200, extra: {}, catalogue: 'channels' }
   const OTHER: TrackCandidate = { ref: 'https://youtu.be/other', title: 'Harbour Lights', uploader: 'Tin Roof', durationS: 200, extra: {} }
-  const REFUSAL = 'this slot plays one of the AI-generated songs from the channels catalogue: search it and submit one of those.'
+  const REFUSAL =
+    'this slot plays one of the AI-generated songs from the channels catalogue: search it first, and submit one of those that fits this hour.'
 
   function build(over: { aiSlot?: boolean; newOnly?: boolean; avoid?: string[]; label?: (title: string) => Familiarity } = {}) {
     const picks: TrackPick[] = []
@@ -344,34 +345,57 @@ describe('an AI slot at submit_pick', () => {
       log: (m) => log.push(m),
     })
     const submit = (c: TrackCandidate) => callTool(tools, 'submit_pick', { ref: c.ref, why: 'w', title: c.title, artist: c.uploader })
-    return { picks, log, submit }
+    const search = (catalogue: string) => callTool(tools, 'search_music', { query: 'folk', catalogue })
+    return { picks, log, submit, search }
   }
 
   it('takes a tag row of the pool at once', async () => {
     const { picks, log, submit } = build({ aiSlot: true })
     expect((await submit(TAG)).ok).toBe(true)
     expect(picks).toHaveLength(1)
-    expect(log).toContain('music.slot ai picked=ai refused=0 fail-open=0')
+    expect(log).toContain('music.slot ai picked=ai searched=0')
   })
 
-  it('turns back anything else three times with the slot error, then plays it', async () => {
-    const { picks, log, submit } = build({ aiSlot: true })
-    for (let i = 0; i < 3; i++) expect(await submit(OTHER)).toEqual({ ok: false, error: REFUSAL })
-    expect(picks).toHaveLength(0)
+  // The slot is not a no-op: a real song is turned back until the model has
+  // looked in the channels catalogue. Once it has looked and nothing there
+  // fit the hour, the real song it found instead is the pick.
+  it('turns back a real song until the channels catalogue was searched, then plays it', async () => {
+    const { picks, log, submit, search } = build({ aiSlot: true })
+    expect(await submit(OTHER)).toEqual({ ok: false, error: REFUSAL })
+    await search('youtube')
+    expect(await submit(OTHER)).toEqual({ ok: false, error: REFUSAL })
+    await search('channels')
     expect((await submit(OTHER)).ok).toBe(true)
     expect(picks).toHaveLength(1)
-    expect(log).toContain('music.slot ai picked=other refused=3 fail-open=1')
+    expect(log).toContain('music.slot ai picked=other searched=1')
     // Counts only, never a title (spec 14 §3.6).
     expect(log.join('\n')).not.toContain('Harbour')
   })
 
-  it('still refuses a tag row that was played recently, without spending a slot refusal on it', async () => {
-    const { picks, log, submit } = build({ aiSlot: true, avoid: ['Paper Lanterns — Lantern Studio'] })
-    expect(String((await submit(TAG)).error)).toMatch(/played recently/)
-    for (let i = 0; i < 3; i++) expect((await submit(OTHER)).ok).toBe(false)
+  it('logs the look on an AI pick too', async () => {
+    const { log, submit, search } = build({ aiSlot: true })
+    await search('channels')
+    expect((await submit(TAG)).ok).toBe(true)
+    expect(log).toContain('music.slot ai picked=ai searched=1')
+  })
+
+  // Dead air costs more than a song that is not AI-made: a model that never
+  // looks is refused three times, and then what it found plays.
+  it('plays a real song after three refusals when the catalogue is never searched', async () => {
+    const { picks, log, submit } = build({ aiSlot: true })
+    for (let i = 0; i < 3; i++) expect(await submit(OTHER)).toEqual({ ok: false, error: REFUSAL })
     expect((await submit(OTHER)).ok).toBe(true)
     expect(picks).toHaveLength(1)
-    expect(log).toContain('music.slot ai picked=other refused=3 fail-open=1')
+    expect(log).toContain('music.slot ai picked=other searched=0')
+  })
+
+  it('still refuses a tag row that was played recently, and then takes the real song once it has looked', async () => {
+    const { picks, log, submit, search } = build({ aiSlot: true, avoid: ['Paper Lanterns — Lantern Studio'] })
+    await search('channels')
+    expect(String((await submit(TAG)).error)).toMatch(/played recently/)
+    expect((await submit(OTHER)).ok).toBe(true)
+    expect(picks).toHaveLength(1)
+    expect(log).toContain('music.slot ai picked=other searched=1')
   })
 
   it('keeps the familiarity refusal armed on a new-only slot', async () => {
