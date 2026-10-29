@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import type { ContextPack, ProgramCue } from '../src/contracts.ts'
-import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION } from '../src/prompts/music.ts'
+import { buildMusicSituation, buildFindMusicInstruction, DEFAULT_MUSIC_POLICY, ANNOUNCE_FIELD_DESCRIPTION, FIND_MUSIC_CONTRACT, FIND_MUSIC_INSTRUCTION, LISTENER_NOTES_HEADER } from '../src/prompts/music.ts'
 import { buildSeedPersonaPrompt, PERSONA_CHAR_CAP, SEED_QUESTIONS, withLanguage } from '../src/prompts/persona.ts'
 import { buildCompactionPrompt, BOOTSTRAP_PROFILE_INSTRUCTION, PROFILE_CHAR_CAP, PROFILE_LINE_CAP } from '../src/prompts/profile.ts'
 import { buildRespondPrompt, buildSteerPrompt, memoryBlock } from '../src/prompts/reply.ts'
@@ -119,22 +119,26 @@ describe('music prompts', () => {
     expect(FIND_MUSIC_CONTRACT).toContain(ANNOUNCE_FIELD_DESCRIPTION)
   })
 
-  // spec 03-01 §2.3: the listener owns the taste half, the code owns the
-  // contract half. A policy that forgets to ask for an announce must not be
-  // able to produce a pick with no announce.
-  it('lets a listener policy replace the taste rules but never the contract', () => {
+  // spec 03-01 §2.3: the built-in policy is code-owned and always present; the
+  // listener's notes are added after it and win where they disagree. Neither
+  // can remove the contract, so a pick still ends in an announced submit.
+  it('adds the listener notes after the built-in policy, never in place of it or the contract', () => {
     const mine = '- only cantopop, nothing else'
     const instruction = buildFindMusicInstruction(mine)
-    expect(instruction).toContain(mine)
-    expect(instruction).not.toContain('Someone has to be singing') // the built-in taste is gone
+    expect(instruction).toContain(DEFAULT_MUSIC_POLICY)
+    expect(instruction).toContain(`${LISTENER_NOTES_HEADER}\n${mine}`)
+    expect(instruction.indexOf(mine)).toBeGreaterThan(instruction.indexOf(DEFAULT_MUSIC_POLICY))
+    expect(LISTENER_NOTES_HEADER).toMatch(/listener/i)
+    expect(LISTENER_NOTES_HEADER).toMatch(/follow them/i)
     expect(instruction).toContain('search_music')
     expect(instruction).toContain('submit_pick')
     expect(instruction).toContain('announce')
   })
 
-  it('falls back to the built-in policy when there is no file', () => {
+  it('is the built-in policy alone when there are no notes', () => {
     expect(buildFindMusicInstruction()).toBe(FIND_MUSIC_INSTRUCTION)
     expect(FIND_MUSIC_INSTRUCTION).toContain(DEFAULT_MUSIC_POLICY)
+    expect(FIND_MUSIC_INSTRUCTION).not.toContain(LISTENER_NOTES_HEADER)
   })
 
   // The whole point of the data source (spec 03-01 §2.3): left to its own
@@ -197,9 +201,8 @@ describe('music prompts', () => {
     expect(buildMusicSituation([])).toContain('just started')
   })
 
-  // The situation states facts; the RULE about them lives in the replaceable
-  // policy (step 8). Otherwise a listener whose policy welcomes repeats still
-  // gets a code-owned "do not repeat" in the same prompt, contradicting them.
+  // The situation states facts; the rule about them is policy step 8, backed
+  // by the refusal in submit_pick.
   it('renders the recently-played list as a fact, not as an instruction', () => {
     const s = buildMusicSituation([], ['Song A -- Label'])
     expect(s).toContain('Recently played')

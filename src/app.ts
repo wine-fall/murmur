@@ -49,7 +49,7 @@ import { commandShimPath, sentinelRoot } from './paths.ts'
 import { personaFingerprint, signOff, StockLines, stockDir, type StockFingerprint } from './support/stock.ts'
 import { stockLinesTask } from './brain/talk-tools.ts'
 import { ChannelPool, channelUploads } from './music/channels.ts'
-import { readMusicPolicy, seedMusicPolicy } from './music/music-policy.ts'
+import { readMusicNotes, seedMusicPolicy } from './music/music-policy.ts'
 import { RealWorldTopics, RWT_AVOID_DEPTH, RwtPool } from './brain/rwt.ts'
 import { ProgramDesk } from './programs/desk.ts'
 import { ProgramFile } from './programs/schedule.ts'
@@ -382,7 +382,7 @@ function buildMusic(
     playlists: { search: (query, limit) => anonymous.playlistPool(query, limit) },
     ...(taste !== undefined && { cookies: cookieLeaser(taste.build), netease: neteaseSearch(taste.build), qqmusic: qqmusicSearch(taste.build) }),
   })
-  // The listener's policy file, seeded once so it is discoverable and read
+  // The listener's notes file, seeded once so it is discoverable and read
   // fresh per pick so an edit lands on the next song (spec 03-01 §2.3).
   if (seedMusicPolicy(config.musicPolicyPath)) host.debug?.(`music.policy seeded ${config.musicPolicyPath}`)
   // The curated channels and tags (spec 14 §2.9): an extra place to LOOK for a
@@ -401,7 +401,7 @@ function buildMusic(
     probe: (s, headers, startS) => probeStream(s, config.ffmpegCmd, undefined, headers, startS),
     // The taste paragraph rides the instruction only while a digest exists.
     instruction: () =>
-      buildFindMusicInstruction(readMusicPolicy(config.musicPolicyPath), {
+      buildFindMusicInstruction(readMusicNotes(config.musicPolicyPath), {
         taste: taste !== undefined && taste.reader.digest() !== '',
         channels: channelPool.count() > 0,
       }),
